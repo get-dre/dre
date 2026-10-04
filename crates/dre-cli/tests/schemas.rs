@@ -163,7 +163,7 @@ fn the_schemas_have_the_keys_the_parser_has() {
     same(
         "destination",
         props(&report["$defs"]["destination"]),
-        set(&["profile", "path"]),
+        minus(DESTINATION_KEYS, &[]),
     );
     same(
         "template",

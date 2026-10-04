@@ -53,6 +53,8 @@ pub struct Description {
     pub option_fields: Vec<OptionField>,
     /// A source's identifier quote character.
     pub identifier_quote: Option<String>,
+    /// A message destination's length limit, in characters.
+    pub message_limit: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -569,10 +571,12 @@ impl PluginProcess {
                 connection_fields,
                 option_fields,
                 identifier_quote,
+                message_limit,
             } => Ok(Description {
                 connection_fields,
                 option_fields,
                 identifier_quote,
+                message_limit,
             }),
             other => Err(self.unexpected("a describe reply", &Incoming::Json(other))),
         }
@@ -764,6 +768,7 @@ impl PluginProcess {
                 files: Vec::new(),
                 connection,
                 options,
+                message: None,
             },
             many => {
                 if !self.has(crate::CAP_MULTI_FILE) {
@@ -781,10 +786,39 @@ impl PluginProcess {
                     files: many.to_vec(),
                     connection,
                     options,
+                    message: None,
                 }
             }
         };
         self.send(&req)?;
+        match self.recv_json("a delivered reply")? {
+            Response::Delivered { location } => Ok(location),
+            other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),
+        }
+    }
+
+    /// Deliver a message, with `attach` files, to a plugin advertising `message`.
+    pub fn deliver_message(
+        &mut self,
+        message: &crate::msg::Message,
+        attach: &[DeliveryFile],
+        connection: Map<String, Value>,
+        options: Map<String, Value>,
+    ) -> Result<String> {
+        if !self.has(crate::CAP_MESSAGE) {
+            return Err(HostError::Plugin {
+                plugin: self.label.clone(),
+                message: "a message, but the plugin doesn't advertise `message`".into(),
+            });
+        }
+        self.send(&Request::Deliver {
+            local_path: None,
+            remote_path: None,
+            files: attach.to_vec(),
+            connection,
+            options,
+            message: Some(message.clone()),
+        })?;
         match self.recv_json("a delivered reply")? {
             Response::Delivered { location } => Ok(location),
             other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),

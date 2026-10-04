@@ -123,6 +123,8 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
 ];
+/// The keys of a destination entry core reads; every other key is the plugin's.
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "name",
     "format",
@@ -434,10 +436,13 @@ pub struct Destination {
     pub profile: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Plugin options: every key other than `profile` and `path`, passed to the plugin after
-    /// rendering.
+    /// Plugin options: every key other than `profile`, `path` and `attach`, passed to the plugin
+    /// after rendering.
     #[serde(skip_serializing_if = "JsonMap::is_empty")]
     pub options: JsonMap<String, Json>,
+    /// `attach:` on a message output's entry: other outputs whose files go with the message.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attach: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -3217,6 +3222,27 @@ impl Loader {
                 ctx.to_string()
             };
             self.check_output_templates(o, &outputs, &octx, file, queries);
+            for d in o.destinations.iter().filter(|d| !d.attach.is_empty()) {
+                for a in &d.attach {
+                    let problem = match outputs.iter().find(|x| x.name.as_deref() == Some(a.as_str())) {
+                        _ if !o.is_message() => Some("`attach` only applies to a message output".to_string()),
+                        None => Some(format!("no output of this report is named `{a}`")),
+                        Some(x) if std::ptr::eq(x, o) => Some(format!("`{a}` is this output itself")),
+                        Some(x) if x.is_message() => Some(format!(
+                            "`{a}` is a message; attach file outputs (its `.md` is linked with `outputs.{a}.location`)"
+                        )),
+                        Some(_) => None,
+                    };
+                    if let Some(p) = problem {
+                        self.diags.error(
+                            "invalid-destination-option",
+                            at.clone(),
+                            None,
+                            format!("{octx}: destination `{}`: `attach: {a}`: {p}", d.profile),
+                        );
+                    }
+                }
+            }
         }
         for q in queries.iter().filter(|q| q.tab) {
             if !outputs.iter().any(|o| o.feeds(&q.query)) {
@@ -3549,13 +3575,27 @@ impl Loader {
         used.destination(p, file.clone(), None);
         let options = d
             .iter()
-            .filter(|(k, _)| !is_one_of(k, &["profile", "path"]))
+            .filter(|(k, _)| !is_one_of(k, DESTINATION_KEYS))
             .filter_map(|(k, v)| Some((k.as_str()?.to_string(), yaml_to_json(v))))
             .collect();
+        let attach = match d.get("attach") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::String(s)) => vec![s.clone()],
+            Some(v) => string_list(v).unwrap_or_else(|| {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: destination `{p}`: `attach` must be an output name or a list of them"),
+                );
+                Vec::new()
+            }),
+        };
         Some(Destination {
             profile: p.to_string(),
             path,
             options,
+            attach,
         })
     }
 

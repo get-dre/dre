@@ -5,17 +5,21 @@
 //! location is `fixture:` followed by the remote paths (or file names), comma-separated.
 //!
 //! - It advertises `multi_file` unless `DRE_FIXTURE_SINGLE_FILE` is set.
+//! - It takes messages (`message`, limit 3,000 characters), recorded with `"message"` and the
+//!   attached `files`, unless `DRE_FIXTURE_FILES_ONLY` is set. `DRE_FIXTURE_MESSAGE_ONLY` makes it
+//!   `message_only`: it refuses files.
 //! - A connection with `fail: true` makes every delivery fail.
 //! - Its options are `to`, `subject` and `message`, recorded as given.
 
 use std::io::Write;
 
-use dre_protocol::CAP_MULTI_FILE;
 use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::Message;
 use dre_protocol::options::{OptionField, OptionType};
 use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_bool, conn_required, serve_destination,
 };
+use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE};
 use serde_json::json;
 
 struct Fixture;
@@ -33,41 +37,73 @@ impl Destination for Fixture {
         ]
     }
 
+    fn message_limit(&self) -> Option<u64> {
+        Some(3_000)
+    }
+
+    fn deliver_message(&mut self, d: &Delivery, m: &Message) -> Result<String> {
+        let names = record(d, Some(m))?;
+        Ok(match names.is_empty() {
+            true => "fixture:message".to_string(),
+            false => format!("fixture:message+{}", names.join(",")),
+        })
+    }
+
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
-        if conn_bool(&d.connection, "fail") == Some(true) {
-            return Err("fixture destination told to fail".into());
+        if std::env::var_os("DRE_FIXTURE_MESSAGE_ONLY").is_some() {
+            return Err("the fixture destination only takes messages".into());
         }
-        let dir = conn_required(&d.connection, "dir")?;
-        let mut files = Vec::new();
-        let mut names = Vec::new();
-        for f in &d.files {
-            let content = std::fs::read_to_string(&f.local)
-                .map_err(|e| format!("can't read {}: {e}", f.local.display()))?;
-            names.push(f.remote.clone().unwrap_or_else(|| {
-                f.local
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
-            }));
-            files.push(json!({"local": f.local, "remote": f.remote, "content": content}));
-        }
-        std::fs::create_dir_all(dir)?;
-        let mut log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(std::path::Path::new(dir).join("deliveries.jsonl"))?;
-        writeln!(log, "{}", json!({"files": files, "options": d.options}))?;
+        let names = record(d, None)?;
         Ok(format!("fixture:{}", names.join(",")))
     }
 }
 
+/// Append the delivery to `deliveries.jsonl`; return the files' remote paths (or names).
+fn record(d: &Delivery, message: Option<&Message>) -> Result<Vec<String>> {
+    if conn_bool(&d.connection, "fail") == Some(true) {
+        return Err("fixture destination told to fail".into());
+    }
+    let dir = conn_required(&d.connection, "dir")?;
+    let mut files = Vec::new();
+    let mut names = Vec::new();
+    for f in &d.files {
+        let content = std::fs::read_to_string(&f.local)
+            .map_err(|e| format!("can't read {}: {e}", f.local.display()))?;
+        names.push(f.remote.clone().unwrap_or_else(|| {
+            f.local
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        }));
+        files.push(json!({"local": f.local, "remote": f.remote, "content": content}));
+    }
+    std::fs::create_dir_all(dir)?;
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::path::Path::new(dir).join("deliveries.jsonl"))?;
+    let mut line = json!({"files": files, "options": d.options});
+    if let Some(m) = message {
+        line["message"] = json!(m);
+    }
+    writeln!(log, "{line}")?;
+    Ok(names)
+}
+
 fn main() {
-    let caps: &'static [&'static str] = if std::env::var_os("DRE_FIXTURE_SINGLE_FILE").is_some() {
-        &[]
-    } else {
-        &[CAP_MULTI_FILE]
-    };
+    let on = |v: &str| std::env::var_os(v).is_some();
+    let mut caps: Vec<&'static str> = Vec::new();
+    if !on("DRE_FIXTURE_SINGLE_FILE") {
+        caps.push(CAP_MULTI_FILE);
+    }
+    if !on("DRE_FIXTURE_FILES_ONLY") {
+        caps.push(CAP_MESSAGE);
+    }
+    if on("DRE_FIXTURE_MESSAGE_ONLY") {
+        caps.push(CAP_MESSAGE_ONLY);
+    }
+    let caps: &'static [&'static str] = caps.leak();
     serve_destination(
         About::new("fixture", env!("CARGO_PKG_VERSION")).capabilities(caps),
         Fixture,

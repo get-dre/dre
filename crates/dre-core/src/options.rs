@@ -30,6 +30,13 @@ struct Use {
     profile: Option<String>,
 }
 
+/// One destination entry: its output's format, and whether it attaches other outputs.
+struct Route {
+    at: Use,
+    format: String,
+    attach: bool,
+}
+
 /// One plugin's distinct option blocks (keyed by their JSON), each with where it's used.
 type Blocks = BTreeMap<String, (Map<String, Value>, Vec<Use>)>;
 
@@ -40,6 +47,8 @@ type Blocks = BTreeMap<String, (Map<String, Value>, Vec<Use>)>;
 pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
     // (kind, plugin) -> distinct option blocks -> where each is used.
     let mut blocks: BTreeMap<(PluginKind, String), Blocks> = BTreeMap::new();
+    // Destination type -> what each entry of it sends: checked against its capabilities.
+    let mut routes: BTreeMap<String, Vec<Route>> = BTreeMap::new();
     let mut add = |kind, name: &str, options: &Map<String, Value>, u: Use| {
         let key = serde_json::to_string(options).unwrap_or_default();
         blocks
@@ -72,6 +81,11 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             for o in b.outputs.iter().filter(|o| !o.is_message()) {
                 add(PluginKind::Format, &o.format, &o.options, at(None));
             }
+            let message_of: Vec<&crate::project::Output> = b
+                .outputs
+                .iter()
+                .flat_map(|o| o.destinations.iter().map(move |_| o))
+                .collect();
             for (i, d) in b.destinations().enumerate() {
                 // The profile as the parse pass rendered it (a Jinja `profile:`).
                 let rendered = b
@@ -89,6 +103,11 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                     }
                 };
                 add(PluginKind::Destination, kind, &d.options, at(Some(profile)));
+                routes.entry(kind.to_string()).or_default().push(Route {
+                    at: at(Some(profile)),
+                    format: message_of[i].format.clone(),
+                    attach: !d.attach.is_empty(),
+                });
             }
         }
     }
@@ -107,6 +126,13 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
         };
         // Core's own destination.
         if kind == PluginKind::Destination && name == LOCAL_TYPE {
+            for r in routes.get(&name).into_iter().flatten().filter(|r| r.attach) {
+                report(
+                    diags,
+                    &r.at,
+                    "`attach:` needs a destination that takes messages and files, but `local` takes files only",
+                );
+            }
             for (options, uses) in blocks.values() {
                 if let Some(k) = options.keys().next() {
                     for u in uses {
@@ -160,6 +186,30 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 continue;
             }
         };
+        if kind == PluginKind::Destination {
+            for r in routes.get(&name).into_iter().flatten() {
+                let message = r.format == crate::project::MESSAGE_FORMAT;
+                let problem = if p.has(dre_protocol::CAP_MESSAGE_ONLY) && !message {
+                    Some(format!(
+                        "`{name}` only takes messages, but this output is `{}`; deliver the file to a file destination (s3, sftp, a Databricks Volume...) and link it from a message output with `outputs.<name>.location`",
+                        r.format
+                    ))
+                } else if r.attach && p.has(dre_protocol::CAP_MESSAGE_ONLY) {
+                    Some(format!(
+                        "`attach:` needs a destination that takes files, but `{name}` only takes messages; deliver the files elsewhere and link them with `outputs.<name>.location`"
+                    ))
+                } else if r.attach && !p.has(dre_protocol::CAP_MESSAGE) {
+                    Some(format!(
+                        "`attach:` needs a destination that takes messages and files, but `{name}` takes files only"
+                    ))
+                } else {
+                    None
+                };
+                if let Some(e) = problem {
+                    report(diags, &r.at, &e);
+                }
+            }
+        }
         if !p.has(dre_protocol::CAP_VALIDATE) {
             if blocks.values().any(|(o, _)| !o.is_empty()) {
                 diags.warning(

@@ -18,7 +18,7 @@ use arrow::ipc::writer::FileWriter;
 use chrono::NaiveDate;
 use dre_protocol::host::{Execution, HostError, LogSink, PluginProcess};
 use dre_protocol::msg::{ColumnOptions, DeliveryFile, ResultSetMeta};
-use dre_protocol::{CAP_LOAD, CAP_MULTI_FILE, CAP_READ_ONLY, CAP_SESSIONS};
+use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE, CAP_READ_ONLY, CAP_SESSIONS};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
@@ -703,6 +703,8 @@ struct RenderedDest {
     profile: String,
     path: Option<String>,
     options: JsonMap<String, Json>,
+    /// Other outputs whose files go with a message.
+    attach: Vec<String>,
 }
 
 type Fail = String;
@@ -1301,7 +1303,9 @@ impl<'a> BindingRun<'a> {
             if let Some(w) = &self.b.outputs[oi].when {
                 notes.push(format!("`when` passed ({w})"));
             }
-            notes.push(format!("{} characters", text.chars().count()));
+            let length = text.chars().count();
+            notes.push(format!("{} characters", thousands(length as u64)));
+            notes.extend(self.destination_limits(oi, length));
             self.ui.message(&ShownMessage {
                 output: self.b.outputs[oi].name.clone(),
                 title: title.clone(),
@@ -1318,6 +1322,42 @@ impl<'a> BindingRun<'a> {
         }
         self.outs[oi].message = Some((title, text));
         Ok(true)
+    }
+
+    /// For `--preview`: how each destination of message output `oi` takes it, and its limit.
+    fn destination_limits(&self, oi: usize, length: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        let Some(pool) = &self.pool else { return out };
+        for d in &self.outs[oi].dests {
+            let Some(t) = self.project.profiles.target(Role::Destination, &d.profile) else {
+                out.push(format!("{}: delivers nowhere on this target", d.profile));
+                continue;
+            };
+            let described = pool.connections.described(Role::Destination, &t.kind);
+            let takes = described
+                .as_ref()
+                .is_some_and(|x| x.capabilities.iter().any(|c| c == CAP_MESSAGE));
+            let limit = described.and_then(|x| x.message_limit);
+            out.push(match (takes, limit) {
+                (false, _) => format!("{} ({}): delivers the .md file", d.profile, t.kind),
+                (true, Some(l)) if length as u64 > l => format!(
+                    "{} ({}): {} of {} characters: over the limit, so it will be cut short",
+                    d.profile,
+                    t.kind,
+                    thousands(length as u64),
+                    thousands(l)
+                ),
+                (true, Some(l)) => format!(
+                    "{} ({}): {} of {} characters",
+                    d.profile,
+                    t.kind,
+                    thousands(length as u64),
+                    thousands(l)
+                ),
+                (true, None) => format!("{} ({}): posts the message", d.profile, t.kind),
+            });
+        }
+        out
     }
 
     /// The Binding's locale for the number filters.
@@ -1543,6 +1583,7 @@ impl<'a> BindingRun<'a> {
                     profile,
                     path: None,
                     options: JsonMap::new(),
+                    attach: Vec::new(),
                 });
                 continue;
             }
@@ -1566,6 +1607,7 @@ impl<'a> BindingRun<'a> {
                     profile: profile.clone(),
                     path,
                     options,
+                    attach: d.attach.clone(),
                 })
             })();
             renderer.set_destination(None);
@@ -2006,6 +2048,50 @@ impl<'a> BindingRun<'a> {
         let mut p = plugin
             .start(self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
+        let is_message = self.b.outputs[oi].is_message();
+        // A message goes to a destination that takes messages as a message; to any other, as
+        // its `.md` file.
+        if is_message
+            && p.has(CAP_MESSAGE)
+            && let Some((title, text)) = self.outs[oi].message.clone()
+        {
+            let t = Instant::now();
+            let message = dre_protocol::msg::Message {
+                title,
+                text,
+                html: None,
+                path: targets[0].local_path.clone(),
+            };
+            let attach: Vec<DeliveryFile> = d
+                .attach
+                .iter()
+                .filter_map(|name| {
+                    self.b
+                        .outputs
+                        .iter()
+                        .position(|o| o.name.as_deref() == Some(name))
+                })
+                .flat_map(|j| self.outs[j].files.iter())
+                .map(|(f, _)| DeliveryFile {
+                    local_path: f.to_string_lossy().to_string(),
+                    remote_path: None,
+                })
+                .collect();
+            let loc = p
+                .deliver_message(&message, &attach, connection, d.options.clone())
+                .map_err(failed)?;
+            self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
+            self.outs[oi].files[0].1.get_or_insert_with(|| loc.clone());
+            let _ = p.close();
+            return Ok(Some(loc));
+        }
+        if !is_message && p.has(CAP_MESSAGE_ONLY) {
+            let _ = p.close();
+            return Err(format!(
+                "`{kind}` only takes messages, but this output is `{}`; deliver the file elsewhere and link it from a message",
+                self.b.outputs[oi].format
+            ));
+        }
         let batches: Vec<Vec<usize>> = if targets.len() > 1 && p.has(CAP_MULTI_FILE) {
             vec![(0..targets.len()).collect()]
         } else {
@@ -2144,7 +2230,11 @@ impl<'a> BindingRun<'a> {
             }
             output_results.push(record);
         }
-        let deliveries: Vec<&Json> = self.outs.iter().flat_map(|o| o.deliveries.iter()).collect();
+        // In delivery order: file outputs, then messages.
+        let order = (0..self.outs.len())
+            .filter(|&i| !self.b.outputs[i].is_message())
+            .chain((0..self.outs.len()).filter(|&i| self.b.outputs[i].is_message()));
+        let deliveries: Vec<&Json> = order.flat_map(|i| self.outs[i].deliveries.iter()).collect();
         let notes: Vec<&str> = self
             .outs
             .iter()
@@ -2732,6 +2822,9 @@ type DescribeKey = (PathBuf, Role, String);
 struct Described {
     secrets: Vec<String>,
     identifier_quote: Option<String>,
+    capabilities: Vec<String>,
+    /// A message destination's length limit.
+    message_limit: Option<u64>,
 }
 
 const SECRET_NAME_WORDS: &[&str] = &["password", "secret", "token", "key", "credential"];
@@ -2798,11 +2891,14 @@ impl ProfileConnections {
                 return Some(Described {
                     secrets: Vec::new(),
                     identifier_quote: None,
+                    capabilities: Vec::new(),
+                    message_limit: None,
                 });
             }
             let id = crate::project::PluginId::new(plugin_kind, kind);
             let plugin = crate::plugins::locate_in(&self.root, &self.plugins, &id).ok()?;
             let mut p = plugin.start(self.log.clone(), Some(&self.root)).ok()?;
+            let capabilities = p.info().capabilities.clone();
             let d = p.description().ok();
             let _ = p.close();
             let d = d?;
@@ -2814,6 +2910,8 @@ impl ProfileConnections {
                     .map(|f| f.name)
                     .collect(),
                 identifier_quote: d.identifier_quote,
+                capabilities,
+                message_limit: d.message_limit,
             })
         })();
         DESCRIBED.lock().unwrap().insert(key, asked.clone());

@@ -127,7 +127,8 @@ fn file_destinations_deliver_the_md_file() {
         "queries: [headline]\noutput:\n  format: message\n  text: \"Revenue {{ results.headline.value | number }}\"\n  destination:\n    - {profile: inbox, path: out/headline.md}\n    - {profile: rec, path: archive/headline.txt}\n  extension: txt\n",
         &[],
     );
-    p.dre("run", &["daily"]).ok();
+    p.dre_env("run", &["daily"], &[("DRE_FIXTURE_FILES_ONLY", "1")])
+        .ok();
     assert_eq!(
         p.read("out/headline.md"),
         "# daily: 2026-01-25\n\nRevenue 12,341\n"
@@ -214,4 +215,109 @@ fn validate_checks_message_options_and_names() {
         "queries: [headline]\noutput: {format: message, text: \"{{ results.headline.value \"}\n",
     );
     p.dre("validate", &[]).failed().says("`text` doesn't compile");
+}
+
+#[test]
+fn a_message_goes_to_a_message_destination_as_a_message() {
+    let (p, rec) = project(
+        "queries: [headline]\noutput:\n  format: message\n  title: Daily\n  text: \"Revenue **{{ results.headline.value | number }}**\"\n  destination:\n    - {profile: rec, subject: Hi}\n    - {profile: inbox, path: out/daily.md}\n",
+        &[],
+    );
+    p.dre("run", &["daily"]).ok();
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0]["message"]["title"], "Daily");
+    assert_eq!(d[0]["message"]["text"], "Revenue **12,341**");
+    assert_eq!(d[0]["message"]["html"], Value::Null);
+    assert!(d[0]["message"]["path"].as_str().unwrap().ends_with("daily.md"));
+    assert_eq!(d[0]["files"], serde_json::json!([]));
+    assert_eq!(d[0]["options"]["subject"], "Hi");
+    assert_eq!(p.read("out/daily.md"), "# Daily\n\nRevenue **12,341**\n");
+    let r = results(&p);
+    assert_eq!(
+        r["output_results"][0]["deliveries"][0]["location"],
+        "fixture:message"
+    );
+}
+
+#[test]
+fn a_file_only_destination_gets_the_md_file() {
+    let (p, rec) = project(
+        "queries: [headline]\noutput:\n  format: message\n  text: Hello\n  destination: {profile: rec, path: archive/daily.md}\n",
+        &[],
+    );
+    p.dre_env("run", &["daily"], &[("DRE_FIXTURE_FILES_ONLY", "1")])
+        .ok();
+    let d = deliveries(&rec);
+    assert_eq!(d[0]["message"], Value::Null);
+    assert_eq!(d[0]["files"][0]["remote"], "archive/daily.md");
+    assert_eq!(d[0]["files"][0]["content"], "# daily: 2026-01-25\n\nHello\n");
+}
+
+#[test]
+fn a_file_output_to_a_message_only_destination_is_refused() {
+    let (p, _) = project(
+        "queries: [headline]\noutput: {format: csv, destination: {profile: rec}}\n",
+        &[],
+    );
+    p.dre_env("validate", &[], &[("DRE_FIXTURE_MESSAGE_ONLY", "1")])
+        .failed()
+        .says("`fixture` only takes messages, but this output is `csv`")
+        .says("link it from a message output with `outputs.<name>.location`");
+}
+
+#[test]
+fn preview_shows_each_destinations_limit() {
+    let (p, _) = project(
+        "queries: [headline]\noutput:\n  format: message\n  text: Hello\n  destination:\n    - {profile: rec}\n    - {profile: inbox, path: out/x.md}\n",
+        &[],
+    );
+    p.dre("run", &["daily", "--preview"])
+        .ok()
+        .says("rec (fixture): 5 of 3,000 characters")
+        .says("inbox (local): delivers the .md file");
+}
+
+#[test]
+fn a_message_links_and_attaches_the_file_outputs() {
+    let (p, rec) = project(
+        "queries: [headline, detail]\noutput:\n\
+         \x20 - name: headline\n    format: message\n    queries: [headline]\n    text: \"Full report: {{ outputs.rows.location }} ({{ outputs.rows.status }})\"\n    destination: {profile: rec, attach: [rows]}\n\
+         \x20 - name: rows\n    queries: [detail]\n    destination: {profile: inbox, path: out/rows_a.csv}\n",
+        &[],
+    );
+    p.dre("run", &["daily"]).ok();
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 1);
+    let loc = p.path("out/rows_a.csv").to_string_lossy().replace('_', "\\_");
+    assert_eq!(d[0]["message"]["text"], format!("Full report: {loc} (delivered)"));
+    assert_eq!(d[0]["files"].as_array().unwrap().len(), 1);
+    assert!(
+        d[0]["files"][0]["local"]
+            .as_str()
+            .unwrap()
+            .ends_with("rows_a.csv")
+    );
+    // The file output was delivered first, though declared second.
+    let r = results(&p);
+    assert_eq!(r["deliveries"][0]["profile"], "inbox");
+}
+
+#[test]
+fn validate_checks_outputs_and_attach() {
+    let (p, _) = project(
+        "queries: [headline, detail]\noutput:\n\
+         \x20 - name: headline\n    format: message\n    queries: [headline]\n    text: \"{{ outputs.rowz.location }}\"\n    destination: {profile: rec, attach: [nope, headline, note]}\n\
+         \x20 - name: note\n    format: message\n    queries: [headline]\n\
+         \x20 - name: rows\n    queries: [detail]\n    destination: {profile: inbox, path: out/x.csv, attach: [headline]}\n",
+        &[],
+    );
+    p.dre("validate", &[])
+        .failed()
+        .says("reads `outputs.rowz`, but no output of this report is named `rowz`")
+        .says("`attach: nope`: no output of this report is named `nope`")
+        .says("`attach: headline`: `headline` is this output itself")
+        .says("`attach: note`: `note` is a message")
+        .says("`attach: headline`: `attach` only applies to a message output")
+        .says("`attach:` needs a destination that takes messages and files, but `local` takes files only");
 }

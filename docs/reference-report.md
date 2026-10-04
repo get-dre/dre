@@ -83,6 +83,7 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 |---|---|---|---|
 | `profile` (required) | string |  | The destination profile in `profiles.yml` (under `destinations:`) to deliver with. `local` is built in. It uses its entry for the run (`--target`, `DRE_TARGET`, else the profile's own `target:`, else `dev`); a missing entry is an error, and an entry `{deliver: false}` delivers nowhere. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `path` | string |  | Where to put the file: a path, or a URL such as `s3://bucket/key`, depending on the destination. Rendered with Jinja, so it can use `var()`, `run.*`, macros and `destination.*` (this destination's settings). |
+| `attach` | string or list of string |  | On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `output[].template`

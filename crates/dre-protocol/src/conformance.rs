@@ -265,6 +265,7 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
                 files: Vec::new(),
                 connection: Map::new(),
                 options: json!({"conformance": true}).as_object().unwrap().clone(),
+                message: None,
             },
         )];
         if info.capabilities.iter().any(|c| c == crate::CAP_MULTI_FILE) {
@@ -276,8 +277,64 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
                     files: vec![missing("a.csv"), missing("b.csv")],
                     connection: Map::new(),
                     options: Map::new(),
+                    message: None,
                 },
             ));
+        }
+        let has = |c: &str| info.capabilities.iter().any(|x| x == c);
+        if has(crate::CAP_MESSAGE) {
+            forms.push((
+                "a message deliver gets a reply and the plugin keeps serving",
+                Request::Deliver {
+                    local_path: None,
+                    remote_path: None,
+                    files: Vec::new(),
+                    connection: Map::new(),
+                    options: Map::new(),
+                    message: Some(crate::msg::Message {
+                        title: "Conformance".into(),
+                        text: "**DRE** conformance check".into(),
+                        html: None,
+                        path: "/nonexistent/dre-conformance/message.md".into(),
+                    }),
+                },
+            ));
+        }
+        if has(crate::CAP_MESSAGE_ONLY) {
+            check(
+                "a message_only plugin also advertises message",
+                if has(crate::CAP_MESSAGE) {
+                    Ok(())
+                } else {
+                    Err("advertises `message_only` without `message`".into())
+                },
+            );
+            check(
+                "a message_only plugin refuses a file deliver and keeps serving",
+                (|| {
+                    let mut p = start(path).map_err(|e| e.to_string())?;
+                    let f = missing("a.csv");
+                    p.send(&Request::Deliver {
+                        local_path: Some(f.local_path),
+                        remote_path: f.remote_path,
+                        files: Vec::new(),
+                        connection: Map::new(),
+                        options: Map::new(),
+                        message: None,
+                    })
+                    .map_err(|e| e.to_string())?;
+                    match p
+                        .recv(Some(TIMEOUT), "a deliver reply")
+                        .map_err(|e| e.to_string())?
+                    {
+                        Incoming::Json(Response::Error { .. }) => {}
+                        other => return Err(format!("expected an error, got {other:?}")),
+                    }
+                    p.describe()
+                        .map_err(|e| format!("plugin stopped serving after a deliver: {e}"))?;
+                    p.close().map_err(|e| e.to_string())
+                })(),
+            );
         }
         for (name, req) in forms {
             check(

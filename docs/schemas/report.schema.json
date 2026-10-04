@@ -372,6 +372,21 @@
         "path": {
           "type": "string",
           "description": "Where to put the file: a path, or a URL such as `s3://bucket/key`, depending on the destination. Rendered with Jinja, so it can use `var()`, `run.*`, macros and `destination.*` (this destination's settings)."
+        },
+        "attach": {
+          "description": "On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
         }
       },
       "required": [

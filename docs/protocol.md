@@ -158,6 +158,8 @@ Capabilities:
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
 | `multi_file` | Destination: takes every file of one output in a single `deliver` (`files`), e.g. one email carrying every attachment. |
+| `message` | Destination: takes a message (`deliver` with `message`), such as a chat post or an email body. |
+| `message_only` | Destination: takes only messages; core never sends it a file output. Implies `message`. |
 | `validate` | Answers `validate`. Required: every first-party plugin advertises it (the Rust SDK does so itself). Core warns that a plugin without it predates option checks and should be updated. |
 
 ## Requests and replies
@@ -198,6 +200,10 @@ DuckDB and Postgres, a backtick for Databricks. Core quotes the parts of a
 [source](sources.md) that ask for it (`quoting:`) with this character, doubling it inside a name.
 Every source returns it; formats and destinations leave it out. Added in DRE 0.2 (duckdb and
 postgres 1.1.0, databricks 1.1.0); core 0.2 needs it only for a source with `quoting:`.
+
+`message_limit` (destinations advertising `message`) is the most characters a message may have
+in the service after translation. `dre run --preview` shows it next to each message's length.
+It may be omitted. Added in DRE 0.3.
 
 `validate` checks one config block of options and replies `validated` with every problem found,
 each a sentence naming the key; `errors` is empty when the block is fine. The plugin doesn't
@@ -331,6 +337,36 @@ It replies with one `delivered` for the whole set. Exactly one of `local_path` o
 present. Core only sends `files` to a plugin that advertised `multi_file`; any other plugin gets
 one `deliver` per file. A single-file output is always sent in the `local_path` form.
 
+#### Messages
+
+A `message` output (DRE 0.3) renders a title and text. To a destination that advertises
+`message`, core sends it in one `deliver`:
+
+```json
+{"type": "deliver",
+ "message": {"title": "Daily revenue", "text": "Revenue **€12,340** (+4.1%)",
+             "path": "/…/target/run/daily/default/daily.md"},
+ "files": [{"local_path": "/…/target/run/daily/default/detail.xlsx"}],
+ "connection": {…}, "options": {…}}
+```
+
+- `title` is one line of plain text. `text` is the portable Markdown subset: `**bold**`,
+  `*italic*` or `_italic_`, `` `code` ``, `[text](url)`, `- ` bullets and backslash escapes
+  (`\*`); no headings or tables. Core has escaped every value the template printed, so the
+  plugin translates the whole text to its service's dialect (`dre_protocol::markdown` has the
+  parser and translations to Slack, Google Chat, Teams, HTML and plain text).
+- `html`, when present, is an HTML body the plugin may use instead of converting `text`. Core
+  0.3 never sends it; it leaves room for a future HTML output.
+- `path` is the `.md` file core wrote (`# title`, a blank line, the text), for attaching the full
+  message when the text is over the service's limit.
+- `files` holds the files of other outputs the entry names in `attach:` (often none). Neither
+  `local_path` nor `remote_path` is set.
+
+A destination that doesn't advertise `message` gets a message output as its `.md` file, in the
+usual `local_path` form. Core never sends a file output to a destination that advertises
+`message_only`: `dre validate` refuses it, as it refuses `attach:` to a destination that takes
+only messages or only files. Older plugins, which advertise neither, keep working for files.
+
 ## Errors and failure
 
 - A plugin that exits, crashes or closes stdout unexpectedly is reported with its exit status and
@@ -353,6 +389,7 @@ one-character `identifier_quote`), error replies for unknown and wrong-kind
 requests, `validate` (advertised, answered, and refusing an option the plugin doesn't declare),
 behaviour on a malformed frame, and a clean exit on `close` and on end of input. For a
 destination it also sends a `deliver` carrying `options` and, when `multi_file` is advertised, a
-`files` delivery, and expects a reply to each (`delivered` or `error`) with the plugin still
-serving. `conformance::run_with_env` runs the suite with extra environment variables. Every
+`files` delivery, and when `message` is advertised a message `deliver`, and expects a reply to
+each (`delivered` or `error`) with the plugin still serving. A `message_only` plugin must also
+advertise `message` and must refuse a file `deliver` with an `error`. `conformance::run_with_env` runs the suite with extra environment variables. Every
 first-party plugin runs the suite in its tests.
