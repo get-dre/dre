@@ -245,3 +245,38 @@ fn values_excel_cant_hold_are_written_as_text_with_a_warning() {
         "{warnings:?}"
     );
 }
+
+#[test]
+fn text_longer_than_an_excel_cell_fails_naming_the_sheet_and_cell() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.xlsx");
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let batch = RecordBatch::try_from_iter([
+        ("id", Arc::new(Int64Array::from(vec![1, 2])) as ArrayRef),
+        (
+            "payload",
+            Arc::new(StringArray::from(vec!["{}".to_string(), "x".repeat(40_000)])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    p.write_begin(
+        path.to_str().unwrap(),
+        "xlsx",
+        Default::default(),
+        vec![meta("Data", None, None)],
+        None,
+    )
+    .unwrap();
+    let schema = batch.schema();
+    let err = p
+        .write_result_set(&schema, vec![batch])
+        .and_then(|_| p.write_finish().map(|_| ()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("sheet `Data`, cell B3 (column `payload`): a value of 40000 characters")
+            && err.contains("text format such as csv"),
+        "{err}"
+    );
+}

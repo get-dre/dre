@@ -175,6 +175,7 @@ impl Format for Xlsx {
             };
             let base = rs.meta.name.clone();
             let mut part = 1u32;
+            let mut sheet = base.clone();
             let mut ws = wb.add_worksheet_with_constant_memory();
             ws.set_name(&base)?;
             ws.set_formula_result_default("");
@@ -195,7 +196,8 @@ impl Format for Xlsx {
                         accs = vec![Acc::default(); names.len()];
                         part += 1;
                         ws = wb.add_worksheet_with_constant_memory();
-                        ws.set_name(continuation_name(&base, part))?;
+                        sheet = continuation_name(&base, part);
+                        ws.set_name(&sheet)?;
                         ws.set_formula_result_default("");
                         row = anchor_row;
                         written = 0;
@@ -220,6 +222,7 @@ impl Format for Xlsx {
                         let style = styles[c].as_ref();
                         cells.write(
                             ws,
+                            &sheet,
                             row,
                             anchor_col + c as u16,
                             v,

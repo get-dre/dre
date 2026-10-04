@@ -66,11 +66,13 @@ jobs:
           save-if: false
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go/databricks/go.mod
-          cache-dependency-path: go/databricks/go.sum
+          go-version-file: go/plugin/go.mod
+          cache-dependency-path: go/*/go.sum
       - name: Build dre and every plugin package
         run: |
           cargo build --locked --workspace --bins
-          (cd go/databricks && go build -o ../../target/debug/dre-plugin-databricks .)
+          for p in databricks bigquery snowflake; do
+            (cd "go/$p" && go build -o "../../target/debug/dre-plugin-$p" .) || exit 1
+          done
       - name: Check the skills
         run: python3 .github/scripts/skills.py check --dre target/debug/dre --plugins-dir target/debug

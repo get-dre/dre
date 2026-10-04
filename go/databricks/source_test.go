@@ -2,14 +2,17 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+
+	"github.com/get-dre/dre/go/plugin/plugintest"
 )
 
 func TestTempViewSQLEscapesForSparkAndCastsEveryColumn(t *testing.T) {
@@ -95,5 +98,29 @@ func TestAnUnreachableWorkspaceFailsAtOnce(t *testing.T) {
 	err := reachable("https://" + addr)
 	if err == nil || !strings.Contains(err.Error(), "can't reach") {
 		t.Fatal(err)
+	}
+}
+
+func TestTheSourceDescribesItsFieldsAndQuote(t *testing.T) {
+	c := plugintest.Start(t, pkg, sourceRole)
+	h := c.Hello()
+	if h["name"] != "databricks" || fmt.Sprint(h["provides"]) != "[source/databricks destination/databricks]" {
+		t.Fatalf("%v", h)
+	}
+	c.Send(map[string]any{"type": "describe"})
+	d := c.Reply()
+	if plugintest.FieldNames(d) != "host,http_path,auth_type,token,client_id,client_secret,catalog,schema" || d["identifier_quote"] != "`" {
+		t.Fatalf("%v", d)
+	}
+}
+
+func TestAPlanningErrorIsReportedWithoutThePlanTree(t *testing.T) {
+	plan := "Error occurred during query planning: \n[UNRESOLVED_COLUMN.WITHOUT_SUGGESTION] A column `nope` cannot be resolved.\n'Project ['nope]\n+- OneRowRelation"
+	e := planError(plan)
+	if !strings.Contains(e, "UNRESOLVED_COLUMN") || strings.Contains(e, "Project") {
+		t.Fatal(e)
+	}
+	if planError("== Physical Plan ==\n*(1) Project [1 AS 1#0]") != "" {
+		t.Fatal("a good plan was an error")
 	}
 }

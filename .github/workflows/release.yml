@@ -10,7 +10,7 @@ name: Release
 #                         installs plugins from (the `packages.json` asset of the `registry`
 #                         release, see docs/registry.md). E.g. duckdb-v1.0.0, object_store-v1.2.0.
 #
-# Plugins have their own versions (plugins/<package>/Cargo.toml, go/databricks/VERSION) and are
+# Plugins have their own versions (plugins/<package>/Cargo.toml, go/<package>/VERSION) and are
 # released only when they change; .github/scripts/release_plan.py checks the tag against them. A
 # version with a pre-release suffix (`-alpha-1`, `-rc.1`) makes a pre-release. Only a stable DRE
 # release is GitHub's "latest".

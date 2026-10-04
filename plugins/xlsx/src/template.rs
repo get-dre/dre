@@ -149,13 +149,14 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
             // A single cell has no row to refer to: it takes the value, not the formula.
             write_value(
                 ws,
+                &b.sheet,
                 coord,
                 res.batch.column(ci).as_ref(),
                 0,
                 col,
                 &res.formats[ci],
                 None,
-            );
+            )?;
         }
     }
 
@@ -208,13 +209,14 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
                         .map_err(|n| format!("sheet `{name}`: column `{n}` isn't on the sheet"))?;
                     write_value(
                         ws,
+                        &name,
                         (c as u32 + 1, r),
                         res.batch.column(c).as_ref(),
                         row,
                         &res.names[c],
                         &res.formats[c],
                         formula.as_deref(),
-                    );
+                    )?;
                 }
             }
         }
@@ -328,13 +330,14 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
                 })?;
                 write_value(
                     ws,
+                    &b.sheet,
                     (u32::from(c0) + 1 + k as u32, r),
                     res.batch.column(ci).as_ref(),
                     row,
                     &res.names[ci],
                     &res.formats[ci],
                     formula.as_deref(),
-                );
+                )?;
             }
         }
     }
@@ -465,15 +468,17 @@ fn row_formula(
 /// Write one value, or given a row `formula`, the formula with the value as its cached result.
 /// An explicit YAML format replaces the cell's number format (keeping its font,
 /// fill and border); a type default only fills a `General` cell, so a template's own format wins.
+#[allow(clippy::too_many_arguments)]
 fn write_value(
     ws: &mut Worksheet,
+    sheet: &str,
     coord: (u32, u32),
     a: &dyn Array,
     i: usize,
     column: &str,
     fmt: &ColumnFormat,
     formula: Option<&str>,
-) {
+) -> std::result::Result<(), String> {
     let cell = ws.cell_mut(coord);
     let apply = |cell: &mut umya_spreadsheet::Cell| {
         let Some(code) = fmt.code() else { return };
@@ -495,6 +500,9 @@ fn write_value(
             apply(cell);
         }
         Some(Excel::Text(t)) => {
+            if let Some(e) = crate::cells::too_long(sheet, coord.1 - 1, coord.0 - 1, column, &t) {
+                return Err(e);
+            }
             cell.set_value(t);
             if Kind::of(a.data_type()) == Kind::Other {
                 apply(cell);
@@ -507,6 +515,7 @@ fn write_value(
     if let Some(f) = formula {
         cell.set_formula(f.strip_prefix('=').unwrap_or(f));
     }
+    Ok(())
 }
 
 #[cfg(test)]

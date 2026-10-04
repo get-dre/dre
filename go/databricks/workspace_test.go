@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/get-dre/dre/go/plugin/plugintest"
 )
 
 type wsCall struct {
@@ -119,15 +121,15 @@ func TestOnDatabricksComputeTheFileIsCopiedToTheMountedWorkspace(t *testing.T) {
 }
 
 func TestTheDestinationDeliversWorkspacePaths(t *testing.T) {
-	c := startAs(t, sourceRole)
-	c.send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t", "plugin": "destination/databricks"})
-	if r := c.reply(); r["kind"] != "destination" || r["name"] != "databricks" {
+	c := plugintest.Start(t, pkg, sourceRole)
+	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t", "plugin": "destination/databricks"})
+	if r := c.Reply(); r["kind"] != "destination" || r["name"] != "databricks" {
 		t.Fatalf("%v", r)
 	}
 	srv, _ := fakeWorkspace(t)
-	c.send(map[string]any{"type": "deliver", "local_path": localFile(t, "x"), "remote_path": "/Workspace/Shared/x.csv",
+	c.Send(map[string]any{"type": "deliver", "local_path": localFile(t, "x"), "remote_path": "/Workspace/Shared/x.csv",
 		"connection": map[string]any{"host": srv.URL, "token": "good"}, "options": map[string]any{}})
-	if r := c.reply(); r["type"] != "delivered" || r["location"] != "/Workspace/Shared/x.csv" {
+	if r := c.Reply(); r["type"] != "delivered" || r["location"] != "/Workspace/Shared/x.csv" {
 		t.Fatalf("%v", r)
 	}
 }

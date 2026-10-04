@@ -44,7 +44,8 @@ can't be merged until every author has signed.
 
 ## Building and testing
 
-You need a recent stable Rust toolchain, and Go for the Databricks package (`go/databricks`).
+You need a recent stable Rust toolchain, and Go for the Go packages in `go/` (`databricks`,
+`bigquery`, `snowflake`, and the protocol module they share, `go/plugin`).
 
 ```sh
 cargo build --workspace --bins
@@ -57,7 +58,7 @@ Before you push, run the same checks as CI:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 gofmt -l go                              # prints nothing when the Go code is formatted
-(cd go/databricks && go vet ./... && go test ./...)
+for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
 ```
 
 The plugin integration tests (Postgres, object store, SFTP, FTP, email) run against local

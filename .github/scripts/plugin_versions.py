@@ -3,8 +3,9 @@
 
     plugin_versions.py <base ref>
 
-Each plugin package has its own version (plugins/<package>/Cargo.toml, go/databricks/VERSION)
-and is released by tagging `<package>-v<version>`. A change to a package's code since <base ref>
+Each plugin package has its own version (plugins/<package>/Cargo.toml, go/<package>/VERSION)
+and is released by tagging `<package>-v<version>`. A Go package's code includes the shared protocol
+module in go/plugin. A change to a package's code since <base ref>
 without a version bump is reported as a GitHub Actions warning, so a fix doesn't sit unreleased
 by accident. The same goes for the dre-protocol crate, which has its own version and is published
 to crates.io only when that version is new. Tests and Markdown don't count. It never fails:
@@ -26,13 +27,13 @@ def git(*args):
 
 
 def sources():
-    """Each versioned unit: its name, directory, the file holding its version, and how it's released."""
+    """Each versioned unit: its name, directories, the file holding its version, and how it's released."""
     for package, about in PACKAGES.items():
         if about.get("go"):
-            yield package, about["go"], f"{about['go']}/VERSION", f"tag {package}-v<version>"
+            yield package, [about["go"], "go/plugin"], f"{about['go']}/VERSION", f"tag {package}-v<version>"
         else:
-            yield package, f"plugins/{package}", f"plugins/{package}/Cargo.toml", f"tag {package}-v<version>"
-    yield "dre-protocol", "crates/dre-protocol", "crates/dre-protocol/Cargo.toml", "published with the next DRE release"
+            yield package, [f"plugins/{package}"], f"plugins/{package}/Cargo.toml", f"tag {package}-v<version>"
+    yield "dre-protocol", ["crates/dre-protocol"], "crates/dre-protocol/Cargo.toml", "published with the next DRE release"
 
 
 def version(text, path):
@@ -44,10 +45,10 @@ def version(text, path):
 
 def main(base):
     stale = []
-    for package, directory, vfile, how in sources():
+    for package, directories, vfile, how in sources():
         changed = [
             f
-            for f in git("diff", "--name-only", f"{base}...HEAD", "--", directory).split()
+            for f in git("diff", "--name-only", f"{base}...HEAD", "--", *directories).split()
             if "/tests/" not in f and not f.endswith(".md") and not f.endswith("_test.go")
         ]
         if not changed:

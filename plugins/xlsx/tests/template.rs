@@ -326,3 +326,25 @@ fn a_large_unbound_result_set_continues_on_numbered_sheets() {
         ("x".into(), "4".into())
     );
 }
+
+#[test]
+fn text_longer_than_an_excel_cell_fails_naming_the_sheet_and_cell() {
+    let ok = accounts(1);
+    let name = ok.schema().index_of("account_name").unwrap();
+    let mut cols = ok.columns().to_vec();
+    cols[name] = Arc::new(StringArray::from(vec!["x".repeat(32_768)]));
+    let long = RecordBatch::try_new(ok.schema(), cols).unwrap();
+    let err = fill(
+        vec![
+            (meta("accounts", "Accounts"), long),
+            (meta("count_q", "Count"), count(1)),
+        ],
+        standard_bindings(),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("sheet `Summary`, cell B5 (column `account_name`)")
+            && err.contains("32767-character cell limit"),
+        "{err}"
+    );
+}

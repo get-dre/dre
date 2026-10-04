@@ -17,6 +17,8 @@ secrets can use `env_var()`.
 | `duckdb` | the `duckdb` source |
 | `postgres` | the `postgres` source |
 | `databricks` | the `databricks` source, and the `databricks` destination (Volumes and workspace files) |
+| `bigquery` | the `bigquery` source (alpha: 1.0.0 pre-releases) |
+| `snowflake` | the `snowflake` source (alpha: 1.0.0 pre-releases) |
 | `csv` | the `csv` and `delimited` formats |
 | `fixed_width` | the `fixed_width` format |
 | `parquet` | the `parquet` format |
@@ -186,6 +188,153 @@ Databricks SQL reads backslashes as escapes in string literals and doesn't read 
 escaped quote: `'O''Brien'` is two literals, `'O'` and `'Brien'`, which Databricks joins into
 `OBrien`. Jinja that builds literals from values should escape for Databricks
 (`'O\'Brien'`); `dre_utils` does this through `dispatch()`, and lookups are inlined portably.
+
+`VARIANT`, `STRUCT`, `ARRAY` and `MAP` columns arrive as compact JSON text (from `databricks`
+1.2.0; before, `STRUCT`, `ARRAY` and `MAP` were passed on as nested Arrow), intervals and
+geography as text. See [Types from warehouses](#types-from-warehouses).
+
+### `bigquery`
+
+An alpha: `bigquery` is published as 1.0.0 pre-releases (`1.0.0-alpha.N`), which `dre deps`
+installs while there's no stable release. It is tested against the BigQuery emulator; sessions,
+`load` and dry runs need the real service. Field names and values are dbt-bigquery's, so a dbt
+profile can be copied across; dbt fields that only matter for building models (`threads`,
+Dataproc, `gcs_bucket`, ...) are accepted and ignored.
+
+| Field | Notes |
+|---|---|
+| `method` | `oauth` (default: gcloud's application-default credentials, from `gcloud auth application-default login`), `service-account`, `service-account-json`, `oauth-secrets` or `external-oauth-wif`. |
+| `project` | Required. The project tables are read from. dbt's `database` works too. |
+| `dataset` | Default dataset for unqualified table names. dbt's `schema` works too. |
+| `location` | Where jobs run, e.g. `US`, `EU`, `europe-west2`. |
+| `keyfile` | For `service-account`: path to a key file. |
+| `keyfile_json` | For `service-account-json`: the key's JSON, as a YAML map or a string. |
+| `token` | For `oauth-secrets`: an access token. |
+| `refresh_token`, `client_id`, `client_secret`, `token_uri` | For `oauth-secrets`: a refresh token and its OAuth client. |
+| `workload_pool_provider_path`, `token_endpoint`, `service_account_impersonation_url` | For `external-oauth-wif` (Microsoft Entra): `token_endpoint` has `type: entra`, `request_url` and `request_data`. |
+| `impersonate_service_account` | Run as this service account, using the signed-in identity. |
+| `scopes` | OAuth scopes. Default: BigQuery, Cloud Platform and Drive (for Sheets-backed tables). |
+| `execution_project` | The project jobs run and are billed in, when not `project`. |
+| `quota_project` | The project API quota is charged to. |
+| `priority` | `interactive` (default) or `batch`. |
+| `maximum_bytes_billed` | A job that would bill more fails instead of running. Set on every job. |
+| `job_execution_timeout_seconds`, `job_creation_timeout_seconds` | Stop a query that runs, or takes to start, longer than this. |
+| `job_retries`, `job_retry_deadline_seconds` | A query that fails with a server error or rate limit runs again, up to `job_retries` times (default 1) within the deadline. |
+| `api_endpoint` | A BigQuery API endpoint other than Google's (Private Service Connect, an emulator). Results are then read over REST only. |
+
+```yaml
+connections:
+  bq:
+    targets:
+      dev:        # you, through gcloud
+        type: bigquery
+        project: my-project
+        dataset: reporting
+        location: EU
+        maximum_bytes_billed: 10000000000
+      prod:       # a service account, for the scheduler
+        type: bigquery
+        method: service-account
+        keyfile: /secrets/reporting-sa.json
+        project: my-project
+        dataset: reporting
+        location: EU
+```
+
+Capabilities: `sessions`, `check`, `load`. `open` starts a BigQuery session and every job of the
+Binding runs in it, so temp tables last for the whole Binding. `check` is a dry run: BigQuery
+validates the statement, and the bytes it would process are logged (`--debug` shows them).
+`load` creates a temp table in the session from one SQL statement, with a warning.
+
+Results come through the Storage Read API (Arrow) when the client library uses it, which it does
+for results larger than one page, and over the REST API otherwise or when the identity can't
+create read sessions (`bigquery.readsessions.create`). Both give the same output.
+
+The package is written in Go, on Google's official BigQuery client. DRE stores nothing for
+BigQuery: sign-in goes through Google's own libraries.
+
+### `snowflake`
+
+An alpha: `snowflake` is published as 1.0.0 pre-releases (`1.0.0-alpha.N`), which `dre deps`
+installs while there's no stable release. It hasn't yet run against a real Snowflake account.
+Field names and values are dbt-snowflake's, so a dbt profile can be copied across.
+
+| Field | Notes |
+|---|---|
+| `account` | Required. The account identifier, e.g. `myorg-myaccount`. |
+| `user` | Required. |
+| `authenticator` | How to sign in: `snowflake` (password, the default), `username_password_mfa`, `externalbrowser`, `oauth`, `jwt`, `programmatic_access_token`, `workload_identity`, or an Okta URL (`https://<org>.okta.com`). A private key means key-pair sign-in. |
+| `password` | For password, MFA and Okta sign-in. A programmatic access token also works here. |
+| `private_key_path`, `private_key` | Key-pair sign-in: a key file, or the key inline (PEM, or base64 DER). |
+| `private_key_passphrase` | For an encrypted key. |
+| `token` | For `oauth` (an access token, or a refresh token with `oauth_client_id` and `oauth_client_secret`), `jwt`, `programmatic_access_token`, and `workload_identity` with OIDC. |
+| `workload_identity_provider`, `workload_identity_entra_resource` | For `workload_identity`: `AWS`, `AZURE`, `GCP` or `OIDC`, and on Azure the Entra resource. |
+| `role`, `warehouse`, `database`, `schema` | The session's defaults. |
+| `query_tag` | Tags every query of the session. |
+| `client_session_keep_alive` | Keep the session alive through a long report. |
+| `client_request_mfa_token`, `client_store_temporary_credential` | Let the driver cache the MFA token and the SSO token in the OS keychain (on by default on macOS and Windows). |
+| `connect_retries`, `connect_timeout` | Retries and seconds for connecting. Defaults 1 and 10. |
+| `host`, `port`, `protocol`, `proxy_host`, `proxy_port`, `insecure_mode` | Connection details for unusual networks. |
+
+```yaml
+connections:
+  sf:
+    targets:
+      dev:        # you, through your company's SSO
+        type: snowflake
+        account: myorg-myaccount
+        user: me@example.com
+        authenticator: externalbrowser
+        role: REPORTER
+        warehouse: REPORTING_WH
+        database: ANALYTICS
+        schema: MARTS
+      prod:       # a service user with a key pair
+        type: snowflake
+        account: myorg-myaccount
+        user: DRE_SVC
+        private_key_path: /secrets/dre_svc.p8
+        private_key_passphrase: "{{ env_var('DRE_SECRET_SF_KEY_PASSPHRASE') }}"
+        role: REPORTER
+        warehouse: REPORTING_WH
+        database: ANALYTICS
+        schema: MARTS
+```
+
+Capabilities: `sessions`, `check` (via `EXPLAIN`), `load`. One connection is one Snowflake session,
+held for the whole Binding. `load` creates a temporary table from one SQL statement, with a
+warning; it needs a current database and schema.
+
+The driver keeps the SSO and MFA token cache, as it does for dbt; DRE writes nothing to `~/.dre`
+for Snowflake. `connections.toml` isn't read. Set `SNOWFLAKE_LOG_LEVEL` (e.g. `DEBUG`) to see the
+driver's log.
+
+To make reports visible inside Snowflake, deliver them to the bucket behind an external stage
+with the `s3`, `gcs` or `azure_blob` destination; there's no Snowflake stage destination.
+
+The package is written in Go, on Snowflake's official Go driver (`gosnowflake`).
+
+### Types from warehouses
+
+Every warehouse source (`databricks`, `bigquery`, `snowflake`) sends the same kinds of value the
+same way, so a report looks the same whichever warehouse it reads:
+
+- Scalars keep their type. Exact numbers (`DECIMAL`, `NUMERIC`, `NUMBER(p,s)`) stay decimals at
+  their declared precision; Snowflake `NUMBER(p,0)` up to 18 digits is an integer. Zone-aware
+  timestamps (`TIMESTAMP`, `TIMESTAMP_TZ`/`_LTZ`) are UTC; naive ones (`TIMESTAMP_NTZ`,
+  BigQuery `DATETIME`) stay naive.
+- Semi-structured and nested values (`VARIANT`, `OBJECT`, `ARRAY`, `STRUCT`, `MAP`, `JSON`,
+  BigQuery `RANGE`) become compact JSON text on one line, whatever the database returned. csv
+  and `delimited` quote it like any other text, so a file never gets a line break in the middle
+  of a record.
+- Types no format holds exactly become text: intervals (Databricks' own text; BigQuery as ISO
+  8601, e.g. `P1Y2M3DT4H`), geography and geometry, vectors, and `BIGNUMERIC` values wider than a
+  38-digit decimal.
+- A column of `NULL`s (`SELECT NULL`) is text.
+
+xlsx refuses text longer than an Excel cell holds (32,767 characters): the run fails naming the
+sheet, the cell and the column, rather than cutting the value. Shorten or cast it in the SQL, or
+write that query to a text format.
 
 ## Formats
 
