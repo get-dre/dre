@@ -1,0 +1,164 @@
+//! The `teams` destination: posts messages to a Microsoft Teams channel through a Workflows
+//! incoming webhook ("Post to a channel when a webhook request is received"). It takes messages
+//! only: Teams can't take a file through a webhook.
+//!
+//! Profile target field (`profiles.yml`): `webhook_url`, secret, best set with `env_var()`. It's
+//! never logged or shown in an error. No destination options.
+//!
+//! The message goes as an Adaptive Card: the title in bold, then one text block per line of the
+//! text, in the Markdown Teams renders. Over the limit, the text is cut short with a marker. A
+//! rate-limited post is retried once, after `Retry-After`.
+
+use std::time::Duration;
+
+use dre_protocol::markdown;
+use dre_protocol::msg::{ConnectionField, Message};
+use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
+use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY};
+use serde_json::{Value, json};
+
+/// The longest text posted, in characters: well inside Teams' 28 KB card limit.
+const MESSAGE_LIMIT: u64 = 15_000;
+const CUT_MARKER: &str = "\n… _(cut short: the full message is in the run's .md file)_";
+/// Longest `Retry-After` honoured before giving up on a rate-limited post.
+const MAX_RETRY_WAIT: u64 = 60;
+
+struct Teams;
+
+impl Destination for Teams {
+    fn connection_fields(&self) -> Vec<ConnectionField> {
+        vec![
+            ConnectionField::new(
+                "webhook_url",
+                "the Workflows webhook URL of the channel (keep it secret)",
+            )
+            .required()
+            .secret(),
+        ]
+    }
+
+    fn message_limit(&self) -> Option<u64> {
+        Some(MESSAGE_LIMIT)
+    }
+
+    fn deliver_message(&mut self, d: &Delivery, m: &Message) -> Result<String> {
+        if !d.files.is_empty() {
+            return Err(FILES_REFUSED.into());
+        }
+        let url = conn_required(&d.connection, "webhook_url")?;
+        let text = markdown::to_teams(&m.text);
+        let text = match markdown::truncate(&text, MESSAGE_LIMIT as usize, CUT_MARKER) {
+            Some(cut) => {
+                eprintln!(
+                    "the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
+                );
+                cut
+            }
+            None => text,
+        };
+        post(url, &card(&m.title, &text))?;
+        Ok("teams channel (webhook)".into())
+    }
+
+    fn deliver_files(&mut self, _d: &Delivery) -> Result<String> {
+        Err(FILES_REFUSED.into())
+    }
+}
+
+const FILES_REFUSED: &str =
+    "the teams destination only takes messages; deliver files to object storage and link them from a message";
+
+/// The Adaptive Card a Workflows webhook posts: the title, then a text block per line.
+fn card(title: &str, text: &str) -> Value {
+    let mut body = vec![json!({
+        "type": "TextBlock",
+        "text": markdown::escape(title),
+        "weight": "Bolder",
+        "size": "Medium",
+        "wrap": true,
+    })];
+    let mut gap = false;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            gap = true;
+            continue;
+        }
+        body.push(json!({
+            "type": "TextBlock",
+            "text": line,
+            "wrap": true,
+            "spacing": if gap { "Medium" } else { "None" },
+        }));
+        gap = false;
+    }
+    json!({
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": body,
+            },
+        }],
+    })
+}
+
+/// POST the card; retry once on 429. Errors never include the URL, which is a credential.
+fn post(url: &str, payload: &Value) -> Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(60)))
+        .build()
+        .into();
+    let body = payload.to_string();
+    for attempt in 0..2 {
+        let resp = agent
+            .post(url)
+            .header("Content-Type", "application/json")
+            .send(body.as_bytes())
+            .map_err(|e| format!("can't reach the Teams webhook: {}", scrub(&e.to_string(), url)))?;
+        let status = resp.status().as_u16();
+        match status {
+            200..=299 => return Ok(()),
+            429 => {
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .unwrap_or(1);
+                if attempt == 0 && wait <= MAX_RETRY_WAIT {
+                    eprintln!("Teams rate-limited the post; retrying in {wait}s");
+                    std::thread::sleep(Duration::from_secs(wait));
+                    continue;
+                }
+                return Err(format!("Teams is rate-limiting posts (retry after {wait}s); try again later").into());
+            }
+            400 => return Err("the Teams webhook rejected the message (HTTP 400); check that the flow uses the \"Post to a channel when a webhook request is received\" template".into()),
+            401 | 403 | 404 => {
+                return Err(format!(
+                    "the Teams webhook refused the post (HTTP {status}); the URL may be wrong, or the flow turned off or deleted: check `webhook_url` in the profile"
+                )
+                .into());
+            }
+            s => return Err(format!("the Teams webhook returned HTTP {s}").into()),
+        }
+    }
+    unreachable!("the loop returns on its second attempt")
+}
+
+/// `text` with the webhook URL (and its query, which holds the signature) removed.
+fn scrub(text: &str, url: &str) -> String {
+    let base = url.split('?').next().unwrap_or(url);
+    text.replace(url, "<webhook_url>").replace(base, "<webhook_url>")
+}
+
+fn main() {
+    serve_destination(
+        About::new("teams", env!("CARGO_PKG_VERSION")).capabilities(&[CAP_MESSAGE, CAP_MESSAGE_ONLY]),
+        Teams,
+    )
+}

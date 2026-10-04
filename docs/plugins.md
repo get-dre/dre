@@ -28,6 +28,8 @@ secrets can use `env_var()`.
 | `ftp` | the `ftp` destination |
 | `email` | the `email` destination |
 | `slack` | the `slack` destination |
+| `teams` | the `teams` destination, messages only (release candidate: 1.0.0-rc.1) |
+| `google_chat` | the `google_chat` destination, messages only (release candidate: 1.0.0-rc.1) |
 
 ```yaml
 # dependencies.yml
@@ -823,6 +825,52 @@ If Slack rate-limits a call, the plugin retries it once after Slack's `Retry-Aft
 most 60 seconds. Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what
 to fix. The delivered location is the uploaded files' permalinks.
+
+### `teams`
+
+Posts [messages](#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
+It takes messages only: a file output, or `attach:`, sent to it is an error in `dre validate`.
+Deliver files to object storage and link them from the message with `outputs.<name>.location`.
+Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url`, which is a credential: anyone with it can post to the channel.
+Set it with `env_var()`. DRE never logs it or shows it in an error.
+
+```yaml
+# profiles.yml
+destinations:
+  finance_teams:
+    targets:
+      prod: {type: teams, webhook_url: "{{ env_var('TEAMS_FINANCE_WEBHOOK') }}"}
+```
+
+To create the webhook: in Teams, open the channel's **...** menu > **Workflows**, choose **Post
+to a channel when a webhook request is received**, pick the team and channel, and copy the URL
+it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
+links and bullets. Teams has no destination options. A message over 15,000 characters is cut
+short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
+warning. If Teams rate-limits the post, the plugin retries once after its `Retry-After`.
+
+### `google_chat`
+
+Posts [messages](#the-message-format) to a Google Chat space through its incoming webhook. Like
+`teams`, it takes messages only. Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url` (it contains the space's key and token), best set with
+`env_var()`; it's never logged.
+
+```yaml
+destinations:
+  ops_chat:
+    targets:
+      prod: {type: google_chat, webhook_url: "{{ env_var('GCHAT_OPS_WEBHOOK') }}"}
+```
+
+To create the webhook: in Google Chat, open the space, then **Apps & integrations** > **Webhooks**
+> **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
+may need to allow webhooks). The message is the title in bold, then the text in Chat's
+formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
+is retried once.
 
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.

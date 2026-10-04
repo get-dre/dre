@@ -75,6 +75,8 @@ DOC_SECTIONS = {
     "destination/databricks": _DEST + [("Destinations", "`databricks`")],
     "destination/email": _DEST + [("Destinations", "`email`")],
     "destination/slack": _DEST + [("Destinations", "`slack`")],
+    "destination/teams": _DEST + [("Destinations", "`teams`")],
+    "destination/google_chat": _DEST + [("Destinations", "`google_chat`")],
 }
 
 # Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).

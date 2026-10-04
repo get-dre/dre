@@ -1845,6 +1845,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dre-plugin-google_chat"
+version = "1.0.0-rc.1"
+dependencies = [
+ "dre-protocol",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "dre-plugin-object_store"
 version = "1.0.0"
 dependencies = [
@@ -1913,6 +1923,16 @@ version = "1.1.0"
 dependencies = [
  "dre-protocol",
  "form_urlencoded",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
+name = "dre-plugin-teams"
+version = "1.0.0-rc.1"
+dependencies = [
+ "dre-protocol",
  "serde_json",
  "tempfile",
  "ureq",
