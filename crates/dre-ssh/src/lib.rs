@@ -23,7 +23,7 @@ pub use russh;
 pub type Session = client::Handle<HostCheck>;
 
 enum Auth {
-    Key(PrivateKey),
+    Key(Arc<PrivateKey>),
     Password(String),
 }
 
@@ -84,28 +84,25 @@ impl Ssh {
                 .as_u64()
                 .and_then(|p| u16::try_from(p).ok())
                 .ok_or_else(|| format!("invalid `{prefix}port` `{n}`"))?,
-            Some(Value::String(s)) => s
-                .parse()
-                .map_err(|_| format!("invalid `{prefix}port` `{s}`"))?,
+            Some(Value::String(s)) => s.parse().map_err(|_| format!("invalid `{prefix}port` `{s}`"))?,
             _ => 22,
         };
         let username = required("username")?;
         let passphrase = conn_str(c, "private_key_passphrase");
         let auth = match (conn_str(c, "private_key_path"), conn_str(c, "private_key")) {
             (Some(_), Some(_)) => {
-                return Err(format!(
-                    "set `{prefix}private_key_path` or `{prefix}private_key`, not both"
-                )
-                .into());
+                return Err(
+                    format!("set `{prefix}private_key_path` or `{prefix}private_key`, not both").into(),
+                );
             }
-            (Some(path), None) => Auth::Key(
+            (Some(path), None) => Auth::Key(Arc::new(
                 russh::keys::load_secret_key(path, passphrase)
                     .map_err(|e| format!("can't load private key {path}: {e}"))?,
-            ),
-            (None, Some(text)) => Auth::Key(
+            )),
+            (None, Some(text)) => Auth::Key(Arc::new(
                 russh::keys::decode_secret_key(&key_text(text), passphrase)
                     .map_err(|e| format!("can't read `{prefix}private_key`: {e}"))?,
-            ),
+            )),
             (None, None) => match conn_str(c, "password") {
                 Some(pw) => Auth::Password(pw.to_string()),
                 None => {
@@ -158,7 +155,7 @@ impl Ssh {
             Auth::Key(key) => {
                 let hash = session.best_supported_rsa_hash().await?.flatten();
                 session
-                    .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key.clone()), hash))
+                    .authenticate_publickey(user, PrivateKeyWithHashAlg::new(key.clone(), hash))
                     .await?
             }
             Auth::Password(pw) => session.authenticate_password(user, pw).await?,
@@ -269,7 +266,9 @@ mod tests {
     }
 
     fn settings(v: Value) -> Map<String, Value> {
-        let Value::Object(mut m) = json!({"host": "bastion", "username": "dre"}) else { unreachable!() };
+        let Value::Object(mut m) = json!({"host": "bastion", "username": "dre"}) else {
+            unreachable!()
+        };
         m.extend(v.as_object().unwrap().clone());
         m
     }
@@ -294,7 +293,10 @@ mod tests {
 
     #[test]
     fn single_line_key_text_gets_its_line_breaks_back() {
-        assert_eq!(key_text("-----BEGIN X-----\\nabc\\n-----END X-----\\n"), "-----BEGIN X-----\nabc\n-----END X-----\n");
+        assert_eq!(
+            key_text("-----BEGIN X-----\\nabc\\n-----END X-----\\n"),
+            "-----BEGIN X-----\nabc\n-----END X-----\n"
+        );
         assert_eq!(key_text("a\\r\\nb"), "a\nb");
         // Real line breaks: left alone (a `\n` inside would be part of the key).
         assert_eq!(key_text("a\nb\\n"), "a\nb\\n");
@@ -321,7 +323,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (path, _) = keypair(dir.path(), "s3cret");
         let text = std::fs::read_to_string(&path).unwrap();
-        let ssh = Ssh::from_settings(&settings(json!({"private_key": text, "private_key_passphrase": "s3cret"})), "");
+        let ssh = Ssh::from_settings(
+            &settings(json!({"private_key": text, "private_key_passphrase": "s3cret"})),
+            "",
+        );
         assert!(ssh.is_ok());
         let e = err(settings(json!({"private_key": text})), "ssh.");
         assert!(e.contains("can't read `ssh.private_key`"), "{e}");
@@ -329,7 +334,10 @@ mod tests {
 
     #[test]
     fn settings_errors_name_the_field_where_it_lives() {
-        let e = err(settings(json!({"private_key_path": "a", "private_key": "b"})), "ssh.");
+        let e = err(
+            settings(json!({"private_key_path": "a", "private_key": "b"})),
+            "ssh.",
+        );
         assert_eq!(e, "set `ssh.private_key_path` or `ssh.private_key`, not both");
         let e = err(settings(json!({})), "");
         assert_eq!(e, "set `password`, `private_key_path` or `private_key`");
@@ -352,12 +360,21 @@ mod tests {
 
         assert!(check(Some(&fp), &none).verdict(&key).is_ok());
         // The pin works without its `SHA256:` prefix too.
-        assert!(check(Some(fp.trim_start_matches("SHA256:")), &none).verdict(&key).is_ok());
-        let e = check(Some("SHA256:AAAAnotthekey"), &none).verdict(&key).unwrap_err();
+        assert!(
+            check(Some(fp.trim_start_matches("SHA256:")), &none)
+                .verdict(&key)
+                .is_ok()
+        );
+        let e = check(Some("SHA256:AAAAnotthekey"), &none)
+            .verdict(&key)
+            .unwrap_err();
         assert!(e.contains("not the pinned"), "{e}");
 
         let e = check(None, &none).verdict(&key).unwrap_err();
-        assert!(e.contains("isn't in") && e.contains(&format!("pin `host_key_fingerprint: {fp}`")), "{e}");
+        assert!(
+            e.contains("isn't in") && e.contains(&format!("pin `host_key_fingerprint: {fp}`")),
+            "{e}"
+        );
 
         let kh = dir.path().join("known_hosts");
         std::fs::write(&kh, format!("[bastion]:2222 {public}\n")).unwrap();

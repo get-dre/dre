@@ -2,7 +2,13 @@
 //!
 //! Profile target fields: `host`, `port` (5432), `user`, `password`, `database` (or `dbname`),
 //! `sslmode` (`disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`),
-//! `sslrootcert`, `connect_timeout` (seconds), `schema` (sets the search path) and `role`.
+//! `sslrootcert`, `connect_timeout` (seconds), `schema` (sets the search path), `role`, and `ssh`.
+//!
+//! `ssh:` reaches the server through an SSH bastion: a block of `dre-ssh` settings (`host`,
+//! `port`, `username`, `password`/`private_key_path`/`private_key`, `known_hosts_path` or
+//! `host_key_fingerprint`). `host` and `port` are then the database as the bastion sees it. No
+//! local port is opened: the Postgres connection runs over the SSH channel, and TLS still checks
+//! the certificate against `host`.
 //!
 //! One connection is held for the whole Binding. Read-only sessions set
 //! `default_transaction_read_only`. `check` uses `EXPLAIN`, which plans without executing.
@@ -13,7 +19,7 @@
 //! (`amount::numeric(18,2)`) for a typed column. Other types need a cast, e.g. `::text`.
 
 use std::error::Error as StdError;
-use std::io::Write;
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,20 +31,33 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use arrow::util::display::{ArrayFormatter, FormatOptions};
+use bytes::Bytes;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
-use postgres::fallible_iterator::FallibleIterator;
-use postgres::types::{FromSql, Kind, Type};
-use postgres::{Client, Column, Config, NoTls};
+use dre_ssh::Ssh;
+use dre_ssh::russh;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Map, Value};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::runtime::Runtime;
+use tokio_postgres::config::SslMode;
+use tokio_postgres::types::{FromSql, Kind, Type};
+use tokio_postgres::{Client, Column, Config, NoTls, Row};
 
 const BATCH_ROWS: usize = 8192;
 
-#[derive(Default)]
 struct Postgres {
-    client: Option<Client>,
+    /// Drives the connection (and the SSH session) in the background; requests block on it.
+    rt: Runtime,
+    session: Option<Session>,
+}
+
+struct Session {
+    client: Client,
+    /// The bastion's SSH session when `ssh:` is set; the connection runs over one of its channels.
+    tunnel: Option<dre_ssh::Session>,
 }
 
 /// How a Postgres column becomes an Arrow column.
@@ -243,7 +262,7 @@ impl Builders {
         Builders { cols, b, schema }
     }
 
-    fn push(&mut self, row: &postgres::Row) -> Result<()> {
+    fn push(&mut self, row: &Row) -> Result<()> {
         macro_rules! put {
             ($i:expr, $bt:ty, $v:expr) => {
                 self.b[$i]
@@ -346,15 +365,25 @@ fn server(c: &Map<String, Value>) -> String {
     format!("{host}:{port}/{db}")
 }
 
-fn config(c: &Map<String, Value>) -> Result<(Config, Option<native_tls::TlsConnector>)> {
+/// Where and how to connect.
+struct Settings {
+    cfg: Config,
+    host: String,
+    port: u16,
+    connect_timeout: Option<Duration>,
+    tls: Option<native_tls::TlsConnector>,
+    /// The bastion from the `ssh:` block.
+    ssh: Option<Ssh>,
+}
+
+fn settings(c: &Map<String, Value>) -> Result<Settings> {
     let mut cfg = Config::new();
-    cfg.host(conn_str(c, "host").unwrap_or("localhost"));
+    let host = conn_str(c, "host").unwrap_or("localhost").to_string();
     let port = match c.get("port") {
         Some(Value::Number(n)) => n.as_u64().ok_or("`port` must be a number")? as u16,
         Some(Value::String(s)) => s.parse().map_err(|_| format!("invalid `port` `{s}`"))?,
         _ => 5432,
     };
-    cfg.port(port);
     if let Some(u) = conn_str(c, "user") {
         cfg.user(u);
     }
@@ -364,12 +393,10 @@ fn config(c: &Map<String, Value>) -> Result<(Config, Option<native_tls::TlsConne
     if let Some(d) = conn_str(c, "database").or_else(|| conn_str(c, "dbname")) {
         cfg.dbname(d);
     }
-    if let Some(t) = c
+    let connect_timeout = c
         .get("connect_timeout")
         .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
-    {
-        cfg.connect_timeout(Duration::from_secs(t));
-    }
+        .map(Duration::from_secs);
     cfg.application_name("dre");
     let mode = conn_str(c, "sslmode").unwrap_or("prefer");
     let mut tls = native_tls::TlsConnector::builder();
@@ -377,30 +404,30 @@ fn config(c: &Map<String, Value>) -> Result<(Config, Option<native_tls::TlsConne
         let pem = std::fs::read(root).map_err(|e| format!("can't read sslrootcert {root}: {e}"))?;
         tls.add_root_certificate(native_tls::Certificate::from_pem(&pem)?);
     }
-    let connector = match mode {
+    let tls = match mode {
         "disable" => {
-            cfg.ssl_mode(postgres::config::SslMode::Disable);
+            cfg.ssl_mode(SslMode::Disable);
             None
         }
         // libpq semantics: `prefer`/`require` encrypt without verifying the server certificate;
         // `verify-ca` checks the chain; `verify-full` also checks the host name.
         "prefer" | "require" => {
             cfg.ssl_mode(if mode == "prefer" {
-                postgres::config::SslMode::Prefer
+                SslMode::Prefer
             } else {
-                postgres::config::SslMode::Require
+                SslMode::Require
             });
             tls.danger_accept_invalid_certs(true)
                 .danger_accept_invalid_hostnames(true);
             Some(tls.build()?)
         }
         "verify-ca" => {
-            cfg.ssl_mode(postgres::config::SslMode::Require);
+            cfg.ssl_mode(SslMode::Require);
             tls.danger_accept_invalid_hostnames(true);
             Some(tls.build()?)
         }
         "verify-full" => {
-            cfg.ssl_mode(postgres::config::SslMode::Require);
+            cfg.ssl_mode(SslMode::Require);
             Some(tls.build()?)
         }
         m => {
@@ -410,7 +437,92 @@ fn config(c: &Map<String, Value>) -> Result<(Config, Option<native_tls::TlsConne
             .into());
         }
     };
-    Ok((cfg, connector))
+    let ssh = match c.get("ssh") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(m)) => Some(Ssh::from_settings(m, "ssh.")?),
+        Some(_) => {
+            return Err(
+                "`ssh` must be a block of settings (`host`, `username`, a password or key, ...)".into(),
+            );
+        }
+    };
+    Ok(Settings {
+        cfg,
+        host,
+        port,
+        connect_timeout,
+        tls,
+        ssh,
+    })
+}
+
+/// Start the Postgres protocol on `stream` and drive the connection in the background.
+async fn handshake<S>(stream: S, s: &Settings) -> std::result::Result<Client, tokio_postgres::Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    match &s.tls {
+        Some(t) => {
+            let tls = postgres_native_tls::TlsConnector::new(t.clone(), &s.host);
+            let (client, conn) = s.cfg.connect_raw(stream, tls).await?;
+            tokio::spawn(conn);
+            Ok(client)
+        }
+        None => {
+            let (client, conn) = s.cfg.connect_raw(stream, NoTls).await?;
+            tokio::spawn(conn);
+            Ok(client)
+        }
+    }
+}
+
+/// Connect directly, or through the bastion. `at` names the server in errors.
+async fn connect(s: &Settings, at: &str) -> std::result::Result<Session, String> {
+    let fail = |e: tokio_postgres::Error| format!("can't connect to Postgres at {at}: {}", describe(&e));
+    let Some(ssh) = &s.ssh else {
+        #[cfg(unix)]
+        if s.host.starts_with('/') {
+            let socket = format!("{}/.s.PGSQL.{}", s.host, s.port);
+            let stream = tokio::net::UnixStream::connect(&socket)
+                .await
+                .map_err(|e| format!("can't connect to Postgres at {at}: error connecting to server: {e}"))?;
+            let client = handshake(stream, s).await.map_err(fail)?;
+            return Ok(Session { client, tunnel: None });
+        }
+        let stream = tokio::net::TcpStream::connect((s.host.as_str(), s.port))
+            .await
+            .map_err(|e| format!("can't connect to Postgres at {at}: error connecting to server: {e}"))?;
+        // As libpq does: no Nagle delay, and keepalives after two idle hours.
+        let _ = stream.set_nodelay(true);
+        let keepalive = socket2::TcpKeepalive::new().with_time(Duration::from_secs(7200));
+        let _ = socket2::SockRef::from(&stream).set_tcp_keepalive(&keepalive);
+        let client = handshake(stream, s).await.map_err(fail)?;
+        return Ok(Session { client, tunnel: None });
+    };
+    let bastion = format!("{}:{}", ssh.host, ssh.port);
+    let config = russh::client::Config {
+        // Keep the session alive between statements, however long the rest of the run takes.
+        keepalive_interval: Some(Duration::from_secs(30)),
+        ..Default::default()
+    };
+    let tunnel = ssh
+        .connect(config, s.connect_timeout.unwrap_or(Duration::from_secs(30)))
+        .await
+        .map_err(|e| format!("can't reach the SSH bastion {bastion} (for Postgres at {at}): {e}"))?;
+    let channel = tunnel
+        .channel_open_direct_tcpip(s.host.as_str(), u32::from(s.port), "127.0.0.1", 0)
+        .await
+        .map_err(|e| {
+            format!(
+                "the SSH bastion {bastion} couldn't connect to {}:{} (for Postgres at {at}): {e}",
+                s.host, s.port
+            )
+        })?;
+    let client = handshake(channel.into_stream(), s).await.map_err(fail)?;
+    Ok(Session {
+        client,
+        tunnel: Some(tunnel),
+    })
 }
 
 fn quote_ident(s: &str) -> String {
@@ -418,8 +530,21 @@ fn quote_ident(s: &str) -> String {
 }
 
 impl Postgres {
-    fn client(&mut self) -> Result<&mut Client> {
-        self.client.as_mut().ok_or_else(|| "no open session".into())
+    fn new() -> Postgres {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("can't start the async runtime");
+        Postgres { rt, session: None }
+    }
+
+    /// The open session's client, and the runtime to run its requests on.
+    fn client(&mut self) -> Result<(&Runtime, &mut Client)> {
+        match &mut self.session {
+            Some(s) => Ok((&self.rt, &mut s.client)),
+            None => Err("no open session".into()),
+        }
     }
 }
 
@@ -438,26 +563,49 @@ impl Source for Postgres {
             ConnectionField::new("sslmode", "disable, prefer, require, verify-ca or verify-full")
                 .default("prefer"),
             ConnectionField::new("schema", "schema to put first on the search path"),
+            // A secret, so templates can't read the block (it may hold a key or a password).
+            ConnectionField::new(
+                "ssh",
+                "reach the server through an SSH bastion (a block of settings)",
+            )
+            .secret()
+            .manual(),
         ]
     }
 
     fn open(&mut self, c: &Map<String, Value>, read_only: bool) -> Result<()> {
-        let (cfg, tls) = config(c)?;
-        let mut client = match tls {
-            Some(t) => cfg.connect(postgres_native_tls::MakeTlsConnector::new(t)),
-            None => cfg.connect(NoTls),
+        let s = settings(c)?;
+        let mut at = server(c);
+        if let Some(ssh) = &s.ssh {
+            at = format!("{at} through the SSH bastion {}:{}", ssh.host, ssh.port);
         }
-        .map_err(|e| format!("can't connect to Postgres at {}: {}", server(c), describe(&e)))?;
+        let session = self.rt.block_on(async {
+            match s.connect_timeout {
+                Some(t) => tokio::time::timeout(t, connect(&s, &at))
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(format!(
+                            "can't connect to Postgres at {at}: timed out after {}s",
+                            t.as_secs()
+                        ))
+                    }),
+                None => connect(&s, &at).await,
+            }
+        })?;
+        let mut setup = Vec::new();
         if let Some(role) = conn_str(c, "role") {
-            client.batch_execute(&format!("set role {}", quote_ident(role)))?;
+            setup.push(format!("set role {}", quote_ident(role)));
         }
         if let Some(schema) = conn_str(c, "schema") {
-            client.batch_execute(&format!("set search_path to {}, public", quote_ident(schema)))?;
+            setup.push(format!("set search_path to {}, public", quote_ident(schema)));
         }
         if read_only {
-            client.batch_execute("set session characteristics as transaction read only")?;
+            setup.push("set session characteristics as transaction read only".into());
         }
-        self.client = Some(client);
+        for sql in setup {
+            self.rt.block_on(session.client.batch_execute(&sql))?;
+        }
+        self.session = Some(session);
         Ok(())
     }
 
@@ -479,42 +627,49 @@ impl Source for Postgres {
             };
             columns.push(format!("{} {t}", quote_ident(f.name())));
         }
-        let client = self.client()?;
-        client
-            .batch_execute(&format!(
-                "drop table if exists pg_temp.{table}; create temp table {table} ({})",
-                columns.join(", ")
-            ))
-            .map_err(|e| describe(&e))?;
-        let mut w = client
-            .copy_in(&format!("copy {table} from stdin (format csv)"))
-            .map_err(|e| describe(&e))?;
-        let opts = FormatOptions::default();
-        let mut line = String::new();
-        while let Some(batch) = data.next_batch()? {
-            let cols: Vec<ArrayFormatter<'_>> = batch
-                .columns()
-                .iter()
-                .map(|c| ArrayFormatter::try_new(c.as_ref(), &opts))
-                .collect::<std::result::Result<_, _>>()?;
-            for row in 0..batch.num_rows() {
-                line.clear();
-                for (i, (c, f)) in batch.columns().iter().zip(&cols).enumerate() {
-                    if i > 0 {
-                        line.push(',');
+        let (rt, client) = self.client()?;
+        let rows = rt.block_on(async {
+            client
+                .batch_execute(&format!(
+                    "drop table if exists pg_temp.{table}; create temp table {table} ({})",
+                    columns.join(", ")
+                ))
+                .await
+                .map_err(|e| describe(&e))?;
+            let sink = client
+                .copy_in::<_, Bytes>(&format!("copy {table} from stdin (format csv)"))
+                .await
+                .map_err(|e| describe(&e))?;
+            let mut sink = pin!(sink);
+            let opts = FormatOptions::default();
+            let mut buf = String::new();
+            while let Some(batch) = data.next_batch()? {
+                let cols: Vec<ArrayFormatter<'_>> = batch
+                    .columns()
+                    .iter()
+                    .map(|c| ArrayFormatter::try_new(c.as_ref(), &opts))
+                    .collect::<std::result::Result<_, _>>()?;
+                buf.clear();
+                for row in 0..batch.num_rows() {
+                    for (i, (c, f)) in batch.columns().iter().zip(&cols).enumerate() {
+                        if i > 0 {
+                            buf.push(',');
+                        }
+                        // Unquoted empty is NULL in CSV mode; every value is quoted.
+                        if !c.is_null(row) {
+                            buf.push('"');
+                            buf.push_str(&f.value(row).to_string().replace('"', "\"\""));
+                            buf.push('"');
+                        }
                     }
-                    // Unquoted empty is NULL in CSV mode; every value is quoted.
-                    if !c.is_null(row) {
-                        line.push('"');
-                        line.push_str(&f.value(row).to_string().replace('"', "\"\""));
-                        line.push('"');
-                    }
+                    buf.push('\n');
                 }
-                line.push('\n');
-                w.write_all(line.as_bytes())?;
+                sink.send(Bytes::from(std::mem::take(&mut buf)))
+                    .await
+                    .map_err(|e| describe(&e))?;
             }
-        }
-        let rows = w.finish().map_err(|e| describe(&e))?;
+            Ok::<_, dre_protocol::plugin::Error>(sink.as_mut().finish().await.map_err(|e| describe(&e))?)
+        })?;
         Ok(Loaded {
             relation: table,
             rows,
@@ -523,68 +678,90 @@ impl Source for Postgres {
     }
 
     fn execute(&mut self, sql: &str, row_limit: Option<u64>, out: &mut dyn ResultSink) -> Result<()> {
-        let client = self.client()?;
-        let stmt = client.prepare(sql).map_err(|e| describe(&e))?;
-        if stmt.columns().is_empty() {
-            let n = client.execute(&stmt, &[]).map_err(|e| describe(&e))?;
-            return out.no_result(Some(n));
-        }
-        let cols: Vec<Col> = stmt.columns().iter().map(classify).collect::<Result<_>>()?;
-        let schema: SchemaRef = Arc::new(Schema::new(
-            stmt.columns()
-                .iter()
-                .zip(&cols)
-                .map(|(c, k)| Field::new(c.name(), arrow_type(*k), true))
-                .collect::<Vec<_>>(),
-        ));
-        out.begin(schema.clone())?;
-        let mut b = Builders::new(cols, schema);
-        match row_limit {
-            // A portal fetches only the rows a preview needs.
-            Some(limit) => {
-                let mut tx = client.transaction()?;
-                let portal = tx.bind(&stmt, &[]).map_err(|e| describe(&e))?;
-                let rows = tx
-                    .query_portal(&portal, limit.min(i32::MAX as u64) as i32)
-                    .map_err(|e| describe(&e))?;
-                for r in &rows {
-                    b.push(r)?;
-                    if b.len() == BATCH_ROWS {
-                        out.batch(b.finish()?)?;
-                    }
-                }
-                if b.len() > 0 {
-                    out.batch(b.finish()?)?;
-                }
-                tx.commit()?;
-            }
-            None => {
-                let mut it = client
-                    .query_raw(&stmt, std::iter::empty::<i32>())
-                    .map_err(|e| describe(&e))?;
-                while let Some(r) = it.next().map_err(|e| describe(&e))? {
-                    b.push(&r)?;
-                    if b.len() == BATCH_ROWS && !out.batch(b.finish()?)? {
-                        return Ok(());
-                    }
-                }
-                if b.len() > 0 {
-                    out.batch(b.finish()?)?;
-                }
-            }
-        }
-        Ok(())
+        let (rt, client) = self.client()?;
+        rt.block_on(execute(client, sql, row_limit, out))
     }
 
     fn check(&mut self, sql: &str) -> Result<()> {
-        self.client()?
-            .batch_execute(&format!("explain {sql}"))
+        let (rt, client) = self.client()?;
+        rt.block_on(client.batch_execute(&format!("explain {sql}")))
             .map_err(|e| describe(&e).into())
+    }
+
+    fn close(&mut self) {
+        if let Some(s) = self.session.take() {
+            drop(s.client);
+            if let Some(tunnel) = s.tunnel {
+                let bye = tunnel.disconnect(russh::Disconnect::ByApplication, "", "en");
+                let _ = self.rt.block_on(bye);
+            }
+        }
     }
 }
 
+async fn execute(
+    client: &mut Client,
+    sql: &str,
+    row_limit: Option<u64>,
+    out: &mut dyn ResultSink,
+) -> Result<()> {
+    let stmt = client.prepare(sql).await.map_err(|e| describe(&e))?;
+    if stmt.columns().is_empty() {
+        let n = client.execute(&stmt, &[]).await.map_err(|e| describe(&e))?;
+        return out.no_result(Some(n));
+    }
+    let cols: Vec<Col> = stmt.columns().iter().map(classify).collect::<Result<_>>()?;
+    let schema: SchemaRef = Arc::new(Schema::new(
+        stmt.columns()
+            .iter()
+            .zip(&cols)
+            .map(|(c, k)| Field::new(c.name(), arrow_type(*k), true))
+            .collect::<Vec<_>>(),
+    ));
+    out.begin(schema.clone())?;
+    let mut b = Builders::new(cols, schema);
+    match row_limit {
+        // A portal fetches only the rows a preview needs.
+        Some(limit) => {
+            let tx = client.transaction().await?;
+            let portal = tx.bind(&stmt, &[]).await.map_err(|e| describe(&e))?;
+            let rows = tx
+                .query_portal(&portal, limit.min(i32::MAX as u64) as i32)
+                .await
+                .map_err(|e| describe(&e))?;
+            for r in &rows {
+                b.push(r)?;
+                if b.len() == BATCH_ROWS {
+                    out.batch(b.finish()?)?;
+                }
+            }
+            if b.len() > 0 {
+                out.batch(b.finish()?)?;
+            }
+            tx.commit().await?;
+        }
+        None => {
+            let rows = client
+                .query_raw(&stmt, std::iter::empty::<i32>())
+                .await
+                .map_err(|e| describe(&e))?;
+            let mut rows = pin!(rows);
+            while let Some(r) = rows.next().await {
+                b.push(&r.map_err(|e| describe(&e))?)?;
+                if b.len() == BATCH_ROWS && !out.batch(b.finish()?)? {
+                    return Ok(());
+                }
+            }
+            if b.len() > 0 {
+                out.batch(b.finish()?)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The server's own message (with its detail/hint) rather than the driver's wrapper.
-fn describe(e: &postgres::Error) -> String {
+fn describe(e: &tokio_postgres::Error) -> String {
     match e.as_db_error() {
         Some(db) => {
             let mut s = format!("{}: {}", db.severity(), db.message());
@@ -615,5 +792,5 @@ fn main() {
         CAP_CHECK,
         CAP_LOAD,
     ]);
-    serve_source(about, Postgres::default())
+    serve_source(about, Postgres::new())
 }

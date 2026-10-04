@@ -160,6 +160,10 @@ fn private_key_text_is_a_secret_init_doesnt_ask_for() {
     let log: LogSink = Arc::new(|_, _| {});
     let mut p = PluginProcess::start(bin(), log).unwrap();
     let d = p.description().unwrap();
-    let f = d.connection_fields.iter().find(|f| f.name == "private_key").unwrap();
+    let f = d
+        .connection_fields
+        .iter()
+        .find(|f| f.name == "private_key")
+        .unwrap();
     assert!(f.secret && f.manual);
 }

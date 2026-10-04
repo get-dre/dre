@@ -23,7 +23,9 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=dre test CA" \
   -keyout "$work/pg/ca.key" -out "$work/pg/ca.crt" 2>/dev/null
 openssl req -newkey rsa:2048 -nodes -subj "/CN=db.internal" \
   -keyout "$work/pg/server.key" -out "$work/pg/server.csr" 2>/dev/null
-printf 'subjectAltName=DNS:db.internal\n' > "$work/pg/san.ext"
+# macOS' TLS stack also wants the server-auth key usage.
+printf 'subjectAltName=DNS:db.internal\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
+  > "$work/pg/san.ext"
 openssl x509 -req -in "$work/pg/server.csr" -CA "$work/pg/ca.crt" -CAkey "$work/pg/ca.key" \
   -CAcreateserial -days 2 -extfile "$work/pg/san.ext" -out "$work/pg/server.crt" 2>/dev/null
 chmod 644 "$work/pg/server.key"
