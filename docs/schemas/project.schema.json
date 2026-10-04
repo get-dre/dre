@@ -82,6 +82,10 @@
       "type": "string",
       "description": "The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC."
     },
+    "locale": {
+      "type": "string",
+      "description": "The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`."
+    },
     "week_start": {
       "type": "string",
       "enum": [
@@ -208,6 +212,10 @@
         "+timezone": {
           "type": "string",
           "description": "The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC."
+        },
+        "+locale": {
+          "type": "string",
+          "description": "The `locale:` for reports in this folder; a report's own wins. See `locale` in dre_project.yml."
         }
       },
       "additionalProperties": {

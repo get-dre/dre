@@ -65,6 +65,7 @@ pub const REPORT_KEYS: &[&str] = &[
     "schedule",
     "vars",
     "timezone",
+    "locale",
 ];
 /// Declares the project's plugin packages, in any project YAML file.
 const PLUGINS_KEY: &str = "plugins";
@@ -86,6 +87,7 @@ pub const PROJECT_KEYS: &[&str] = &[
     "dispatch",
     "mask_secrets",
     "timezone",
+    "locale",
     "week_start",
     "week_numbering",
     "reports",
@@ -98,7 +100,15 @@ pub const SCHEDULE_ENTRY_KEYS: &[&str] = &[
 ];
 /// The timings file's name. Other YAML files of timings are recognised by their shape.
 pub const TIMINGS_FILE: &str = "timings.yml";
-pub const FOLDER_CONFIG_KEYS: &[&str] = &["+tags", "+output", "+profile", "+schedule", "+vars", "+timezone"];
+pub const FOLDER_CONFIG_KEYS: &[&str] = &[
+    "+tags",
+    "+output",
+    "+profile",
+    "+schedule",
+    "+vars",
+    "+timezone",
+    "+locale",
+];
 pub const SET_ENTRY_KEYS: &[&str] = &[
     "name",
     "profile",
@@ -108,6 +118,7 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "tab_names",
     "output",
     "schedule",
+    "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
@@ -196,6 +207,9 @@ pub struct Project {
     /// The project's default `timezone:` (IANA name); runs default to UTC without one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// The project's `locale:` for the number filters; `en` without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// `week_start:` and `week_numbering:`, for the calendar functions.
     #[serde(skip)]
     pub week_start: WeekStart,
@@ -324,6 +338,9 @@ pub struct Binding {
     /// Fully merged vars: project < folders < report < Set registry < inline Binding.
     pub vars: JsonMap<String, Json>,
     pub queries: Vec<QueryEntry>,
+    /// The `locale:` for the number filters: Set, report, folder `+locale`, project; `None`: `en`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// The Binding's outputs, in declared order (`output:` as a list, or one map). Each formats
     /// its own subset of `queries` from the same run.
     pub outputs: Vec<Output>,
@@ -455,6 +472,8 @@ pub struct SetDef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     pub vars: JsonMap<String, Json>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// Where it's declared, for messages.
     #[serde(skip)]
     pub file: PathBuf,
@@ -762,6 +781,7 @@ struct FolderCfg {
     profile: Option<(String, Option<usize>)>,
     vars: Option<Mapping>,
     timezone: Option<String>,
+    locale: Option<String>,
 }
 
 struct Discovered {
@@ -1085,6 +1105,10 @@ impl Loader {
             None => None,
             Some(v) => self.timezone_value(v, &yf.display, yf.line_of("timezone", None), "`timezone`"),
         };
+        let locale = match m.get("locale") {
+            None => None,
+            Some(v) => self.locale_value(v, &yf.display, yf.line_of("locale", None), "`locale`"),
+        };
         let week_start = match m.get("week_start") {
             None => WeekStart::Monday,
             Some(v) => v.as_str().and_then(WeekStart::parse).unwrap_or_else(|| {
@@ -1147,6 +1171,7 @@ impl Loader {
             packages: Vec::new(),
             mask_secrets,
             timezone,
+            locale,
             week_start,
             week_numbering,
             dispatch,
@@ -1178,6 +1203,19 @@ impl Loader {
         };
         self.diags
             .error("invalid-timezone", Some(file.to_path_buf()), line, msg);
+        None
+    }
+
+    /// A `locale:` value: a tag the number filters know (`de-DE`), else an error at `line`.
+    fn locale_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
+        let msg = match v.as_str() {
+            Some(s) => match crate::numbers::Locale::parse(s) {
+                Ok(_) => return Some(s.to_string()),
+                Err(e) => format!("{what}: {e}"),
+            },
+            None => format!("{what} must be a string, a locale such as `de-DE`"),
+        };
+        self.diags.error("invalid-locale", Some(file.to_path_buf()), line, msg);
         None
     }
 
@@ -1358,6 +1396,9 @@ impl Loader {
                         }
                         "timezone" => {
                             cfg.timezone = self.timezone_value(v, &yf.display, kline, "`+timezone`");
+                        }
+                        "locale" => {
+                            cfg.locale = self.locale_value(v, &yf.display, kline, "`+locale`");
                         }
                         _ => match v.as_mapping() {
                             Some(s) => cfg.vars = Some(s.clone()),
@@ -2105,6 +2146,10 @@ impl Loader {
                         format!("Set `{name}`: `profile` must be a string"),
                     );
                 }
+                let locale = match v.get("locale") {
+                    None | Some(Value::Null) => None,
+                    Some(l) => self.locale_value(l, &yf.display, line, &format!("Set `{name}`: `locale`")),
+                };
                 let vars = match v.get("vars") {
                     Some(Value::Mapping(m)) => yaml_map_to_json(m),
                     None | Some(Value::Null) => JsonMap::new(),
@@ -2123,6 +2168,7 @@ impl Loader {
                     SetDef {
                         profile,
                         vars,
+                        locale,
                         file: yf.display.clone(),
                         line,
                     },
@@ -2595,6 +2641,16 @@ impl Loader {
         let timezone = report_timezone
             .or_else(|| layers.iter().rev().find_map(|l| l.timezone.clone()))
             .or_else(|| project.timezone.clone());
+        let report_locale = match key("locale") {
+            Some(t) => {
+                let (f, l) = located("locale").unwrap();
+                self.locale_value(&t.value, &f, l, &format!("report `{name}`: `locale`"))
+            }
+            None => None,
+        };
+        let locale = report_locale
+            .or_else(|| layers.iter().rev().find_map(|l| l.locale.clone()))
+            .or_else(|| project.locale.clone());
         let profile_at = if report_profile.is_some() {
             located("profile").map(|(file, line)| ProfileAt {
                 file,
@@ -2671,6 +2727,7 @@ impl Loader {
             profile_at,
             vars,
             outputs,
+            locale,
         };
         let has_sets = key("sets").is_some();
         let report_base = self.silent_binding(&name, &base, &queries, &r.file.display);
@@ -2799,6 +2856,7 @@ impl Loader {
                 profile_at: base.profile_at.clone(),
                 vars: base.vars.clone(),
                 outputs: base.outputs.clone(),
+                locale: base.locale.clone(),
             };
             if let Some(reg) = registry {
                 if let Some(p) = &reg.profile {
@@ -2811,6 +2869,9 @@ impl Loader {
                     used.connection(p, None, None);
                 }
                 b.vars.extend(reg.vars.clone());
+                if reg.locale.is_some() {
+                    b.locale = reg.locale.clone();
+                }
             }
             let mut qs = queries.to_vec();
             let mut tab_names: Option<Mapping> = None;
@@ -2863,6 +2924,11 @@ impl Loader {
                 }
                 if m.contains_key("schedule") {
                     self.moved_to_schedules(&yf.display, line, &format!("{ctx}: `schedule`"));
+                }
+                if let Some(l) = m.get("locale")
+                    && let Some(l) = self.locale_value(l, &yf.display, line, &format!("{ctx}: `locale`"))
+                {
+                    b.locale = Some(l);
                 }
                 let listed: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
                 match (m.get("exclude"), m.get("queries")) {
@@ -3032,6 +3098,7 @@ impl Loader {
             profile: base.profile.clone(),
             vars: base.vars.clone(),
             queries: std::mem::take(&mut queries),
+            locale: base.locale.clone(),
             outputs,
             schedules: Vec::new(),
             parsed: None,
@@ -3565,6 +3632,11 @@ impl Loader {
             profile_at: inherited_profile_at(&layers, project),
             vars,
             outputs: vec![output],
+            locale: layers
+                .iter()
+                .rev()
+                .find_map(|l| l.locale.clone())
+                .or_else(|| project.locale.clone()),
         };
         if let Some(p) = &profile {
             used.connection(p, None, None);
@@ -4081,6 +4153,7 @@ impl Loader {
                             now: chrono::Utc::now(),
                             scheduled_at: None,
                             calendar: crate::dates::Calendar::default(),
+                            locale: Default::default(),
                         },
                         vars,
                         cli_vars: self.opts.vars.clone(),
@@ -4760,6 +4833,7 @@ struct BindingBase {
     vars: JsonMap<String, Json>,
     /// The merged outputs, in order: one unless a layer gave a list.
     outputs: Vec<Mapping>,
+    locale: Option<String>,
 }
 
 /// Everything the project references, for profile and plugin checks.
@@ -5020,7 +5094,7 @@ fn is_set_registry(m: &Mapping) -> bool {
         && m.values().all(|v| {
             v.is_null()
                 || v.as_mapping()
-                    .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars"])))
+                    .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars", "locale"])))
         })
 }
 

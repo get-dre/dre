@@ -53,6 +53,8 @@ pub struct RunContext {
     pub scheduled_at: Option<chrono::DateTime<Utc>>,
     /// The run's timezone and week settings.
     pub calendar: Calendar,
+    /// The Binding's `locale:`, for the number filters.
+    pub locale: crate::numbers::Locale,
 }
 
 /// Rows returned to templates by `run_query()`.
@@ -257,6 +259,7 @@ impl Renderer {
         });
         let source_type = cfg.source_type.clone();
         crate::dates::register(&mut env, cfg.context.calendar, cfg.context.date);
+        crate::numbers::register(&mut env, cfg.context.locale);
         env.add_global("target", Value::from_object(Target(cfg.context.target.clone())));
         env.add_global("run", Value::from_object(Run(cfg.context)));
         let destination: Arc<Mutex<Option<Connection>>> = Arc::default();
@@ -640,6 +643,7 @@ impl Limited {
             Err(Error::new(ErrorKind::InvalidOperation, message))
         });
         crate::dates::register(&mut env, context.calendar, context.date);
+        crate::numbers::register(&mut env, context.locale);
         env.add_global("target", Value::from_object(Target(context.target.clone())));
         env.add_global("run", Value::from_object(Run(context)));
         for f in LIMITED_FUNCTIONS {
@@ -1418,6 +1422,7 @@ mod tests {
                 now: Utc::now(),
                 scheduled_at: None,
                 calendar: Calendar::default(),
+                locale: Default::default(),
             },
             vars: vars.as_object().cloned().unwrap_or_default(),
             cli_vars: cli.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
@@ -1754,6 +1759,7 @@ mod tests {
                 now: Utc::now(),
                 scheduled_at: None,
                 calendar: Calendar::default(),
+                locale: Default::default(),
             },
             vars: JsonMap::new(),
             cli_vars: BTreeMap::new(),

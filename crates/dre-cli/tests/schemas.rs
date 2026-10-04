@@ -183,7 +183,7 @@ fn the_schemas_have_the_keys_the_parser_has() {
     same(
         "Set in sets.yml",
         props(&raw("sets")["$defs"]["set"]),
-        set(&["profile", "vars"]),
+        set(&["profile", "vars", "locale"]),
     );
     same(
         "schedule",

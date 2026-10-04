@@ -159,6 +159,12 @@ pub fn run_context(
         now: inputs.scheduled_at.unwrap_or(now),
         scheduled_at: inputs.scheduled_at,
         calendar,
+        // Checked when the project was loaded.
+        locale: b
+            .locale
+            .as_deref()
+            .and_then(|l| crate::numbers::Locale::parse(l).ok())
+            .unwrap_or_default(),
     }
 }
 

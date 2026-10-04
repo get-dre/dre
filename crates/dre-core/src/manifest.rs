@@ -273,6 +273,7 @@ fn sources(project: &Project) -> Json {
             .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH),
         scheduled_at: inputs.scheduled_at,
         calendar,
+        locale: Default::default(),
     };
     let limited = crate::render::Limited::new(context, project.vars.clone(), inputs.cli_vars.clone());
     let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();

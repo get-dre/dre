@@ -27,3 +27,4 @@ The file maps names to entries; each entry has these keys.
 |---|---|---|---|
 | `profile` | string |  | The connection a Binding with this Set runs on. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
+| `locale` | string |  | The locale for this Set's number filters (`fr-FR`), above the report's. |

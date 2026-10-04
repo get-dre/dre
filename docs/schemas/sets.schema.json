@@ -20,6 +20,10 @@
           "type": "object",
           "description": "Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.",
           "additionalProperties": true
+        },
+        "locale": {
+          "type": "string",
+          "description": "The locale for this Set's number filters (`fr-FR`), above the report's."
         }
       },
       "additionalProperties": false

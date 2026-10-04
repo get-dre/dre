@@ -78,6 +78,10 @@
       "type": "string",
       "description": "The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC."
     },
+    "locale": {
+      "type": "string",
+      "description": "The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`."
+    },
     "plugins": {
       "description": "The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.",
       "oneOf": [
@@ -289,6 +293,10 @@
               }
             }
           ]
+        },
+        "locale": {
+          "type": "string",
+          "description": "The locale for this Set's number filters (`fr-FR`), above the report's."
         }
       },
       "required": [

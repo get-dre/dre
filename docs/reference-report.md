@@ -32,6 +32,7 @@ For editor autocomplete and validation, add this as the first line of the file (
 | `default_set` | string |  | The Set a plain `dre run` uses. Must be one of `sets`. |
 | `vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
+| `locale` | string |  | The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`. |
 | `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
 | `sources` | map, as in [the sources reference](reference-sources.md) |  | dbt-style source declarations (see the sources schema). May be written in any project YAML file. |
 
@@ -122,6 +123,7 @@ A Set declared in the report: a named variant of it.
 | `queries` | list of string or map (see below) |  | Replaces the report's queries for this Set. |
 | `tab_names` | map |  | Renames tabs for this Set: query name to tab name. |
 | `output` | map (see below) or list of map (see below) |  | Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all. |
+| `locale` | string |  | The locale for this Set's number filters (`fr-FR`), above the report's. |
 
 ## `sets[].queries[]`
 
