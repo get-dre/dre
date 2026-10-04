@@ -88,7 +88,7 @@ Core looks in the project's `dre_deps/plugins` (or `DRE_PLUGINS_DIR`), in two la
 |---|---|---|
 | stdin | core → plugin | frames |
 | stdout | plugin → core | frames, and nothing else |
-| stderr | plugin → core | free-form UTF-8 log lines, shown in core's log and quoted in errors; a line starting `info: ` is shown to the person without `-v` (e.g. while waiting for a warehouse to start) |
+| stderr | plugin → core | free-form UTF-8 log lines, shown in core's log and quoted in errors; a line starting `info: ` is shown to the person without `-v` (e.g. while waiting for a warehouse to start), and one starting `warning: ` is shown as a warning (e.g. a message cut short to fit the service) |
 
 A plugin must never write anything but frames to stdout.
 

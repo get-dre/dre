@@ -123,6 +123,8 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
 ];
+/// The shared output keys that don't belong to one format: they survive a layer changing `format`.
+const FORMAT_INDEPENDENT_KEYS: &[&str] = &["name", "queries", "when", "destination", "template"];
 /// The keys of a destination entry core reads; every other key is the plugin's.
 pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
@@ -424,10 +426,7 @@ impl Output {
 
     /// How messages name it: "output `x`", or "output 2" when unnamed.
     pub fn label(&self, index: usize) -> String {
-        match &self.name {
-            Some(n) => format!("output `{n}`"),
-            None => format!("output {}", index + 1),
-        }
+        output_label(self.name.as_deref(), index)
     }
 }
 
@@ -3127,11 +3126,10 @@ impl Loader {
         let mut outputs = Vec::new();
         for (i, m) in maps.iter().enumerate() {
             let octx = if several {
-                let label = match m.get("name").and_then(Value::as_str) {
-                    Some(n) => format!("output `{n}`"),
-                    None => format!("output {}", i + 1),
-                };
-                format!("{ctx}, {label}")
+                format!(
+                    "{ctx}, {}",
+                    output_label(m.get("name").and_then(Value::as_str), i)
+                )
             } else {
                 ctx.to_string()
             };
@@ -3305,22 +3303,16 @@ impl Loader {
             }
             match o.options.get("file") {
                 None => {}
-                Some(Json::String(f)) => {
-                    match [self.root.join(f), self.root.join("templates").join(f)]
-                        .iter()
-                        .find(|p| p.is_file())
-                        .map(std::fs::read_to_string)
-                    {
-                        Some(Ok(t)) => templates.push((format!("`file` {f}"), t)),
-                        Some(Err(e)) => err(self, format!("can't read message file `{f}`: {e}")),
-                        None => err(
-                            self,
-                            format!(
-                                "message file `{f}` doesn't exist (looked in the project root and templates/)"
-                            ),
+                Some(Json::String(f)) => match find_template(&self.root, f).map(std::fs::read_to_string) {
+                    Some(Ok(t)) => templates.push((format!("`file` {f}"), t)),
+                    Some(Err(e)) => err(self, format!("can't read message file `{f}`: {e}")),
+                    None => err(
+                        self,
+                        format!(
+                            "message file `{f}` doesn't exist (looked in the project root and templates/)"
                         ),
-                    }
-                }
+                    ),
+                },
                 Some(_) => err(self, "`file` must be a path (a string)".into()),
             }
             match o.options.get("max_rows") {
@@ -3354,6 +3346,15 @@ impl Loader {
                         ),
                     );
                 }
+            }
+            if !o.is_message() && !preflight::attributes(src, "outputs").is_empty() {
+                err(
+                    self,
+                    format!(
+                        "{what} reads `outputs.*`, but a file output's `when` is decided before anything is delivered; use `outputs.*` in a message output"
+                    ),
+                );
+                continue;
             }
             for (name, _) in preflight::attributes(src, "outputs") {
                 let other = all.iter().find(|x| x.name.as_deref() == Some(name.as_str()));
@@ -4937,8 +4938,7 @@ impl Loader {
                 if !seen.insert((r.name.clone(), t.file.clone(), format!("{:?}", t.bindings))) {
                     continue;
                 }
-                let candidates = [self.root.join(&t.file), self.root.join("templates").join(&t.file)];
-                let Some(path) = candidates.iter().find(|p| p.is_file()) else {
+                let Some(path) = find_template(&self.root, &t.file) else {
                     self.diags.error(
                         "missing-template",
                         Some(r.file.clone()),
@@ -4947,7 +4947,7 @@ impl Loader {
                     );
                     continue;
                 };
-                match template_sheets(path) {
+                match template_sheets(&path) {
                     Ok(sheets) => {
                         for tb in &t.bindings {
                             if !sheets.contains(&tb.sheet) {
@@ -4979,6 +4979,22 @@ impl Loader {
 }
 
 /// Sheet names in an xlsx template, read without modifying it.
+/// Where a template file named in YAML (`template:`, a message's `file:`) is read from: the
+/// project root, else `templates/`.
+pub fn find_template(root: &Path, file: &str) -> Option<PathBuf> {
+    [root.join(file), root.join("templates").join(file)]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// "output `name`", or "output 2" for an unnamed one, as messages name an output.
+pub fn output_label(name: Option<&str>, index: usize) -> String {
+    match name {
+        Some(n) => format!("output `{n}`"),
+        None => format!("output {}", index + 1),
+    }
+}
+
 pub fn template_sheets(path: &Path) -> Result<Vec<String>, String> {
     use calamine::Reader;
     let wb: calamine::Xlsx<_> =
@@ -5146,7 +5162,7 @@ pub fn merge_output(base: &mut Mapping, over: &Mapping) -> Option<String> {
     if let Some(f) = over.get(&fmt_key)
         && base.get(&fmt_key) != Some(f)
     {
-        base.retain(|k, _| is_one_of(k, &["name", "queries", "when", "destination", "template"]));
+        base.retain(|k, _| is_one_of(k, FORMAT_INDEPENDENT_KEYS));
     }
     let mut problem = None;
     for (k, v) in over {

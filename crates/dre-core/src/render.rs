@@ -553,7 +553,7 @@ impl Renderer {
 
     /// Render `src`, reporting errors against `file`.
     pub fn render(&self, file: &Path, src: &str) -> Result<String, RenderError> {
-        self.render_in(file, src, Value::UNDEFINED, false)
+        self.render_with(file, src, Value::UNDEFINED, false)
     }
 
     /// Render `src` with `ctx`'s keys (a map) added to the context (`results`, `outputs`). With
@@ -565,10 +565,6 @@ impl Renderer {
         ctx: Value,
         markdown: bool,
     ) -> Result<String, RenderError> {
-        self.render_in(file, src, ctx, markdown)
-    }
-
-    fn render_in(&self, file: &Path, src: &str, ctx: Value, markdown: bool) -> Result<String, RenderError> {
         self.columns_cache.lock().unwrap().clear();
         *self.raised.lock().unwrap() = None;
         let full = format!("{}{src}", self.import);

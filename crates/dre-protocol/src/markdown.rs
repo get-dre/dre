@@ -109,11 +109,12 @@ fn parse_span(chars: &[char]) -> Vec<Inline> {
             i += 2;
             continue;
         }
+        // Values printed inside a code span were escaped too: unescape them.
         if c == '`'
-            && let Some(end) = chars[i + 1..].iter().position(|&x| x == '`')
+            && let Some(end) = find(chars, i + 1, &['`'])
         {
-            out.push(Inline::Code(chars[i + 1..i + 1 + end].iter().collect()));
-            i += end + 2;
+            out.push(Inline::Code(unescape(&chars[i + 1..end])));
+            i = end + 1;
             continue;
         }
         if c == '*'
@@ -222,13 +223,26 @@ pub fn to_google_chat(text: &str) -> String {
     render(text, &CHAT)
 }
 
+/// Literal text where `*`, `_` (at a word's edge), `~` and `` ` `` would start formatting: each
+/// becomes a look-alike, since chat services have no escapes.
+fn defused(t: &str) -> String {
+    let chars: Vec<char> = t.chars().collect();
+    let word = |j: Option<usize>| j.and_then(|j| chars.get(j)).is_some_and(|c| c.is_alphanumeric());
+    let mut out = String::with_capacity(t.len());
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            '*' => out.push('\u{2217}'),
+            '~' => out.push('\u{223c}'),
+            '`' => out.push('\u{02cb}'),
+            '_' if !(word(i.checked_sub(1)) && word(Some(i + 1))) => out.push('\u{02cd}'),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn chat_text(t: &str) -> String {
-    t.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('*', "\u{2217}")
-        .replace('~', "\u{223c}")
-        .replace('`', "\u{02cb}")
+    defused(&t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"))
 }
 
 const CHAT: Dialect = Dialect {
@@ -245,17 +259,19 @@ pub fn to_teams(text: &str) -> String {
     render(
         text,
         &Dialect {
-            text: escape,
+            // Teams' card Markdown has no reliable escapes either: look-alikes, as for chat.
+            text: defused,
             bold: ("**", "**"),
             italic: ("_", "_"),
-            code: |c| format!("`{c}`"),
+            code: |c| format!("`{}`", c.replace('`', "\u{02cb}")),
             link: |t, u| format!("[{t}]({})", u.replace(')', "%29")),
             bullet: "- ",
         },
     )
 }
 
-fn html_escape(t: &str) -> String {
+/// `t` safe as HTML text or an attribute value.
+pub fn html_escape(t: &str) -> String {
     t.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -345,6 +361,27 @@ pub fn truncate(text: &str, max: usize, marker: &str) -> Option<String> {
     Some(format!("{}{marker}", kept.trim_end()))
 }
 
+/// `text` (portable Markdown) translated with `translate`, fitting in `max` characters: when the
+/// translation is too long, whole lines are dropped from the end of the source before
+/// translating, so a cut never lands inside the dialect's markup, and `marker` (already in the
+/// dialect) is appended. The second value says whether it was cut.
+pub fn fit(text: &str, max: usize, marker: &str, translate: impl Fn(&str) -> String) -> (String, bool) {
+    let full = translate(text);
+    if full.chars().count() <= max {
+        return (full, false);
+    }
+    let room = max.saturating_sub(marker.chars().count());
+    let lines: Vec<&str> = text.lines().collect();
+    for n in (1..lines.len()).rev() {
+        let t = translate(&lines[..n].join("\n"));
+        if t.chars().count() <= room {
+            return (format!("{}{marker}", t.trim_end()), true);
+        }
+    }
+    // Even the first line is too long: cut the translation itself.
+    (truncate(&full, max, marker).unwrap_or(full), true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,14 +404,33 @@ mod tests {
         );
         assert_eq!(
             to_teams(src),
-            "Revenue **€12,340** (_+4.1%_)\n- [Report](https://x.test/a_b) `code`\n- acme\\_corp has 2\\*3"
+            "Revenue **€12,340** (_+4.1%_)\n- [Report](https://x.test/a_b) `code`\n- acme_corp has 2\u{2217}3"
         );
+    }
+
+    #[test]
+    fn escaped_values_stay_literal_in_code_and_at_word_edges() {
+        // A template's `{{ v }}` arrives escaped: `a\_b` inside a code span, `\_pending\_` as text.
+        assert_eq!(to_plain("id `a\\_b`"), "id a_b");
+        assert_eq!(
+            to_slack("state \\_pending\\_ ok"),
+            "state \u{02cd}pending\u{02cd} ok"
+        );
+        assert_eq!(to_slack("snake_case"), "snake_case");
     }
 
     #[test]
     fn snake_case_and_lone_marks_stay_text() {
         assert_eq!(to_plain("total_rows is 3 * 4"), "total_rows is 3 * 4");
         assert_eq!(escape("a_b*[c]"), "a\\_b\\*\\[c\\]");
+    }
+
+    #[test]
+    fn fit_drops_whole_source_lines() {
+        let t = "**a & b**\n**c & d**\n**e & f**";
+        assert_eq!(fit(t, 100, "…", to_slack), (to_slack(t), false));
+        // `*a &amp; b*` is 11 characters; two lines would be 23 with the newline.
+        assert_eq!(fit(t, 15, "\n…", to_slack), ("*a &amp; b*\n…".to_string(), true));
     }
 
     #[test]

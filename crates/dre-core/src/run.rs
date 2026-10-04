@@ -689,13 +689,35 @@ struct OutputRun {
     /// One record per destination: `run_results.json`'s `deliveries`.
     deliveries: Vec<Json>,
     delivery_note: Option<String>,
-    /// `delivered`, `kept` (stays in the target path), `skipped` or `failed`; empty until done.
-    status: &'static str,
+    /// `None` until it's done.
+    status: Option<OutputStatus>,
     error: Option<String>,
     /// The result of its `when:`, once evaluated.
     when: Option<bool>,
     /// A message output's rendered title and text.
     message: Option<(String, String)>,
+}
+
+/// How one output ended, as `run_results.json` records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputStatus {
+    Delivered,
+    /// It stays in the target path: no destination, `deliver: false`, or a preview.
+    Kept,
+    /// Its `when:` was false, or its message rendered empty.
+    Skipped,
+    Failed,
+}
+
+impl OutputStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            OutputStatus::Delivered => "delivered",
+            OutputStatus::Kept => "kept",
+            OutputStatus::Skipped => "skipped",
+            OutputStatus::Failed => "failed",
+        }
+    }
 }
 
 /// A destination entry after rendering.
@@ -1095,7 +1117,7 @@ impl<'a> BindingRun<'a> {
         let preview = self.opts.preview.is_some();
         let mut failures = Vec::new();
         for oi in file_outs.into_iter().chain(message_outs) {
-            if self.outs[oi].status == "skipped" {
+            if self.outs[oi].status == Some(OutputStatus::Skipped) {
                 continue;
             }
             if self.b.outputs[oi].is_message() {
@@ -1104,7 +1126,7 @@ impl<'a> BindingRun<'a> {
                     Ok(false) => continue,
                     Err(e) => {
                         let e = format!("{}: {e}", self.b.outputs[oi].label(oi));
-                        self.outs[oi].status = "failed";
+                        self.outs[oi].status = Some(OutputStatus::Failed);
                         self.outs[oi].error = Some(e.clone());
                         failures.push(e);
                         continue;
@@ -1113,7 +1135,7 @@ impl<'a> BindingRun<'a> {
             }
             if preview {
                 self.outs[oi].delivery_note = Some("preview: not delivered".into());
-                self.outs[oi].status = "kept";
+                self.outs[oi].status = Some(OutputStatus::Kept);
             } else if let Err(e) = self.deliver(oi) {
                 failures.push(e);
             }
@@ -1178,10 +1200,7 @@ impl<'a> BindingRun<'a> {
                 .iter()
                 .map(|(f, _)| record_path(self.project, f).to_string_lossy().to_string())
                 .collect();
-            let status = match run.status {
-                "" => "pending",
-                s => s,
-            };
+            let status = run.status.map_or("pending", OutputStatus::as_str);
             outputs.insert(
                 name.clone(),
                 Value::from_serialize(json!({
@@ -1199,11 +1218,19 @@ impl<'a> BindingRun<'a> {
 
     /// Evaluate output `oi`'s `when:`. False: the output is skipped (recorded, not a failure).
     fn passes_when(&mut self, oi: usize) -> Result<bool, Fail> {
+        if self.b.outputs[oi].when.is_none() {
+            return Ok(true);
+        }
+        let results = self.results_for(oi, crate::message::DEFAULT_MAX_ROWS)?;
+        self.when_holds(oi, &results)
+    }
+
+    /// Output `oi`'s `when:` over `results` (the same ones its message reads).
+    fn when_holds(&mut self, oi: usize, results: &[(String, Arc<QueryResult>)]) -> Result<bool, Fail> {
         let Some(when) = self.b.outputs[oi].when.clone() else {
             return Ok(true);
         };
-        let results = self.results_for(oi, crate::message::DEFAULT_MAX_ROWS)?;
-        let ctx = self.template_context(oi, &results);
+        let ctx = self.template_context(oi, results);
         let renderer = self.renderer(None)?;
         let label = self.b.outputs[oi].label(oi);
         let src = format!("{{% if {when} %}}true{{% endif %}}");
@@ -1220,7 +1247,7 @@ impl<'a> BindingRun<'a> {
 
     fn skip(&mut self, oi: usize, why: &str) {
         let label = self.b.outputs[oi].label(oi);
-        self.outs[oi].status = "skipped";
+        self.outs[oi].status = Some(OutputStatus::Skipped);
         self.outs[oi].delivery_note = Some(format!("skipped: {why}"));
         self.ui
             .step(Level::Info, "Skipped", &format!("{label}: {why}"), None);
@@ -1237,10 +1264,10 @@ impl<'a> BindingRun<'a> {
             .get("max_rows")
             .and_then(Json::as_u64)
             .unwrap_or(crate::message::DEFAULT_MAX_ROWS);
-        if !self.passes_when(oi)? {
+        let results = self.results_for(oi, max_rows)?;
+        if !self.when_holds(oi, &results)? {
             return Ok(false);
         }
-        let results = self.results_for(oi, max_rows)?;
         for (q, r) in results.iter().filter(|(_, r)| r.capped()) {
             self.ui.warn(&format!(
                 "  results.{q}.rows holds the first {} of {} rows (`max_rows`); aggregate in SQL, or raise `max_rows`",
@@ -1257,9 +1284,7 @@ impl<'a> BindingRun<'a> {
                 .map_err(|e| e.message)?,
             (None, Some(f)) => {
                 let root = &self.project.root;
-                let path = [root.join(&f), root.join("templates").join(&f)]
-                    .into_iter()
-                    .find(|p| p.is_file())
+                let path = crate::project::find_template(root, &f)
                     .ok_or_else(|| format!("message file `{f}` doesn't exist"))?;
                 let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let shown = rel(root, &path);
@@ -1873,10 +1898,7 @@ impl<'a> BindingRun<'a> {
     }
 
     fn template_payload(&mut self, t: &crate::project::Template) -> Result<Json, Fail> {
-        let root = &self.project.root;
-        let file = [root.join(&t.file), root.join("templates").join(&t.file)]
-            .into_iter()
-            .find(|p| p.is_file())
+        let file = crate::project::find_template(&self.project.root, &t.file)
             .ok_or_else(|| format!("template file `{}` doesn't exist", t.file))?;
         let renderer = self.renderer(None)?;
         let mut values = JsonMap::new();
@@ -1896,11 +1918,11 @@ impl<'a> BindingRun<'a> {
     fn deliver(&mut self, oi: usize) -> Result<(), Fail> {
         let result = self.deliver_output(oi);
         let o = &mut self.outs[oi];
-        o.status = match &result {
-            Err(_) => "failed",
-            Ok(()) if o.deliveries.iter().any(|d| d["status"] == "delivered") => "delivered",
-            Ok(()) => "kept",
-        };
+        o.status = Some(match &result {
+            Err(_) => OutputStatus::Failed,
+            Ok(()) if o.deliveries.iter().any(|d| d["status"] == "delivered") => OutputStatus::Delivered,
+            Ok(()) => OutputStatus::Kept,
+        });
         o.error = result.as_ref().err().cloned();
         result
     }
@@ -2208,10 +2230,11 @@ impl<'a> BindingRun<'a> {
                 .map(|q| q.query.as_str())
                 .collect();
             let status = match (run.status, status) {
-                ("", Status::Error) => "failed",
-                ("", _) => "kept",
-                (s, _) => s,
-            };
+                (Some(s), _) => s,
+                (None, Status::Error) => OutputStatus::Failed,
+                (None, _) => OutputStatus::Kept,
+            }
+            .as_str();
             let mut record = json!({
                 "name": o.name,
                 "format": o.format,

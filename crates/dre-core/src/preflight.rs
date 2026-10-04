@@ -34,6 +34,10 @@ static CALL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w.])([A-Za-
 static REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?:^|[^\w.])ref\s*\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap());
 
+/// `root.attr` or `root['attr']` (`results`, `outputs`).
+static ATTRIBUTE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:^|[^\w.])([A-Za-z_]\w*)\s*(?:\.\s*([A-Za-z_]\w*)|\[\s*['"]([^'"]+)['"]\s*\])"#).unwrap()
+});
 static TARGET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w.])target\.([A-Za-z_]\w*)").unwrap());
 static SOURCE_ROLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"role\s*=\s*['"]source['"]"#).unwrap());
 
@@ -129,14 +133,10 @@ pub fn called_names(src: &str) -> Vec<String> {
 /// `name.<attr>` and `name['attr']` inside Jinja blocks: the attributes a template reads from
 /// the global `name` (`results`, `outputs`), with their 1-based lines. Dynamic access isn't seen.
 pub fn attributes(src: &str, name: &str) -> Vec<(String, usize)> {
-    let re = Regex::new(&format!(
-        r#"(?:^|[^\w.]){name}\s*(?:\.\s*([A-Za-z_]\w*)|\[\s*['"]([^'"]+)['"]\s*\])"#
-    ))
-    .expect("a valid pattern");
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
-        for c in re.captures_iter(seg.as_str()) {
-            let m = c.get(1).or_else(|| c.get(2)).unwrap();
+        for c in ATTRIBUTE.captures_iter(seg.as_str()).filter(|c| &c[1] == name) {
+            let m = c.get(2).or_else(|| c.get(3)).unwrap();
             out.push((m.as_str().to_string(), line_at(src, seg.start() + m.start())));
         }
     }

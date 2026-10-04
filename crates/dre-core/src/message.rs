@@ -26,7 +26,7 @@ const DEFAULT_LIST_ROWS: usize = 10;
 /// One query's result as message templates see it.
 #[derive(Debug)]
 pub struct QueryResult {
-    pub columns: Vec<String>,
+    pub columns: Arc<Vec<String>>,
     /// At most the cap's rows.
     pub rows: Vec<Vec<Value>>,
     /// Every row the query returned.
@@ -38,12 +38,14 @@ impl QueryResult {
     pub fn read(spool: &Path, row_count: u64, max_rows: u64, cal: Calendar) -> Result<QueryResult, String> {
         let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
             .map_err(|e| e.to_string())?;
-        let columns = reader
-            .schema()
-            .fields()
-            .iter()
-            .map(|f| f.name().clone())
-            .collect();
+        let columns = Arc::new(
+            reader
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect(),
+        );
         let mut rows = Vec::new();
         for b in reader {
             if rows.len() as u64 >= max_rows {
@@ -72,10 +74,9 @@ impl QueryResult {
     }
 
     fn row(&self, i: usize) -> Option<Value> {
-        let cols = Arc::new(self.columns.clone());
         self.rows
             .get(i)
-            .map(|r| crate::render::Row::value(cols, r.clone()))
+            .map(|r| crate::render::Row::value(self.columns.clone(), r.clone()))
     }
 }
 
@@ -98,7 +99,7 @@ impl Object for ResultValue {
             "first" => r.row(0).unwrap_or(Value::from(())),
             "rows" => Value::from((0..r.rows.len()).filter_map(|i| r.row(i)).collect::<Vec<_>>()),
             "row_count" => Value::from(r.row_count),
-            "columns" => Value::from(r.columns.clone()),
+            "columns" => Value::from(r.columns.as_ref().clone()),
             // One .sql file makes one result set (its last statement's), so `sets` holds it once.
             "sets" => Value::from(vec![Value::from_object(ResultValue(r.clone()))]),
             _ => return None,

@@ -670,6 +670,11 @@ impl Ui for Printer {
                 i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
                 return;
             }
+            // `warning: ...` lines are too (a message cut short to fit the service).
+            if let Some(msg) = line.strip_prefix("warning: ") {
+                i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
+                return;
+            }
             i.file_log("DEBUG", &format!("[{plugin}] {line}"));
             if !i.shows(Level::Debug) {
                 return;

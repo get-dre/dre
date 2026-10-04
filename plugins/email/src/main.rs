@@ -194,7 +194,7 @@ impl Plan {
         let (subject, body, html) = match m {
             Some(m) => {
                 if o.contains_key("body") {
-                    eprintln!("`body` doesn't apply to a message output: the message is the body");
+                    eprintln!("warning: `body` doesn't apply to a message output: the message is the body");
                 }
                 let html = m
                     .html
@@ -243,22 +243,16 @@ impl Plan {
             b = b.bcc(m.clone());
         }
         let built = match &self.html {
-            // A message: HTML with a plain-text alternative, then any attachments.
-            Some(html) => {
-                let body = MultiPart::alternative_plain_html(self.body.clone(), html.clone());
-                if self.attachments.is_empty() {
-                    b.multipart(body)
-                } else {
-                    let mut parts = MultiPart::mixed().multipart(body);
-                    for (name, bytes) in &self.attachments {
-                        let ct = ContentType::parse(content_type(name)).expect("valid content type");
-                        parts = parts.singlepart(Attachment::new(name.clone()).body(bytes.clone(), ct));
-                    }
-                    b.multipart(parts)
-                }
+            // A message with nothing attached: just HTML with a plain-text alternative.
+            Some(html) if self.attachments.is_empty() => {
+                b.multipart(MultiPart::alternative_plain_html(self.body.clone(), html.clone()))
             }
-            None => {
-                let mut parts = MultiPart::mixed().singlepart(SinglePart::plain(self.body.clone()));
+            _ => {
+                let mut parts = match &self.html {
+                    Some(html) => MultiPart::mixed()
+                        .multipart(MultiPart::alternative_plain_html(self.body.clone(), html.clone())),
+                    None => MultiPart::mixed().singlepart(SinglePart::plain(self.body.clone())),
+                };
                 for (name, bytes) in &self.attachments {
                     let ct = ContentType::parse(content_type(name)).expect("valid content type");
                     parts = parts.singlepart(Attachment::new(name.clone()).body(bytes.clone(), ct));
@@ -387,10 +381,7 @@ fn parse_mailbox(s: &str, field: &str) -> Result<Mailbox> {
 
 /// A message's HTML fragment as a complete, plainly styled page.
 fn html_page(title: &str, body: &str) -> String {
-    let title = title
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
+    let title = markdown::html_escape(title);
     format!(
         "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{title}</title></head>\n<body style=\"font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.5;\">\n{body}</body></html>\n"
     )

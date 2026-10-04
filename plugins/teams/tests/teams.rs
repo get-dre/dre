@@ -177,9 +177,9 @@ fn posts_an_adaptive_card_with_the_title_and_one_block_per_line() {
     assert_eq!(
         texts(card),
         [
-            "Daily \\*revenue\\*",
+            "Daily \u{2217}revenue\u{2217}",
             "Revenue **€12,340** (_+4.1%_)",
-            "- acme\\_corp",
+            "- acme_corp",
             "- [Report](https://x.test/r)"
         ]
     );

@@ -43,16 +43,15 @@ impl Destination for GoogleChat {
         }
         let url = conn_required(&d.connection, "webhook_url")?;
         let title = markdown::to_google_chat(&markdown::escape(&m.title));
-        let text = format!("*{title}*\n{}", markdown::to_google_chat(&m.text));
-        let text = match markdown::truncate(&text, MESSAGE_LIMIT as usize, CUT_MARKER) {
-            Some(cut) => {
-                eprintln!(
-                    "the message is over the google_chat limit of {MESSAGE_LIMIT} characters; it was cut short"
-                );
-                cut
-            }
-            None => text,
-        };
+        let title = format!("*{title}*");
+        let room = (MESSAGE_LIMIT as usize).saturating_sub(title.chars().count() + 1);
+        let (text, cut) = markdown::fit(&m.text, room, CUT_MARKER, markdown::to_google_chat);
+        if cut {
+            eprintln!(
+                "warning: the message is over the google_chat limit of {MESSAGE_LIMIT} characters; it was cut short"
+            );
+        }
+        let text = format!("{title}\n{text}");
         post(url, &json!({ "text": text }))?;
         Ok("google_chat space (webhook)".into())
     }

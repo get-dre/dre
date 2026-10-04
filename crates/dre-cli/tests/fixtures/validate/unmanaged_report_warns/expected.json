@@ -70,6 +70,14 @@ exit: 1
       "format": "csv",
       "output": "target/run/quick_look/default/quick_look.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/quick_look/default/quick_look.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     },
     {
@@ -91,6 +99,14 @@ exit: 1
       "format": "csv",
       "output": "target/run/temp_then_select/default/temp_then_select.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/temp_then_select/default/temp_then_select.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     }
   ],
@@ -126,6 +142,13 @@ exit: 1
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -171,6 +194,13 @@ exit: 1
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -216,6 +246,13 @@ exit: 1
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

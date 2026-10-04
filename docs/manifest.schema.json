@@ -176,7 +176,8 @@
       "required": ["profile"],
       "properties": {
         "profile": {"type": "string", "description": "The destination profile, rendered."},
-        "path": {"type": "string", "description": "The path template, unrendered."}
+        "path": {"type": "string", "description": "The path template, unrendered."},
+        "attach": {"type": "array", "items": {"type": "string"}, "description": "A message output's entry: the outputs whose files go with the message."}
       }
     },
     "schedule": {

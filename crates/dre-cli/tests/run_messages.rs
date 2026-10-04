@@ -321,3 +321,16 @@ fn validate_checks_outputs_and_attach() {
         .says("`attach: headline`: `attach` only applies to a message output")
         .says("`attach:` needs a destination that takes messages and files, but `local` takes files only");
 }
+
+#[test]
+fn a_file_outputs_when_cant_read_outputs() {
+    let (p, _) = project(
+        "queries: [headline, detail]\noutput:\n\
+         \x20 - {name: a, queries: [detail], when: \"outputs.b.status == 'delivered'\"}\n\
+         \x20 - {name: b, format: message, queries: [headline]}\n",
+        &[],
+    );
+    p.dre("validate", &[])
+        .failed()
+        .says("a file output's `when` is decided before anything is delivered");
+}

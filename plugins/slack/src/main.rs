@@ -80,16 +80,20 @@ impl Destination for Slack {
         let api = Api::new(&d.connection)?;
         let channel_id = api.channel_of(&target)?;
         let title = format!("*{}*", markdown::to_slack(&markdown::escape(&m.title)));
-        let text = format!("{title}\n{}", markdown::to_slack(&m.text));
-        let cut = markdown::truncate(&text, MESSAGE_LIMIT as usize, CUT_MARKER);
+        let (text, cut) = markdown::fit(
+            &m.text,
+            MESSAGE_LIMIT as usize - title.chars().count() - 1,
+            CUT_MARKER,
+            markdown::to_slack,
+        );
+        let text = format!("{title}\n{text}");
         let mut files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
-        if cut.is_some() {
+        if cut {
             eprintln!(
-                "the message is over Slack's {MESSAGE_LIMIT} characters; posting it cut short with the full message attached"
+                "warning: the message is over Slack's {MESSAGE_LIMIT} characters; posting it cut short with the full message attached"
             );
             files.push(m.path.clone().into());
         }
-        let text = cut.unwrap_or(text);
         if files.is_empty() {
             let r = api.call(
                 "chat.postMessage",

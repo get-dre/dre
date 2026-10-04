@@ -228,7 +228,10 @@ With several outputs, `outputs` (every file) and `deliveries` (every destination
 them, and each file names its `output`. `output_results` has one entry per output, in declared
 order: its `name`, `format`, the `queries` it formatted, its `status` (`delivered`, `kept` when
 it stays in the target path, `skipped` when its `when:` was false or its message rendered empty,
-or `failed`), any `error`, its `files`, `delivery` note and `deliveries`.
+or `failed`), any `error`, its `files`, `delivery` note and `deliveries`; `when` (true or false)
+when it has a `when:`; and for a message output, `message` with the full rendered `title` and
+`text` that were sent. A report's checksum covers a message output's `file:` template, like an
+xlsx template.
 
 ## Versioning
 

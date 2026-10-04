@@ -205,6 +205,9 @@ fn binding(b: &Binding) -> Json {
                         json!(rendered.unwrap_or_else(|| d.profile.clone())),
                     );
                     insert_some(&mut m, "path", d.path.as_ref());
+                    if !d.attach.is_empty() {
+                        m.insert("attach".into(), json!(d.attach));
+                    }
                     Json::Object(m)
                 })
                 .collect();
@@ -434,12 +437,19 @@ fn report_files(project: &Project, r: &Report) -> BTreeSet<String> {
     {
         files.insert(slash(&q.path));
     }
-    for t in r
-        .bindings
-        .iter()
-        .flat_map(|b| b.outputs.iter().filter_map(|o| o.template.as_ref()))
-    {
-        files.insert(template_file(&project.root, &t.file));
+    for o in r.bindings.iter().flat_map(|b| b.outputs.iter()) {
+        if let Some(t) = &o.template {
+            files.insert(template_file(&project.root, &t.file));
+        }
+        // A message's text template counts like an xlsx template.
+        if let Some(f) = o
+            .options
+            .get("file")
+            .and_then(Json::as_str)
+            .filter(|_| o.is_message())
+        {
+            files.insert(template_file(&project.root, f));
+        }
     }
     files
 }

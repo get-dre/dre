@@ -46,16 +46,12 @@ impl Destination for Teams {
             return Err(FILES_REFUSED.into());
         }
         let url = conn_required(&d.connection, "webhook_url")?;
-        let text = markdown::to_teams(&m.text);
-        let text = match markdown::truncate(&text, MESSAGE_LIMIT as usize, CUT_MARKER) {
-            Some(cut) => {
-                eprintln!(
-                    "the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
-                );
-                cut
-            }
-            None => text,
-        };
+        let (text, cut) = markdown::fit(&m.text, MESSAGE_LIMIT as usize, CUT_MARKER, markdown::to_teams);
+        if cut {
+            eprintln!(
+                "warning: the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
+            );
+        }
         post(url, &card(&m.title, &text))?;
         Ok("teams channel (webhook)".into())
     }
@@ -72,7 +68,7 @@ const FILES_REFUSED: &str =
 fn card(title: &str, text: &str) -> Value {
     let mut body = vec![json!({
         "type": "TextBlock",
-        "text": markdown::escape(title),
+        "text": markdown::to_teams(&markdown::escape(title)),
         "weight": "Bolder",
         "size": "Medium",
         "wrap": true,
