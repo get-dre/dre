@@ -188,6 +188,10 @@ fn describe_lists_connection_fields() {
             .iter()
             .map(|f| (f.name.as_str(), f.secret, f.manual))
             .collect::<Vec<_>>(),
-        vec![("path", false, false), ("token", true, false), ("token_text", true, true)]
+        vec![
+            ("path", false, false),
+            ("token", true, false),
+            ("token_text", true, true)
+        ]
     );
 }
