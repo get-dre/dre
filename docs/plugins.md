@@ -745,6 +745,24 @@ people where it is yourself; a location written into `body` only helps readers w
 open it. In a list of destinations an email entry still attaches the output, so an oversized
 output fails that entry (the others are delivered) and the run fails.
 
+**Messages** (email 1.1.0): for a [`message`](#the-message-format) output, the message is the
+email: an HTML body with a plain-text alternative, and the subject is `subject:`, else the
+message's title. `body:` doesn't apply. `attach: [<output>]` on the entry attaches those
+outputs' files, under the same `max_attachment_mb` check, so one email carries the headline and
+the workbook:
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    destination:
+      - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
+```
+
 ### `slack`
 
 Uploads the output to a Slack channel, or to one person's DM, as a single post with a message.

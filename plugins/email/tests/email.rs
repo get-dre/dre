@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use dre_protocol::host::{LogSink, PluginProcess};
 use dre_protocol::msg::DeliveryFile;
-use dre_protocol::{CAP_MULTI_FILE, conformance};
+use dre_protocol::msg::Message;
+use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE, conformance};
 use mail_parser::{MessageParser, MimeHeaders};
 use serde_json::{Map, Value, json};
 
@@ -360,4 +361,110 @@ fn delivers_to_mailpit() {
     };
     assert_eq!(part("monthly.csv"), b"a,b\r\n1,2\r\n");
     assert_eq!(part("notes.txt"), b"hello");
+}
+
+fn post(m: &Message, attach: &[DeliveryFile], conn: Value, options: Value) -> Result<String, String> {
+    let mut p = PluginProcess::start(bin(), quiet()).unwrap();
+    let r = p
+        .deliver_message(m, attach, obj(conn), obj(options))
+        .map_err(|e| e.to_string());
+    let _ = p.close();
+    r
+}
+
+fn message(title: &str, text: &str, html: Option<&str>) -> Message {
+    Message {
+        title: title.into(),
+        text: text.into(),
+        html: html.map(str::to_string),
+        path: "/nonexistent/daily.md".into(),
+    }
+}
+
+#[test]
+fn advertises_messages() {
+    let p = PluginProcess::start(bin(), quiet()).unwrap();
+    assert!(p.has(CAP_MESSAGE));
+}
+
+#[test]
+fn a_message_is_an_html_body_with_a_plain_alternative() {
+    let (port, rx) = fake_smtp();
+    let loc = post(
+        &message(
+            "Daily revenue",
+            "Revenue **€12,340** (+4.1%)\n- [Report](https://x.test/r) <b>",
+            None,
+        ),
+        &[],
+        local(port),
+        json!({"to": "finance@example.com"}),
+    )
+    .unwrap();
+    assert!(loc.ends_with("to 1 recipient"), "{loc}");
+    let m = received(&rx);
+    let msg = MessageParser::default().parse(&m.data).unwrap();
+    // No `subject:`: the title.
+    assert_eq!(msg.subject(), Some("Daily revenue"));
+    assert_eq!(
+        msg.body_text(0).unwrap().trim().replace("\r\n", "\n"),
+        "Revenue €12,340 (+4.1%)\n- Report (https://x.test/r) <b>"
+    );
+    let html = msg.body_html(0).unwrap();
+    assert!(
+        html.contains("<p>Revenue <strong>€12,340</strong> (+4.1%)</p>"),
+        "{html}"
+    );
+    assert!(
+        html.contains("<li><a href=\"https://x.test/r\">Report</a> &lt;b&gt;</li>"),
+        "{html}"
+    );
+    assert_eq!(msg.attachment_count(), 0);
+}
+
+#[test]
+fn a_message_uses_its_html_and_the_subject_option() {
+    let (port, rx) = fake_smtp();
+    post(
+        &message("Daily", "Plain", Some("<p>Rich</p>")),
+        &[],
+        local(port),
+        json!({"to": "finance@example.com", "subject": "Revenue {{ x }}"}),
+    )
+    .unwrap();
+    let msg_data = received(&rx).data;
+    let msg = MessageParser::default().parse(&msg_data).unwrap();
+    assert_eq!(msg.subject(), Some("Revenue {{ x }}"));
+    assert_eq!(msg.body_html(0).unwrap().trim(), "<p>Rich</p>");
+    assert_eq!(msg.body_text(0).unwrap().trim(), "Plain");
+}
+
+#[test]
+fn attached_files_go_with_the_message_within_the_size_limit() {
+    let (port, rx) = fake_smtp();
+    let f = Files::new();
+    post(
+        &message("Daily", "See attached", None),
+        &[f.file("detail.csv", b"n\r\n1\r\n")],
+        local(port),
+        json!({"to": "finance@example.com"}),
+    )
+    .unwrap();
+    let msg_data = received(&rx).data;
+    let msg = MessageParser::default().parse(&msg_data).unwrap();
+    assert_eq!(msg.body_text(0).unwrap().trim(), "See attached");
+    assert_eq!(msg.attachment_count(), 1);
+    assert_eq!(msg.attachment(0).unwrap().attachment_name(), Some("detail.csv"));
+
+    let mut conn = local(port);
+    conn["max_attachment_mb"] = json!(0.000001);
+    let err = post(
+        &message("Daily", "See attached", None),
+        &[f.file("big.csv", &[b'x'; 2048])],
+        conn,
+        json!({"to": "finance@example.com"}),
+    )
+    .unwrap_err();
+    assert!(err.contains("over the 0.000001 MB limit"), "{err}");
+    assert!(rx.try_recv().is_err(), "nothing should be sent");
 }
