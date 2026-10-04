@@ -1891,10 +1891,10 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-sftp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dre-protocol",
- "russh",
+ "dre-ssh",
  "russh-sftp",
  "serde_json",
  "tempfile",
@@ -1936,6 +1936,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "dre-ssh"
+version = "0.1.0"
+dependencies = [
+ "dre-protocol",
+ "russh",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

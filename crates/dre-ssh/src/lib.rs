@@ -1,0 +1,375 @@
+//! SSH connections for DRE plugins: the `sftp` destination and the `postgres` source's bastion
+//! tunnel share one set of settings and rules.
+//!
+//! Settings: `host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
+//! (the key's text, e.g. from `env_var()`; a literal `\n` counts as a line break), with
+//! `private_key_passphrase` for an encrypted key. The server's host key must be trusted: it's
+//! checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
+//! `host_key_fingerprint` (`SHA256:...`, as `ssh-keygen -lf` prints it).
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use dre_protocol::msg::ConnectionField;
+use dre_protocol::plugin::{Result, conn_str};
+use russh::client;
+use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
+use serde_json::{Map, Value};
+
+pub use russh;
+
+/// An authenticated SSH session.
+pub type Session = client::Handle<HostCheck>;
+
+enum Auth {
+    Key(PrivateKey),
+    Password(String),
+}
+
+/// Where to connect, as whom, and which host key to trust.
+pub struct Ssh {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    auth: Auth,
+    pub known_hosts: PathBuf,
+    pub fingerprint: Option<String>,
+    /// Trust a host missing from `known_hosts` (sftp's `accept_unknown_host`). A key that
+    /// contradicts `known_hosts` is refused regardless.
+    pub accept_unknown: bool,
+}
+
+/// The authentication and host-key fields, as a plugin declares them after `host`, `port` and
+/// `username`.
+pub fn auth_fields() -> Vec<ConnectionField> {
+    vec![
+        ConnectionField::new("password", "password (or set private_key_path)").secret(),
+        ConnectionField::new("private_key_path", "private key file (instead of a password)"),
+        ConnectionField::new(
+            "private_key",
+            "the private key's text, e.g. from env_var() (instead of private_key_path)",
+        )
+        .secret()
+        .manual(),
+        ConnectionField::new(
+            "host_key_fingerprint",
+            "pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used)",
+        ),
+    ]
+}
+
+/// A private key's text as it arrives from an environment variable: a secret stored on one line
+/// with literal `\n` sequences gets its line breaks back.
+pub fn key_text(s: &str) -> String {
+    if s.contains('\n') {
+        s.to_string()
+    } else {
+        s.replace("\\r\\n", "\n").replace("\\n", "\n")
+    }
+}
+
+impl Ssh {
+    /// Read the settings from a profile's fields; `prefix` names where they live in error
+    /// messages (`""` at the top level, `"ssh."` for a nested block).
+    pub fn from_settings(c: &Map<String, Value>, prefix: &str) -> Result<Ssh> {
+        let required = |key: &str| {
+            conn_str(c, key)
+                .map(str::to_string)
+                .ok_or_else(|| format!("the profile output needs a `{prefix}{key}` field"))
+        };
+        let host = required("host")?;
+        let port: u16 = match c.get("port") {
+            Some(Value::Number(n)) => n
+                .as_u64()
+                .and_then(|p| u16::try_from(p).ok())
+                .ok_or_else(|| format!("invalid `{prefix}port` `{n}`"))?,
+            Some(Value::String(s)) => s
+                .parse()
+                .map_err(|_| format!("invalid `{prefix}port` `{s}`"))?,
+            _ => 22,
+        };
+        let username = required("username")?;
+        let passphrase = conn_str(c, "private_key_passphrase");
+        let auth = match (conn_str(c, "private_key_path"), conn_str(c, "private_key")) {
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "set `{prefix}private_key_path` or `{prefix}private_key`, not both"
+                )
+                .into());
+            }
+            (Some(path), None) => Auth::Key(
+                russh::keys::load_secret_key(path, passphrase)
+                    .map_err(|e| format!("can't load private key {path}: {e}"))?,
+            ),
+            (None, Some(text)) => Auth::Key(
+                russh::keys::decode_secret_key(&key_text(text), passphrase)
+                    .map_err(|e| format!("can't read `{prefix}private_key`: {e}"))?,
+            ),
+            (None, None) => match conn_str(c, "password") {
+                Some(pw) => Auth::Password(pw.to_string()),
+                None => {
+                    return Err(format!(
+                        "set `{prefix}password`, `{prefix}private_key_path` or `{prefix}private_key`"
+                    )
+                    .into());
+                }
+            },
+        };
+        Ok(Ssh {
+            host,
+            port,
+            username,
+            auth,
+            known_hosts: conn_str(c, "known_hosts_path")
+                .map(PathBuf::from)
+                .unwrap_or_else(home_known_hosts),
+            fingerprint: conn_str(c, "host_key_fingerprint").map(str::to_string),
+            accept_unknown: false,
+        })
+    }
+
+    /// Connect, check the host key and authenticate. `timeout` bounds reaching the server and
+    /// the key exchange.
+    pub async fn connect(&self, config: client::Config, timeout: Duration) -> Result<Session> {
+        let (host, port) = (self.host.as_str(), self.port);
+        let refused = Arc::new(Mutex::new(None));
+        let check = HostCheck {
+            host: host.to_string(),
+            port,
+            known_hosts: self.known_hosts.clone(),
+            fingerprint: self.fingerprint.clone(),
+            accept_unknown: self.accept_unknown,
+            refused: refused.clone(),
+        };
+        let connecting = client::connect(Arc::new(config), (host, port), check);
+        let mut session = match tokio::time::timeout(timeout, connecting).await {
+            Err(_) => return Err(format!("timed out connecting to {host}:{port}").into()),
+            Ok(Err(e)) => {
+                let why = refused.lock().unwrap().take();
+                return Err(why
+                    .unwrap_or_else(|| format!("can't connect to {host}:{port}: {e}"))
+                    .into());
+            }
+            Ok(Ok(s)) => s,
+        };
+        let user = &self.username;
+        let auth = match &self.auth {
+            Auth::Key(key) => {
+                let hash = session.best_supported_rsa_hash().await?.flatten();
+                session
+                    .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key.clone()), hash))
+                    .await?
+            }
+            Auth::Password(pw) => session.authenticate_password(user, pw).await?,
+        };
+        if !auth.success() {
+            return Err(format!("{host}:{port} refused the credentials for `{user}`").into());
+        }
+        Ok(session)
+    }
+}
+
+fn home_known_hosts() -> PathBuf {
+    std::env::home_dir()
+        .unwrap_or_default()
+        .join(".ssh")
+        .join("known_hosts")
+}
+
+/// Checks the server's host key during the handshake.
+pub struct HostCheck {
+    host: String,
+    port: u16,
+    known_hosts: PathBuf,
+    fingerprint: Option<String>,
+    accept_unknown: bool,
+    /// Why the key was refused, for the error message.
+    refused: Arc<Mutex<Option<String>>>,
+}
+
+impl HostCheck {
+    fn verdict(&self, key: &PublicKey) -> std::result::Result<(), String> {
+        let fp = key.fingerprint(HashAlg::Sha256).to_string();
+        if let Some(pin) = &self.fingerprint {
+            let want = if pin.starts_with("SHA256:") {
+                pin.clone()
+            } else {
+                format!("SHA256:{pin}")
+            };
+            return if want == fp {
+                Ok(())
+            } else {
+                Err(format!(
+                    "the server's host key is {fp}, not the pinned `host_key_fingerprint` {want}"
+                ))
+            };
+        }
+        match russh::keys::check_known_hosts_path(&self.host, self.port, key, &self.known_hosts) {
+            Ok(true) => Ok(()),
+            Ok(false) if self.accept_unknown => Ok(()),
+            Ok(false) => Err(format!(
+                "the host key of {}:{} ({fp}) isn't in {}; add it (ssh-keyscan) or pin `host_key_fingerprint: {fp}`",
+                self.host,
+                self.port,
+                self.known_hosts.display()
+            )),
+            Err(e) => Err(format!(
+                "the host key of {}:{} doesn't match {} ({e}); refusing to connect — it may have changed or be spoofed",
+                self.host,
+                self.port,
+                self.known_hosts.display()
+            )),
+        }
+    }
+}
+
+impl client::Handler for HostCheck {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        key: &russh::keys::PublicKeyOrCertificate,
+    ) -> std::result::Result<bool, Self::Error> {
+        let russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } = key else {
+            *self.refused.lock().unwrap() =
+                Some("the server presented a certificate; DRE only checks plain host keys".into());
+            return Ok(false);
+        };
+        match self.verdict(key) {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                *self.refused.lock().unwrap() = Some(e);
+                Ok(false)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::Path;
+
+    /// A fresh ed25519 key pair from `ssh-keygen`: (private key file, public key line).
+    fn keypair(dir: &Path, passphrase: &str) -> (PathBuf, String) {
+        let path = dir.join("id");
+        let ok = std::process::Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", passphrase, "-f"])
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        // Without the comment, as a server presents its key.
+        let public = std::fs::read_to_string(path.with_extension("pub")).unwrap();
+        let public = public.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
+        (path, public)
+    }
+
+    fn settings(v: Value) -> Map<String, Value> {
+        let Value::Object(mut m) = json!({"host": "bastion", "username": "dre"}) else { unreachable!() };
+        m.extend(v.as_object().unwrap().clone());
+        m
+    }
+
+    fn err(c: Map<String, Value>, prefix: &str) -> String {
+        match Ssh::from_settings(&c, prefix) {
+            Ok(_) => panic!("expected an error"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    fn check(fingerprint: Option<&str>, known_hosts: &Path) -> HostCheck {
+        HostCheck {
+            host: "bastion".into(),
+            port: 2222,
+            known_hosts: known_hosts.into(),
+            fingerprint: fingerprint.map(str::to_string),
+            accept_unknown: false,
+            refused: Arc::default(),
+        }
+    }
+
+    #[test]
+    fn single_line_key_text_gets_its_line_breaks_back() {
+        assert_eq!(key_text("-----BEGIN X-----\\nabc\\n-----END X-----\\n"), "-----BEGIN X-----\nabc\n-----END X-----\n");
+        assert_eq!(key_text("a\\r\\nb"), "a\nb");
+        // Real line breaks: left alone (a `\n` inside would be part of the key).
+        assert_eq!(key_text("a\nb\\n"), "a\nb\\n");
+    }
+
+    #[test]
+    fn a_key_is_read_from_a_file_or_from_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = keypair(dir.path(), "");
+        let text = std::fs::read_to_string(&path).unwrap();
+        for c in [
+            json!({"private_key_path": path}),
+            json!({"private_key": text}),
+            json!({"private_key": text.trim_end().replace('\n', "\\n")}),
+        ] {
+            let ssh = Ssh::from_settings(&settings(c), "").unwrap();
+            assert!(matches!(ssh.auth, Auth::Key(_)));
+            assert_eq!(ssh.port, 22);
+        }
+    }
+
+    #[test]
+    fn an_encrypted_key_text_takes_the_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = keypair(dir.path(), "s3cret");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let ssh = Ssh::from_settings(&settings(json!({"private_key": text, "private_key_passphrase": "s3cret"})), "");
+        assert!(ssh.is_ok());
+        let e = err(settings(json!({"private_key": text})), "ssh.");
+        assert!(e.contains("can't read `ssh.private_key`"), "{e}");
+    }
+
+    #[test]
+    fn settings_errors_name_the_field_where_it_lives() {
+        let e = err(settings(json!({"private_key_path": "a", "private_key": "b"})), "ssh.");
+        assert_eq!(e, "set `ssh.private_key_path` or `ssh.private_key`, not both");
+        let e = err(settings(json!({})), "");
+        assert_eq!(e, "set `password`, `private_key_path` or `private_key`");
+        let e = err(json!({"host": "h"}).as_object().unwrap().clone(), "ssh.");
+        assert_eq!(e, "the profile output needs a `ssh.username` field");
+        let e = err(settings(json!({"password": "x", "port": 70000})), "ssh.");
+        assert_eq!(e, "invalid `ssh.port` `70000`");
+        let e = err(settings(json!({"private_key": "not a key"})), "");
+        assert!(e.starts_with("can't read `private_key`"), "{e}");
+    }
+
+    #[test]
+    fn host_keys_are_checked_against_a_pin_or_known_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, public) = keypair(dir.path(), "");
+        let key = PublicKey::from_openssh(&public).unwrap();
+        let fp = key.fingerprint(HashAlg::Sha256).to_string();
+        let none = dir.path().join("none");
+        std::fs::write(&none, "").unwrap();
+
+        assert!(check(Some(&fp), &none).verdict(&key).is_ok());
+        // The pin works without its `SHA256:` prefix too.
+        assert!(check(Some(fp.trim_start_matches("SHA256:")), &none).verdict(&key).is_ok());
+        let e = check(Some("SHA256:AAAAnotthekey"), &none).verdict(&key).unwrap_err();
+        assert!(e.contains("not the pinned"), "{e}");
+
+        let e = check(None, &none).verdict(&key).unwrap_err();
+        assert!(e.contains("isn't in") && e.contains(&format!("pin `host_key_fingerprint: {fp}`")), "{e}");
+
+        let kh = dir.path().join("known_hosts");
+        std::fs::write(&kh, format!("[bastion]:2222 {public}\n")).unwrap();
+        check(None, &kh).verdict(&key).unwrap();
+
+        // Another key for the same host in known_hosts: refused even with accept_unknown.
+        let other = tempfile::tempdir().unwrap();
+        let (_, public2) = keypair(other.path(), "");
+        let key2 = PublicKey::from_openssh(&public2).unwrap();
+        let mut lax = check(None, &kh);
+        lax.accept_unknown = true;
+        let e = lax.verdict(&key2).unwrap_err();
+        assert!(e.contains("doesn't match"), "{e}");
+    }
+}

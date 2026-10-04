@@ -205,6 +205,10 @@ pub struct ConnectionField {
     /// that source as this field's default (e.g. one Databricks host for source and destination).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub same_as_source: Option<String>,
+    /// Set by hand in `profiles.yml`: `dre init` doesn't ask for it. For alternatives to a
+    /// prompted field (a key given as text instead of a file) and nested blocks (`ssh:`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub manual: bool,
 }
 
 impl ConnectionField {
@@ -216,6 +220,7 @@ impl ConnectionField {
             secret: false,
             default: None,
             same_as_source: None,
+            manual: false,
         }
     }
     pub fn required(mut self) -> Self {
@@ -232,6 +237,10 @@ impl ConnectionField {
     }
     pub fn same_as_source(mut self, source_type: &str) -> Self {
         self.same_as_source = Some(source_type.into());
+        self
+    }
+    pub fn manual(mut self) -> Self {
+        self.manual = true;
         self
     }
 }
