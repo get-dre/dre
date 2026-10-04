@@ -163,6 +163,9 @@ jobs:
               sleep 1
             done
           done
+      # Postgres with TLS behind an SSH bastion, for the postgres plugin's tunnel tests.
+      - name: Start the SSH bastion
+        run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

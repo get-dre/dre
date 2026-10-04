@@ -43,6 +43,10 @@ impl Source for Fixture {
                 .required()
                 .same_as_source("fixture"),
             ConnectionField::new("token", "secret").secret(),
+            // `dre init` must not ask for this one.
+            ConnectionField::new("token_text", "the token as text")
+                .secret()
+                .manual(),
         ]
     }
 

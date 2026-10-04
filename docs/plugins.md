@@ -54,10 +54,11 @@ Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`).
 | `user`, `password` | |
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
-| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. |
+| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | Seconds. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
+| `ssh` | Reach the server through an SSH bastion: a block of settings, below. |
 
 Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`). `numeric(p,s)` becomes a decimal
 column. An unconstrained `numeric` becomes exact text, so cast it (`::numeric(18,2)`) when you
@@ -70,6 +71,41 @@ their numbers arrive as plain `numeric`, i.e. text. Cast in the outer query:
 select code, amount::numeric(18,2) as amount
 from (values ('a', 1.50), ('b', 2.25)) as t(code, amount)
 ```
+
+**Through an SSH bastion.** When the database is only reachable from a jump host, add an `ssh:`
+block. `host` and `port` are then the database's address *as the bastion sees it*. `dre` opens
+the SSH session itself; there's no `ssh -L` to run and no local port to keep open.
+
+```yaml
+connections:
+  warehouse:
+    targets:
+      prod:
+        type: postgres
+        host: db.internal          # as seen from the bastion
+        port: 5432
+        user: reporting
+        password: "{{ env_var('PG_PASSWORD') }}"
+        database: analytics
+        sslmode: verify-full       # still checks db.internal's certificate
+        sslrootcert: ~/certs/ca.pem
+        ssh:
+          host: bastion.example.com
+          username: deploy
+          private_key_path: ~/.ssh/id_ed25519
+          # or the key's text, e.g. a CI secret:
+          # private_key: "{{ env_var('BASTION_SSH_KEY') }}"
+          host_key_fingerprint: "SHA256:..."   # or known_hosts_path
+```
+
+The `ssh:` block takes the same settings as the [`sftp`](#sftp) destination: `host`, `port`
+(22), `username`, and `password`, `private_key_path` or `private_key` (+
+`private_key_passphrase`); the bastion's host key is checked against `known_hosts_path` (default
+`~/.ssh/known_hosts`) or a pinned `host_key_fingerprint`, and an unknown or changed key is
+refused (there's no `accept_unknown_host` here). The error for an unknown key prints its
+fingerprint, ready to pin. `connect_timeout` covers the whole way, SSH included, and errors say
+which hop failed: the bastion, the bastion's connection to the database, or Postgres itself.
+Templates can't read the `ssh` block (it may hold a key), and `dre init` doesn't ask for it.
 
 A connection error names the server (`host:port/database`). On macOS the plugin uses the system
 TLS stack: TLS 1.2 at most, and with `verify-ca`/`verify-full` a server certificate valid for more
@@ -428,10 +464,15 @@ Uploads use GCS's resumable protocol.
 
 ### `sftp`
 
-`host`, `port` (22), `username`, and `password` or `private_key_path`
-(+ `private_key_passphrase`). The host key is checked against `known_hosts_path` (default
-`~/.ssh/known_hosts`) or a pinned `host_key_fingerprint` (`SHA256:...`). Unknown hosts are
-refused unless `accept_unknown_host: true`. Missing directories are created.
+`host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
+(+ `private_key_passphrase`). `private_key` is the key's text, for when it can't be a file (a CI
+secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line with literal `\n`
+gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
+checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
+`host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+Missing directories are created. The [`postgres`](#postgres)
+source's `ssh:` block takes the same settings.
 
 ### `ftp`
 

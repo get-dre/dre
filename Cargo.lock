@@ -1877,24 +1877,30 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-postgres"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "arrow",
+ "bytes",
  "chrono",
  "dre-protocol",
+ "dre-ssh",
+ "futures-util",
  "native-tls",
- "postgres",
  "postgres-native-tls",
  "serde_json",
+ "socket2",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
  "uuid",
 ]
 
 [[package]]
 name = "dre-plugin-sftp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dre-protocol",
- "russh",
+ "dre-ssh",
  "russh-sftp",
  "serde_json",
  "tempfile",
@@ -1930,12 +1936,23 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arrow",
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "dre-ssh"
+version = "0.1.0"
+dependencies = [
+ "dre-protocol",
+ "russh",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -3987,20 +4004,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
 dependencies = [
  "portable-atomic",
-]
-
-[[package]]
-name = "postgres"
-version = "0.19.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ad20e0aa0b24f5a394eab4f78c781d248982b22b25cecc7e3aa46a681605bd"
-dependencies = [
- "bytes",
- "fallible-iterator 0.2.0",
- "futures-util",
- "log",
- "tokio",
- "tokio-postgres",
 ]
 
 [[package]]

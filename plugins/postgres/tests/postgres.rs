@@ -1,5 +1,7 @@
 //! Conformance always; integration tests when `DRE_TEST_POSTGRES=host:port` points at a server
-//! with user/password/database `dre` (CI runs one as a service container).
+//! with user/password/database `dre` (CI runs one as a service container). TLS and SSH tunnel
+//! tests need the containers `.github/scripts/ssh_bastion.sh` starts (`DRE_TEST_POSTGRES_TLS`,
+//! `DRE_TEST_POSTGRES_CA`, `DRE_TEST_SSH_BASTION`, `DRE_TEST_SSH_KEY`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -317,4 +319,236 @@ fn a_connection_error_names_the_server() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("can't connect to Postgres at 127.0.0.1:1/shop"), "{e}");
+}
+
+/// `host:port` from an environment variable.
+fn addr(var: &str) -> Option<(String, u16)> {
+    let v = std::env::var(var).ok()?;
+    let (h, p) = v.split_once(':')?;
+    Some((h.to_string(), p.parse().ok()?))
+}
+
+/// Settings for the TLS server (`DRE_TEST_POSTGRES_TLS`), whose certificate names `db.internal`.
+fn tls_conn(extra: Value) -> Option<Map<String, Value>> {
+    let (host, port) = addr("DRE_TEST_POSTGRES_TLS")?;
+    let mut m = json!({"host": host, "port": port, "user": "dre", "password": "dre", "database": "dre"});
+    if let Value::Object(e) = extra {
+        m.as_object_mut().unwrap().extend(e);
+    }
+    Some(m.as_object().unwrap().clone())
+}
+
+fn try_open(c: Map<String, Value>) -> Result<PluginProcess, String> {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    p.open(c, true).map_err(|e| e.to_string())?;
+    Ok(p)
+}
+
+/// Whether the session is encrypted.
+fn encrypted(p: &mut PluginProcess) -> bool {
+    let (_, b) = collect(
+        p,
+        "select ssl from pg_stat_ssl where pid = pg_backend_pid()",
+        None,
+    );
+    b[0].column(0).as_boolean().value(0)
+}
+
+#[test]
+fn sslmodes_encrypt_and_verify_like_libpq() {
+    let (Some(_), Ok(ca)) = (tls_conn(json!({})), std::env::var("DRE_TEST_POSTGRES_CA")) else {
+        eprintln!("skipped: run .github/scripts/ssh_bastion.sh and set DRE_TEST_POSTGRES_TLS/_CA");
+        return;
+    };
+    // `prefer` (the default) and `require` encrypt without checking the certificate.
+    for mode in [json!({}), json!({"sslmode": "require"})] {
+        let mut p = try_open(tls_conn(mode).unwrap()).unwrap();
+        assert!(encrypted(&mut p));
+    }
+    // `verify-ca` checks the chain only: the certificate names db.internal, not localhost.
+    let mut p = try_open(tls_conn(json!({"sslmode": "verify-ca", "sslrootcert": ca})).unwrap()).unwrap();
+    assert!(encrypted(&mut p));
+    let e = try_open(tls_conn(json!({"sslmode": "verify-ca"})).unwrap())
+        .err()
+        .unwrap();
+    assert!(e.contains("can't connect to Postgres at"), "{e}");
+    // `verify-full` also checks the host name.
+    let e = try_open(tls_conn(json!({"sslmode": "verify-full", "sslrootcert": ca})).unwrap())
+        .err()
+        .unwrap();
+    assert!(e.contains("can't connect to Postgres at"), "{e}");
+}
+
+#[test]
+fn prefer_falls_back_to_plain_text_and_require_refuses_it() {
+    needs_server!();
+    let mut p = try_open(conn(json!({"sslmode": "prefer"}))).unwrap();
+    assert!(!encrypted(&mut p));
+    let e = try_open(conn(json!({"sslmode": "require"}))).err().unwrap();
+    assert!(e.contains("does not support TLS"), "{e}");
+    let e = try_open(conn(json!({"sslmode": "sometimes"}))).err().unwrap();
+    assert!(e.contains("unknown `sslmode` `sometimes`"), "{e}");
+}
+
+/// Settings for Postgres at `db.internal`, reachable only through the bastion
+/// (`DRE_TEST_SSH_BASTION`), and the bastion's `ssh:` block with `ssh` merged in.
+fn tunnel_conn(ssh: Value, extra: Value) -> Option<Map<String, Value>> {
+    let (host, port) = addr("DRE_TEST_SSH_BASTION")?;
+    let mut block = json!({"host": host, "port": port, "username": "dre", "password": "dre-pass"});
+    block
+        .as_object_mut()
+        .unwrap()
+        .extend(ssh.as_object().unwrap().clone());
+    let mut m = json!({"host": "db.internal", "port": 5432, "user": "dre", "password": "dre",
+        "database": "dre", "ssh": block});
+    m.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    Some(m.as_object().unwrap().clone())
+}
+
+/// The bastion's host key fingerprint, from the error an untrusted bastion gives.
+fn bastion_fingerprint() -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("known_hosts");
+    std::fs::write(&empty, "").unwrap();
+    let e = try_open(tunnel_conn(json!({"known_hosts_path": empty}), json!({})).unwrap())
+        .err()
+        .unwrap();
+    assert!(
+        e.contains("can't reach the SSH bastion") && e.contains("isn't in"),
+        "{e}"
+    );
+    e.split("pin `host_key_fingerprint: ")
+        .nth(1)
+        .unwrap()
+        .trim_end_matches('`')
+        .to_string()
+}
+
+macro_rules! needs_bastion {
+    () => {
+        if addr("DRE_TEST_SSH_BASTION").is_none() {
+            eprintln!("skipped: run .github/scripts/ssh_bastion.sh and set DRE_TEST_SSH_BASTION");
+            return;
+        }
+    };
+}
+
+#[test]
+fn queries_previews_and_loads_run_through_an_ssh_bastion() {
+    needs_bastion!();
+    let fp = bastion_fingerprint();
+    let mut p = try_open(tunnel_conn(json!({"host_key_fingerprint": fp}), json!({})).unwrap()).unwrap();
+    let (_, b) = collect(
+        &mut p,
+        "select inet_server_addr()::text is not null as remote",
+        None,
+    );
+    assert!(b[0].column(0).as_boolean().value(0));
+    let (_, b) = collect(&mut p, "select g from generate_series(1, 20000) g", None);
+    assert_eq!(b.iter().map(RecordBatch::num_rows).sum::<usize>(), 20000);
+    let (_, b) = collect(&mut p, "select g from generate_series(1, 20000) g", Some(5));
+    assert_eq!(b.iter().map(RecordBatch::num_rows).sum::<usize>(), 5);
+    // `prefer` (the default) encrypts through the tunnel too.
+    assert!(encrypted(&mut p));
+    p.close().unwrap();
+}
+
+#[test]
+fn verify_full_checks_the_database_host_name_through_the_tunnel() {
+    needs_bastion!();
+    let Ok(ca) = std::env::var("DRE_TEST_POSTGRES_CA") else {
+        return;
+    };
+    let fp = bastion_fingerprint();
+    let tls = json!({"sslmode": "verify-full", "sslrootcert": ca});
+    let mut p = try_open(tunnel_conn(json!({"host_key_fingerprint": fp}), tls).unwrap()).unwrap();
+    assert!(encrypted(&mut p));
+}
+
+#[test]
+fn the_bastion_takes_a_key_file_or_key_text() {
+    needs_bastion!();
+    let Ok(key) = std::env::var("DRE_TEST_SSH_KEY") else {
+        return;
+    };
+    let fp = bastion_fingerprint();
+    let text = std::fs::read_to_string(&key).unwrap();
+    for ssh in [
+        json!({"private_key_path": key}),
+        json!({"private_key": text}),
+        json!({"private_key": text.trim_end().replace('\n', "\\n")}),
+    ] {
+        let mut ssh = ssh;
+        ssh["host_key_fingerprint"] = json!(fp);
+        ssh["password"] = Value::Null;
+        try_open(tunnel_conn(ssh, json!({})).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn tunnel_errors_name_the_hop_that_failed() {
+    needs_bastion!();
+    let fp = bastion_fingerprint();
+    let e =
+        try_open(tunnel_conn(json!({"host_key_fingerprint": "SHA256:AAAAnotthekey"}), json!({})).unwrap())
+            .err()
+            .unwrap();
+    assert!(
+        e.contains("can't reach the SSH bastion") && e.contains("not the pinned"),
+        "{e}"
+    );
+    let e = try_open(
+        tunnel_conn(
+            json!({"host_key_fingerprint": fp, "password": "wrong"}),
+            json!({}),
+        )
+        .unwrap(),
+    )
+    .err()
+    .unwrap();
+    assert!(e.contains("refused the credentials for `dre`"), "{e}");
+    let e = try_open(
+        tunnel_conn(
+            json!({"host_key_fingerprint": fp}),
+            json!({"host": "nowhere.internal"}),
+        )
+        .unwrap(),
+    )
+    .err()
+    .unwrap();
+    assert!(e.contains("couldn't connect to nowhere.internal:5432"), "{e}");
+    let e = try_open(tunnel_conn(json!({"host_key_fingerprint": fp}), json!({"password": "wrong"})).unwrap())
+        .err()
+        .unwrap();
+    assert!(
+        e.contains("can't connect to Postgres at db.internal:5432/dre through the SSH bastion")
+            && e.contains("password authentication failed"),
+        "{e}"
+    );
+}
+
+#[test]
+fn ssh_settings_are_checked() {
+    let c = json!({"host": "db", "user": "dre", "database": "dre", "ssh": "bastion"});
+    let e = try_open(c.as_object().unwrap().clone()).err().unwrap();
+    assert!(e.contains("`ssh` must be a block"), "{e}");
+    let c = json!({"host": "db", "user": "dre", "database": "dre",
+        "ssh": {"host": "b", "username": "u", "private_key_path": "/k", "private_key": "k"}});
+    let e = try_open(c.as_object().unwrap().clone()).err().unwrap();
+    assert!(
+        e.contains("set `ssh.private_key_path` or `ssh.private_key`, not both"),
+        "{e}"
+    );
+}
+
+#[test]
+fn the_ssh_block_is_a_secret_init_doesnt_ask_for() {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let d = p.description().unwrap();
+    let f = d.connection_fields.iter().find(|f| f.name == "ssh").unwrap();
+    assert!(f.secret && f.manual);
 }

@@ -134,3 +134,36 @@ fn uploads_with_a_private_key() {
     let conn = json!({"host": host, "port": port, "username": "dre", "private_key_path": key, "known_hosts_path": kh});
     deliver("upload/key.csv", conn, b"a,b\r\n").unwrap();
 }
+
+#[test]
+fn uploads_with_a_private_key_given_as_text() {
+    let (Some((host, port)), Ok(key)) = (server(), std::env::var("DRE_TEST_SFTP_KEY")) else {
+        eprintln!("skipped: set DRE_TEST_SFTP and DRE_TEST_SFTP_KEY");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let kh = known_hosts(dir.path(), &host, port);
+    let text = std::fs::read_to_string(&key).unwrap();
+    // As the file has it, and squeezed onto one line with literal `\n`, as some CI secrets are.
+    for text in [text.clone(), text.trim_end().replace('\n', "\\n")] {
+        let conn = json!({"host": host, "port": port, "username": "dre", "private_key": text, "known_hosts_path": kh});
+        deliver("upload/key-text.csv", conn, b"a,b\r\n").unwrap();
+    }
+    let both = json!({"host": host, "port": port, "username": "dre", "private_key": text,
+        "private_key_path": key, "known_hosts_path": kh});
+    let err = deliver("upload/x.csv", both, b"x").unwrap_err();
+    assert!(err.contains("not both"), "{err}");
+}
+
+#[test]
+fn private_key_text_is_a_secret_init_doesnt_ask_for() {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let d = p.description().unwrap();
+    let f = d
+        .connection_fields
+        .iter()
+        .find(|f| f.name == "private_key")
+        .unwrap();
+    assert!(f.secret && f.manual);
+}

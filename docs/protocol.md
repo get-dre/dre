@@ -175,7 +175,7 @@ another plugin kind, are answered with `error`.
 
 | Request | Reply |
 |---|---|
-| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\""}` |
+| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source","manual"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\""}` |
 | `{"type":"validate","options":{…}}` | `{"type":"validated","errors":["…"]}` |
 | `{"type":"close"}` | `{"type":"ok"}`, then the plugin exits 0 |
 
@@ -183,7 +183,9 @@ another plugin kind, are answered with `error`.
 uses it to prompt for connection details. By default it offers fields marked `secret` as
 `env_var()` references. A destination field with `"same_as_source": "<source type>"` defaults
 to the value entered for a connection profile of that source type (for example one Databricks host for
-both). Format plugins return an empty list.
+both). `dre init` doesn't ask for a field marked `"manual": true`: an alternative to a prompted
+field (a key's text instead of its file) or a nested block (`ssh:`), set by hand. A `secret`
+field, prompted or not, is one templates can't read. Format plugins return an empty list.
 
 `option_fields` lists the options the plugin takes (see [The plugin interface](#the-plugin-interface)).
 `type` is one of `string`, `char` (exactly one character), `boolean`, `integer`, `number`,

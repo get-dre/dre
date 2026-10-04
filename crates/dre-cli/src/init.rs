@@ -320,7 +320,7 @@ fn connection<R: BufRead>(
     source: Option<&SourceConn>,
 ) -> Result<Mapping, String> {
     let mut m = Mapping::new();
-    for f in fields {
+    for f in fields.iter().filter(|f| !f.manual) {
         let inherited = source
             .filter(|s| f.same_as_source.as_deref() == Some(s.kind))
             .and_then(|s| {

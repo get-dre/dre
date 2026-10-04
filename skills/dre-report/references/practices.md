@@ -52,8 +52,9 @@ Recommend, in this order:
    - GCS: application default credentials, `gcloud auth application-default login` (leave the key
      fields out).
    - Azure Blob: `use_azure_cli: true` after `az login`, or `use_managed_identity: true` on Azure.
-   - SFTP: a key pair (`private_key_path`), with its passphrase in an environment variable if it
-     has one.
+   - SFTP, and a Postgres SSH bastion (`ssh:`): a key pair (`private_key_path`), with its
+     passphrase in an environment variable if it has one. Where the key can't be a file (a CI
+     runner), its text from `env_var()` in `private_key` (as in item 2).
 2. **An environment variable read with `env_var()`**, set by you (SEC-3), for what has no sign-in:
    Postgres and FTP passwords, SMTP passwords, Slack bot tokens, a Databricks service principal's
    secret for a scheduler.
