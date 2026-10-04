@@ -781,6 +781,26 @@ fails and says what to change.
 
 The bot must be a member of the channel. Invite it with `/invite @your-bot`.
 
+**Messages** (slack 1.1.0): for a [`message`](#the-message-format) output, the post is the
+message itself: the title in bold, then the text in Slack's formatting, sent with
+`chat.postMessage` (scope `chat:write`) to the same `channel` or `user`. `message:` isn't used.
+Slack's recommended maximum is 4,000 characters: a longer message is posted cut short, with a
+note and the full message attached as its `.md` file (scope `files:write`). `attach: [<output>]`
+on the entry uploads those outputs' files in the same post, with the message as its text.
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    text: "Revenue yesterday: **{{ results.headline.value | currency('EUR') }}**"
+    destination:
+      - {profile: team_slack, channel: "#finance", attach: [workbook]}
+```
+
 If Slack rate-limits a call, the plugin retries it once after Slack's `Retry-After`, waiting at
 most 60 seconds. Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what

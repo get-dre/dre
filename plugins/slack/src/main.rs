@@ -10,20 +10,29 @@
 //!
 //! Uses Slack's external upload flow: `files.getUploadURLExternal` per file, the bytes to the
 //! returned URL, then one `files.completeUploadExternal` that shares every file in one post.
+//!
+//! Messages (a `message` output): the title in bold, then the text translated to Slack's mrkdwn,
+//! posted with `chat.postMessage` (scope `chat:write`). With `attach:` files, or over Slack's
+//! limit, it's one upload post instead: the files (plus the full `.md` when the text was cut short)
+//! with the text as its comment.
 
 use std::time::Duration;
 
-use dre_protocol::CAP_MULTI_FILE;
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::markdown;
+use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::options::{OptionField, OptionType};
 use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_required, conn_str, serve_destination,
 };
+use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE};
 use serde_json::{Map, Value, json};
 
 const DEFAULT_API: &str = "https://slack.com/api";
 /// Longest `Retry-After` honoured before giving up on a rate-limited call.
 const MAX_RETRY_WAIT: u64 = 60;
+/// The longest message text posted, in characters: Slack's recommended maximum.
+const MESSAGE_LIMIT: u64 = 4_000;
+const CUT_MARKER: &str = "\n… _(cut short: the full message is attached)_";
 
 struct Slack;
 
@@ -62,6 +71,37 @@ impl Destination for Slack {
         }
     }
 
+    fn message_limit(&self) -> Option<u64> {
+        Some(MESSAGE_LIMIT)
+    }
+
+    fn deliver_message(&mut self, d: &Delivery, m: &Message) -> Result<String> {
+        let target = Target::from(&d.options, &d.connection)?;
+        let api = Api::new(&d.connection)?;
+        let channel_id = api.channel_of(&target)?;
+        let title = format!("*{}*", markdown::to_slack(&markdown::escape(&m.title)));
+        let text = format!("{title}\n{}", markdown::to_slack(&m.text));
+        let cut = markdown::truncate(&text, MESSAGE_LIMIT as usize, CUT_MARKER);
+        let mut files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
+        if cut.is_some() {
+            eprintln!(
+                "the message is over Slack's {MESSAGE_LIMIT} characters; posting it cut short with the full message attached"
+            );
+            files.push(m.path.clone().into());
+        }
+        let text = cut.unwrap_or(text);
+        if files.is_empty() {
+            let r = api.call(
+                "chat.postMessage",
+                &[("channel", channel_id.clone()), ("text", text)],
+                &target,
+            )?;
+            let ts = r["ts"].as_str().unwrap_or_default();
+            return Ok(format!("slack {} message {ts}", target.place(&channel_id)));
+        }
+        api.share(&files, &channel_id, Some(text), &target)
+    }
+
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
         let target = Target::from(&d.options, &d.connection)?;
         let message = match d.options.get("message") {
@@ -70,50 +110,62 @@ impl Destination for Slack {
             Some(v) => return Err(format!("slack option `message` must be a string, got {v}").into()),
         };
         let api = Api::new(&d.connection)?;
-        let channel_id = match &target {
-            Target::Channel(c) => api.resolve_channel(c)?,
-            Target::User(u) => api.open_dm(u)?,
-        };
+        let channel_id = api.channel_of(&target)?;
+        let files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
+        api.share(&files, &channel_id, message, &target)
+    }
+}
 
+impl Api {
+    /// The channel ID a target posts to: a channel as given or looked up, or a user's DM.
+    fn channel_of(&self, target: &Target) -> Result<String> {
+        match target {
+            Target::Channel(c) => self.resolve_channel(c),
+            Target::User(u) => self.open_dm(u),
+        }
+    }
+
+    /// Upload `files` and share them in one post with `comment`; return where they landed.
+    fn share(
+        &self,
+        files: &[std::path::PathBuf],
+        channel_id: &str,
+        comment: Option<String>,
+        target: &Target,
+    ) -> Result<String> {
         let mut uploaded = Vec::new();
-        for f in &d.files {
-            let bytes =
-                std::fs::read(&f.local).map_err(|e| format!("can't read {}: {e}", f.local.display()))?;
-            let name = f
-                .local
+        for local in files {
+            let bytes = std::fs::read(local).map_err(|e| format!("can't read {}: {e}", local.display()))?;
+            let name = local
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let r = api.call(
+            let r = self.call(
                 "files.getUploadURLExternal",
                 &[("filename", name.clone()), ("length", bytes.len().to_string())],
-                &target,
+                target,
             )?;
             let (Some(url), Some(id)) = (r["upload_url"].as_str(), r["file_id"].as_str()) else {
                 return Err("Slack's upload reply had no `upload_url`/`file_id`".into());
             };
-            api.upload(url, bytes)
+            self.upload(url, bytes)
                 .map_err(|e| format!("uploading {name} to Slack failed: {e}"))?;
             uploaded.push(json!({"id": id, "title": name}));
         }
         let mut form = vec![
             ("files", Value::Array(uploaded).to_string()),
-            ("channel_id", channel_id.clone()),
+            ("channel_id", channel_id.to_string()),
         ];
-        if let Some(m) = message {
-            form.push(("initial_comment", m));
+        if let Some(c) = comment {
+            form.push(("initial_comment", c));
         }
-        let r = api.call("files.completeUploadExternal", &form, &target)?;
+        let r = self.call("files.completeUploadExternal", &form, target)?;
         let links: Vec<&str> = r["files"]
             .as_array()
             .map(|a| a.iter().filter_map(|f| f["permalink"].as_str()).collect())
             .unwrap_or_default();
-        let place = match &target {
-            Target::Channel(c) if c.starts_with('#') => format!("{c} ({channel_id})"),
-            Target::Channel(_) => channel_id,
-            Target::User(u) => format!("DM with {u}"),
-        };
+        let place = target.place(channel_id);
         Ok(if links.is_empty() {
             format!("slack {place}")
         } else {
@@ -157,6 +209,15 @@ impl Target {
         match self {
             Target::Channel(c) => format!("channel {c}"),
             Target::User(u) => format!("user {u}"),
+        }
+    }
+
+    /// Where a post landed, for the location.
+    fn place(&self, channel_id: &str) -> String {
+        match self {
+            Target::Channel(c) if c.starts_with('#') => format!("{c} ({channel_id})"),
+            Target::Channel(_) => channel_id.to_string(),
+            Target::User(u) => format!("DM with {u}"),
         }
     }
 }
@@ -328,7 +389,7 @@ fn explain(method: &str, v: &Value, target: &Target) -> String {
 
 fn main() {
     serve_destination(
-        About::new("slack", env!("CARGO_PKG_VERSION")).capabilities(&[CAP_MULTI_FILE]),
+        About::new("slack", env!("CARGO_PKG_VERSION")).capabilities(&[CAP_MULTI_FILE, CAP_MESSAGE]),
         Slack,
     )
 }
