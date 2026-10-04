@@ -1,7 +1,7 @@
 # dre-cli
 
-The `dre` command of [DRE](https://github.com/get-dre/dre), the Declarative Reporting Engine:
-SQL in, a correctly formatted file out. You declare reports as YAML and `.sql` files; DRE runs the
+The `dre` command of [DRE](https://getdre.com), the Declarative Reporting Engine: reports as
+code, SQL in, a correctly formatted file out. You declare reports as YAML and `.sql` files; DRE runs the
 SQL against your warehouse, writes csv, delimited, fixed-width, parquet or xlsx, and delivers the
 file (object storage, SFTP/FTP, Databricks Volumes, email, Slack).
 
