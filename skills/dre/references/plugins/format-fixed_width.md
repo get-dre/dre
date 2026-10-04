@@ -57,6 +57,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugins.md#fixed-width-columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugins.md#xlsx-column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugins.md#xlsx-formulas-and-totals-rows)); per query `anchor`/`header`/`columns`; `template` |
+| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
 `""` for none. The file is written the same way; only its name changes.

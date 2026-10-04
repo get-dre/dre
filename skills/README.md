@@ -60,7 +60,8 @@ the plugins'. Each release supports a range of DRE minor versions (every `SKILL.
 |---|---|
 | 1.x | 0.1.x |
 | 2.0 | 0.2.x |
-| 2.1 and later 2.x | 0.2.1 and later 0.2.x |
+| 2.1, 2.2 | 0.2.1 and later 0.2.x |
+| 2.3 and later 2.x | 0.2.1 and later; messages and the other 0.3 features need 0.3 |
 
 A new DRE minor gets a skills release that supports it. Dropping support for an older DRE minor
 is a new major skills version, so if you stay on an older DRE, pin the skills release that
@@ -85,7 +86,7 @@ docs, build `dre` and the plugins and regenerate:
 
 ```bash
 cargo build --workspace --bins
-(cd go/databricks && go build -o ../../target/debug/dre-plugin-databricks .)
+for p in databricks bigquery snowflake; do (cd "go/$p" && go build -o "../../target/debug/dre-plugin-$p" .); done
 python3 .github/scripts/skills.py sync
 python3 .github/scripts/skills.py generate --plugins-dir target/debug
 python3 .github/scripts/skills.py check --dre target/debug/dre --plugins-dir target/debug
