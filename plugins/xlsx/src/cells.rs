@@ -17,6 +17,19 @@ use crate::formats::{ColumnFormat, Kind};
 pub const EPOCH_OFFSET: f64 = 25_569.0;
 const EXCEL_MAX_STRING: usize = 32_767;
 
+/// The error for text longer than an Excel cell holds, naming the sheet and the cell (`row` and
+/// `col` from 0), or None when `s` fits. Nothing is truncated.
+pub fn too_long(sheet: &str, row: u32, col: u32, column: &str, s: &str) -> Option<String> {
+    let n = s.chars().count();
+    (n > EXCEL_MAX_STRING).then(|| {
+        format!(
+            "sheet `{sheet}`, cell {}{} (column `{column}`): a value of {n} characters is longer than Excel's {EXCEL_MAX_STRING}-character cell limit; shorten or cast it in the SQL, or write this query to a text format such as csv",
+            crate::formulas::col_letters(col),
+            row + 1
+        )
+    })
+}
+
 /// A value as Excel stores it.
 pub enum Excel {
     Number(f64),
@@ -235,6 +248,7 @@ impl CellWriter {
     pub fn write(
         &self,
         ws: &mut Worksheet,
+        sheet: &str,
         row: u32,
         col: u16,
         v: Option<Excel>,
@@ -265,8 +279,8 @@ impl CellWriter {
             (Excel::Bool(b), Some(f)) => ws.write_boolean_with_format(row, col, b, f)?,
             (Excel::Bool(b), None) => ws.write_boolean(row, col, b)?,
             (Excel::Text(s), f) => {
-                if s.chars().count() > EXCEL_MAX_STRING {
-                    return Err(format!("column `{column}`: a value is longer than Excel's {EXCEL_MAX_STRING}-character cell limit").into());
+                if let Some(e) = too_long(sheet, row, u32::from(col), column, &s) {
+                    return Err(e.into());
                 }
                 match f {
                     // A number or date Excel can't hold stays unformatted text.

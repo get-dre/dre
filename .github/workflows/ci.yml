@@ -67,14 +67,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The Databricks adapter is Go.
+      # The Go plugin packages (databricks, bigquery, snowflake) and their shared protocol module,
+      # each its own Go module.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go/databricks/go.mod
-          cache-dependency-path: go/databricks/go.sum
+          go-version-file: go/plugin/go.mod
+          cache-dependency-path: go/*/go.sum
       - run: test -z "$(gofmt -l go)" || { gofmt -l go; exit 1; }
-      - run: go vet ./...
-        working-directory: go/databricks
+      - run: for m in go/*/; do (cd "$m" && go vet ./...) || exit 1; done
 
   integration:
     # Plugin integration tests against local emulators (Linux only). Each test skips itself when
@@ -108,6 +108,7 @@ jobs:
       DRE_TEST_FTPS: 127.0.0.1:2990
       DRE_TEST_SMTP: localhost:1025
       DRE_TEST_MAILPIT_API: http://localhost:8025
+      DRE_TEST_BIGQUERY_EMULATOR: http://localhost:9050
     steps:
       - uses: actions/checkout@v7
       - name: Start emulators that need arguments
@@ -120,6 +121,7 @@ jobs:
             atmoz/sftp dre:dre-pass:1001::upload
           docker run -d -p 10000:10000 mcr.microsoft.com/azure-storage/azurite \
             azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          docker run -d -p 9050:9050 ghcr.io/goccy/bigquery-emulator --project=dre-test --dataset=shop
           # The image's own start runs vsftpd in the background and keeps the container alive only
           # while the pid it records exists. If the readiness check below connects as vsftpd
           # starts, that pid can be the check's session process, and the container exits when the
@@ -152,7 +154,7 @@ jobs:
               *) curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/" ;;
             esac
           }
-          for port in 4443 2222 10000 2121 2990; do
+          for port in 4443 2222 10000 2121 2990 9050; do
             for i in $(seq 60); do
               ready "$port" 2>/dev/null && break
               if [ "$i" = 60 ]; then
@@ -164,6 +166,13 @@ jobs:
             done
           done
       # Postgres with TLS behind an SSH bastion, for the postgres plugin's tunnel tests.
+      # The bigquery plugin against the BigQuery emulator.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/bigquery/go.mod
+          cache-dependency-path: go/*/go.sum
+      - run: go test ./...
+        working-directory: go/bigquery
       - name: Start the SSH bastion
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -198,19 +207,21 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go/databricks/go.mod
-          cache-dependency-path: go/databricks/go.sum
-      - run: go test ./...
-        working-directory: go/databricks
-      # The Databricks package, one Go program; the Rust tests check it through the same host
-      # code core uses.
-      - name: Build the Databricks package
+          go-version-file: go/plugin/go.mod
+          cache-dependency-path: go/*/go.sum
+      - name: Go tests
+        shell: bash
+        run: for m in go/*/; do (cd "$m" && go test ./...) || exit 1; done
+      # The Go packages; the Rust tests check them through the same host code core uses.
+      - name: Build the Go packages
         shell: bash
         run: |
           ext=""; [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
           dir="$RUNNER_TEMP/go-plugins"
           mkdir -p "$dir"
-          (cd go/databricks && go build -o "$dir/dre-plugin-databricks$ext" .)
+          for p in databricks bigquery snowflake; do
+            (cd "go/$p" && go build -o "$dir/dre-plugin-$p$ext" .) || exit 1
+          done
           echo "DRE_TEST_GO_PLUGINS=$dir" >> "$GITHUB_ENV"
       - run: cargo build --workspace --bins
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in

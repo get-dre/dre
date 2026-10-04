@@ -2,12 +2,17 @@ module github.com/get-dre/dre/go/databricks
 
 go 1.27
 
+// The shared protocol module, from this repository.
+replace github.com/get-dre/dre/go/plugin => ../plugin
+
 require (
-	// Held at v12: databricks-sql-go (latest, v1.16.0) returns arrow/go/v12 records. Move to
-	// github.com/apache/arrow-go/v18 when the driver does.
+	// The connector (latest, v1.16.0) returns arrow/go/v12 records; bridge.go hands them to the
+	// shared module's arrow-go v18. Drop v12 when the driver moves.
+	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/arrow/go/v12 v12.0.1
 	github.com/databricks/databricks-sdk-go v0.182.0
 	github.com/databricks/databricks-sql-go v1.16.0
+	github.com/get-dre/dre/go/plugin v0.0.0
 )
 
 require (

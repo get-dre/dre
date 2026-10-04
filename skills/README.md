@@ -85,7 +85,7 @@ docs, build `dre` and the plugins and regenerate:
 
 ```bash
 cargo build --workspace --bins
-(cd go/databricks && go build -o ../../target/debug/dre-plugin-databricks .)
+for p in databricks bigquery snowflake; do (cd "go/$p" && go build -o "../../target/debug/dre-plugin-$p" .); done
 python3 .github/scripts/skills.py sync
 python3 .github/scripts/skills.py generate --plugins-dir target/debug
 python3 .github/scripts/skills.py check --dre target/debug/dre --plugins-dir target/debug

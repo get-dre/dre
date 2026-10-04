@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/get-dre/dre/go/plugin/plugintest"
 )
 
 type filesCall struct {
@@ -135,39 +137,35 @@ func TestRESTErrorsShowTheCodeAndMessage(t *testing.T) {
 }
 
 func TestTheDestinationRoleSpeaksTheProtocol(t *testing.T) {
-	if roleOf("/x/dre-destination-databricks.exe").id() != destinationRole.id() || roleOf("dre-source-databricks").id() != sourceRole.id() ||
-		roleOf("dre-plugin-databricks").id() != sourceRole.id() {
-		t.Fatal("roleOf")
+	if pkg.RoleFor("/x/dre-destination-databricks.exe").ID() != destinationRole.ID() || pkg.RoleFor("dre-source-databricks").ID() != sourceRole.ID() ||
+		pkg.RoleFor("dre-plugin-databricks").ID() != sourceRole.ID() {
+		t.Fatal("RoleFor")
 	}
-	c := startAs(t, destinationRole)
-	c.send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t"})
-	if r := c.reply(); r["kind"] != "destination" || r["name"] != "databricks" {
+	c := plugintest.Start(t, pkg, destinationRole)
+	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t"})
+	if r := c.Reply(); r["kind"] != "destination" || r["name"] != "databricks" {
 		t.Fatalf("%v", r)
 	}
-	c.send(map[string]any{"type": "describe"})
-	var names []string
-	for _, f := range c.reply()["connection_fields"].([]any) {
-		names = append(names, f.(map[string]any)["name"].(string))
-	}
-	if strings.Join(names, ",") != "host,auth_type,token,client_id,client_secret" {
+	c.Send(map[string]any{"type": "describe"})
+	if names := plugintest.FieldNames(c.Reply()); names != "host,auth_type,token,client_id,client_secret" {
 		t.Fatalf("%v", names)
 	}
-	c.send(map[string]any{"type": "deliver", "local_path": "/x", "remote_path": "/Volumes/c/s/v/x", "connection": map[string]any{}, "options": map[string]any{"to": "x"}})
-	expectError(t, c.reply(), "the `databricks` destination takes no options, but got `to`")
-	c.send(map[string]any{"type": "validate", "options": map[string]any{"to": "x"}})
-	if r := c.reply(); r["type"] != "validated" || len(r["errors"].([]any)) != 1 {
+	c.Send(map[string]any{"type": "deliver", "local_path": "/x", "remote_path": "/Volumes/c/s/v/x", "connection": map[string]any{}, "options": map[string]any{"to": "x"}})
+	plugintest.ExpectError(t, c.Reply(), "the `databricks` destination takes no options, but got `to`")
+	c.Send(map[string]any{"type": "validate", "options": map[string]any{"to": "x"}})
+	if r := c.Reply(); r["type"] != "validated" || len(r["errors"].([]any)) != 1 {
 		t.Fatalf("%v", r)
 	}
-	c.send(map[string]any{"type": "validate", "options": map[string]any{}})
-	if r := c.reply(); r["type"] != "validated" || len(r["errors"].([]any)) != 0 {
+	c.Send(map[string]any{"type": "validate", "options": map[string]any{}})
+	if r := c.Reply(); r["type"] != "validated" || len(r["errors"].([]any)) != 0 {
 		t.Fatalf("%v", r)
 	}
-	c.send(map[string]any{"type": "execute", "sql": "select 1"})
-	expectError(t, c.reply(), "a destination plugin doesn't handle execute requests")
+	c.Send(map[string]any{"type": "execute", "sql": "select 1"})
+	plugintest.ExpectError(t, c.Reply(), "a destination plugin doesn't handle execute requests")
 	srv, _ := fakeFiles(t)
-	c.send(map[string]any{"type": "deliver", "local_path": localFile(t, "x"), "remote_path": "/Volumes/c/s/v/x.csv",
+	c.Send(map[string]any{"type": "deliver", "local_path": localFile(t, "x"), "remote_path": "/Volumes/c/s/v/x.csv",
 		"connection": map[string]any{"host": srv.URL, "token": "good"}, "options": map[string]any{}})
-	if r := c.reply(); r["type"] != "delivered" || r["location"] != "dbfs:/Volumes/c/s/v/x.csv" {
+	if r := c.Reply(); r["type"] != "delivered" || r["location"] != "dbfs:/Volumes/c/s/v/x.csv" {
 		t.Fatalf("%v", r)
 	}
 }

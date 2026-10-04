@@ -18,11 +18,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/get-dre/dre/go/plugin"
 )
 
-func volumesFields() []connectionField {
+func volumesFields() []plugin.Field {
 	f := connectionFields()
-	out := []connectionField{{Name: "host", Description: "workspace host, e.g. adb-123.4.azuredatabricks.net", Required: true, SameAsSource: "databricks"}}
+	out := []plugin.Field{{Name: "host", Description: "workspace host, e.g. adb-123.4.azuredatabricks.net", Required: true, SameAsSource: "databricks"}}
 	for _, c := range f {
 		if c.SameAsSource == "databricks" {
 			out = append(out, c)

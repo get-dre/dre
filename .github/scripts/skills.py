@@ -59,7 +59,9 @@ _FORMAT = [("Formats", None)]
 DOC_SECTIONS = {
     "source/duckdb": [("Sources", "`duckdb`")],
     "source/postgres": [("Sources", "`postgres`")],
-    "source/databricks": [("Sources", "`databricks`")],
+    "source/databricks": [("Sources", "`databricks`"), ("Sources", "Types from warehouses")],
+    "source/bigquery": [("Sources", "`bigquery`"), ("Sources", "Types from warehouses")],
+    "source/snowflake": [("Sources", "`snowflake`"), ("Sources", "Types from warehouses")],
     "format/csv": _FORMAT,
     "format/delimited": _FORMAT,
     "format/fixed_width": _FORMAT + [("Formats", "Fixed-width columns")],
@@ -423,7 +425,7 @@ def describe_all(plugins_dir):
         if not exe.exists() and pathlib.Path(str(exe) + ".exe").exists():
             exe = pathlib.Path(str(exe) + ".exe")
         if not exe.exists():
-            raise SystemExit(f"no {exe}: build the plugins first (cargo build --workspace --bins, and go/databricks)")
+            raise SystemExit(f"no {exe}: build the plugins first (cargo build --workspace --bins, and each package in go/)")
         out[plugin] = describe(exe, plugin)
     return out
 

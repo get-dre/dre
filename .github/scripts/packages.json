@@ -6,6 +6,16 @@
     "provides": ["source/databricks", "destination/databricks"],
     "go": "go/databricks"
   },
+  "bigquery": {
+    "description": "Google BigQuery",
+    "provides": ["source/bigquery"],
+    "go": "go/bigquery"
+  },
+  "snowflake": {
+    "description": "Snowflake",
+    "provides": ["source/snowflake"],
+    "go": "go/snowflake"
+  },
   "csv": {"description": "Comma-separated and other delimited text", "provides": ["format/csv", "format/delimited"]},
   "fixed_width": {"description": "Fixed-width text", "provides": ["format/fixed_width"]},
   "parquet": {"description": "Parquet", "provides": ["format/parquet"]},

@@ -17,9 +17,10 @@ import (
 	dbsql "github.com/databricks/databricks-sql-go"
 	dbsqlrows "github.com/databricks/databricks-sql-go/rows"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+
+	"github.com/get-dre/dre/go/plugin"
 )
 
 // databricks holds one connection from database/sql, which is one Databricks session: temp
@@ -29,7 +30,7 @@ type databricks struct {
 	conn *sql.Conn
 }
 
-func newDatabricks(conn map[string]any) (backend, error) {
+func newDatabricks(conn map[string]any) (*databricks, error) {
 	host, err := required(conn, "host")
 	if err != nil {
 		return nil, err
@@ -92,7 +93,9 @@ func newDatabricks(conn map[string]any) (backend, error) {
 	return &databricks{db: db, conn: cn}, nil
 }
 
-func (d *databricks) run(query string, fn func(result) error) error {
+// Run executes one statement. The connector's Arrow (v12) batches are handed on as arrow-go v18
+// ones through IPC (bridge.go).
+func (d *databricks) Run(query string, fn func(plugin.Result) error) error {
 	ctx := context.Background()
 	err := d.conn.Raw(func(dc any) error {
 		q, ok := dc.(driver.QueryerContext)
@@ -117,9 +120,22 @@ func (d *databricks) run(query string, fn func(result) error) error {
 			return err
 		}
 		defer it.Close()
-		return fn(it)
+		return fn(&bridged{it: it})
 	})
 	return cleanErr(err)
+}
+
+// Check runs EXPLAIN. A planning error is reported inside the plan text rather than failing,
+// so it's picked out of the plan.
+func (d *databricks) Check(query string) (string, error) {
+	plan, err := d.explain(query)
+	if err != nil {
+		return "", err
+	}
+	if e := planError(plan); e != "" {
+		return "", fmt.Errorf("%s", e)
+	}
+	return "", nil
 }
 
 // explain returns EXPLAIN's plan text; Databricks sends it one line per row.
@@ -140,63 +156,26 @@ func (d *databricks) explain(query string) (string, error) {
 	return strings.Join(lines, "\n"), cleanErr(rows.Err())
 }
 
-func (d *databricks) close() {
+// Load puts the rows into a temporary view, as one VALUES statement: a SQL warehouse
+// connection has no bulk path.
+func (d *databricks) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+	view := "dre_lookup_" + name
+	sql, rows, err := tempViewSQL(view, schema, recs)
+	if err != nil {
+		return plugin.Loaded{}, err
+	}
+	if err := d.Run(sql, func(plugin.Result) error { return nil }); err != nil {
+		return plugin.Loaded{}, err
+	}
+	return plugin.Loaded{
+		Relation: view, Rows: rows,
+		Warning: fmt.Sprintf("Databricks has no bulk load over a SQL warehouse connection, so %d rows were sent as one SQL statement into a temporary view. Data this size probably belongs in a table in Databricks", rows),
+	}, nil
+}
+
+func (d *databricks) Close() {
 	d.conn.Close()
 	d.db.Close()
-}
-
-// outputSchema is the schema sent to core: the columns as Databricks typed them, without the
-// connector's Spark metadata, and NULL-typed columns (SELECT NULL) as text.
-func outputSchema(s *arrow.Schema) *arrow.Schema {
-	fields := make([]arrow.Field, len(s.Fields()))
-	for i, f := range s.Fields() {
-		t := f.Type
-		if t.ID() == arrow.NULL {
-			t = arrow.BinaryTypes.String
-		}
-		fields[i] = arrow.Field{Name: f.Name, Type: t, Nullable: true}
-	}
-	return arrow.NewSchema(fields, nil)
-}
-
-// convertRecord puts rec's columns under schema (from outputSchema). The caller releases it.
-func convertRecord(rec arrow.Record, schema *arrow.Schema) (arrow.Record, error) {
-	if int(rec.NumCols()) != len(schema.Fields()) {
-		return nil, fmt.Errorf("a batch has %d columns but the result has %d", rec.NumCols(), len(schema.Fields()))
-	}
-	cols := make([]arrow.Array, rec.NumCols())
-	for i := range cols {
-		c := rec.Column(i)
-		want := schema.Field(i).Type
-		switch {
-		case c.DataType().ID() == arrow.NULL && want.ID() == arrow.STRING:
-			b := array.NewStringBuilder(memory.DefaultAllocator)
-			for n := int64(0); n < rec.NumRows(); n++ {
-				b.AppendNull()
-			}
-			cols[i] = b.NewArray()
-			b.Release()
-		case arrow.TypeEqual(c.DataType(), want):
-			c.Retain()
-			cols[i] = c
-		default:
-			for _, done := range cols[:i] {
-				done.Release()
-			}
-			return nil, fmt.Errorf("column `%s` changed type from %s to %s between batches", schema.Field(i).Name, want, c.DataType())
-		}
-	}
-	out := array.NewRecord(schema, cols, rec.NumRows())
-	for _, c := range cols {
-		c.Release()
-	}
-	return out, nil
-}
-
-func emptyRecord(schema *arrow.Schema) arrow.Record {
-	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-	defer b.Release()
-	return b.NewRecord()
 }
 
 // cleanErr keeps the useful part of a server error: the message, not the JVM stack trace.
@@ -260,18 +239,6 @@ func planError(plan string) string {
 		}
 	}
 	return ""
-}
-
-func validViewName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, r := range name {
-		if !(r == '_' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
-			return false
-		}
-	}
-	return true
 }
 
 func quote(ident string) string {
@@ -350,29 +317,6 @@ func literal(col arrow.Array, i int) string {
 	}
 }
 
-func required(conn map[string]any, key string) (string, error) {
-	if v := optional(conn, key); v != "" {
-		return v, nil
-	}
-	return "", fmt.Errorf("the profile output needs a `%s` field", key)
-}
-
-func optional(conn map[string]any, key string) string {
-	s, _ := conn[key].(string)
-	return s
-}
-
-func number(v any) (int, bool) {
-	switch n := v.(type) {
-	case float64:
-		return int(n), true
-	case string:
-		i, err := strconv.Atoi(n)
-		return i, err == nil
-	}
-	return 0, false
-}
-
 // baseURL is https://<host> for a bare host; a URL with a scheme is kept.
 // reachable fails at once when the workspace can't be reached at all: a host name that doesn't
 // resolve or a refused connection won't fix itself by retrying, unlike a warehouse that is
@@ -442,3 +386,10 @@ func hostname(host string) string {
 	h = strings.TrimPrefix(h, "https://")
 	return strings.TrimPrefix(h, "http://")
 }
+
+// Profile field helpers, shared by every Go plugin.
+var (
+	required = plugin.Required
+	optional = plugin.Optional
+	number   = plugin.Number
+)
