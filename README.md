@@ -5,16 +5,36 @@
   </picture>
 </p>
 
+<p align="center"><strong>Reports as code.</strong> The dbt-style workflow, for reporting.</p>
+
+<p align="center">
+  <a href="https://github.com/get-dre/dre/releases/latest"><img src="https://img.shields.io/github/v/release/get-dre/dre?filter=v*&sort=semver&label=release" alt="Latest release"></a>
+  <a href="https://pypi.org/project/dre-cli/"><img src="https://img.shields.io/pypi/v/dre-cli?label=pypi" alt="PyPI version"></a>
+  <a href="https://crates.io/crates/dre-cli"><img src="https://img.shields.io/crates/v/dre-cli?label=crates.io" alt="crates.io version"></a>
+  <a href="https://github.com/get-dre/dre/actions/workflows/ci.yml"><img src="https://github.com/get-dre/dre/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
+  <a href="https://pypi.org/project/dre-cli/"><img src="https://img.shields.io/pypi/dm/dre-cli?label=pypi%20downloads" alt="PyPI downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/get-dre/dre" alt="License: GPL-3.0"></a>
+  <a href="https://getdre.com/docs/"><img src="https://img.shields.io/badge/docs-getdre.com-1d6fd8" alt="Documentation"></a>
+</p>
+
 # DRE
 
-**DRE** stands for **Declarative Reporting Engine**.
-
-DRE is SQL (plus a template) in, a correctly formatted file out. You declare reports as YAML and
-`.sql` files in a dbt-shaped project. DRE runs the SQL against your databases (each tab of a
-workbook can come from a different one, and tables can be declared as dbt-style sources), writes the result as
+**DRE**, the **Declarative Reporting Engine**, is open-source reports as code. You keep each report
+as `.sql` and YAML files in git; DRE runs the SQL against your databases (each tab of a workbook can
+come from a different one, and tables can be declared as dbt-style sources), writes the result as
 csv, delimited, fixed-width, parquet or xlsx (including multi-sheet workbooks, number formats,
 formulas and totals rows, and branded Excel templates), and delivers the file wherever it needs
-to go. It runs on whatever scheduler you already have: cron, Airflow, Dagster, Databricks Jobs.
+to go: email, SFTP/FTP, S3, GCS, Azure Blob, Databricks Volumes or Slack. A report can also send a
+headline [message](docs/messages.md) built from its results, to Slack, Microsoft Teams, Google Chat
+or email. It runs on whatever scheduler you already have: cron, Airflow, Dagster, Databricks Jobs.
+
+If you know dbt, you already know DRE: a project of SQL and YAML, Jinja and macros, `ref()`,
+`source()`, folder config, tags, selectors, profiles and targets. dbt builds your tables; DRE
+delivers the last mile, the reports people receive. DRE is inspired by dbt and is an independent
+project, not affiliated with or endorsed by dbt Labs, Inc. (dbt is their trademark).
+[DRE and dbt, side by side](https://getdre.com/dbt/).
+
+Website: [getdre.com](https://getdre.com).
 
 Status: under active development, before 1.0. A patch release never breaks a project; a minor
 release may, with release notes and a [migration guide](docs/migrating-to-0.2.md).

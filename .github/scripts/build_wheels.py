@@ -111,7 +111,8 @@ MAIN = "from dre_cli import main\n\nmain()\n"
 
 README = """# dre-cli
 
-[DRE](https://github.com/{repo}), the Declarative Reporting Engine: SQL in, formatted files out.
+[DRE](https://getdre.com), the Declarative Reporting Engine: reports as code. SQL and YAML in,
+formatted files out, delivered.
 DRE runs SQL reports and writes csv, delimited, fixed-width, parquet or xlsx files, then delivers
 them (S3, GCS, Azure Blob, SFTP/FTP, Databricks Volumes and workspace files, email, Slack).
 
@@ -159,9 +160,13 @@ def build(dre_version, plat, out_dir, dist=None, from_dir=None):
     metadata = f"""Metadata-Version: 2.1
 Name: {DIST_NAME}
 Version: {version}
-Summary: DRE, the Declarative Reporting Engine: SQL in, formatted files out
-Home-page: https://github.com/{REPO}
+Summary: DRE, reports as code: SQL and YAML in, Excel, CSV or fixed-width files out, delivered
+Home-page: https://getdre.com
+Project-URL: Homepage, https://getdre.com
+Project-URL: Documentation, https://getdre.com/docs/
 Project-URL: Source, https://github.com/{REPO}
+Project-URL: Changelog, https://github.com/{REPO}/releases
+Keywords: reports-as-code,reporting,sql,excel,xlsx,csv,fixed-width,report-automation
 License: GPL-3.0-only
 Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
 Classifier: Development Status :: 2 - Pre-Alpha
