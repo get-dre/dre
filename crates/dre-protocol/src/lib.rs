@@ -12,10 +12,12 @@
 //! - [`options`]: the options a plugin declares, and how they're checked.
 //! - [`conformance`]: checks any plugin binary against the protocol.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
+//! - [`markdown`]: the portable Markdown subset of messages, and its translations.
 
 pub mod conformance;
 pub mod frame;
 pub mod host;
+pub mod markdown;
 pub mod msg;
 pub mod options;
 pub mod plugin;

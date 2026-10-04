@@ -1215,7 +1215,8 @@ impl Loader {
             },
             None => format!("{what} must be a string, a locale such as `de-DE`"),
         };
-        self.diags.error("invalid-locale", Some(file.to_path_buf()), line, msg);
+        self.diags
+            .error("invalid-locale", Some(file.to_path_buf()), line, msg);
         None
     }
 
@@ -3209,6 +3210,14 @@ impl Loader {
                 );
             }
         }
+        for (i, o) in outputs.iter().enumerate() {
+            let octx = if several {
+                format!("{ctx}, {}", o.label(i))
+            } else {
+                ctx.to_string()
+            };
+            self.check_output_templates(o, &outputs, &octx, file, queries);
+        }
         for q in queries.iter().filter(|q| q.tab) {
             if !outputs.iter().any(|o| o.feeds(&q.query)) {
                 self.diags.warning(
@@ -3223,6 +3232,120 @@ impl Loader {
             }
         }
         outputs
+    }
+
+    /// A message output's options, and the templates of any output (`text`, `file`, `title`,
+    /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
+    /// another output. Only attribute access is checked; dynamic access isn't seen.
+    fn check_output_templates(
+        &mut self,
+        o: &Output,
+        all: &[Output],
+        ctx: &str,
+        file: &Path,
+        queries: &[QueryEntry],
+    ) {
+        let at = Some(file.to_path_buf());
+        let err = |s: &mut Self, msg: String| {
+            s.diags
+                .error("invalid-output-option", at.clone(), None, format!("{ctx}: {msg}"))
+        };
+        // (what, source) of every template to check.
+        let mut templates: Vec<(String, String)> = Vec::new();
+        if let Some(w) = &o.when {
+            templates.push(("`when`".into(), format!("{{% if {w} %}}{{% endif %}}")));
+        }
+        if o.is_message() {
+            for k in o.options.keys() {
+                if !crate::message::MESSAGE_KEYS.contains(&k.as_str()) {
+                    err(
+                        self,
+                        format!(
+                            "`{k}` isn't an option of the `message` format; its options are {}",
+                            crate::message::MESSAGE_KEYS.join(", ")
+                        ),
+                    );
+                }
+            }
+            if o.options.contains_key("text") && o.options.contains_key("file") {
+                err(self, "use either `text:` or `file:`, not both".into());
+            }
+            for k in ["text", "title"] {
+                match o.options.get(k) {
+                    None => {}
+                    Some(Json::String(t)) => templates.push((format!("`{k}`"), t.clone())),
+                    Some(_) => err(self, format!("`{k}` must be a string")),
+                }
+            }
+            match o.options.get("file") {
+                None => {}
+                Some(Json::String(f)) => {
+                    match [self.root.join(f), self.root.join("templates").join(f)]
+                        .iter()
+                        .find(|p| p.is_file())
+                        .map(std::fs::read_to_string)
+                    {
+                        Some(Ok(t)) => templates.push((format!("`file` {f}"), t)),
+                        Some(Err(e)) => err(self, format!("can't read message file `{f}`: {e}")),
+                        None => err(
+                            self,
+                            format!(
+                                "message file `{f}` doesn't exist (looked in the project root and templates/)"
+                            ),
+                        ),
+                    }
+                }
+                Some(_) => err(self, "`file` must be a path (a string)".into()),
+            }
+            match o.options.get("max_rows") {
+                None => {}
+                Some(v) if v.as_u64().is_some_and(|n| n > 0) => {}
+                Some(_) => err(self, "`max_rows` must be a positive whole number".into()),
+            }
+        }
+        let fed: Vec<&str> = queries
+            .iter()
+            .filter(|q| q.tab && o.feeds(&q.query))
+            .map(|q| q.query.as_str())
+            .collect();
+        for (what, src) in &templates {
+            if let Err((line, msg)) = preflight::check_syntax("output", src) {
+                let line = line.map(|l| format!(" (line {l})")).unwrap_or_default();
+                err(self, format!("{what} doesn't compile{line}: {msg}"));
+                continue;
+            }
+            for (name, _) in preflight::attributes(src, "results") {
+                if !fed.contains(&name.as_str()) {
+                    err(
+                        self,
+                        format!(
+                            "{what} reads `results.{name}`, but `{name}` isn't one of this output's queries ({})",
+                            if fed.is_empty() {
+                                "none".to_string()
+                            } else {
+                                fed.join(", ")
+                            }
+                        ),
+                    );
+                }
+            }
+            for (name, _) in preflight::attributes(src, "outputs") {
+                let other = all.iter().find(|x| x.name.as_deref() == Some(name.as_str()));
+                match other {
+                    None => err(
+                        self,
+                        format!(
+                            "{what} reads `outputs.{name}`, but no output of this report is named `{name}`"
+                        ),
+                    ),
+                    Some(x) if std::ptr::eq(x, o) => err(
+                        self,
+                        format!("{what} reads `outputs.{name}`, which is this output itself"),
+                    ),
+                    Some(_) => {}
+                }
+            }
+        }
     }
 
     /// Convert a merged output map into a typed `Output`, validating options and references.
@@ -3241,7 +3364,10 @@ impl Loader {
             .and_then(Value::as_str)
             .unwrap_or("csv")
             .to_string();
-        used.format(&format, ctx, &file_path);
+        // `message` is built in; every other format is a plugin.
+        if format != MESSAGE_FORMAT {
+            used.format(&format, ctx, &file_path);
+        }
         let mut opts = JsonMap::new();
         for (k, v) in m {
             let Some(k) = k.as_str() else { continue };

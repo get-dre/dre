@@ -8,6 +8,7 @@ pub mod lock;
 pub mod lookups;
 pub mod manager;
 pub mod manifest;
+pub mod message;
 mod mutable;
 pub mod numbers;
 pub mod occurrences;

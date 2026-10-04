@@ -92,7 +92,11 @@ impl Locale {
                 .is_none_or(|r| (2..=3).contains(&r.len()) && r.chars().all(|c| c.is_ascii_alphanumeric()))
             && parts.next().is_none();
         let unknown = || {
-            let langs: Vec<&str> = LOCALES.iter().map(|l| l.tag).filter(|t| !t.contains('-')).collect();
+            let langs: Vec<&str> = LOCALES
+                .iter()
+                .map(|l| l.tag)
+                .filter(|t| !t.contains('-'))
+                .collect();
             format!(
                 "unknown locale `{tag}`; use a language DRE knows ({}), optionally with a region (`de-DE`)",
                 langs.join(", ")
@@ -106,7 +110,11 @@ impl Locale {
         {
             return Ok(*l);
         }
-        LOCALES.iter().find(|l| l.tag == lang).copied().ok_or_else(unknown)
+        LOCALES
+            .iter()
+            .find(|l| l.tag == lang)
+            .copied()
+            .ok_or_else(unknown)
     }
 
     /// `x` rounded half away from zero to `decimals` places, with group and decimal separators.
@@ -283,7 +291,9 @@ pub fn register(env: &mut Environment<'static>, locale: Locale) {
             if code.len() != 3 || !code.chars().all(|c| c.is_ascii_uppercase()) {
                 return Err(Error::new(
                     ErrorKind::InvalidOperation,
-                    format!("`currency('{code}')`: the code must be three capital letters (ISO 4217), like `EUR`"),
+                    format!(
+                        "`currency('{code}')`: the code must be three capital letters (ISO 4217), like `EUR`"
+                    ),
                 ));
             }
             Ok(to_number("currency", &v)?.map_or_else(String::new, |x| locale.currency(x, &code, d)))

@@ -553,6 +553,25 @@ impl Ui for Printer {
         }
     }
 
+    fn message(&mut self, m: &dre_core::run::ShownMessage) {
+        let mut i = self.inner.lock().unwrap();
+        i.file_log("INFO", &format!("Message {}\n{}", m.title, m.text));
+        if i.format == LogFormat::Json {
+            i.json(json!({"event": "message", "message": m}));
+            return;
+        }
+        let head = match &m.output {
+            Some(n) => format!("{} (output `{n}`)", m.title),
+            None => m.title.clone(),
+        };
+        i.print(Tone::Good, "Message", &head);
+        let body: String = m.text.lines().map(|l| format!("  {l}\n")).collect();
+        i.print(Tone::Note, "", &format!("\n{}", body.trim_end()));
+        for n in &m.notes {
+            i.print(Tone::Note, "Note", n);
+        }
+    }
+
     fn binding_end(&mut self, o: &BindingOutcome) {
         let mut i = self.inner.lock().unwrap();
         let name = label(&o.report, o.set.as_deref());

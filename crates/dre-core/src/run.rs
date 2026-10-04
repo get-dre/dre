@@ -24,6 +24,7 @@ use serde_json::{Map as JsonMap, Value as Json, json};
 
 use crate::dates::Calendar;
 use crate::lookups::Table;
+use crate::message::QueryResult;
 use crate::parse::ParsedBinding;
 use crate::profiles::{Entry, LOCAL_TYPE, ProfileTarget, Profiles, Role};
 use crate::project::{Binding, PluginKind, Project, QueryEntry, Report};
@@ -118,6 +119,8 @@ pub trait Ui {
     fn binding_end(&mut self, _outcome: &BindingOutcome) {}
     /// A Binding was compiled (`--dry-run`, `dre compile`, `dre validate`): what it would do.
     fn compiled(&mut self, _plan: &BindingPlan) {}
+    /// `--preview`: a rendered message, shown instead of sent.
+    fn message(&mut self, _message: &ShownMessage) {}
     /// Ask which Set to run; `None` means "all".
     fn choose_set(&mut self, report: &str, sets: &[String]) -> Result<Option<String>, String>;
     /// Where plugin stderr goes.
@@ -126,6 +129,18 @@ pub trait Ui {
     fn sql_log(&self) -> LogSink {
         Arc::new(|_, _| {})
     }
+}
+
+/// A message `--preview` shows.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShownMessage {
+    /// The output's `name:`.
+    pub output: Option<String>,
+    pub title: String,
+    /// Portable Markdown.
+    pub text: String,
+    /// Length, the row sample, `when:` and each destination's limit.
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -677,6 +692,10 @@ struct OutputRun {
     /// `delivered`, `kept` (stays in the target path), `skipped` or `failed`; empty until done.
     status: &'static str,
     error: Option<String>,
+    /// The result of its `when:`, once evaluated.
+    when: Option<bool>,
+    /// A message output's rendered title and text.
+    message: Option<(String, String)>,
 }
 
 /// A destination entry after rendering.
@@ -1039,8 +1058,13 @@ impl<'a> BindingRun<'a> {
 
         self.name_result_sets()?;
 
-        // 5. Format every output into target/run/.
-        for oi in 0..self.outs.len() {
+        // 5. Format every file output into target/run/; one whose `when:` is false is skipped.
+        let (file_outs, message_outs): (Vec<usize>, Vec<usize>) =
+            (0..self.outs.len()).partition(|&i| !self.b.outputs[i].is_message());
+        for &oi in &file_outs {
+            if !self.passes_when(oi)? {
+                continue;
+            }
             let filename = self.file_names(oi);
             self.format(oi, &filename)?;
         }
@@ -1064,12 +1088,35 @@ impl<'a> BindingRun<'a> {
             }
         }
 
-        // 6. Deliver, output by output. A failed output doesn't stop the next one.
-        if self.opts.preview.is_some() {
-            for o in &mut self.outs {
-                o.delivery_note = Some("preview: not delivered".into());
-                o.status = "kept";
+        // 6. Deliver the file outputs, then render and deliver each message, so a message can
+        // link to what was delivered. A failed output doesn't stop the next one.
+        let preview = self.opts.preview.is_some();
+        let mut failures = Vec::new();
+        for oi in file_outs.into_iter().chain(message_outs) {
+            if self.outs[oi].status == "skipped" {
+                continue;
             }
+            if self.b.outputs[oi].is_message() {
+                match self.render_message(oi) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        let e = format!("{}: {e}", self.b.outputs[oi].label(oi));
+                        self.outs[oi].status = "failed";
+                        self.outs[oi].error = Some(e.clone());
+                        failures.push(e);
+                        continue;
+                    }
+                }
+            }
+            if preview {
+                self.outs[oi].delivery_note = Some("preview: not delivered".into());
+                self.outs[oi].status = "kept";
+            } else if let Err(e) = self.deliver(oi) {
+                failures.push(e);
+            }
+        }
+        if preview {
             let dir = rel(&self.project.root, &self.run_dir);
             self.ui.step(
                 Level::Info,
@@ -1077,16 +1124,9 @@ impl<'a> BindingRun<'a> {
                 &format!("not delivered; output stays in {}", dir.display()),
                 None,
             );
-        } else {
-            let mut failures = Vec::new();
-            for oi in 0..self.outs.len() {
-                if let Err(e) = self.deliver(oi) {
-                    failures.push(e);
-                }
-            }
-            if !failures.is_empty() {
-                return Err(failures.join("; "));
-            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("; "));
         }
 
         // 7. Snapshot the schema for the next drift check.
@@ -1098,6 +1138,195 @@ impl<'a> BindingRun<'a> {
             ));
         }
         Ok(())
+    }
+
+    /// Output `oi`'s queries' results, `rows` capped at `max_rows`.
+    fn results_for(&mut self, oi: usize, max_rows: u64) -> Result<Vec<(String, Arc<QueryResult>)>, Fail> {
+        let o = &self.b.outputs[oi];
+        let mut out = Vec::new();
+        for p in self.produced.iter().filter(|p| o.feeds(&p.query)) {
+            let r = QueryResult::read(&p.spool, p.rows, max_rows, self.calendar)
+                .map_err(|e| format!("can't read the result of `{}`: {e}", p.query))?;
+            out.push((p.query.clone(), Arc::new(r)));
+        }
+        Ok(out)
+    }
+
+    /// What output `oi`'s templates read besides the usual context: `results` and `outputs`
+    /// (every other named output: `location`, `files` and `status`).
+    fn template_context(&self, oi: usize, results: &[(String, Arc<QueryResult>)]) -> minijinja::Value {
+        use minijinja::Value;
+        let results: BTreeMap<String, Value> = results
+            .iter()
+            .map(|(q, r)| (q.clone(), r.clone().value()))
+            .collect();
+        let mut outputs: BTreeMap<String, Value> = BTreeMap::new();
+        for (j, (o, run)) in self.b.outputs.iter().zip(&self.outs).enumerate() {
+            let Some(name) = &o.name else { continue };
+            if j == oi {
+                continue;
+            }
+            let locations: Vec<&str> = run
+                .deliveries
+                .iter()
+                .filter_map(|d| d.get("location").and_then(Json::as_str))
+                .collect();
+            let files: Vec<String> = run
+                .files
+                .iter()
+                .map(|(f, _)| record_path(self.project, f).to_string_lossy().to_string())
+                .collect();
+            let status = match run.status {
+                "" => "pending",
+                s => s,
+            };
+            outputs.insert(
+                name.clone(),
+                Value::from_serialize(json!({
+                    "location": locations.join(", "),
+                    "files": files,
+                    "status": status,
+                })),
+            );
+        }
+        Value::from(BTreeMap::from([
+            ("results".to_string(), Value::from(results)),
+            ("outputs".to_string(), Value::from(outputs)),
+        ]))
+    }
+
+    /// Evaluate output `oi`'s `when:`. False: the output is skipped (recorded, not a failure).
+    fn passes_when(&mut self, oi: usize) -> Result<bool, Fail> {
+        let Some(when) = self.b.outputs[oi].when.clone() else {
+            return Ok(true);
+        };
+        let results = self.results_for(oi, crate::message::DEFAULT_MAX_ROWS)?;
+        let ctx = self.template_context(oi, &results);
+        let renderer = self.renderer(None)?;
+        let label = self.b.outputs[oi].label(oi);
+        let src = format!("{{% if {when} %}}true{{% endif %}}");
+        let passed = renderer
+            .render_with(&self.report.file, &src, ctx, false)
+            .map_err(|e| format!("{label}: `when` `{when}`: {}", e.message))?
+            == "true";
+        self.outs[oi].when = Some(passed);
+        if !passed {
+            self.skip(oi, &format!("`when` is false ({when})"));
+        }
+        Ok(passed)
+    }
+
+    fn skip(&mut self, oi: usize, why: &str) {
+        let label = self.b.outputs[oi].label(oi);
+        self.outs[oi].status = "skipped";
+        self.outs[oi].delivery_note = Some(format!("skipped: {why}"));
+        self.ui
+            .step(Level::Info, "Skipped", &format!("{label}: {why}"), None);
+    }
+
+    /// Render message output `oi` and write its `.md` file. `Ok(false)`: skipped (`when:` false,
+    /// or the text rendered empty).
+    fn render_message(&mut self, oi: usize) -> Result<bool, Fail> {
+        let o = &self.b.outputs[oi];
+        let opt = |k: &str| o.options.get(k).and_then(Json::as_str).map(str::to_string);
+        let (text_src, file_src, title_src) = (opt("text"), opt("file"), opt("title"));
+        let max_rows = o
+            .options
+            .get("max_rows")
+            .and_then(Json::as_u64)
+            .unwrap_or(crate::message::DEFAULT_MAX_ROWS);
+        if !self.passes_when(oi)? {
+            return Ok(false);
+        }
+        let results = self.results_for(oi, max_rows)?;
+        for (q, r) in results.iter().filter(|(_, r)| r.capped()) {
+            self.ui.warn(&format!(
+                "  results.{q}.rows holds the first {} of {} rows (`max_rows`); aggregate in SQL, or raise `max_rows`",
+                thousands(r.rows.len() as u64),
+                thousands(r.row_count)
+            ));
+        }
+        let ctx = self.template_context(oi, &results);
+        let renderer = self.renderer(None)?;
+        let file = self.report.file.clone();
+        let text = match (text_src, file_src) {
+            (Some(t), _) => renderer
+                .render_with(&file, &t, ctx.clone(), true)
+                .map_err(|e| e.message)?,
+            (None, Some(f)) => {
+                let root = &self.project.root;
+                let path = [root.join(&f), root.join("templates").join(&f)]
+                    .into_iter()
+                    .find(|p| p.is_file())
+                    .ok_or_else(|| format!("message file `{f}` doesn't exist"))?;
+                let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                let shown = rel(root, &path);
+                renderer
+                    .render_with(&shown, &src, ctx.clone(), true)
+                    .map_err(|e| e.to_string())?
+            }
+            (None, None) => crate::message::default_text(&results, self.locale()),
+        };
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            self.skip(oi, "the message is empty");
+            return Ok(false);
+        }
+        let title = match title_src {
+            Some(t) => renderer
+                .render_with(&file, &t, ctx, false)
+                .map_err(|e| e.message)?,
+            None => format!("{}: {}", self.report.name, self.date),
+        };
+        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+        let name = self.file_names(oi);
+        let path = self.run_dir.join(&name);
+        if let Some(prev) = (0..oi).find(|&j| self.outs[j].files.iter().any(|(f, _)| f == &path)) {
+            return Err(format!(
+                "it writes {name}, as {} does; give them different `name:`s",
+                self.b.outputs[prev].label(prev)
+            ));
+        }
+        std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
+        std::fs::write(&path, crate::message::file_body(&title, &text)).map_err(|e| e.to_string())?;
+        self.outs[oi].files.push((path, None));
+        if self.opts.preview.is_some() {
+            let mut notes = Vec::new();
+            if let Some(n) = self.opts.preview {
+                notes.push(format!(
+                    "numbers come from a sample of at most {} rows per query (--preview)",
+                    thousands(n)
+                ));
+            }
+            if let Some(w) = &self.b.outputs[oi].when {
+                notes.push(format!("`when` passed ({w})"));
+            }
+            notes.push(format!("{} characters", text.chars().count()));
+            self.ui.message(&ShownMessage {
+                output: self.b.outputs[oi].name.clone(),
+                title: title.clone(),
+                text: text.clone(),
+                notes,
+            });
+        } else {
+            self.ui.step(
+                Level::Info,
+                "Message",
+                &crate::message::excerpt(&title, &text, 100),
+                None,
+            );
+        }
+        self.outs[oi].message = Some((title, text));
+        Ok(true)
+    }
+
+    /// The Binding's locale for the number filters.
+    fn locale(&self) -> crate::numbers::Locale {
+        self.b
+            .locale
+            .as_deref()
+            .and_then(|l| crate::numbers::Locale::parse(l).ok())
+            .unwrap_or_default()
     }
 
     /// Render one query file into its statements, writing it to `target/compiled/`.
@@ -1897,7 +2126,7 @@ impl<'a> BindingRun<'a> {
                 ("", _) => "kept",
                 (s, _) => s,
             };
-            output_results.push(json!({
+            let mut record = json!({
                 "name": o.name,
                 "format": o.format,
                 "queries": queries,
@@ -1906,7 +2135,14 @@ impl<'a> BindingRun<'a> {
                 "files": files,
                 "delivery": run.delivery_note,
                 "deliveries": run.deliveries,
-            }));
+            });
+            if let Some(w) = run.when {
+                record["when"] = json!(w);
+            }
+            if let Some((title, text)) = &run.message {
+                record["message"] = json!({"title": title, "text": text});
+            }
+            output_results.push(record);
         }
         let deliveries: Vec<&Json> = self.outs.iter().flat_map(|o| o.deliveries.iter()).collect();
         let notes: Vec<&str> = self
@@ -2642,6 +2878,7 @@ fn is_single_table(format: &str) -> bool {
 fn extension(format: &str) -> &str {
     match format {
         "delimited" | "fixed_width" => "txt",
+        crate::project::MESSAGE_FORMAT => "md",
         f => f,
     }
 }

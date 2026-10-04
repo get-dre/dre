@@ -360,6 +360,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](#fixed-width-columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](#xlsx-column-formats)), `totals_label` (see [xlsx formulas and totals rows](#xlsx-formulas-and-totals-rows)); per query `anchor`/`header`/`columns`; `template` |
+| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
 `""` for none. The file is written the same way; only its name changes.
@@ -385,6 +386,49 @@ Every format but xlsx also takes `extension`: the output file's extension (`aba`
   with one warning per column: numbers with more than 15 significant digits (large integers,
   wide decimals), numbers beyond Excel's range, and dates or timestamps before 1900-03-01 or
   after 9999-12-31 (as ISO text). Those values get no number format, and the warning says so.
+
+### The `message` format
+
+`message` is built into DRE. It renders the output's query results through Jinja into a short
+headline: a title, plus text in a small Markdown subset (`**bold**`, `*italic*` or `_italic_`,
+`` `code` ``, `[text](url)` and `- ` bullets; no headings or tables). Destinations that take
+messages post it natively; every other destination delivers it as a `.md` file, which is also
+written to the target path (`<report>.md`, or `<name>.md` for a named output; `extension:`
+changes the extension).
+
+| Option | Default | |
+|---|---|---|
+| `text` | the default template | The message, a Jinja template. |
+| `file` | | The message template in a file, relative to the project root or `templates/`. Not with `text`. |
+| `title` | `<report>: <run date>` | A Jinja template; the subject line of an email, the heading in chat. |
+| `max_rows` | `1000` | How many rows of each query `results.<query>.rows` holds. A warning says when it's reached; file outputs of the same query still get every row. |
+
+Templates read `results.<query>` for each of the output's queries:
+
+- `value`: the first column of the first row (`none` with no rows);
+- `first.<column>`: a column of the first row;
+- `rows`: the rows (at most `max_rows`), each readable as `row.<column>` or `row[0]`;
+- `row_count`: the true number of rows, even past `max_rows`;
+- `columns`: the column names;
+- `sets[n]`: a result set by index, each with the same fields. One `.sql` file makes one result set
+  (its last statement's), so `sets[0]` and `sets[-1]` are the query's result.
+
+Values keep their types: numbers stay numbers, dates and timestamps are DRE dates (`.strftime()`,
+`.yyyymmdd`, ...), nulls are `none`. Every value a template prints is escaped for Markdown, so a
+`*` or `_` in the data stays literal; `| safe` prints a value as written. The number filters
+(`number`, `percent`, `signed`, `currency`, `compact`; see [Templates](templates.md)) make values
+readable, and `var()`, `run.*` and macros work as in every template.
+
+With neither `text` nor `file`, the default template writes one block per query: a single value
+as `column: value`, one row as `column: value` lines, several rows as a list of at most ten,
+then `+ N more`. Numbers are written with `number` in the Binding's locale (two decimals unless
+whole).
+
+A message whose text renders empty (after trimming) is skipped, like an output whose `when:` is
+false: nothing is written or delivered, and `run_results.json` records it as `skipped`.
+`dre run --preview` prints each message (title, text, length, whether `when:` passed) and delivers
+nothing; numbers then come from the row sample. A real run logs one line per message, and
+`run_results.json` keeps the full title and text.
 
 ### xlsx column formats
 

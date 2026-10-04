@@ -126,6 +126,23 @@ pub fn called_names(src: &str) -> Vec<String> {
     out
 }
 
+/// `name.<attr>` and `name['attr']` inside Jinja blocks: the attributes a template reads from
+/// the global `name` (`results`, `outputs`), with their 1-based lines. Dynamic access isn't seen.
+pub fn attributes(src: &str, name: &str) -> Vec<(String, usize)> {
+    let re = Regex::new(&format!(
+        r#"(?:^|[^\w.]){name}\s*(?:\.\s*([A-Za-z_]\w*)|\[\s*['"]([^'"]+)['"]\s*\])"#
+    ))
+    .expect("a valid pattern");
+    let mut out = Vec::new();
+    for seg in SEGMENT.find_iter(src) {
+        for c in re.captures_iter(seg.as_str()) {
+            let m = c.get(1).or_else(|| c.get(2)).unwrap();
+            out.push((m.as_str().to_string(), line_at(src, seg.start() + m.start())));
+        }
+    }
+    out
+}
+
 /// Whether a string contains Jinja at all.
 pub fn is_templated(s: &str) -> bool {
     s.contains("{{") || s.contains("{%")
