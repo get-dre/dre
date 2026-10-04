@@ -3,8 +3,8 @@ name: dre-run
 description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed.
 license: GPL-3.0-only
 metadata:
-  version: "2.2.0"
-  dre: ">=0.2.1, <0.3.0"
+  version: "2.3.0"
+  dre: ">=0.2.1, <0.4.0"
 ---
 
 # Run, check and deliver DRE reports
@@ -129,6 +129,11 @@ row limit and writes the output to `target/run/`, and **never delivers**. It's s
 without asking, unless a connection reads a production entry (its own `target: prod`, or
 `--target prod`).
 
+For a report with a `message` output, the preview prints each message: its title and text, its
+length against each destination's limit, and whether `when:` passed. Read it with the user before
+anything is posted (RUN-6); its numbers come from the row sample, so totals can be lower than a
+full run's.
+
 ### Step 5: look at the output
 
 List what it wrote under `target/run/` and check it against what the user asked for:
@@ -166,7 +171,9 @@ destination's entry for this target `{deliver: false}`.
 The summary shows each Binding's status and each delivery's. `target/run_results.json` has the
 detail (`deliveries` with `target`, `status` and `location`; `not_delivered` is a
 `{deliver: false}` entry, not a failure), and `logs/dre.log` the full SQL of every statement.
-Report what was delivered where, what delivered nowhere on purpose, and what failed.
+Report what was delivered where, what delivered nowhere on purpose, and what failed. With
+several outputs, `output_results` has one entry per output: `skipped` (its `when:` was false, or
+its message rendered empty) is not a failure, and a message's entry holds the full text it sent.
 
 End with what ran and what's next: fixing a failure, or scheduling (`dre run --schedule <name>`
 from the user's orchestrator, with `DRE_RUN_AT` for the instant it was scheduled for, RUN-3; a

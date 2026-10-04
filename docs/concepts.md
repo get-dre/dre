@@ -40,6 +40,10 @@ sidebar:
 - **Delivery**: one output can go to several destinations in a single run, e.g. object storage
   (S3, GCS, Azure Blob), SFTP/FTP, Databricks Volumes or workspace files, an email with the file
   attached, or a Slack channel. See [plugins](plugins.md).
+- **Outputs and messages**: a report can have several outputs (`output:` as a list), all made
+  from one run of its queries, each from its own `queries:`. A `message` output turns the results
+  into a short headline posted to Slack, Teams, Google Chat or an email body; `when:` sends an
+  output only when the data calls for it. See [messages](messages.md).
 - **Logs**: every run appends to `logs/dre.log` in the project, including the full SQL of each
   statement sent to the database (report queries, `run_query()`, lookup loads). The file rotates
   every 10,000 lines, keeping `dre.log.1` to `dre.log.5`.

@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "dre-cli"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "dre-core"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1810,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-email"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dre-protocol",
  "lettre",
@@ -1842,6 +1842,16 @@ dependencies = [
  "serde_json",
  "suppaftp",
  "tempfile",
+]
+
+[[package]]
+name = "dre-plugin-google_chat"
+version = "1.0.0-rc.1"
+dependencies = [
+ "dre-protocol",
+ "serde_json",
+ "tempfile",
+ "ureq",
 ]
 
 [[package]]
@@ -1909,10 +1919,20 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-slack"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dre-protocol",
  "form_urlencoded",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
+name = "dre-plugin-teams"
+version = "1.0.0-rc.1"
+dependencies = [
+ "dre-protocol",
  "serde_json",
  "tempfile",
  "ureq",
@@ -1936,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "serde",

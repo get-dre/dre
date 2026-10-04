@@ -55,6 +55,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/daily/default/daily.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/daily/default/daily.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     }
   ],
@@ -90,6 +98,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

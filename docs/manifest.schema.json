@@ -125,7 +125,7 @@
     },
     "binding": {
       "type": "object",
-      "required": ["set", "profile", "vars", "queries", "output", "destinations", "schedules"],
+      "required": ["set", "profile", "vars", "queries", "output", "destinations", "outputs", "schedules"],
       "properties": {
         "set": {"type": ["string", "null"], "description": "Null for a report without Sets."},
         "profile": {
@@ -136,6 +136,7 @@
         "queries": {"type": "array", "items": {"$ref": "#/$defs/query"}},
         "output": {
           "type": "object",
+          "description": "The first output; every output is under `outputs`.",
           "required": ["format", "options"],
           "properties": {
             "format": {"type": "string"},
@@ -146,17 +147,37 @@
         },
         "destinations": {
           "type": "array",
-          "description": "In delivery order.",
+          "description": "Every output's destinations, in delivery order.",
+          "items": {"$ref": "#/$defs/destination"}
+        },
+        "outputs": {
+          "type": "array",
+          "description": "Every output, in declared order.",
           "items": {
             "type": "object",
-            "required": ["profile"],
+            "required": ["format", "options", "destinations"],
             "properties": {
-              "profile": {"type": "string", "description": "The destination profile, rendered."},
-              "path": {"type": "string", "description": "The path template, unrendered."}
+              "name": {"type": "string", "description": "The output's `name:`."},
+              "format": {"type": "string"},
+              "queries": {"type": "array", "items": {"type": "string"}, "description": "The queries it formats; absent means all of them."},
+              "when": {"type": "string", "description": "The `when:` condition, unrendered."},
+              "options": {"type": "object"},
+              "extension": {"type": "string"},
+              "template": {"$ref": "#/$defs/path", "description": "The template file, as declared."},
+              "destinations": {"type": "array", "description": "In delivery order.", "items": {"$ref": "#/$defs/destination"}}
             }
           }
         },
         "schedules": {"type": "array", "items": {"type": "string"}, "description": "The schedules that run this Binding."}
+      }
+    },
+    "destination": {
+      "type": "object",
+      "required": ["profile"],
+      "properties": {
+        "profile": {"type": "string", "description": "The destination profile, rendered."},
+        "path": {"type": "string", "description": "The path template, unrendered."},
+        "attach": {"type": "array", "items": {"type": "string"}, "description": "A message output's entry: the outputs whose files go with the message."}
       }
     },
     "schedule": {

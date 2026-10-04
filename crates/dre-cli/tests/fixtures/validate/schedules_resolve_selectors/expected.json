@@ -49,6 +49,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/fin_monthly/default/fin_monthly.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/fin_monthly/default/fin_monthly.csv",
+          "destinations": []
+        }
+      ],
       "schedules": [
         "finance_monthly"
       ]
@@ -72,6 +80,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/ops_monthly/default/ops_monthly.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/ops_monthly/default/ops_monthly.csv",
+          "destinations": []
+        }
+      ],
       "schedules": [
         "ops_tag_monthly",
         "ops_every_5_days",
@@ -111,6 +127,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -162,6 +185,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

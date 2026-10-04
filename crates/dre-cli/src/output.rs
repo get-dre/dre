@@ -221,24 +221,26 @@ impl Printer {
                 &format!("{} on {} ({}){target}{sources}", q.query, q.connection, q.kind),
             );
         }
-        i.print(
-            Tone::Note,
-            "Output",
-            &format!("{} ({})", p.output.display(), p.format),
-        );
-        for d in &p.destinations {
-            let target = d.target.clone().unwrap_or_default();
-            let what = match (&d.kind, &d.path) {
-                (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
-                (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
-                (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
+        for o in &p.outputs {
+            let what = match &o.name {
+                Some(n) => format!("{} ({}, output `{n}`)", o.output.display(), o.format),
+                None => format!("{} ({})", o.output.display(), o.format),
             };
-            let tone = if d.delivers && non_dev(&target) {
-                Tone::Warn
-            } else {
-                Tone::Note
-            };
-            i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+            i.print(Tone::Note, "Output", &what);
+            for d in &o.destinations {
+                let target = d.target.clone().unwrap_or_default();
+                let what = match (&d.kind, &d.path) {
+                    (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
+                    (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
+                    (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
+                };
+                let tone = if d.delivers && non_dev(&target) {
+                    Tone::Warn
+                } else {
+                    Tone::Note
+                };
+                i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+            }
         }
         if !p.schedules.is_empty() {
             i.print(Tone::Note, "Schedules", &p.schedules.join(", "));
@@ -551,6 +553,25 @@ impl Ui for Printer {
         }
     }
 
+    fn message(&mut self, m: &dre_core::run::ShownMessage) {
+        let mut i = self.inner.lock().unwrap();
+        i.file_log("INFO", &format!("Message {}\n{}", m.title, m.text));
+        if i.format == LogFormat::Json {
+            i.json(json!({"event": "message", "message": m}));
+            return;
+        }
+        let head = match &m.output {
+            Some(n) => format!("{} (output `{n}`)", m.title),
+            None => m.title.clone(),
+        };
+        i.print(Tone::Good, "Message", &head);
+        let body: String = m.text.lines().map(|l| format!("  {l}\n")).collect();
+        i.print(Tone::Note, "", &format!("\n{}", body.trim_end()));
+        for n in &m.notes {
+            i.print(Tone::Note, "Note", n);
+        }
+    }
+
     fn binding_end(&mut self, o: &BindingOutcome) {
         let mut i = self.inner.lock().unwrap();
         let name = label(&o.report, o.set.as_deref());
@@ -647,6 +668,11 @@ impl Ui for Printer {
             // `info: ...` lines are for the person (e.g. waiting for a warehouse to start).
             if let Some(msg) = line.strip_prefix("info: ") {
                 i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
+                return;
+            }
+            // `warning: ...` lines are too (a message cut short to fit the service).
+            if let Some(msg) = line.strip_prefix("warning: ") {
+                i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
                 return;
             }
             i.file_log("DEBUG", &format!("[{plugin}] {line}"));

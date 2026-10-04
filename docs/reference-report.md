@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.2/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.3/report.schema.json
 ```
 
 ## Keys
@@ -26,12 +26,13 @@ For editor autocomplete and validation, add this as the first line of the file (
 | `name` | string |  | The report's name. Default: the name of the folder the YAML file is in. Report names are unique across the project. |
 | `tags` | list of string |  | Tags to select the report with, `-s tag:<tag>`. |
 | `queries` | list of string or map (see below) |  | The `.sql` files whose results make the report's tabs, in the order they run, on one database session. |
-| `output` | map (see below) |  | How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`); they are documented with the plugins. |
+| `output` | map (see below) or list of map (see below) |  | One output, or a list of outputs formatted from the same run of the queries (file outputs are delivered before messages). A list replaces the inherited output; a map changes it. |
 | `profile` | string |  | The connection (in `profiles.yml`) the queries run on, unless a query's own `profile:` or a source's says otherwise. Default: the folder's `+profile`, then `default_profile`. Can't be combined with `sets`. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `sets` | list of string or map (see below) |  | The Sets the report can run as, by name (declared in `sets.yml`) or declared here. |
 | `default_set` | string |  | The Set a plain `dre run` uses. Must be one of `sets`. |
 | `vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
+| `locale` | string |  | The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`. |
 | `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
 | `sources` | map, as in [the sources reference](reference-sources.md) |  | dbt-style source declarations (see the sources schema). May be written in any project YAML file. |
 
@@ -59,19 +60,22 @@ Settings for one column of an xlsx tab.
 | `formula` | string |  | An Excel formula for each row of this column; `{name}` stands for that column's cell on the same row, e.g. `=ROUND({qty}*{unit_price},2)`. The SQL selects a placeholder column where the formula goes. |
 | `total` | string |  | Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`. |
 
-## `output`
+## `output[]`
 
-How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`); they are documented with the plugins.
+How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`, `text` for `message`); they are documented with the formats.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `format` | string |  | The output format: `csv`, `delimited`, `fixed_width`, `parquet` or `xlsx` (each a plugin). Default: `csv`, or the project's `default_output`. |
+| `name` | string |  | Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report. |
+| `format` | string |  | The output format: `message` (built in: a short headline rendered from the results), or `csv`, `delimited`, `fixed_width`, `parquet` or `xlsx` (each a plugin). Default: `csv`, or the project's `default_output`. |
+| `queries` | list of string |  | Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs. |
+| `when` | string or boolean |  | A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. |
 | `destination` | map (see below) or list of map (see below) |  | Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. |
 | `template` | map (see below) |  | Fills a branded Excel workbook instead of creating a new one (xlsx only). |
 | `extension` | string or boolean or null |  | File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
-## `output.destination[]`
+## `output[].destination[]`
 
 Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). The built-in profile `local` copies the file to a local path.
 
@@ -79,9 +83,10 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 |---|---|---|---|
 | `profile` (required) | string |  | The destination profile in `profiles.yml` (under `destinations:`) to deliver with. `local` is built in. It uses its entry for the run (`--target`, `DRE_TARGET`, else the profile's own `target:`, else `dev`); a missing entry is an error, and an entry `{deliver: false}` delivers nowhere. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `path` | string |  | Where to put the file: a path, or a URL such as `s3://bucket/key`, depending on the destination. Rendered with Jinja, so it can use `var()`, `run.*`, macros and `destination.*` (this destination's settings). |
+| `attach` | string or list of string |  | On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
-## `output.template`
+## `output[].template`
 
 Fills a branded Excel workbook instead of creating a new one (xlsx only).
 
@@ -90,7 +95,7 @@ Fills a branded Excel workbook instead of creating a new one (xlsx only).
 | `file` (required) | string |  | Path of the `.xlsx` template, relative to the project. |
 | `bindings` | list of map (see below) |  | Where each query's data goes in the template. Default: none, so the template is copied as it is. |
 
-## `output.template.bindings[]`
+## `output[].template.bindings[]`
 
 One block of data in an xlsx template: a table of a query's result, or a single cell.
 
@@ -118,7 +123,8 @@ A Set declared in the report: a named variant of it.
 | `exclude` | list of string |  | Queries to leave out of this Set, by name. |
 | `queries` | list of string or map (see below) |  | Replaces the report's queries for this Set. |
 | `tab_names` | map |  | Renames tabs for this Set: query name to tab name. |
-| `output` | map (see below) |  | Output settings that replace or add to the report's for this Set. |
+| `output` | map (see below) or list of map (see below) |  | Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all. |
+| `locale` | string |  | The locale for this Set's number filters (`fr-FR`), above the report's. |
 
 ## `sets[].queries[]`
 

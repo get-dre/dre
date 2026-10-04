@@ -96,6 +96,8 @@ compares manifests should build both with the same target and vars.
           ],
           "output": {"format": "csv", "options": {}},
           "destinations": [{"profile": "inbox", "path": "out/monthly-{{ run.date.yyyymmdd }}.csv"}],
+          "outputs": [{"format": "csv", "options": {},
+                       "destinations": [{"profile": "inbox", "path": "out/monthly-{{ run.date.yyyymmdd }}.csv"}]}],
           "schedules": ["close_a"]
         }
       ]
@@ -143,9 +145,10 @@ compares manifests should build both with the same target and vars.
   (`depends_on.sources`), [checksum](#checksums), validity, and its Bindings.
 - **Each Binding**: its Set (`null` for a report without Sets), the inherited connection
   (rendered), fully merged vars, queries (each with the `connection` it runs on and
-  `depends_on.sources`, from the parse pass), output (format, options, extension, template
-  file), destinations in delivery order (rendered profile name and the path template,
-  unrendered), and the schedules that run it.
+  `depends_on.sources`, from the parse pass), `outputs` in declared order (name, format, the
+  queries it formats, `when`, options, extension, template file, and its destinations: rendered
+  profile name and the path template, unrendered), and the schedules that run it. `output` repeats
+  the first output and `destinations` lists every output's destinations, as before 0.3.
 - **`schedules`**, by name: the report or selector and Set it targets, its timing (`cron`,
   `every` or `rrule` with `starting`, `at`, `except` and `also`; a shared timing's fields, with its
   name in `timing`), whether it's `enabled`, its vars and timezone, and the Bindings it runs,
@@ -220,6 +223,15 @@ the target path when that's outside the project), each delivery (its profile, `t
 and `status`: `delivered`, `not_delivered` for a `{deliver: false}` entry, or `failed`), schema
 drift, the resolved
 `target_path`, and `manifest_checksum`: the SHA-256 of the `manifest.json` bytes that run wrote.
+
+With several outputs, `outputs` (every file) and `deliveries` (every destination) cover all of
+them, and each file names its `output`. `output_results` has one entry per output, in declared
+order: its `name`, `format`, the `queries` it formatted, its `status` (`delivered`, `kept` when
+it stays in the target path, `skipped` when its `when:` was false or its message rendered empty,
+or `failed`), any `error`, its `files`, `delivery` note and `deliveries`; `when` (true or false)
+when it has a `when:`; and for a message output, `message` with the full rendered `title` and
+`text` that were sent. A report's checksum covers a message output's `file:` template, like an
+xlsx template.
 
 ## Versioning
 

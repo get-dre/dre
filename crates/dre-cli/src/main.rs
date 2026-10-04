@@ -99,10 +99,10 @@ struct RunArgs {
     /// `default_profile`), e.g. for an ad hoc Set. A query's own `profile:` or a source's wins.
     #[arg(long)]
     profile: Option<String>,
-    /// Override the output file name for this run.
+    /// Override the output file name for this run (the first output, with several).
     #[arg(long)]
     output_name: Option<String>,
-    /// Override the full output (delivery) path for this run.
+    /// Override the full output (delivery) path for this run (the first output, with several).
     #[arg(long)]
     output_path: Option<String>,
     /// Render SQL into target/compiled/ and stop; no report query is executed.

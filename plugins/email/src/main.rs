@@ -5,17 +5,22 @@
 //! `tls_accept_invalid_certs`. Destination options (the report's `output.destination` entry):
 //! `to`, `cc`, `bcc`, `subject`, `body`, `attachment_name`. An option replaces the profile's
 //! default of the same name.
+//!
+//! A message (a `message` output) is the email's body: HTML with a plain-text alternative (its
+//! `html` when core sends one, else its text converted), the subject `subject:` else its title,
+//! and any `attach:` files as attachments under the same size limit.
 
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use dre_protocol::CAP_MULTI_FILE;
+use dre_protocol::markdown;
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::options::{OptionField, OptionType, is_template};
 use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_bool, conn_required, conn_str, serve_destination,
 };
+use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE};
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
@@ -87,8 +92,18 @@ impl Destination for Email {
             .collect()
     }
 
+    fn deliver_message(&mut self, d: &Delivery, m: &dre_protocol::msg::Message) -> Result<String> {
+        self.send(d, Some(m))
+    }
+
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
-        let plan = Plan::new(d)?;
+        self.send(d, None)
+    }
+}
+
+impl Email {
+    fn send(&self, d: &Delivery, m: Option<&dre_protocol::msg::Message>) -> Result<String> {
+        let plan = Plan::new(d, m)?;
         let message = plan.message()?;
         let message_id = message
             .headers()
@@ -113,11 +128,13 @@ struct Plan {
     bcc: Vec<Mailbox>,
     subject: String,
     body: String,
+    /// A message's HTML body, sent with `body` as its plain-text alternative.
+    html: Option<String>,
     attachments: Vec<(String, Vec<u8>)>,
 }
 
 impl Plan {
-    fn new(d: &Delivery) -> Result<Plan> {
+    fn new(d: &Delivery, m: Option<&dre_protocol::msg::Message>) -> Result<Plan> {
         let c = &d.connection;
         let o = &d.options;
         let from = parse_mailbox(conn_required(c, "from")?, "from")?;
@@ -174,8 +191,27 @@ impl Plan {
             attachments.push((name.clone(), bytes));
         }
 
-        let subject = option_str(o, "subject")?.unwrap_or_else(|| format!("Report: {}", names.join(", ")));
-        let body = option_str(o, "body")?.unwrap_or_else(|| format!("Attached: {}\n", names.join(", ")));
+        let (subject, body, html) = match m {
+            Some(m) => {
+                if o.contains_key("body") {
+                    eprintln!("warning: `body` doesn't apply to a message output: the message is the body");
+                }
+                let html = m
+                    .html
+                    .clone()
+                    .unwrap_or_else(|| html_page(&m.title, &markdown::to_html(&m.text)));
+                (
+                    option_str(o, "subject")?.unwrap_or_else(|| m.title.clone()),
+                    format!("{}\n", markdown::to_plain(&m.text)),
+                    Some(html),
+                )
+            }
+            None => (
+                option_str(o, "subject")?.unwrap_or_else(|| format!("Report: {}", names.join(", "))),
+                option_str(o, "body")?.unwrap_or_else(|| format!("Attached: {}\n", names.join(", "))),
+                None,
+            ),
+        };
         Ok(Plan {
             from,
             to,
@@ -183,6 +219,7 @@ impl Plan {
             bcc,
             subject,
             body,
+            html,
             attachments,
         })
     }
@@ -205,13 +242,25 @@ impl Plan {
         for m in &self.bcc {
             b = b.bcc(m.clone());
         }
-        let mut parts = MultiPart::mixed().singlepart(SinglePart::plain(self.body.clone()));
-        for (name, bytes) in &self.attachments {
-            let ct = ContentType::parse(content_type(name)).expect("valid content type");
-            parts = parts.singlepart(Attachment::new(name.clone()).body(bytes.clone(), ct));
-        }
-        Ok(b.multipart(parts)
-            .map_err(|e| format!("can't build the email: {e}"))?)
+        let built = match &self.html {
+            // A message with nothing attached: just HTML with a plain-text alternative.
+            Some(html) if self.attachments.is_empty() => {
+                b.multipart(MultiPart::alternative_plain_html(self.body.clone(), html.clone()))
+            }
+            _ => {
+                let mut parts = match &self.html {
+                    Some(html) => MultiPart::mixed()
+                        .multipart(MultiPart::alternative_plain_html(self.body.clone(), html.clone())),
+                    None => MultiPart::mixed().singlepart(SinglePart::plain(self.body.clone())),
+                };
+                for (name, bytes) in &self.attachments {
+                    let ct = ContentType::parse(content_type(name)).expect("valid content type");
+                    parts = parts.singlepart(Attachment::new(name.clone()).body(bytes.clone(), ct));
+                }
+                b.multipart(parts)
+            }
+        };
+        Ok(built.map_err(|e| format!("can't build the email: {e}"))?)
     }
 }
 
@@ -330,6 +379,14 @@ fn parse_mailbox(s: &str, field: &str) -> Result<Mailbox> {
         .map_err(|e| format!("`{field}`: `{s}` isn't a valid email address ({e})").into())
 }
 
+/// A message's HTML fragment as a complete, plainly styled page.
+fn html_page(title: &str, body: &str) -> String {
+    let title = markdown::html_escape(title);
+    format!(
+        "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{title}</title></head>\n<body style=\"font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.5;\">\n{body}</body></html>\n"
+    )
+}
+
 fn file_name(p: &Path) -> String {
     p.file_name().unwrap_or_default().to_string_lossy().to_string()
 }
@@ -348,7 +405,7 @@ fn content_type(name: &str) -> &'static str {
 
 fn main() {
     serve_destination(
-        About::new("email", env!("CARGO_PKG_VERSION")).capabilities(&[CAP_MULTI_FILE]),
+        About::new("email", env!("CARGO_PKG_VERSION")).capabilities(&[CAP_MULTI_FILE, CAP_MESSAGE]),
         Email,
     )
 }

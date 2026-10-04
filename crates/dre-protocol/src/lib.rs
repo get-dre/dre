@@ -12,10 +12,12 @@
 //! - [`options`]: the options a plugin declares, and how they're checked.
 //! - [`conformance`]: checks any plugin binary against the protocol.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
+//! - [`markdown`]: the portable Markdown subset of messages, and its translations.
 
 pub mod conformance;
 pub mod frame;
 pub mod host;
+pub mod markdown;
 pub mod msg;
 pub mod options;
 pub mod plugin;
@@ -37,6 +39,10 @@ pub const CAP_READ_ONLY: &str = "read_only";
 pub const CAP_CHECK: &str = "check";
 /// Capability (destinations): takes every file of one output in a single `deliver`.
 pub const CAP_MULTI_FILE: &str = "multi_file";
+/// Capability (destinations): takes a message (`deliver` with `message`), not only files.
+pub const CAP_MESSAGE: &str = "message";
+/// Capability (destinations): takes only messages; core never sends it a file output.
+pub const CAP_MESSAGE_ONLY: &str = "message_only";
 /// Source: loads rows into a temporary table on the session (`load`), for large lookups.
 pub const CAP_LOAD: &str = "load";
 /// Answers `validate` (checks a config block of options). The Rust SDK always advertises it.

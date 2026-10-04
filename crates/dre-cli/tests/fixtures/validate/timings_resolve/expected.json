@@ -41,6 +41,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/sales/client_a/sales.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/sales/client_a/sales.csv",
+          "destinations": []
+        }
+      ],
       "schedules": [
         "close_a"
       ]
@@ -64,6 +72,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/sales/client_b/sales.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/sales/client_b/sales.csv",
+          "destinations": []
+        }
+      ],
       "schedules": [
         "close_b"
       ]
@@ -101,6 +117,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -127,6 +150,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

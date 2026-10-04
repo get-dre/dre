@@ -64,6 +64,26 @@ output:
   columns: [...]
 ```
 
+`output:` can also be a list: the queries run once and each output is made from the same results,
+from the queries its `queries:` names (all of them by default). A named output writes
+`<name>.<ext>`, and a Set changes one output by giving its `name:`, or replaces the whole list.
+File outputs are delivered first, then messages:
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [summary, detail]
+    destination: {profile: reports_s3, path: "s3://reports/monthly.xlsx"}
+  - name: headline
+    format: message          # a short headline built from the results; see Messages
+    queries: [summary]
+    destination: {profile: team_slack, channel: "#finance"}
+```
+
+`--output-name` and `--output-path` apply to the first output. See [messages](messages.md) for
+message outputs, `when:` and `attach:`.
+
 > **Changed in 0.2.** Connections are under `connections:` (was `sources:`). In 0.2.1 each
 > profile has its own default `target:` again, and a missing entry is an error. See
 > [Upgrading to 0.2](migrating-to-0.2.md).

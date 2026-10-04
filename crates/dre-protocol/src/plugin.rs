@@ -200,11 +200,14 @@ pub trait Format {
 
 /// A destination `deliver` request.
 pub struct Delivery {
-    /// One file, or every file of an output when the plugin advertises `multi_file`.
+    /// One file, or every file of an output when the plugin advertises `multi_file`. With a
+    /// `message`: the files to attach to it (often none).
     pub files: Vec<DeliveryFile>,
     pub connection: Map<String, Value>,
     /// The destination entry's plugin options, rendered by core (empty when none).
     pub options: Map<String, Value>,
+    /// A message to post; only sent to a plugin advertising `message`.
+    pub message: Option<crate::msg::Message>,
 }
 
 /// One file to deliver: the local copy in `target/run/` and its rendered remote path, if any.
@@ -237,6 +240,16 @@ pub trait Destination {
         _connection: &Map<String, Value>,
     ) -> Result<String> {
         Err("this destination doesn't implement `deliver`".into())
+    }
+    /// The most characters a message may have in the service (after translation), reported in
+    /// `describe` by a plugin advertising `message`.
+    fn message_limit(&self) -> Option<u64> {
+        None
+    }
+    /// Post `d.message` (with `d.files` attached). Called only for a plugin advertising
+    /// `message`, which implements it.
+    fn deliver_message(&mut self, _d: &Delivery, _m: &crate::msg::Message) -> Result<String> {
+        Err("this destination doesn't take messages".into())
     }
     /// The whole request, options included (already checked). The default hands a single file
     /// to [`Destination::deliver`]; several files arrive only with `multi_file` advertised.
@@ -556,10 +569,15 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Handler::Source(s) => s.identifier_quote().map(str::to_string),
             _ => None,
         };
+        let message_limit = match h {
+            Handler::Destination(d) => d.message_limit(),
+            _ => None,
+        };
         out.send(&Response::Describe {
             connection_fields,
             option_fields: h.option_fields(),
             identifier_quote,
+            message_limit,
         });
         return Ok(());
     }
@@ -698,15 +716,16 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 files,
                 connection,
                 options,
+                message,
             },
         ) => {
             checked?;
-            let files = match (local_path, files.is_empty()) {
-                (Some(local), true) => vec![DeliveryFile {
+            let files = match (local_path, files.is_empty(), &message) {
+                (Some(local), true, None) => vec![DeliveryFile {
                     local: PathBuf::from(local),
                     remote: remote_path,
                 }],
-                (None, false) => files
+                (None, false, _) | (None, true, Some(_)) => files
                     .into_iter()
                     .map(|f| DeliveryFile {
                         local: PathBuf::from(f.local_path),
@@ -715,11 +734,16 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                     .collect(),
                 _ => return Err("`deliver` needs exactly one of `local_path` or `files`".into()),
             };
-            let location = d.deliver_files(&Delivery {
+            let delivery = Delivery {
                 files,
                 connection,
                 options,
-            })?;
+                message,
+            };
+            let location = match &delivery.message {
+                Some(m) => d.deliver_message(&delivery, m)?,
+                None => d.deliver_files(&delivery)?,
+            };
             out.send(&Response::Delivered { location });
         }
         (h, req) => {

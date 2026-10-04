@@ -57,8 +57,10 @@ pub enum Request {
     ResultSetEnd {},
     Finish {},
     /// Destination: deliver a local file, or with `files` (only to a plugin advertising
-    /// `multi_file`) every file of one output at once. Exactly one of `local_path`/`files` is set.
-    /// `options` are the destination entry's plugin options, rendered by core. Replies `delivered`.
+    /// `multi_file`) every file of one output at once. Exactly one of `local_path`/`files` is set,
+    /// unless `message` is: then `files` (possibly empty) holds the files to attach to it, and is
+    /// sent only to a plugin advertising `message`. `options` are the destination entry's plugin
+    /// options, rendered by core. Replies `delivered`.
     Deliver {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         local_path: Option<String>,
@@ -69,6 +71,8 @@ pub enum Request {
         connection: Map<String, Value>,
         #[serde(default)]
         options: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<Message>,
     },
     /// Source: load rows into a temporary table on the session, named after `name`. Followed by
     /// Arrow frames (at least one, carrying the schema) and a `result_set_end`. Replies `loaded`.
@@ -108,6 +112,10 @@ pub enum Response {
         /// quote (a source's `quoting:`). Every source sets it; other kinds leave it out.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identifier_quote: Option<String>,
+        /// Destination advertising `message`: the most characters a message may have in the
+        /// service, after translation. Core shows it next to a message's length in a preview.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_limit: Option<u64>,
     },
     /// Every problem with the options, each a sentence naming the key; empty when they're fine.
     Validated {
@@ -145,6 +153,21 @@ pub enum Response {
     Error {
         message: String,
     },
+}
+
+/// A rendered message, as `deliver` carries it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Message {
+    /// One line, plain text.
+    pub title: String,
+    /// The portable Markdown subset ([`crate::markdown`]).
+    pub text: String,
+    /// An HTML body, when one was made; core leaves it out today. A plugin that can show HTML
+    /// (email) uses it when present, else converts `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub html: Option<String>,
+    /// The `.md` file core wrote: `# title`, then the text.
+    pub path: String,
 }
 
 /// One file of a multi-file `deliver`.

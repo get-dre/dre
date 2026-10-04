@@ -161,6 +161,45 @@ into SQL as literals should `dispatch()` a Databricks variant:
 
 Lookups (`ref('countries')`) are inlined in a form every engine reads the same way.
 
+## Numbers: `number`, `percent`, `signed`, `currency`, `compact`
+
+These filters make values readable in every template (SQL, paths, destination options and
+messages). They round half away from zero.
+
+| Filter | Example | en | de-DE |
+|---|---|---|---|
+| `number(decimals=0)` | `12340.5 \| number` | `12,341` | `12.341` |
+| | `1234.5678 \| number(2)` | `1,234.57` | `1.234,57` |
+| `percent(decimals=1)` | `0.0412 \| percent` | `4.1%` | `4,1 %` |
+| `signed(decimals=0)` | `-320 \| signed` | `−320` | `−320` |
+| | `0.0412 \| percent \| signed` | `+4.1%` | `+4,1 %` |
+| `currency(code, decimals=0)` | `12340 \| currency('EUR')` | `€12,340` | `12.340 €` |
+| `compact(decimals=1)` | `1234567 \| compact` | `1.2M` | `1,2M` |
+
+- Negative numbers start with `-`; `signed` writes `+` or a minus sign (`−`) and leaves zero
+  alone. On text another filter made, `signed` adds `+` unless it's negative or zero.
+- `none` renders as nothing. Text that holds a number (`'12.5'`) is read as one; any other value
+  is an error naming the filter.
+- `currency` takes an ISO 4217 code. Common codes print their symbol (`€`, `$`, `£`, `¥`, `kr`,
+  ...); others print the code (`CHF 12'340`).
+- `compact` uses `K`, `M`, `B` and `T` in every locale, with the locale's decimal separator.
+
+### Locale
+
+`locale:` sets the separators and where the currency symbol and percent sign go. Set it in
+`dre_project.yml`, as a folder's `+locale`, on a report, or on a Set (inline or in sets.yml);
+the most specific wins. Default: `en`.
+
+```yaml
+# dre_project.yml
+locale: de-DE
+```
+
+DRE carries its own conventions for these languages: `en`, `de`, `fr`, `it`, `es`, `nl`, `pt`,
+`sv`, `da`, `nb`/`no`, `fi`, `pl`, `cs`, `ja`, `zh` and `ko`, with regional variants where they
+differ (`de-CH`, `fr-CH`, `it-CH`, `es-MX`, `es-US`, `pt-BR`). Any other region uses its
+language's conventions; an unknown language is an error when the project loads.
+
 ## Dates and times
 
 `run.date` is a date, not a string. It's `DRE_RUN_DATE` when set, else the date of `DRE_RUN_AT`

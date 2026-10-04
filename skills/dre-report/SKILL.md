@@ -1,10 +1,10 @@
 ---
 name: dre-report
-description: Create or change a DRE report - the SQL files and report YAML, its tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack) and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, to add a tab, a column format, a variable, a destination or a recipient to an existing one, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project.
+description: Create or change a DRE report - the SQL files and report YAML, its tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat), headline messages built from the results (several outputs per report, conditional sends with when:, number filters) and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, to add a tab, a column format, a variable, a destination or a recipient to an existing one, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project.
 license: GPL-3.0-only
 metadata:
-  version: "2.2.0"
-  dre: ">=0.2.1, <0.3.0"
+  version: "2.3.0"
+  dre: ">=0.2.1, <0.4.0"
 ---
 
 # Write or change a DRE report
@@ -167,8 +167,9 @@ Ask, one at a time, only what the request didn't say:
 
 1. **What it shows**: the questions it answers, the tables it reads from. Offer to look at the
    tables' columns with a query the user approves, rather than guessing column names.
-2. **Who gets it**: people (who read xlsx), or a system (which needs an exact csv or fixed-width
-   layout; ask for the spec).
+2. **Who gets it**: people (who read xlsx), people who only want the number (a headline message
+   in chat or an email body, often next to the file; see step 6b), or a system (which needs an
+   exact csv or fixed-width layout; ask for the spec).
 3. **Format**: recommend xlsx for people, csv or delimited for most systems, fixed-width when a
    spec demands it, parquet for data tools.
 4. **How often**, and for what period: daily, monthly... This decides the date variables (REP-2)
@@ -230,6 +231,49 @@ plugin's options (recipients, channel, message). Use only options and fields fro
 - Delivering to real people is for `dre-run` to confirm (RUN-2); writing the YAML delivers
   nothing.
 
+### Step 6b: messages and several outputs (dre 0.3 and later)
+
+When people want the number rather than the file ("post yesterday's revenue to #finance"), add a
+`message` output. It's built into dre (no plugin): it renders the results into a title and a few
+lines of text. Check `dre --version` first: messages, `output:` lists, `when:`, `attach:`, the
+number filters and `locale:` need 0.3; on 0.2, say so and offer `dre-upgrade`.
+
+- **Aggregate in SQL** (REP-9): write a small headline query (one row: the total, the change),
+  rather than pointing the message at the detail query.
+- **Several outputs**: make `output:` a list, give each a `name:` and the `queries:` it uses, so
+  the headline query isn't a tab in the workbook and the message doesn't read the detail. The
+  queries run once for all outputs.
+- **The text**: `text:` (or `file:` for a longer template) reads `results.<query>.value`,
+  `.first.<column>`, `.rows`, `.row_count` and `.columns`, and `outputs.<name>.location` to link
+  a file output. Write it in the small Markdown subset (`**bold**`, `*italic*`, links, `- `
+  bullets; no tables or headings). Format numbers with the filters: `number`, `percent`,
+  `signed`, `currency('EUR')`, `compact`; set `locale:` (e.g. `de-DE`) in `dre_project.yml`, on
+  the report or a Set when readers expect other separators. `title:` defaults to the report name
+  and run date. With no `text:`, a default template lists every query's values.
+- **Conditional**: `when: "results.<query>.row_count > 0"` (any Jinja condition over the results)
+  sends only when the data calls for it; otherwise the output is skipped, not failed. Nothing is
+  remembered between runs: no "alert once".
+- **Destinations**: `slack` and `email` (1.1.0 or later) post the message itself and can carry
+  other outputs' files with `attach: [<name>]`; `teams` and `google_chat` take messages only, so
+  link files instead (validation refuses a file there); any other destination delivers the
+  message as a `.md` file. Read each `references/plugins/destination-<type>.md`.
+- Every option, with worked examples: the Messages guide,
+  <https://github.com/get-dre/dre/blob/master/docs/messages.md>.
+
+```yaml
+queries: [headline, detail]
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    text: "Revenue yesterday: **{{ results.headline.value | currency('EUR') }}**"
+    destination:
+      - {profile: team_slack, channel: "#finance", attach: [workbook]}
+```
+
 ### Step 7: validate
 
 Run `dre validate -s <report>`. It checks the YAML, the SQL's templates, every format and
@@ -248,6 +292,9 @@ Read it first. Change only what was asked; keep the rest byte for byte. Common c
 - **Add a destination:** turn a single `destination:` map into a list if needed, and add the
   entry; the existing one stays first (it names the local file).
 - **Add a recipient:** extend `to`, `cc` or `bcc` on the email entry.
+- **Add a headline message:** turn `output:` into a list, name the existing output (its file is
+  then `<name>.<ext>`; keep the report's name as `name:` if file names matter), add a headline
+  query and a `message` output (step 6b).
 
 Show the diff before writing when the change touches more than one file. Then step 7.
 
@@ -313,6 +360,11 @@ Then point to `dre-run` for running a firing or wiring the orchestrator.
   column.
 - Errors that only a run finds (a column the query doesn't return, a format code that doesn't
   fit its column) come from `dre-run`.
+- **Message outputs:** "`text` reads `results.x`, but `x` isn't one of this output's queries": add
+  the query to the output's `queries:` or fix the name. "only takes messages": a file output or
+  `attach:` sent to `teams`/`google_chat`; deliver the file elsewhere and link it with
+  `outputs.<name>.location`. "it inherits 2 outputs, so it's unclear which one to change": give
+  the Set's `output:` override the `name:` of the output it changes.
 - **`schedule-needs-anchor`, `schedule-no-time`:** add `starting` (the first date) or `at`
   (`HH:MM`). **`unknown-timing`:** the name isn't in `timings.yml`. **A schedule using `timing:`
   can't set** `cron`, `timezone`...: move those into the timing, or drop `timing:`.

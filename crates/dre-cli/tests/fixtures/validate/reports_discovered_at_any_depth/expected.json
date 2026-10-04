@@ -41,6 +41,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/daily_summary/default/daily_summary.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/daily_summary/default/daily_summary.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     },
     {
@@ -62,6 +70,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/quarterly_filing/default/quarterly_filing.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/quarterly_filing/default/quarterly_filing.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     }
   ],
@@ -97,6 +113,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -143,6 +166,13 @@ exit: 0
               "format": "csv",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

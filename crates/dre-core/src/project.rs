@@ -65,6 +65,7 @@ pub const REPORT_KEYS: &[&str] = &[
     "schedule",
     "vars",
     "timezone",
+    "locale",
 ];
 /// Declares the project's plugin packages, in any project YAML file.
 const PLUGINS_KEY: &str = "plugins";
@@ -86,6 +87,7 @@ pub const PROJECT_KEYS: &[&str] = &[
     "dispatch",
     "mask_secrets",
     "timezone",
+    "locale",
     "week_start",
     "week_numbering",
     "reports",
@@ -98,7 +100,15 @@ pub const SCHEDULE_ENTRY_KEYS: &[&str] = &[
 ];
 /// The timings file's name. Other YAML files of timings are recognised by their shape.
 pub const TIMINGS_FILE: &str = "timings.yml";
-pub const FOLDER_CONFIG_KEYS: &[&str] = &["+tags", "+output", "+profile", "+schedule", "+vars", "+timezone"];
+pub const FOLDER_CONFIG_KEYS: &[&str] = &[
+    "+tags",
+    "+output",
+    "+profile",
+    "+schedule",
+    "+vars",
+    "+timezone",
+    "+locale",
+];
 pub const SET_ENTRY_KEYS: &[&str] = &[
     "name",
     "profile",
@@ -108,11 +118,24 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "tab_names",
     "output",
     "schedule",
+    "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
 ];
-pub const OUTPUT_SHARED_KEYS: &[&str] = &["format", "destination", "template", "extension"];
+/// The shared output keys that don't belong to one format: they survive a layer changing `format`.
+const FORMAT_INDEPENDENT_KEYS: &[&str] = &["name", "queries", "when", "destination", "template"];
+/// The keys of a destination entry core reads; every other key is the plugin's.
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach"];
+pub const OUTPUT_SHARED_KEYS: &[&str] = &[
+    "name",
+    "format",
+    "queries",
+    "when",
+    "destination",
+    "template",
+    "extension",
+];
 /// Keys of one `output.template.bindings` entry.
 pub const TEMPLATE_BINDING_KEYS: &[&str] = &[
     "sheet",
@@ -188,6 +211,9 @@ pub struct Project {
     /// The project's default `timezone:` (IANA name); runs default to UTC without one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// The project's `locale:` for the number filters; `en` without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// `week_start:` and `week_numbering:`, for the calendar functions.
     #[serde(skip)]
     pub week_start: WeekStart,
@@ -316,7 +342,12 @@ pub struct Binding {
     /// Fully merged vars: project < folders < report < Set registry < inline Binding.
     pub vars: JsonMap<String, Json>,
     pub queries: Vec<QueryEntry>,
-    pub output: Output,
+    /// The `locale:` for the number filters: Set, report, folder `+locale`, project; `None`: `en`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    /// The Binding's outputs, in declared order (`output:` as a list, or one map). Each formats
+    /// its own subset of `queries` from the same run.
+    pub outputs: Vec<Output>,
     /// Names of every `schedules.yml` entry that runs this Binding.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<String>,
@@ -343,12 +374,34 @@ impl Binding {
     pub fn dir_name(&self) -> &str {
         self.set.as_deref().unwrap_or("default")
     }
+
+    /// Every output's destinations, in order: the order of [`crate::parse::ParsedBinding::destinations`].
+    pub fn destinations(&self) -> impl Iterator<Item = &Destination> {
+        self.outputs.iter().flat_map(|o| o.destinations.iter())
+    }
+
+    /// The output named `name`.
+    pub fn output(&self, name: &str) -> Option<&Output> {
+        self.outputs.iter().find(|o| o.name.as_deref() == Some(name))
+    }
 }
+
+/// The built-in format that renders query results into a short headline.
+pub const MESSAGE_FORMAT: &str = "message";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Output {
+    /// `name:`, so other outputs can refer to it; the default file name when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub format: String,
-    /// Format options: every key except `format`, `destination` and `template`.
+    /// `queries:`: which of the Binding's queries this output formats; `None`: all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<String>>,
+    /// `when:`: a Jinja expression; the output is skipped when it's false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+    /// Format options: every key except the shared ones ([`OUTPUT_SHARED_KEYS`]).
     pub options: JsonMap<String, Json>,
     /// Where the output is delivered, in order. Empty: it stays in `target/`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -361,15 +414,34 @@ pub struct Output {
     pub extension: Option<String>,
 }
 
+impl Output {
+    /// Whether this output formats `query`'s result.
+    pub fn feeds(&self, query: &str) -> bool {
+        self.queries.as_ref().is_none_or(|q| q.iter().any(|n| n == query))
+    }
+
+    pub fn is_message(&self) -> bool {
+        self.format == MESSAGE_FORMAT
+    }
+
+    /// How messages name it: "output `x`", or "output 2" when unnamed.
+    pub fn label(&self, index: usize) -> String {
+        output_label(self.name.as_deref(), index)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Destination {
     pub profile: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Plugin options: every key other than `profile` and `path`, passed to the plugin after
-    /// rendering.
+    /// Plugin options: every key other than `profile`, `path` and `attach`, passed to the plugin
+    /// after rendering.
     #[serde(skip_serializing_if = "JsonMap::is_empty")]
     pub options: JsonMap<String, Json>,
+    /// `attach:` on a message output's entry: other outputs whose files go with the message.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attach: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -404,6 +476,8 @@ pub struct SetDef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     pub vars: JsonMap<String, Json>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// Where it's declared, for messages.
     #[serde(skip)]
     pub file: PathBuf,
@@ -711,6 +785,7 @@ struct FolderCfg {
     profile: Option<(String, Option<usize>)>,
     vars: Option<Mapping>,
     timezone: Option<String>,
+    locale: Option<String>,
 }
 
 struct Discovered {
@@ -1034,6 +1109,10 @@ impl Loader {
             None => None,
             Some(v) => self.timezone_value(v, &yf.display, yf.line_of("timezone", None), "`timezone`"),
         };
+        let locale = match m.get("locale") {
+            None => None,
+            Some(v) => self.locale_value(v, &yf.display, yf.line_of("locale", None), "`locale`"),
+        };
         let week_start = match m.get("week_start") {
             None => WeekStart::Monday,
             Some(v) => v.as_str().and_then(WeekStart::parse).unwrap_or_else(|| {
@@ -1096,6 +1175,7 @@ impl Loader {
             packages: Vec::new(),
             mask_secrets,
             timezone,
+            locale,
             week_start,
             week_numbering,
             dispatch,
@@ -1127,6 +1207,20 @@ impl Loader {
         };
         self.diags
             .error("invalid-timezone", Some(file.to_path_buf()), line, msg);
+        None
+    }
+
+    /// A `locale:` value: a tag the number filters know (`de-DE`), else an error at `line`.
+    fn locale_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
+        let msg = match v.as_str() {
+            Some(s) => match crate::numbers::Locale::parse(s) {
+                Ok(_) => return Some(s.to_string()),
+                Err(e) => format!("{what}: {e}"),
+            },
+            None => format!("{what} must be a string, a locale such as `de-DE`"),
+        };
+        self.diags
+            .error("invalid-locale", Some(file.to_path_buf()), line, msg);
         None
     }
 
@@ -1307,6 +1401,9 @@ impl Loader {
                         }
                         "timezone" => {
                             cfg.timezone = self.timezone_value(v, &yf.display, kline, "`+timezone`");
+                        }
+                        "locale" => {
+                            cfg.locale = self.locale_value(v, &yf.display, kline, "`+locale`");
                         }
                         _ => match v.as_mapping() {
                             Some(s) => cfg.vars = Some(s.clone()),
@@ -2054,6 +2151,10 @@ impl Loader {
                         format!("Set `{name}`: `profile` must be a string"),
                     );
                 }
+                let locale = match v.get("locale") {
+                    None | Some(Value::Null) => None,
+                    Some(l) => self.locale_value(l, &yf.display, line, &format!("Set `{name}`: `locale`")),
+                };
                 let vars = match v.get("vars") {
                     Some(Value::Mapping(m)) => yaml_map_to_json(m),
                     None | Some(Value::Null) => JsonMap::new(),
@@ -2072,6 +2173,7 @@ impl Loader {
                     SetDef {
                         profile,
                         vars,
+                        locale,
                         file: yf.display.clone(),
                         line,
                     },
@@ -2544,6 +2646,16 @@ impl Loader {
         let timezone = report_timezone
             .or_else(|| layers.iter().rev().find_map(|l| l.timezone.clone()))
             .or_else(|| project.timezone.clone());
+        let report_locale = match key("locale") {
+            Some(t) => {
+                let (f, l) = located("locale").unwrap();
+                self.locale_value(&t.value, &f, l, &format!("report `{name}`: `locale`"))
+            }
+            None => None,
+        };
+        let locale = report_locale
+            .or_else(|| layers.iter().rev().find_map(|l| l.locale.clone()))
+            .or_else(|| project.locale.clone());
         let profile_at = if report_profile.is_some() {
             located("profile").map(|(file, line)| ProfileAt {
                 file,
@@ -2596,24 +2708,12 @@ impl Loader {
                 format!("report `{name}`: folder config: {p}"),
             );
         }
+        let mut outputs = vec![output];
         if let Some(o) = key("output") {
-            match o.value.as_mapping() {
-                Some(m) => {
-                    if let Some(p) = merge_output(&mut output, m) {
-                        let (f, l) = located("output").unwrap();
-                        self.diags
-                            .error("invalid-field", Some(f), l, format!("report `{name}`: {p}"));
-                    }
-                }
-                None => {
-                    let (f, l) = located("output").unwrap();
-                    self.diags.error(
-                        "invalid-field",
-                        Some(f),
-                        l,
-                        format!("report `{name}`: `output` must be a map"),
-                    );
-                }
+            for p in layer_outputs(&mut outputs, &o.value) {
+                let (f, l) = located("output").unwrap();
+                self.diags
+                    .error("invalid-field", Some(f), l, format!("report `{name}`: {p}"));
             }
         }
 
@@ -2631,7 +2731,8 @@ impl Loader {
             profile: base_profile,
             profile_at,
             vars,
-            output,
+            outputs,
+            locale,
         };
         let has_sets = key("sets").is_some();
         let report_base = self.silent_binding(&name, &base, &queries, &r.file.display);
@@ -2759,7 +2860,8 @@ impl Loader {
                 profile: base.profile.clone(),
                 profile_at: base.profile_at.clone(),
                 vars: base.vars.clone(),
-                output: base.output.clone(),
+                outputs: base.outputs.clone(),
+                locale: base.locale.clone(),
             };
             if let Some(reg) = registry {
                 if let Some(p) = &reg.profile {
@@ -2772,6 +2874,9 @@ impl Loader {
                     used.connection(p, None, None);
                 }
                 b.vars.extend(reg.vars.clone());
+                if reg.locale.is_some() {
+                    b.locale = reg.locale.clone();
+                }
             }
             let mut qs = queries.to_vec();
             let mut tab_names: Option<Mapping> = None;
@@ -2817,23 +2922,18 @@ impl Loader {
                     ),
                 }
                 if let Some(o) = m.get("output") {
-                    match o.as_mapping() {
-                        Some(o) => {
-                            if let Some(p) = merge_output(&mut b.output, o) {
-                                self.diags
-                                    .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
-                            }
-                        }
-                        None => self.diags.error(
-                            "invalid-field",
-                            file.clone(),
-                            line,
-                            format!("{ctx}: `output` must be a map"),
-                        ),
+                    for p in layer_outputs(&mut b.outputs, o) {
+                        self.diags
+                            .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
                     }
                 }
                 if m.contains_key("schedule") {
                     self.moved_to_schedules(&yf.display, line, &format!("{ctx}: `schedule`"));
+                }
+                if let Some(l) = m.get("locale")
+                    && let Some(l) = self.locale_value(l, &yf.display, line, &format!("{ctx}: `locale`"))
+                {
+                    b.locale = Some(l);
                 }
                 let listed: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
                 match (m.get("exclude"), m.get("queries")) {
@@ -2994,7 +3094,7 @@ impl Loader {
                 }
             }
         }
-        let output = self.typed_output(&base.output, &ctx, &file, &queries, used);
+        let outputs = self.typed_outputs(&base.outputs, &ctx, &file, &queries, used);
         if let Some(p) = &base.profile {
             used.connection(p, None, None);
         }
@@ -3003,10 +3103,275 @@ impl Loader {
             profile: base.profile.clone(),
             vars: base.vars.clone(),
             queries: std::mem::take(&mut queries),
-            output,
+            locale: base.locale.clone(),
+            outputs,
             schedules: Vec::new(),
             parsed: None,
             profile_at: base.profile_at.clone(),
+        }
+    }
+
+    /// Every merged output, typed, plus the checks across them: unique names, `queries:` naming
+    /// the Binding's queries, xlsx-only `columns`, and queries that feed no output.
+    fn typed_outputs(
+        &mut self,
+        maps: &[Mapping],
+        ctx: &str,
+        file: &Path,
+        queries: &[QueryEntry],
+        used: &mut Usage,
+    ) -> Vec<Output> {
+        let at = Some(file.to_path_buf());
+        let several = maps.len() > 1;
+        let mut outputs = Vec::new();
+        for (i, m) in maps.iter().enumerate() {
+            let octx = if several {
+                format!(
+                    "{ctx}, {}",
+                    output_label(m.get("name").and_then(Value::as_str), i)
+                )
+            } else {
+                ctx.to_string()
+            };
+            let subset: Vec<QueryEntry> = match m.get("queries") {
+                None | Some(Value::Null) => queries.to_vec(),
+                Some(v) => {
+                    match string_list(v) {
+                        Some(names) => {
+                            for n in names.iter().filter(|n| !queries.iter().any(|q| &&q.query == n)) {
+                                self.diags.error(
+                                "unknown-query",
+                                at.clone(),
+                                None,
+                                format!("{octx}: `queries` names `{n}`, which isn't one of this Binding's queries"),
+                            );
+                            }
+                            queries
+                                .iter()
+                                .filter(|q| names.contains(&q.query))
+                                .cloned()
+                                .collect()
+                        }
+                        None => {
+                            self.diags.error(
+                                "invalid-field",
+                                at.clone(),
+                                None,
+                                format!("{octx}: `queries` must be a list of query names"),
+                            );
+                            queries.to_vec()
+                        }
+                    }
+                }
+            };
+            outputs.push(self.typed_output(m, &octx, file, &subset, used));
+        }
+        let mut seen = BTreeSet::new();
+        for o in &outputs {
+            if let Some(n) = &o.name
+                && !seen.insert(n.clone())
+            {
+                self.diags.error(
+                    "duplicate-output",
+                    at.clone(),
+                    None,
+                    format!("{ctx}: output `{n}` is declared twice; output names must be unique"),
+                );
+            }
+        }
+        // Two unnamed outputs of one format would write the same default file.
+        let mut exts = BTreeSet::new();
+        for o in outputs.iter().filter(|o| o.name.is_none()) {
+            let ext = o.extension.clone().unwrap_or_else(|| o.format.clone());
+            if !exts.insert(ext) {
+                self.diags.error(
+                    "duplicate-output",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: two unnamed `{}` outputs would write the same file; give each output a `name:`",
+                        o.format
+                    ),
+                );
+            }
+        }
+        for q in queries.iter().filter(|q| !q.columns.is_empty()) {
+            let formats: Vec<&str> = outputs
+                .iter()
+                .filter(|o| o.feeds(&q.query))
+                .map(|o| o.format.as_str())
+                .collect();
+            if !formats.is_empty() && !formats.contains(&"xlsx") {
+                self.diags.error(
+                    "invalid-field",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: `columns` on query `{}` only applies to the xlsx format",
+                        q.query
+                    ),
+                );
+            }
+        }
+        for (i, o) in outputs.iter().enumerate() {
+            let octx = if several {
+                format!("{ctx}, {}", o.label(i))
+            } else {
+                ctx.to_string()
+            };
+            self.check_output_templates(o, &outputs, &octx, file, queries);
+            for d in o.destinations.iter().filter(|d| !d.attach.is_empty()) {
+                for a in &d.attach {
+                    let problem = match outputs.iter().find(|x| x.name.as_deref() == Some(a.as_str())) {
+                        _ if !o.is_message() => Some("`attach` only applies to a message output".to_string()),
+                        None => Some(format!("no output of this report is named `{a}`")),
+                        Some(x) if std::ptr::eq(x, o) => Some(format!("`{a}` is this output itself")),
+                        Some(x) if x.is_message() => Some(format!(
+                            "`{a}` is a message; attach file outputs (its `.md` is linked with `outputs.{a}.location`)"
+                        )),
+                        Some(_) => None,
+                    };
+                    if let Some(p) = problem {
+                        self.diags.error(
+                            "invalid-destination-option",
+                            at.clone(),
+                            None,
+                            format!("{octx}: destination `{}`: `attach: {a}`: {p}", d.profile),
+                        );
+                    }
+                }
+            }
+        }
+        for q in queries.iter().filter(|q| q.tab) {
+            if !outputs.iter().any(|o| o.feeds(&q.query)) {
+                self.diags.warning(
+                    "unused-query",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: query `{}` feeds no output; add it to an output's `queries:`, or give it `tab: false` if it only prepares later queries",
+                        q.query
+                    ),
+                );
+            }
+        }
+        outputs
+    }
+
+    /// A message output's options, and the templates of any output (`text`, `file`, `title`,
+    /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
+    /// another output. Only attribute access is checked; dynamic access isn't seen.
+    fn check_output_templates(
+        &mut self,
+        o: &Output,
+        all: &[Output],
+        ctx: &str,
+        file: &Path,
+        queries: &[QueryEntry],
+    ) {
+        let at = Some(file.to_path_buf());
+        let err = |s: &mut Self, msg: String| {
+            s.diags
+                .error("invalid-output-option", at.clone(), None, format!("{ctx}: {msg}"))
+        };
+        // (what, source) of every template to check.
+        let mut templates: Vec<(String, String)> = Vec::new();
+        if let Some(w) = &o.when {
+            templates.push(("`when`".into(), format!("{{% if {w} %}}{{% endif %}}")));
+        }
+        if o.is_message() {
+            for k in o.options.keys() {
+                if !crate::message::MESSAGE_KEYS.contains(&k.as_str()) {
+                    err(
+                        self,
+                        format!(
+                            "`{k}` isn't an option of the `message` format; its options are {}",
+                            crate::message::MESSAGE_KEYS.join(", ")
+                        ),
+                    );
+                }
+            }
+            if o.options.contains_key("text") && o.options.contains_key("file") {
+                err(self, "use either `text:` or `file:`, not both".into());
+            }
+            for k in ["text", "title"] {
+                match o.options.get(k) {
+                    None => {}
+                    Some(Json::String(t)) => templates.push((format!("`{k}`"), t.clone())),
+                    Some(_) => err(self, format!("`{k}` must be a string")),
+                }
+            }
+            match o.options.get("file") {
+                None => {}
+                Some(Json::String(f)) => match find_template(&self.root, f).map(std::fs::read_to_string) {
+                    Some(Ok(t)) => templates.push((format!("`file` {f}"), t)),
+                    Some(Err(e)) => err(self, format!("can't read message file `{f}`: {e}")),
+                    None => err(
+                        self,
+                        format!(
+                            "message file `{f}` doesn't exist (looked in the project root and templates/)"
+                        ),
+                    ),
+                },
+                Some(_) => err(self, "`file` must be a path (a string)".into()),
+            }
+            match o.options.get("max_rows") {
+                None => {}
+                Some(v) if v.as_u64().is_some_and(|n| n > 0) => {}
+                Some(_) => err(self, "`max_rows` must be a positive whole number".into()),
+            }
+        }
+        let fed: Vec<&str> = queries
+            .iter()
+            .filter(|q| q.tab && o.feeds(&q.query))
+            .map(|q| q.query.as_str())
+            .collect();
+        for (what, src) in &templates {
+            if let Err((line, msg)) = preflight::check_syntax("output", src) {
+                let line = line.map(|l| format!(" (line {l})")).unwrap_or_default();
+                err(self, format!("{what} doesn't compile{line}: {msg}"));
+                continue;
+            }
+            for (name, _) in preflight::attributes(src, "results") {
+                if !fed.contains(&name.as_str()) {
+                    err(
+                        self,
+                        format!(
+                            "{what} reads `results.{name}`, but `{name}` isn't one of this output's queries ({})",
+                            if fed.is_empty() {
+                                "none".to_string()
+                            } else {
+                                fed.join(", ")
+                            }
+                        ),
+                    );
+                }
+            }
+            if !o.is_message() && !preflight::attributes(src, "outputs").is_empty() {
+                err(
+                    self,
+                    format!(
+                        "{what} reads `outputs.*`, but a file output's `when` is decided before anything is delivered; use `outputs.*` in a message output"
+                    ),
+                );
+                continue;
+            }
+            for (name, _) in preflight::attributes(src, "outputs") {
+                let other = all.iter().find(|x| x.name.as_deref() == Some(name.as_str()));
+                match other {
+                    None => err(
+                        self,
+                        format!(
+                            "{what} reads `outputs.{name}`, but no output of this report is named `{name}`"
+                        ),
+                    ),
+                    Some(x) if std::ptr::eq(x, o) => err(
+                        self,
+                        format!("{what} reads `outputs.{name}`, which is this output itself"),
+                    ),
+                    Some(_) => {}
+                }
+            }
         }
     }
 
@@ -3026,7 +3391,10 @@ impl Loader {
             .and_then(Value::as_str)
             .unwrap_or("csv")
             .to_string();
-        used.format(&format, ctx, &file_path);
+        // `message` is built in; every other format is a plugin.
+        if format != MESSAGE_FORMAT {
+            used.format(&format, ctx, &file_path);
+        }
         let mut opts = JsonMap::new();
         for (k, v) in m {
             let Some(k) = k.as_str() else { continue };
@@ -3083,19 +3451,6 @@ impl Loader {
                 Vec::new()
             }
         };
-        if format != "xlsx" {
-            for q in queries.iter().filter(|q| !q.columns.is_empty()) {
-                self.diags.error(
-                    "invalid-field",
-                    file.clone(),
-                    None,
-                    format!(
-                        "{ctx}: `columns` on query `{}` only applies to the xlsx format",
-                        q.query
-                    ),
-                );
-            }
-        }
         let template = match m.get("template") {
             None | Some(Value::Null) => None,
             Some(t) => {
@@ -3137,6 +3492,37 @@ impl Loader {
                 None
             }
         };
+        let name = match m.get("name") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(n)) if is_identifier(n) => Some(n.clone()),
+            Some(_) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: output `name` must be an identifier (letters, digits, `_`)"),
+                );
+                None
+            }
+        };
+        let when = match m.get("when") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(w)) => Some(w.clone()),
+            Some(Value::Bool(b)) => Some(b.to_string()),
+            Some(_) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: `when` must be a Jinja expression (a string)"),
+                );
+                None
+            }
+        };
+        let queries = m
+            .get("queries")
+            .and_then(string_list)
+            .map(|_| queries.iter().map(|q| q.query.clone()).collect());
         if extension.is_some() && format == "xlsx" {
             self.diags.error(
                 "invalid-output-option",
@@ -3146,7 +3532,10 @@ impl Loader {
             );
         }
         Output {
+            name,
             format,
+            queries,
+            when,
             options: opts,
             destinations,
             template,
@@ -3187,13 +3576,27 @@ impl Loader {
         used.destination(p, file.clone(), None);
         let options = d
             .iter()
-            .filter(|(k, _)| !is_one_of(k, &["profile", "path"]))
+            .filter(|(k, _)| !is_one_of(k, DESTINATION_KEYS))
             .filter_map(|(k, v)| Some((k.as_str()?.to_string(), yaml_to_json(v))))
             .collect();
+        let attach = match d.get("attach") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::String(s)) => vec![s.clone()],
+            Some(v) => string_list(v).unwrap_or_else(|| {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: destination `{p}`: `attach` must be an output name or a list of them"),
+                );
+                Vec::new()
+            }),
+        };
         Some(Destination {
             profile: p.to_string(),
             path,
             options,
+            attach,
         })
     }
 
@@ -3395,7 +3798,12 @@ impl Loader {
             profile: profile.clone(),
             profile_at: inherited_profile_at(&layers, project),
             vars,
-            output,
+            outputs: vec![output],
+            locale: layers
+                .iter()
+                .rev()
+                .find_map(|l| l.locale.clone())
+                .or_else(|| project.locale.clone()),
         };
         if let Some(p) = &profile {
             used.connection(p, None, None);
@@ -3889,12 +4297,7 @@ impl Loader {
         let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         for report in &project.reports {
             for b in report.bindings.iter().filter(|b| b.schedules.len() > 1) {
-                let paths: Vec<&String> = b
-                    .output
-                    .destinations
-                    .iter()
-                    .filter_map(|d| d.path.as_ref())
-                    .collect();
+                let paths: Vec<&String> = b.destinations().filter_map(|d| d.path.as_ref()).collect();
                 if paths.is_empty() {
                     continue;
                 }
@@ -3917,6 +4320,7 @@ impl Loader {
                             now: chrono::Utc::now(),
                             scheduled_at: None,
                             calendar: crate::dates::Calendar::default(),
+                            locale: Default::default(),
                         },
                         vars,
                         cli_vars: self.opts.vars.clone(),
@@ -4423,11 +4827,11 @@ impl Loader {
                 }
                 // Templated output values render with the same context.
                 let mut values: Vec<String> = Vec::new();
-                for d in &b.output.destinations {
+                for d in b.destinations() {
                     values.extend(d.path.clone());
                     values.extend(d.options.values().flat_map(json_strings));
                 }
-                if let Some(t) = &b.output.template {
+                for t in b.outputs.iter().filter_map(|o| o.template.as_ref()) {
                     values.extend(t.bindings.iter().filter_map(|tb| tb.value.clone()));
                 }
                 for v in values.iter().filter(|v| preflight::is_templated(v)) {
@@ -4526,13 +4930,15 @@ impl Loader {
     fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
         for r in &project.reports {
-            for b in &r.bindings {
-                let Some(t) = &b.output.template else { continue };
+            for t in r
+                .bindings
+                .iter()
+                .flat_map(|b| b.outputs.iter().filter_map(|o| o.template.as_ref()))
+            {
                 if !seen.insert((r.name.clone(), t.file.clone(), format!("{:?}", t.bindings))) {
                     continue;
                 }
-                let candidates = [self.root.join(&t.file), self.root.join("templates").join(&t.file)];
-                let Some(path) = candidates.iter().find(|p| p.is_file()) else {
+                let Some(path) = find_template(&self.root, &t.file) else {
                     self.diags.error(
                         "missing-template",
                         Some(r.file.clone()),
@@ -4541,7 +4947,7 @@ impl Loader {
                     );
                     continue;
                 };
-                match template_sheets(path) {
+                match template_sheets(&path) {
                     Ok(sheets) => {
                         for tb in &t.bindings {
                             if !sheets.contains(&tb.sheet) {
@@ -4573,6 +4979,22 @@ impl Loader {
 }
 
 /// Sheet names in an xlsx template, read without modifying it.
+/// Where a template file named in YAML (`template:`, a message's `file:`) is read from: the
+/// project root, else `templates/`.
+pub fn find_template(root: &Path, file: &str) -> Option<PathBuf> {
+    [root.join(file), root.join("templates").join(file)]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// "output `name`", or "output 2" for an unnamed one, as messages name an output.
+pub fn output_label(name: Option<&str>, index: usize) -> String {
+    match name {
+        Some(n) => format!("output `{n}`"),
+        None => format!("output {}", index + 1),
+    }
+}
+
 pub fn template_sheets(path: &Path) -> Result<Vec<String>, String> {
     use calamine::Reader;
     let wb: calamine::Xlsx<_> =
@@ -4591,7 +5013,9 @@ struct BindingBase {
     profile: Option<String>,
     profile_at: Option<ProfileAt>,
     vars: JsonMap<String, Json>,
-    output: Mapping,
+    /// The merged outputs, in order: one unless a layer gave a list.
+    outputs: Vec<Mapping>,
+    locale: Option<String>,
 }
 
 /// Everything the project references, for profile and plugin checks.
@@ -4653,6 +5077,76 @@ fn project_default_output(p: &Project) -> Option<Mapping> {
         .cloned()
 }
 
+/// Apply one report or Set `output:` layer over the inherited outputs; returns the problems.
+///
+/// - A list replaces whatever was inherited; each entry starts from the built-in defaults.
+/// - A map merges ([`merge_output`]) into the single inherited output, or into the one its
+///   `name:` names. With several inherited outputs and no `name:`, it's unclear which one to
+///   change: the layer is ignored and the problem says why.
+pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
+    let mut problems = Vec::new();
+    match over {
+        Value::Sequence(list) if list.is_empty() => problems.push(
+            "`output` is an empty list; give at least one output, or remove it to use the inherited one"
+                .into(),
+        ),
+        Value::Sequence(list) => {
+            let mut outs = Vec::new();
+            for (i, entry) in list.iter().enumerate() {
+                match entry.as_mapping() {
+                    Some(m) => {
+                        let mut o = builtin_output();
+                        problems.extend(merge_output(&mut o, m));
+                        outs.push(o);
+                    }
+                    None => problems.push(format!("`output` entry {} must be a map", i + 1)),
+                }
+            }
+            if problems.is_empty() {
+                *base = outs;
+            }
+        }
+        Value::Mapping(m) => {
+            let name_of = |o: &Mapping| o.get("name").and_then(Value::as_str).map(str::to_string);
+            let target = match m.get("name").and_then(Value::as_str) {
+                Some(n) => match base.iter().position(|o| name_of(o).as_deref() == Some(n)) {
+                    Some(i) => Some(i),
+                    None if base.len() == 1 && name_of(&base[0]).is_none() => Some(0),
+                    None => {
+                        let names: Vec<String> = base
+                            .iter()
+                            .filter_map(name_of)
+                            .map(|n| format!("`{n}`"))
+                            .collect();
+                        problems.push(format!(
+                            "no inherited output is named `{n}`{}; override the full `output:` list to add one",
+                            if names.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (they're {})", names.join(", "))
+                            }
+                        ));
+                        None
+                    }
+                },
+                None if base.len() == 1 => Some(0),
+                None => {
+                    problems.push(format!(
+                        "this overrides `output` with no `name:`, but it inherits {} outputs, so it's unclear which one to change; give the `name:` of the output to change, or override the full list",
+                        base.len()
+                    ));
+                    None
+                }
+            };
+            if let Some(i) = target {
+                problems.extend(merge_output(&mut base[i], m));
+            }
+        }
+        _ => problems.push("`output` must be a map or a list of maps".into()),
+    }
+    problems
+}
+
 /// Merge an output layer over `base`. Changing `format` drops the lower layers' format options,
 /// since they belong to a different format.
 ///
@@ -4668,7 +5162,7 @@ pub fn merge_output(base: &mut Mapping, over: &Mapping) -> Option<String> {
     if let Some(f) = over.get(&fmt_key)
         && base.get(&fmt_key) != Some(f)
     {
-        base.retain(|k, _| is_one_of(k, &["destination", "template"]));
+        base.retain(|k, _| is_one_of(k, FORMAT_INDEPENDENT_KEYS));
     }
     let mut problem = None;
     for (k, v) in over {
@@ -4782,7 +5276,7 @@ fn is_set_registry(m: &Mapping) -> bool {
         && m.values().all(|v| {
             v.is_null()
                 || v.as_mapping()
-                    .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars"])))
+                    .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars", "locale"])))
         })
 }
 

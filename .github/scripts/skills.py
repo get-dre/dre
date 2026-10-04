@@ -75,6 +75,8 @@ DOC_SECTIONS = {
     "destination/databricks": _DEST + [("Destinations", "`databricks`")],
     "destination/email": _DEST + [("Destinations", "`email`")],
     "destination/slack": _DEST + [("Destinations", "`slack`")],
+    "destination/teams": _DEST + [("Destinations", "`teams`")],
+    "destination/google_chat": _DEST + [("Destinations", "`google_chat`")],
 }
 
 # Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).
@@ -636,7 +638,8 @@ def check(root, dre, replies):
 
     # Commands, practices and plugin names in every Markdown file the skills ship.
     practices = defined_practices((root / PRACTICES).read_text())
-    known = {p.split("/")[1] for _, p in plugins()} | {"local"}
+    # Core's own: the `local` destination and the `message` format.
+    known = {p.split("/")[1] for _, p in plugins()} | {"local", "message"}
     cli = built_cli(dre)
     for path in sorted(skills_root.rglob("*.md")):
         rel = path.relative_to(root).as_posix()

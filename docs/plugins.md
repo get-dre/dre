@@ -28,6 +28,8 @@ secrets can use `env_var()`.
 | `ftp` | the `ftp` destination |
 | `email` | the `email` destination |
 | `slack` | the `slack` destination |
+| `teams` | the `teams` destination, messages only (release candidate: 1.0.0-rc.1) |
+| `google_chat` | the `google_chat` destination, messages only (release candidate: 1.0.0-rc.1) |
 
 ```yaml
 # dependencies.yml
@@ -360,6 +362,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](#fixed-width-columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](#xlsx-column-formats)), `totals_label` (see [xlsx formulas and totals rows](#xlsx-formulas-and-totals-rows)); per query `anchor`/`header`/`columns`; `template` |
+| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
 `""` for none. The file is written the same way; only its name changes.
@@ -385,6 +388,49 @@ Every format but xlsx also takes `extension`: the output file's extension (`aba`
   with one warning per column: numbers with more than 15 significant digits (large integers,
   wide decimals), numbers beyond Excel's range, and dates or timestamps before 1900-03-01 or
   after 9999-12-31 (as ISO text). Those values get no number format, and the warning says so.
+
+### The `message` format
+
+`message` is built into DRE (see [Messages](messages.md) for a guide with examples). It renders
+the output's query results through Jinja into a short headline: a title, plus text in a small Markdown subset (`**bold**`, `*italic*` or `_italic_`,
+`` `code` ``, `[text](url)` and `- ` bullets; no headings or tables). Destinations that take
+messages post it natively; every other destination delivers it as a `.md` file, which is also
+written to the target path (`<report>.md`, or `<name>.md` for a named output; `extension:`
+changes the extension).
+
+| Option | Default | |
+|---|---|---|
+| `text` | the default template | The message, a Jinja template. |
+| `file` | | The message template in a file, relative to the project root or `templates/`. Not with `text`. |
+| `title` | `<report>: <run date>` | A Jinja template; the subject line of an email, the heading in chat. |
+| `max_rows` | `1000` | How many rows of each query `results.<query>.rows` holds. A warning says when it's reached; file outputs of the same query still get every row. |
+
+Templates read `results.<query>` for each of the output's queries:
+
+- `value`: the first column of the first row (`none` with no rows);
+- `first.<column>`: a column of the first row;
+- `rows`: the rows (at most `max_rows`), each readable as `row.<column>` or `row[0]`;
+- `row_count`: the true number of rows, even past `max_rows`;
+- `columns`: the column names;
+- `sets[n]`: a result set by index, each with the same fields. One `.sql` file makes one result set
+  (its last statement's), so `sets[0]` and `sets[-1]` are the query's result.
+
+Values keep their types: numbers stay numbers, dates and timestamps are DRE dates (`.iso`,
+`.yyyymmdd`, `.format()`, ...), nulls are `none`. Every value a template prints is escaped for Markdown, so a
+`*` or `_` in the data stays literal; `| safe` prints a value as written. The number filters
+(`number`, `percent`, `signed`, `currency`, `compact`; see [Templates](templates.md)) make values
+readable, and `var()`, `run.*` and macros work as in every template.
+
+With neither `text` nor `file`, the default template writes one block per query: a single value
+as `column: value`, one row as `column: value` lines, several rows as a list of at most ten,
+then `+ N more`. Numbers are written with `number` in the Binding's locale (two decimals unless
+whole).
+
+A message whose text renders empty (after trimming) is skipped, like an output whose `when:` is
+false: nothing is written or delivered, and `run_results.json` records it as `skipped`.
+`dre run --preview` prints each message (title, text, length, whether `when:` passed) and delivers
+nothing; numbers then come from the row sample. A real run logs one line per message, and
+`run_results.json` keeps the full title and text.
 
 ### xlsx column formats
 
@@ -581,7 +627,7 @@ output:
 - A Set can replace the whole list. Overriding only `path:` works when exactly one destination
   is inherited; with several, override the full list.
 - The local file is named after the first entry's `path`. `--output-path` and `--output-name`
-  apply to every entry that has a path.
+  apply to every entry that has a path, of the first output only when a report has several.
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
@@ -701,6 +747,24 @@ people where it is yourself; a location written into `body` only helps readers w
 open it. In a list of destinations an email entry still attaches the output, so an oversized
 output fails that entry (the others are delivered) and the run fails.
 
+**Messages** (email 1.1.0): for a [`message`](#the-message-format) output, the message is the
+email: an HTML body with a plain-text alternative, and the subject is `subject:`, else the
+message's title. `body:` doesn't apply. `attach: [<output>]` on the entry attaches those
+outputs' files, under the same `max_attachment_mb` check, so one email carries the headline and
+the workbook:
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    destination:
+      - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
+```
+
 ### `slack`
 
 Uploads the output to a Slack channel, or to one person's DM, as a single post with a message.
@@ -737,10 +801,76 @@ fails and says what to change.
 
 The bot must be a member of the channel. Invite it with `/invite @your-bot`.
 
+**Messages** (slack 1.1.0): for a [`message`](#the-message-format) output, the post is the
+message itself: the title in bold, then the text in Slack's formatting, sent with
+`chat.postMessage` (scope `chat:write`) to the same `channel` or `user`. `message:` isn't used.
+Slack's recommended maximum is 4,000 characters: a longer message is posted cut short, with a
+note and the full message attached as its `.md` file (scope `files:write`). `attach: [<output>]`
+on the entry uploads those outputs' files in the same post, with the message as its text.
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    text: "Revenue yesterday: **{{ results.headline.value | currency('EUR') }}**"
+    destination:
+      - {profile: team_slack, channel: "#finance", attach: [workbook]}
+```
+
 If Slack rate-limits a call, the plugin retries it once after Slack's `Retry-After`, waiting at
 most 60 seconds. Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what
 to fix. The delivered location is the uploaded files' permalinks.
+
+### `teams`
+
+Posts [messages](#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
+It takes messages only: a file output, or `attach:`, sent to it is an error in `dre validate`.
+Deliver files to object storage and link them from the message with `outputs.<name>.location`.
+Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url`, which is a credential: anyone with it can post to the channel.
+Set it with `env_var()`. DRE never logs it or shows it in an error.
+
+```yaml
+# profiles.yml
+destinations:
+  finance_teams:
+    targets:
+      prod: {type: teams, webhook_url: "{{ env_var('TEAMS_FINANCE_WEBHOOK') }}"}
+```
+
+To create the webhook: in Teams, open the channel's **...** menu > **Workflows**, choose **Post
+to a channel when a webhook request is received**, pick the team and channel, and copy the URL
+it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
+links and bullets. Teams has no destination options. A message over 15,000 characters is cut
+short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
+warning. If Teams rate-limits the post, the plugin retries once after its `Retry-After`.
+
+### `google_chat`
+
+Posts [messages](#the-message-format) to a Google Chat space through its incoming webhook. Like
+`teams`, it takes messages only. Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url` (it contains the space's key and token), best set with
+`env_var()`; it's never logged.
+
+```yaml
+destinations:
+  ops_chat:
+    targets:
+      prod: {type: google_chat, webhook_url: "{{ env_var('GCHAT_OPS_WEBHOOK') }}"}
+```
+
+To create the webhook: in Google Chat, open the space, then **Apps & integrations** > **Webhooks**
+> **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
+may need to allow webhooks). The message is the title in bold, then the text in Chat's
+formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
+is retried once.
 
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.

@@ -15,7 +15,7 @@ and underlines mistakes before you run `dre validate`.
 kind (the [YAML reference](yaml-reference.md) lists them):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.2/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.3/report.schema.json
 ```
 
 The URL carries DRE's minor version (`v0.2`) and always serves the newest 0.2.x schema. A patch
@@ -32,13 +32,13 @@ To apply a schema to every file of a kind without a comment line, map them in yo
 ```json
 {
   "yaml.schemas": {
-    "https://getdre.com/schemas/v0.2/report.schema.json": "reports/**/*.yml",
-    "https://getdre.com/schemas/v0.2/project.schema.json": "dre_project.yml",
-    "https://getdre.com/schemas/v0.2/dependencies.schema.json": ["dependencies.yml", "packages.yml"],
-    "https://getdre.com/schemas/v0.2/schedules.schema.json": "schedules.yml",
-    "https://getdre.com/schemas/v0.2/timings.schema.json": "timings.yml",
-    "https://getdre.com/schemas/v0.2/sets.schema.json": "sets.yml",
-    "https://getdre.com/schemas/v0.2/sources.schema.json": "sources/*.yml"
+    "https://getdre.com/schemas/v0.3/report.schema.json": "reports/**/*.yml",
+    "https://getdre.com/schemas/v0.3/project.schema.json": "dre_project.yml",
+    "https://getdre.com/schemas/v0.3/dependencies.schema.json": ["dependencies.yml", "packages.yml"],
+    "https://getdre.com/schemas/v0.3/schedules.schema.json": "schedules.yml",
+    "https://getdre.com/schemas/v0.3/timings.schema.json": "timings.yml",
+    "https://getdre.com/schemas/v0.3/sets.schema.json": "sets.yml",
+    "https://getdre.com/schemas/v0.3/sources.schema.json": "sources/*.yml"
   }
 }
 ```

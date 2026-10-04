@@ -16,7 +16,7 @@ Where: dre_project.yml.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.2/project.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.3/project.schema.json
 ```
 
 ## Keys
@@ -34,6 +34,7 @@ For editor autocomplete and validation, add this as the first line of the file (
 | `dispatch` | list of map (see below) |  | Which macro packages `dispatch()` searches, and in what order. |
 | `mask_secrets` | boolean | `true` | Whether `DRE_SECRET_*` values are masked as `*****` in the console, logs, JSON events, `run_results.json` and `target/compiled/`. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
+| `locale` | string |  | The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`. |
 | `week_start` | `monday` or `sunday` | `monday` | The first day of the week for `run.date` week arithmetic. |
 | `week_numbering` | `iso` or `us` | `iso` | How weeks are numbered: ISO 8601 or US style. |
 | `reports` | map (see below) |  | Folder config: settings for the report folders, by folder name, nested to match the folders under `reports/`. |
@@ -61,6 +62,7 @@ Folder config: settings for the report folders, by folder name, nested to match 
 | `+profile` | string |  | The connection for reports in the folder. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `+vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
 | `+timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
+| `+locale` | string |  | The `locale:` for reports in this folder; a report's own wins. See `locale` in dre_project.yml. |
 
 ## `plugins[]`
 

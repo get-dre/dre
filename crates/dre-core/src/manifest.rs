@@ -177,27 +177,50 @@ fn query(q: &QueryEntry, parsed: Option<&crate::parse::ParsedQuery>) -> Json {
 
 fn binding(b: &Binding) -> Json {
     let parsed = b.parsed.as_deref();
-    let mut output = JsonMap::new();
-    output.insert("format".into(), json!(b.output.format));
-    output.insert("options".into(), Json::Object(b.output.options.clone()));
-    insert_some(&mut output, "extension", b.output.extension.as_ref());
-    if let Some(t) = &b.output.template {
-        output.insert("template".into(), json!(t.file));
-    }
-    let destinations: Vec<Json> = b
-        .output
-        .destinations
+    // Destinations are numbered across every output, as the parse pass renders them.
+    let mut next = 0;
+    let outputs: Vec<(JsonMap<String, Json>, Vec<Json>)> = b
+        .outputs
         .iter()
-        .enumerate()
-        .map(|(i, d)| {
-            let mut m = JsonMap::new();
-            let rendered = parsed.and_then(|p| p.destinations.get(i).cloned().flatten());
-            m.insert(
-                "profile".into(),
-                json!(rendered.unwrap_or_else(|| d.profile.clone())),
-            );
-            insert_some(&mut m, "path", d.path.as_ref());
-            Json::Object(m)
+        .map(|o| {
+            let mut output = JsonMap::new();
+            insert_some(&mut output, "name", o.name.as_ref());
+            output.insert("format".into(), json!(o.format));
+            insert_some(&mut output, "queries", o.queries.as_ref());
+            insert_some(&mut output, "when", o.when.as_ref());
+            output.insert("options".into(), Json::Object(o.options.clone()));
+            insert_some(&mut output, "extension", o.extension.as_ref());
+            if let Some(t) = &o.template {
+                output.insert("template".into(), json!(t.file));
+            }
+            let destinations: Vec<Json> = o
+                .destinations
+                .iter()
+                .map(|d| {
+                    let mut m = JsonMap::new();
+                    let rendered = parsed.and_then(|p| p.destinations.get(next).cloned().flatten());
+                    next += 1;
+                    m.insert(
+                        "profile".into(),
+                        json!(rendered.unwrap_or_else(|| d.profile.clone())),
+                    );
+                    insert_some(&mut m, "path", d.path.as_ref());
+                    if !d.attach.is_empty() {
+                        m.insert("attach".into(), json!(d.attach));
+                    }
+                    Json::Object(m)
+                })
+                .collect();
+            (output, destinations)
+        })
+        .collect();
+    let output = outputs.first().map(|(o, _)| o.clone()).unwrap_or_default();
+    let destinations: Vec<Json> = outputs.iter().flat_map(|(_, d)| d.clone()).collect();
+    let outputs: Vec<Json> = outputs
+        .into_iter()
+        .map(|(mut o, d)| {
+            o.insert("destinations".into(), json!(d));
+            Json::Object(o)
         })
         .collect();
     let mut m = JsonMap::new();
@@ -218,6 +241,7 @@ fn binding(b: &Binding) -> Json {
     );
     m.insert("output".into(), Json::Object(output));
     m.insert("destinations".into(), json!(destinations));
+    m.insert("outputs".into(), json!(outputs));
     m.insert("schedules".into(), json!(b.schedules));
     Json::Object(m)
 }
@@ -252,6 +276,7 @@ fn sources(project: &Project) -> Json {
             .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH),
         scheduled_at: inputs.scheduled_at,
         calendar,
+        locale: Default::default(),
     };
     let limited = crate::render::Limited::new(context, project.vars.clone(), inputs.cli_vars.clone());
     let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -412,8 +437,19 @@ fn report_files(project: &Project, r: &Report) -> BTreeSet<String> {
     {
         files.insert(slash(&q.path));
     }
-    for t in r.bindings.iter().filter_map(|b| b.output.template.as_ref()) {
-        files.insert(template_file(&project.root, &t.file));
+    for o in r.bindings.iter().flat_map(|b| b.outputs.iter()) {
+        if let Some(t) = &o.template {
+            files.insert(template_file(&project.root, &t.file));
+        }
+        // A message's text template counts like an xlsx template.
+        if let Some(f) = o
+            .options
+            .get("file")
+            .and_then(Json::as_str)
+            .filter(|_| o.is_message())
+        {
+            files.insert(template_file(&project.root, f));
+        }
     }
     files
 }

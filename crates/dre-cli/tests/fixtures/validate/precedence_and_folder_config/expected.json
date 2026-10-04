@@ -49,6 +49,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/bare/default/bare.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/bare/default/bare.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     },
     {
@@ -70,6 +78,14 @@ exit: 0
       "format": "xlsx",
       "output": "target/run/filing/client_a/filing.xlsx",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "xlsx",
+          "output": "target/run/filing/client_a/filing.xlsx",
+          "destinations": []
+        }
+      ],
       "schedules": []
     },
     {
@@ -91,6 +107,14 @@ exit: 0
       "format": "csv",
       "output": "target/run/ledger/default/ledger.csv",
       "destinations": [],
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/ledger/default/ledger.csv",
+          "destinations": []
+        }
+      ],
       "schedules": []
     }
   ],
@@ -135,6 +159,15 @@ exit: 0
                 "delimiter": ";"
               }
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {
+                  "delimiter": ";"
+                }
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -184,6 +217,13 @@ exit: 0
               "format": "xlsx",
               "options": {}
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "xlsx",
+                "options": {}
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {
@@ -241,6 +281,15 @@ exit: 0
                 "delimiter": ";"
               }
             },
+            "outputs": [
+              {
+                "destinations": [],
+                "format": "csv",
+                "options": {
+                  "delimiter": ";"
+                }
+              }
+            ],
             "profile": "local_dev",
             "queries": [
               {

@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use dre_protocol::host::{LogSink, PluginProcess};
 use dre_protocol::msg::DeliveryFile;
-use dre_protocol::{CAP_MULTI_FILE, conformance};
+use dre_protocol::msg::Message;
+use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE, conformance};
 use serde_json::{Map, Value, json};
 
 fn bin() -> &'static Path {
@@ -125,6 +126,9 @@ fn fake_slack() -> (String, Calls) {
                     // The plugin only ever probes a DM with no text.
                     "chat.postMessage" if !form.contains_key("text") => {
                         json!({"ok": false, "error": "no_text"})
+                    }
+                    "chat.postMessage" => {
+                        json!({"ok": true, "channel": form["channel"], "ts": "1700000000.000100"})
                     }
                     "conversations.open" => {
                         json!({"ok": true, "channel": {"id": format!("D_{}", form["users"])}})
@@ -468,4 +472,122 @@ fn delivers_to_a_real_workspace() {
         .unwrap();
         assert!(loc.starts_with("slack DM with "), "{loc}");
     }
+}
+
+fn post(m: &Message, attach: &[DeliveryFile], conn: Value, options: Value) -> Result<String, String> {
+    let mut p = PluginProcess::start(bin(), quiet()).unwrap();
+    let r = p
+        .deliver_message(m, attach, obj(conn), obj(options))
+        .map_err(|e| e.to_string());
+    let _ = p.close();
+    r
+}
+
+fn message(f: &Files, title: &str, text: &str) -> Message {
+    let md = f.file("daily.md", format!("# {title}\n\n{text}\n").as_bytes());
+    Message {
+        title: title.into(),
+        text: text.into(),
+        html: None,
+        path: md.local_path,
+    }
+}
+
+#[test]
+fn advertises_messages_and_their_limit() {
+    let mut p = PluginProcess::start(bin(), quiet()).unwrap();
+    assert!(p.has(CAP_MESSAGE));
+    assert_eq!(p.description().unwrap().message_limit, Some(4_000));
+}
+
+#[test]
+fn posts_a_message_as_mrkdwn_with_values_escaped() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let m = message(
+        &f,
+        "Daily *revenue*",
+        "Revenue **€12,340** (_+4.1%_)\n- top: acme\\_corp 2\\*3 <b>\n- [Report](https://x.test/r_1)",
+    );
+    let loc = post(
+        &m,
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "#finance-reports"}),
+    )
+    .unwrap();
+    assert_eq!(loc, "slack #finance-reports (C2) message 1700000000.000100");
+    let sent = calls_to(&calls, "chat.postMessage");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].form["channel"], "C2");
+    assert_eq!(
+        sent[0].form["text"],
+        "*Daily \u{2217}revenue\u{2217}*\nRevenue *€12,340* (_+4.1%_)\n• top: acme_corp 2\u{2217}3 &lt;b&gt;\n• <https://x.test/r_1|Report>"
+    );
+    assert!(calls_to(&calls, "files.getUploadURLExternal").is_empty());
+}
+
+#[test]
+fn posts_a_message_to_a_dm() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let loc = post(
+        &message(&f, "Hi", "Hello"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"user": "U7"}),
+    )
+    .unwrap();
+    assert_eq!(loc, "slack DM with U7 message 1700000000.000100");
+    let sent: Vec<Call> = calls_to(&calls, "chat.postMessage")
+        .into_iter()
+        .filter(|c| c.form.contains_key("text"))
+        .collect();
+    assert_eq!(sent[0].form["channel"], "D_U7");
+    assert_eq!(sent[0].form["text"], "*Hi*\nHello");
+}
+
+#[test]
+fn an_over_limit_message_is_cut_short_with_the_full_md_attached() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let long: String = (0..400).map(|i| format!("line {i} of the message\n")).collect();
+    let loc = post(
+        &message(&f, "Long", &long),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9"}),
+    )
+    .unwrap();
+    assert!(
+        loc.starts_with("slack C9: https://acme.slack.com/files/F1"),
+        "{loc}"
+    );
+    assert!(calls_to(&calls, "chat.postMessage").is_empty());
+    let get = calls_to(&calls, "files.getUploadURLExternal");
+    assert_eq!(get.len(), 1);
+    assert_eq!(get[0].form["filename"], "daily.md");
+    let done = calls_to(&calls, "files.completeUploadExternal");
+    let comment = &done[0].form["initial_comment"];
+    assert!(comment.chars().count() <= 4_000, "{}", comment.chars().count());
+    assert!(comment.starts_with("*Long*\nline 0 of the message"));
+    assert!(comment.ends_with("_(cut short: the full message is attached)_"));
+}
+
+#[test]
+fn attached_files_go_with_the_message_in_one_post() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let loc = post(
+        &message(&f, "Daily", "See attached"),
+        &[f.file("detail.xlsx", b"xlsx")],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9"}),
+    )
+    .unwrap();
+    assert_eq!(loc, "slack C9: https://acme.slack.com/files/F1");
+    let done = calls_to(&calls, "files.completeUploadExternal");
+    assert_eq!(done[0].form["initial_comment"], "*Daily*\nSee attached");
+    let files: Value = serde_json::from_str(&done[0].form["files"]).unwrap();
+    assert_eq!(files, json!([{"id": "F1", "title": "detail.xlsx"}]));
 }

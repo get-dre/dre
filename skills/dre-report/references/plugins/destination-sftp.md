@@ -75,7 +75,7 @@ output:
 - A Set can replace the whole list. Overriding only `path:` works when exactly one destination
   is inherited; with several, override the full list.
 - The local file is named after the first entry's `path`. `--output-path` and `--output-name`
-  apply to every entry that has a path.
+  apply to every entry that has a path, of the first output only when a report has several.
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit

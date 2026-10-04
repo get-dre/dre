@@ -53,7 +53,12 @@ pub struct RunContext {
     pub scheduled_at: Option<chrono::DateTime<Utc>>,
     /// The run's timezone and week settings.
     pub calendar: Calendar,
+    /// The Binding's `locale:`, for the number filters.
+    pub locale: crate::numbers::Locale,
 }
+
+/// Appended to a message template's name: it turns on Markdown escaping.
+const MARKDOWN_SUFFIX: &str = "\u{0}md";
 
 /// Rows returned to templates by `run_query()`.
 #[derive(Debug, Clone, Default)]
@@ -240,6 +245,27 @@ impl Renderer {
             UndefinedBehavior::Strict
         });
         env.set_keep_trailing_newline(true);
+        // Message text is portable Markdown: every value it prints is escaped, so a `*` or `_`
+        // in the data stays literal (`| safe` opts out).
+        env.set_auto_escape_callback(|name| {
+            if name.ends_with(MARKDOWN_SUFFIX) {
+                minijinja::AutoEscape::Custom("markdown")
+            } else {
+                minijinja::AutoEscape::None
+            }
+        });
+        env.set_formatter(|out, state, value| {
+            if state.auto_escape() == minijinja::AutoEscape::Custom("markdown") {
+                let text = value.to_string();
+                let text = if value.is_safe() {
+                    text
+                } else {
+                    dre_protocol::markdown::escape(&text)
+                };
+                return out.write_str(&text).map_err(Error::from);
+            }
+            minijinja::escape_formatter(out, state, value)
+        });
         crate::mutable::register(&mut env);
 
         add_vars(&mut env, cfg.vars, cfg.cli_vars);
@@ -257,6 +283,7 @@ impl Renderer {
         });
         let source_type = cfg.source_type.clone();
         crate::dates::register(&mut env, cfg.context.calendar, cfg.context.date);
+        crate::numbers::register(&mut env, cfg.context.locale);
         env.add_global("target", Value::from_object(Target(cfg.context.target.clone())));
         env.add_global("run", Value::from_object(Run(cfg.context)));
         let destination: Arc<Mutex<Option<Connection>>> = Arc::default();
@@ -526,15 +553,35 @@ impl Renderer {
 
     /// Render `src`, reporting errors against `file`.
     pub fn render(&self, file: &Path, src: &str) -> Result<String, RenderError> {
+        self.render_with(file, src, Value::UNDEFINED, false)
+    }
+
+    /// Render `src` with `ctx`'s keys (a map) added to the context (`results`, `outputs`). With
+    /// `markdown`, it's message text: every printed value is escaped for portable Markdown.
+    pub fn render_with(
+        &self,
+        file: &Path,
+        src: &str,
+        ctx: Value,
+        markdown: bool,
+    ) -> Result<String, RenderError> {
         self.columns_cache.lock().unwrap().clear();
         *self.raised.lock().unwrap() = None;
         let full = format!("{}{src}", self.import);
-        let name = file.to_string_lossy().to_string();
+        let mut name = file.to_string_lossy().to_string();
+        if markdown {
+            name.push_str(MARKDOWN_SUFFIX);
+        }
         let tmpl = self
             .env
             .template_from_named_str(&name, &full)
             .map_err(|e| self.error(file, &e))?;
-        tmpl.render(()).map_err(|e| {
+        let rendered = if ctx.is_undefined() {
+            tmpl.render(())
+        } else {
+            tmpl.render(ctx)
+        };
+        rendered.map_err(|e| {
             let mut err = self.error(file, &e);
             if let Some(m) = self.raised.lock().unwrap().take() {
                 err.message = m;
@@ -640,6 +687,7 @@ impl Limited {
             Err(Error::new(ErrorKind::InvalidOperation, message))
         });
         crate::dates::register(&mut env, context.calendar, context.date);
+        crate::numbers::register(&mut env, context.locale);
         env.add_global("target", Value::from_object(Target(context.target.clone())));
         env.add_global("run", Value::from_object(Run(context)));
         for f in LIMITED_FUNCTIONS {
@@ -1370,9 +1418,15 @@ impl Object for QueryResult {
 
 /// One `run_query()` row: accessible by column name (`row.region`, `row['region']`) or index.
 #[derive(Debug)]
-struct Row {
+pub(crate) struct Row {
     columns: Arc<Vec<String>>,
     values: Vec<Value>,
+}
+
+impl Row {
+    pub(crate) fn value(columns: Arc<Vec<String>>, values: Vec<Value>) -> Value {
+        Value::from_object(Row { columns, values })
+    }
 }
 
 impl Object for Row {
@@ -1418,6 +1472,7 @@ mod tests {
                 now: Utc::now(),
                 scheduled_at: None,
                 calendar: Calendar::default(),
+                locale: Default::default(),
             },
             vars: vars.as_object().cloned().unwrap_or_default(),
             cli_vars: cli.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
@@ -1754,6 +1809,7 @@ mod tests {
                 now: Utc::now(),
                 scheduled_at: None,
                 calendar: Calendar::default(),
+                locale: Default::default(),
             },
             vars: JsonMap::new(),
             cli_vars: BTreeMap::new(),
