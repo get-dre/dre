@@ -391,8 +391,8 @@ Every format but xlsx also takes `extension`: the output file's extension (`aba`
 
 ### The `message` format
 
-`message` is built into DRE. It renders the output's query results through Jinja into a short
-headline: a title, plus text in a small Markdown subset (`**bold**`, `*italic*` or `_italic_`,
+`message` is built into DRE (see [Messages](messages.md) for a guide with examples). It renders
+the output's query results through Jinja into a short headline: a title, plus text in a small Markdown subset (`**bold**`, `*italic*` or `_italic_`,
 `` `code` ``, `[text](url)` and `- ` bullets; no headings or tables). Destinations that take
 messages post it natively; every other destination delivers it as a `.md` file, which is also
 written to the target path (`<report>.md`, or `<name>.md` for a named output; `extension:`
@@ -415,8 +415,8 @@ Templates read `results.<query>` for each of the output's queries:
 - `sets[n]`: a result set by index, each with the same fields. One `.sql` file makes one result set
   (its last statement's), so `sets[0]` and `sets[-1]` are the query's result.
 
-Values keep their types: numbers stay numbers, dates and timestamps are DRE dates (`.strftime()`,
-`.yyyymmdd`, ...), nulls are `none`. Every value a template prints is escaped for Markdown, so a
+Values keep their types: numbers stay numbers, dates and timestamps are DRE dates (`.iso`,
+`.yyyymmdd`, `.format()`, ...), nulls are `none`. Every value a template prints is escaped for Markdown, so a
 `*` or `_` in the data stays literal; `| safe` prints a value as written. The number filters
 (`number`, `percent`, `signed`, `currency`, `compact`; see [Templates](templates.md)) make values
 readable, and `var()`, `run.*` and macros work as in every template.
