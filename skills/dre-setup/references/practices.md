@@ -287,6 +287,19 @@ what they make.
 *Why:* one rule (explicit beats inherited, and they must agree) then explains every tab's
 connection, and a setup query can't silently prepare a session the tabs never use.
 
+### REP-9: Aggregate in SQL, keep messages short
+
+**Level:** advise
+
+Give a `message` output its own small query that computes the headline numbers (one row, or a
+handful), name it in the output's `queries:`, and keep the text to a few lines: the number, the
+change, and a link to the file for detail. Don't point a message at a detail query and count or
+sum rows in Jinja.
+
+*Why:* the database does the arithmetic on every row, a message only reads the first 1,000 rows
+of each query (`max_rows`), and a long message is cut short in chat while people stop reading a
+noisy channel.
+
 ## Running and delivering
 
 ### RUN-1: Test before you schedule
@@ -344,6 +357,21 @@ When a run stops because the output's columns changed, find out why before re-ru
 
 *Why:* the people or systems reading the file may depend on its columns; the check exists to
 stop an unexpected change from reaching them.
+
+### RUN-6: Preview a message before it's sent
+
+**Level:** warn
+
+Before a report with a `message` output delivers to a real channel or inbox, run
+`dre run <report> --preview` and read the message it prints (title, text, length against each
+destination's limit, and whether `when:` passed). On the dev target, give chat and email
+profiles `{deliver: false}` so a test run can't post.
+
+*Why:* a post to a channel can't be taken back, and a template that reads the wrong column still
+renders.
+
+*Warned when:* you ask to run a report with a `message` output against a real destination before
+it has been previewed.
 
 ## Schedules
 
