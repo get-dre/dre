@@ -33,7 +33,19 @@
       }
     },
     "output": {
-      "$ref": "#/$defs/output"
+      "description": "One output, or a list of outputs formatted from the same run of the queries (file outputs are delivered before messages). A list replaces the inherited output; a map changes it.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/output"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/output"
+          }
+        }
+      ]
     },
     "profile": {
       "type": "string",
@@ -264,8 +276,19 @@
           }
         },
         "output": {
-          "$ref": "#/$defs/output",
-          "description": "Output settings that replace or add to the report's for this Set."
+          "description": "Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/output"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/output"
+              }
+            }
+          ]
         }
       },
       "required": [
@@ -275,11 +298,31 @@
     },
     "output": {
       "type": "object",
-      "description": "How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`); they are documented with the plugins.",
+      "description": "How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`, `text` for `message`); they are documented with the formats.",
       "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report."
+        },
         "format": {
           "type": "string",
-          "description": "The output format: `csv`, `delimited`, `fixed_width`, `parquet` or `xlsx` (each a plugin). Default: `csv`, or the project's `default_output`."
+          "description": "The output format: `message` (built in: a short headline rendered from the results), or `csv`, `delimited`, `fixed_width`, `parquet` or `xlsx` (each a plugin). Default: `csv`, or the project's `default_output`."
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs."
+        },
+        "when": {
+          "type": [
+            "string",
+            "boolean"
+          ],
+          "description": "A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`."
         },
         "destination": {
           "description": "Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path.",

@@ -112,7 +112,15 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
 ];
-pub const OUTPUT_SHARED_KEYS: &[&str] = &["format", "destination", "template", "extension"];
+pub const OUTPUT_SHARED_KEYS: &[&str] = &[
+    "name",
+    "format",
+    "queries",
+    "when",
+    "destination",
+    "template",
+    "extension",
+];
 /// Keys of one `output.template.bindings` entry.
 pub const TEMPLATE_BINDING_KEYS: &[&str] = &[
     "sheet",
@@ -316,7 +324,9 @@ pub struct Binding {
     /// Fully merged vars: project < folders < report < Set registry < inline Binding.
     pub vars: JsonMap<String, Json>,
     pub queries: Vec<QueryEntry>,
-    pub output: Output,
+    /// The Binding's outputs, in declared order (`output:` as a list, or one map). Each formats
+    /// its own subset of `queries` from the same run.
+    pub outputs: Vec<Output>,
     /// Names of every `schedules.yml` entry that runs this Binding.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<String>,
@@ -343,12 +353,34 @@ impl Binding {
     pub fn dir_name(&self) -> &str {
         self.set.as_deref().unwrap_or("default")
     }
+
+    /// Every output's destinations, in order: the order of [`crate::parse::ParsedBinding::destinations`].
+    pub fn destinations(&self) -> impl Iterator<Item = &Destination> {
+        self.outputs.iter().flat_map(|o| o.destinations.iter())
+    }
+
+    /// The output named `name`.
+    pub fn output(&self, name: &str) -> Option<&Output> {
+        self.outputs.iter().find(|o| o.name.as_deref() == Some(name))
+    }
 }
+
+/// The built-in format that renders query results into a short headline.
+pub const MESSAGE_FORMAT: &str = "message";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Output {
+    /// `name:`, so other outputs can refer to it; the default file name when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub format: String,
-    /// Format options: every key except `format`, `destination` and `template`.
+    /// `queries:`: which of the Binding's queries this output formats; `None`: all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<String>>,
+    /// `when:`: a Jinja expression; the output is skipped when it's false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+    /// Format options: every key except the shared ones ([`OUTPUT_SHARED_KEYS`]).
     pub options: JsonMap<String, Json>,
     /// Where the output is delivered, in order. Empty: it stays in `target/`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -359,6 +391,25 @@ pub struct Output {
     /// (`<report>.<extension>`); `Some("")` means no extension. `None`: the format's own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<String>,
+}
+
+impl Output {
+    /// Whether this output formats `query`'s result.
+    pub fn feeds(&self, query: &str) -> bool {
+        self.queries.as_ref().is_none_or(|q| q.iter().any(|n| n == query))
+    }
+
+    pub fn is_message(&self) -> bool {
+        self.format == MESSAGE_FORMAT
+    }
+
+    /// How messages name it: "output `x`", or "output 2" when unnamed.
+    pub fn label(&self, index: usize) -> String {
+        match &self.name {
+            Some(n) => format!("output `{n}`"),
+            None => format!("output {}", index + 1),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -2596,24 +2647,12 @@ impl Loader {
                 format!("report `{name}`: folder config: {p}"),
             );
         }
+        let mut outputs = vec![output];
         if let Some(o) = key("output") {
-            match o.value.as_mapping() {
-                Some(m) => {
-                    if let Some(p) = merge_output(&mut output, m) {
-                        let (f, l) = located("output").unwrap();
-                        self.diags
-                            .error("invalid-field", Some(f), l, format!("report `{name}`: {p}"));
-                    }
-                }
-                None => {
-                    let (f, l) = located("output").unwrap();
-                    self.diags.error(
-                        "invalid-field",
-                        Some(f),
-                        l,
-                        format!("report `{name}`: `output` must be a map"),
-                    );
-                }
+            for p in layer_outputs(&mut outputs, &o.value) {
+                let (f, l) = located("output").unwrap();
+                self.diags
+                    .error("invalid-field", Some(f), l, format!("report `{name}`: {p}"));
             }
         }
 
@@ -2631,7 +2670,7 @@ impl Loader {
             profile: base_profile,
             profile_at,
             vars,
-            output,
+            outputs,
         };
         let has_sets = key("sets").is_some();
         let report_base = self.silent_binding(&name, &base, &queries, &r.file.display);
@@ -2759,7 +2798,7 @@ impl Loader {
                 profile: base.profile.clone(),
                 profile_at: base.profile_at.clone(),
                 vars: base.vars.clone(),
-                output: base.output.clone(),
+                outputs: base.outputs.clone(),
             };
             if let Some(reg) = registry {
                 if let Some(p) = &reg.profile {
@@ -2817,19 +2856,9 @@ impl Loader {
                     ),
                 }
                 if let Some(o) = m.get("output") {
-                    match o.as_mapping() {
-                        Some(o) => {
-                            if let Some(p) = merge_output(&mut b.output, o) {
-                                self.diags
-                                    .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
-                            }
-                        }
-                        None => self.diags.error(
-                            "invalid-field",
-                            file.clone(),
-                            line,
-                            format!("{ctx}: `output` must be a map"),
-                        ),
+                    for p in layer_outputs(&mut b.outputs, o) {
+                        self.diags
+                            .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
                     }
                 }
                 if m.contains_key("schedule") {
@@ -2994,7 +3023,7 @@ impl Loader {
                 }
             }
         }
-        let output = self.typed_output(&base.output, &ctx, &file, &queries, used);
+        let outputs = self.typed_outputs(&base.outputs, &ctx, &file, &queries, used);
         if let Some(p) = &base.profile {
             used.connection(p, None, None);
         }
@@ -3003,11 +3032,130 @@ impl Loader {
             profile: base.profile.clone(),
             vars: base.vars.clone(),
             queries: std::mem::take(&mut queries),
-            output,
+            outputs,
             schedules: Vec::new(),
             parsed: None,
             profile_at: base.profile_at.clone(),
         }
+    }
+
+    /// Every merged output, typed, plus the checks across them: unique names, `queries:` naming
+    /// the Binding's queries, xlsx-only `columns`, and queries that feed no output.
+    fn typed_outputs(
+        &mut self,
+        maps: &[Mapping],
+        ctx: &str,
+        file: &Path,
+        queries: &[QueryEntry],
+        used: &mut Usage,
+    ) -> Vec<Output> {
+        let at = Some(file.to_path_buf());
+        let several = maps.len() > 1;
+        let mut outputs = Vec::new();
+        for (i, m) in maps.iter().enumerate() {
+            let octx = if several {
+                let label = match m.get("name").and_then(Value::as_str) {
+                    Some(n) => format!("output `{n}`"),
+                    None => format!("output {}", i + 1),
+                };
+                format!("{ctx}, {label}")
+            } else {
+                ctx.to_string()
+            };
+            let subset: Vec<QueryEntry> = match m.get("queries") {
+                None | Some(Value::Null) => queries.to_vec(),
+                Some(v) => {
+                    match string_list(v) {
+                        Some(names) => {
+                            for n in names.iter().filter(|n| !queries.iter().any(|q| &&q.query == n)) {
+                                self.diags.error(
+                                "unknown-query",
+                                at.clone(),
+                                None,
+                                format!("{octx}: `queries` names `{n}`, which isn't one of this Binding's queries"),
+                            );
+                            }
+                            queries
+                                .iter()
+                                .filter(|q| names.contains(&q.query))
+                                .cloned()
+                                .collect()
+                        }
+                        None => {
+                            self.diags.error(
+                                "invalid-field",
+                                at.clone(),
+                                None,
+                                format!("{octx}: `queries` must be a list of query names"),
+                            );
+                            queries.to_vec()
+                        }
+                    }
+                }
+            };
+            outputs.push(self.typed_output(m, &octx, file, &subset, used));
+        }
+        let mut seen = BTreeSet::new();
+        for o in &outputs {
+            if let Some(n) = &o.name
+                && !seen.insert(n.clone())
+            {
+                self.diags.error(
+                    "duplicate-output",
+                    at.clone(),
+                    None,
+                    format!("{ctx}: output `{n}` is declared twice; output names must be unique"),
+                );
+            }
+        }
+        // Two unnamed outputs of one format would write the same default file.
+        let mut exts = BTreeSet::new();
+        for o in outputs.iter().filter(|o| o.name.is_none()) {
+            let ext = o.extension.clone().unwrap_or_else(|| o.format.clone());
+            if !exts.insert(ext) {
+                self.diags.error(
+                    "duplicate-output",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: two unnamed `{}` outputs would write the same file; give each output a `name:`",
+                        o.format
+                    ),
+                );
+            }
+        }
+        for q in queries.iter().filter(|q| !q.columns.is_empty()) {
+            let formats: Vec<&str> = outputs
+                .iter()
+                .filter(|o| o.feeds(&q.query))
+                .map(|o| o.format.as_str())
+                .collect();
+            if !formats.is_empty() && !formats.contains(&"xlsx") {
+                self.diags.error(
+                    "invalid-field",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: `columns` on query `{}` only applies to the xlsx format",
+                        q.query
+                    ),
+                );
+            }
+        }
+        for q in queries.iter().filter(|q| q.tab) {
+            if !outputs.iter().any(|o| o.feeds(&q.query)) {
+                self.diags.warning(
+                    "unused-query",
+                    at.clone(),
+                    None,
+                    format!(
+                        "{ctx}: query `{}` feeds no output; add it to an output's `queries:`, or give it `tab: false` if it only prepares later queries",
+                        q.query
+                    ),
+                );
+            }
+        }
+        outputs
     }
 
     /// Convert a merged output map into a typed `Output`, validating options and references.
@@ -3083,19 +3231,6 @@ impl Loader {
                 Vec::new()
             }
         };
-        if format != "xlsx" {
-            for q in queries.iter().filter(|q| !q.columns.is_empty()) {
-                self.diags.error(
-                    "invalid-field",
-                    file.clone(),
-                    None,
-                    format!(
-                        "{ctx}: `columns` on query `{}` only applies to the xlsx format",
-                        q.query
-                    ),
-                );
-            }
-        }
         let template = match m.get("template") {
             None | Some(Value::Null) => None,
             Some(t) => {
@@ -3137,6 +3272,37 @@ impl Loader {
                 None
             }
         };
+        let name = match m.get("name") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(n)) if is_identifier(n) => Some(n.clone()),
+            Some(_) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: output `name` must be an identifier (letters, digits, `_`)"),
+                );
+                None
+            }
+        };
+        let when = match m.get("when") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(w)) => Some(w.clone()),
+            Some(Value::Bool(b)) => Some(b.to_string()),
+            Some(_) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    None,
+                    format!("{ctx}: `when` must be a Jinja expression (a string)"),
+                );
+                None
+            }
+        };
+        let queries = m
+            .get("queries")
+            .and_then(string_list)
+            .map(|_| queries.iter().map(|q| q.query.clone()).collect());
         if extension.is_some() && format == "xlsx" {
             self.diags.error(
                 "invalid-output-option",
@@ -3146,7 +3312,10 @@ impl Loader {
             );
         }
         Output {
+            name,
             format,
+            queries,
+            when,
             options: opts,
             destinations,
             template,
@@ -3395,7 +3564,7 @@ impl Loader {
             profile: profile.clone(),
             profile_at: inherited_profile_at(&layers, project),
             vars,
-            output,
+            outputs: vec![output],
         };
         if let Some(p) = &profile {
             used.connection(p, None, None);
@@ -3889,12 +4058,7 @@ impl Loader {
         let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         for report in &project.reports {
             for b in report.bindings.iter().filter(|b| b.schedules.len() > 1) {
-                let paths: Vec<&String> = b
-                    .output
-                    .destinations
-                    .iter()
-                    .filter_map(|d| d.path.as_ref())
-                    .collect();
+                let paths: Vec<&String> = b.destinations().filter_map(|d| d.path.as_ref()).collect();
                 if paths.is_empty() {
                     continue;
                 }
@@ -4423,11 +4587,11 @@ impl Loader {
                 }
                 // Templated output values render with the same context.
                 let mut values: Vec<String> = Vec::new();
-                for d in &b.output.destinations {
+                for d in b.destinations() {
                     values.extend(d.path.clone());
                     values.extend(d.options.values().flat_map(json_strings));
                 }
-                if let Some(t) = &b.output.template {
+                for t in b.outputs.iter().filter_map(|o| o.template.as_ref()) {
                     values.extend(t.bindings.iter().filter_map(|tb| tb.value.clone()));
                 }
                 for v in values.iter().filter(|v| preflight::is_templated(v)) {
@@ -4526,8 +4690,11 @@ impl Loader {
     fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
         for r in &project.reports {
-            for b in &r.bindings {
-                let Some(t) = &b.output.template else { continue };
+            for t in r
+                .bindings
+                .iter()
+                .flat_map(|b| b.outputs.iter().filter_map(|o| o.template.as_ref()))
+            {
                 if !seen.insert((r.name.clone(), t.file.clone(), format!("{:?}", t.bindings))) {
                     continue;
                 }
@@ -4591,7 +4758,8 @@ struct BindingBase {
     profile: Option<String>,
     profile_at: Option<ProfileAt>,
     vars: JsonMap<String, Json>,
-    output: Mapping,
+    /// The merged outputs, in order: one unless a layer gave a list.
+    outputs: Vec<Mapping>,
 }
 
 /// Everything the project references, for profile and plugin checks.
@@ -4653,6 +4821,76 @@ fn project_default_output(p: &Project) -> Option<Mapping> {
         .cloned()
 }
 
+/// Apply one report or Set `output:` layer over the inherited outputs; returns the problems.
+///
+/// - A list replaces whatever was inherited; each entry starts from the built-in defaults.
+/// - A map merges ([`merge_output`]) into the single inherited output, or into the one its
+///   `name:` names. With several inherited outputs and no `name:`, it's unclear which one to
+///   change: the layer is ignored and the problem says why.
+pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
+    let mut problems = Vec::new();
+    match over {
+        Value::Sequence(list) if list.is_empty() => problems.push(
+            "`output` is an empty list; give at least one output, or remove it to use the inherited one"
+                .into(),
+        ),
+        Value::Sequence(list) => {
+            let mut outs = Vec::new();
+            for (i, entry) in list.iter().enumerate() {
+                match entry.as_mapping() {
+                    Some(m) => {
+                        let mut o = builtin_output();
+                        problems.extend(merge_output(&mut o, m));
+                        outs.push(o);
+                    }
+                    None => problems.push(format!("`output` entry {} must be a map", i + 1)),
+                }
+            }
+            if problems.is_empty() {
+                *base = outs;
+            }
+        }
+        Value::Mapping(m) => {
+            let name_of = |o: &Mapping| o.get("name").and_then(Value::as_str).map(str::to_string);
+            let target = match m.get("name").and_then(Value::as_str) {
+                Some(n) => match base.iter().position(|o| name_of(o).as_deref() == Some(n)) {
+                    Some(i) => Some(i),
+                    None if base.len() == 1 && name_of(&base[0]).is_none() => Some(0),
+                    None => {
+                        let names: Vec<String> = base
+                            .iter()
+                            .filter_map(name_of)
+                            .map(|n| format!("`{n}`"))
+                            .collect();
+                        problems.push(format!(
+                            "no inherited output is named `{n}`{}; override the full `output:` list to add one",
+                            if names.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (they're {})", names.join(", "))
+                            }
+                        ));
+                        None
+                    }
+                },
+                None if base.len() == 1 => Some(0),
+                None => {
+                    problems.push(format!(
+                        "this overrides `output` with no `name:`, but it inherits {} outputs, so it's unclear which one to change; give the `name:` of the output to change, or override the full list",
+                        base.len()
+                    ));
+                    None
+                }
+            };
+            if let Some(i) = target {
+                problems.extend(merge_output(&mut base[i], m));
+            }
+        }
+        _ => problems.push("`output` must be a map or a list of maps".into()),
+    }
+    problems
+}
+
 /// Merge an output layer over `base`. Changing `format` drops the lower layers' format options,
 /// since they belong to a different format.
 ///
@@ -4668,7 +4906,7 @@ pub fn merge_output(base: &mut Mapping, over: &Mapping) -> Option<String> {
     if let Some(f) = over.get(&fmt_key)
         && base.get(&fmt_key) != Some(f)
     {
-        base.retain(|k, _| is_one_of(k, &["destination", "template"]));
+        base.retain(|k, _| is_one_of(k, &["name", "queries", "when", "destination", "template"]));
     }
     let mut problem = None;
     for (k, v) in over {

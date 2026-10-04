@@ -423,7 +423,7 @@ pub fn binding(
         }
         out.queries.push(pq);
     }
-    for d in &b.output.destinations {
+    for d in b.destinations() {
         let p = render_profile(
             &mut out,
             "destination `profile`",

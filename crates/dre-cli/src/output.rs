@@ -221,24 +221,26 @@ impl Printer {
                 &format!("{} on {} ({}){target}{sources}", q.query, q.connection, q.kind),
             );
         }
-        i.print(
-            Tone::Note,
-            "Output",
-            &format!("{} ({})", p.output.display(), p.format),
-        );
-        for d in &p.destinations {
-            let target = d.target.clone().unwrap_or_default();
-            let what = match (&d.kind, &d.path) {
-                (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
-                (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
-                (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
+        for o in &p.outputs {
+            let what = match &o.name {
+                Some(n) => format!("{} ({}, output `{n}`)", o.output.display(), o.format),
+                None => format!("{} ({})", o.output.display(), o.format),
             };
-            let tone = if d.delivers && non_dev(&target) {
-                Tone::Warn
-            } else {
-                Tone::Note
-            };
-            i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+            i.print(Tone::Note, "Output", &what);
+            for d in &o.destinations {
+                let target = d.target.clone().unwrap_or_default();
+                let what = match (&d.kind, &d.path) {
+                    (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
+                    (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
+                    (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
+                };
+                let tone = if d.delivers && non_dev(&target) {
+                    Tone::Warn
+                } else {
+                    Tone::Note
+                };
+                i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+            }
         }
         if !p.schedules.is_empty() {
             i.print(Tone::Note, "Schedules", &p.schedules.join(", "));

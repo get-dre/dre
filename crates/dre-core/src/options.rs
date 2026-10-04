@@ -69,8 +69,10 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 file: r.file.clone(),
                 profile: profile.map(str::to_string),
             };
-            add(PluginKind::Format, &b.output.format, &b.output.options, at(None));
-            for (i, d) in b.output.destinations.iter().enumerate() {
+            for o in b.outputs.iter().filter(|o| !o.is_message()) {
+                add(PluginKind::Format, &o.format, &o.options, at(None));
+            }
+            for (i, d) in b.destinations().enumerate() {
                 // The profile as the parse pass rendered it (a Jinja `profile:`).
                 let rendered = b
                     .parsed

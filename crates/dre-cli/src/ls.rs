@@ -292,9 +292,7 @@ fn table(reports: &[(&Report, Vec<&Binding>)]) -> String {
                 .filter(|c| !c.is_empty())
                 .unwrap_or_else(|| "-".into());
             let dests: Vec<String> = b
-                .output
-                .destinations
-                .iter()
+                .destinations()
                 .map(|d| match &d.path {
                     Some(p) => format!("{}:{p}", d.profile),
                     None => d.profile.clone(),
@@ -304,7 +302,11 @@ fn table(reports: &[(&Report, Vec<&Binding>)]) -> String {
                 r.name.clone(),
                 b.set.clone().unwrap_or_else(|| "-".into()),
                 conns,
-                b.output.format.clone(),
+                b.outputs
+                    .iter()
+                    .map(|o| o.format.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 if dests.is_empty() {
                     "-".into()
                 } else {
