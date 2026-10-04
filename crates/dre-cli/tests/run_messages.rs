@@ -289,7 +289,12 @@ fn a_message_links_and_attaches_the_file_outputs() {
     p.dre("run", &["daily"]).ok();
     let d = deliveries(&rec);
     assert_eq!(d.len(), 1);
-    let loc = p.path("out/rows_a.csv").to_string_lossy().replace('_', "\\_");
+    // The location as the template printed it: Markdown-escaped (Windows backslashes too).
+    let loc = p
+        .path("out/rows_a.csv")
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('_', "\\_");
     assert_eq!(d[0]["message"]["text"], format!("Full report: {loc} (delivered)"));
     assert_eq!(d[0]["files"].as_array().unwrap().len(), 1);
     assert!(
