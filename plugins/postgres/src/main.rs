@@ -476,8 +476,9 @@ where
     }
 }
 
-/// Connect directly, or through the bastion. `at` names the server in errors.
-async fn connect(s: &Settings, at: &str) -> std::result::Result<Session, String> {
+/// Connect directly, or through the bastion. `at` names the server in errors: `db` (from
+/// [`server`]), and the bastion when there is one.
+async fn connect(s: &Settings, db: &str, at: &str) -> std::result::Result<Session, String> {
     let fail = |e: tokio_postgres::Error| format!("can't connect to Postgres at {at}: {}", describe(&e));
     let Some(ssh) = &s.ssh else {
         #[cfg(unix)]
@@ -508,13 +509,13 @@ async fn connect(s: &Settings, at: &str) -> std::result::Result<Session, String>
     let tunnel = ssh
         .connect(config, s.connect_timeout.unwrap_or(Duration::from_secs(30)))
         .await
-        .map_err(|e| format!("can't reach the SSH bastion {bastion} (for Postgres at {at}): {e}"))?;
+        .map_err(|e| format!("can't reach the SSH bastion {bastion} (for Postgres at {db}): {e}"))?;
     let channel = tunnel
         .channel_open_direct_tcpip(s.host.as_str(), u32::from(s.port), "127.0.0.1", 0)
         .await
         .map_err(|e| {
             format!(
-                "the SSH bastion {bastion} couldn't connect to {}:{} (for Postgres at {at}): {e}",
+                "the SSH bastion {bastion} couldn't connect to {}:{} (for Postgres at {db}): {e}",
                 s.host, s.port
             )
         })?;
@@ -575,13 +576,14 @@ impl Source for Postgres {
 
     fn open(&mut self, c: &Map<String, Value>, read_only: bool) -> Result<()> {
         let s = settings(c)?;
-        let mut at = server(c);
-        if let Some(ssh) = &s.ssh {
-            at = format!("{at} through the SSH bastion {}:{}", ssh.host, ssh.port);
-        }
+        let db = server(c);
+        let at = match &s.ssh {
+            Some(ssh) => format!("{db} through the SSH bastion {}:{}", ssh.host, ssh.port),
+            None => db.clone(),
+        };
         let session = self.rt.block_on(async {
             match s.connect_timeout {
-                Some(t) => tokio::time::timeout(t, connect(&s, &at))
+                Some(t) => tokio::time::timeout(t, connect(&s, &db, &at))
                     .await
                     .unwrap_or_else(|_| {
                         Err(format!(
@@ -589,7 +591,7 @@ impl Source for Postgres {
                             t.as_secs()
                         ))
                     }),
-                None => connect(&s, &at).await,
+                None => connect(&s, &db, &at).await,
             }
         })?;
         let mut setup = Vec::new();
