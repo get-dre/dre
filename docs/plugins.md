@@ -54,7 +54,7 @@ Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`).
 | `user`, `password` | |
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
-| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. |
+| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | Seconds. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
@@ -469,8 +469,9 @@ Uploads use GCS's resumable protocol.
 secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line with literal `\n`
 gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
-`host_key_fingerprint` (`SHA256:...`). Unknown hosts are refused unless
-`accept_unknown_host: true`. Missing directories are created. The [`postgres`](#postgres)
+`host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+Missing directories are created. The [`postgres`](#postgres)
 source's `ssh:` block takes the same settings.
 
 ### `ftp`

@@ -90,8 +90,9 @@ output:
 secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line with literal `\n`
 gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
-`host_key_fingerprint` (`SHA256:...`). Unknown hosts are refused unless
-`accept_unknown_host: true`. Missing directories are created. The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#postgres)
+`host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+Missing directories are created. The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#postgres)
 source's `ssh:` block takes the same settings.
 
 ## Guide notes

@@ -44,7 +44,7 @@ None: a source's settings are its profile fields.
 | `user`, `password` | |
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
-| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. |
+| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | Seconds. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |

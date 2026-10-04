@@ -59,6 +59,15 @@ pub fn auth_fields() -> Vec<ConnectionField> {
     ]
 }
 
+/// A path from a profile, with a leading `~/` meaning the home directory (profiles aren't run
+/// through a shell, so nothing else expands it).
+pub fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => std::env::home_dir().unwrap_or_default().join(rest),
+        None => PathBuf::from(path),
+    }
+}
+
 /// A private key's text as it arrives from an environment variable: a secret stored on one line
 /// with literal `\n` sequences gets its line breaks back.
 pub fn key_text(s: &str) -> String {
@@ -96,7 +105,7 @@ impl Ssh {
                 );
             }
             (Some(path), None) => Auth::Key(Arc::new(
-                russh::keys::load_secret_key(path, passphrase)
+                russh::keys::load_secret_key(expand_home(path), passphrase)
                     .map_err(|e| format!("can't load private key {path}: {e}"))?,
             )),
             (None, Some(text)) => Auth::Key(Arc::new(
@@ -119,7 +128,7 @@ impl Ssh {
             username,
             auth,
             known_hosts: conn_str(c, "known_hosts_path")
-                .map(PathBuf::from)
+                .map(expand_home)
                 .unwrap_or_else(home_known_hosts),
             fingerprint: conn_str(c, "host_key_fingerprint").map(str::to_string),
             accept_unknown: false,
@@ -289,6 +298,14 @@ mod tests {
             accept_unknown: false,
             refused: Arc::default(),
         }
+    }
+
+    #[test]
+    fn a_leading_tilde_is_the_home_directory() {
+        let home = std::env::home_dir().unwrap();
+        assert_eq!(expand_home("~/.ssh/id"), home.join(".ssh/id"));
+        assert_eq!(expand_home("/etc/key"), PathBuf::from("/etc/key"));
+        assert_eq!(expand_home("a~/b"), PathBuf::from("a~/b"));
     }
 
     #[test]

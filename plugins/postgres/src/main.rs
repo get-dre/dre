@@ -401,7 +401,8 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
     let mode = conn_str(c, "sslmode").unwrap_or("prefer");
     let mut tls = native_tls::TlsConnector::builder();
     if let Some(root) = conn_str(c, "sslrootcert") {
-        let pem = std::fs::read(root).map_err(|e| format!("can't read sslrootcert {root}: {e}"))?;
+        let pem = std::fs::read(dre_ssh::expand_home(root))
+            .map_err(|e| format!("can't read sslrootcert {root}: {e}"))?;
         tls.add_root_certificate(native_tls::Certificate::from_pem(&pem)?);
     }
     let tls = match mode {
