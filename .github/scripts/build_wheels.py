@@ -25,6 +25,9 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+import package_readme  # noqa: E402  (the long description and summary come from the README)
+
 REPO = "get-dre/dre"
 DIST_NAME = "dre-cli"
 PKG = "dre_cli"
@@ -109,26 +112,6 @@ def main():
 
 MAIN = "from dre_cli import main\n\nmain()\n"
 
-README = """# dre-cli
-
-[DRE](https://getdre.com), the Declarative Reporting Engine: reports as code. SQL and YAML in,
-formatted files out, delivered.
-DRE runs SQL reports and writes csv, delimited, fixed-width, parquet or xlsx files, then delivers
-them (S3, GCS, Azure Blob, SFTP/FTP, Databricks Volumes and workspace files, email, Slack).
-
-```bash
-pip install dre-cli        # or: uv tool install dre-cli
-dre --help
-```
-
-This package holds the `dre` {dre_version} executable. Plugins (databases, file formats,
-destinations) are installed by `dre` on demand, for the ones a project declares. From Python:
-`dre_cli.run(["run", "-s", "daily"])`.
-
-In a Databricks job, add `dre-cli` to the job's environment dependencies and run `dre` (or
-`python -m dre_cli`) from a script or notebook. See the
-[README](https://github.com/{repo}#readme) for everything else.
-"""
 
 
 def record_line(path, data):
@@ -157,23 +140,23 @@ def build(dre_version, plat, out_dir, dist=None, from_dir=None):
     files[f"{PKG}/__main__.py"] = (MAIN.encode(), False)
 
     dist_info = f"{PKG}-{version}.dist-info"
+    extra_classifiers = "".join(f"Classifier: {c}\n" for c in package_readme.meta()["classifiers"])
     metadata = f"""Metadata-Version: 2.1
 Name: {DIST_NAME}
 Version: {version}
-Summary: DRE, reports as code: SQL and YAML in, Excel, CSV or fixed-width files out, delivered
+Summary: {package_readme.meta()['summary']}
 Home-page: https://getdre.com
 Project-URL: Homepage, https://getdre.com
 Project-URL: Documentation, https://getdre.com/docs/
 Project-URL: Source, https://github.com/{REPO}
 Project-URL: Changelog, https://github.com/{REPO}/releases
-Keywords: reports-as-code,reporting,sql,excel,xlsx,csv,fixed-width,report-automation
+Keywords: {','.join(package_readme.meta()['keywords'])}
 License: GPL-3.0-only
 Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
-Classifier: Development Status :: 2 - Pre-Alpha
-Requires-Python: >=3.8
+{extra_classifiers}Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 
-""" + README.format(repo=REPO, dre_version=dre_version)
+""" + package_readme.pypi_readme((package_readme.ROOT / "README.md").read_text(), dre_version)
     wheel = f"""Wheel-Version: 1.0
 Generator: dre build_wheels.py
 Root-Is-Purelib: false

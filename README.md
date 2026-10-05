@@ -19,20 +19,22 @@
 
 # DRE
 
+<!-- package-description:start -->
 **DRE**, the **Declarative Reporting Engine**, is open-source reports as code. You keep each report
 as `.sql` and YAML files in git; DRE runs the SQL against your databases (each tab of a workbook can
 come from a different one, and tables can be declared as dbt-style sources), writes the result as
 csv, delimited, fixed-width, parquet or xlsx (including multi-sheet workbooks, number formats,
 formulas and totals rows, and branded Excel templates), and delivers the file wherever it needs
 to go: email, SFTP/FTP, S3, GCS, Azure Blob, Databricks Volumes or Slack. A report can also send a
-headline [message](docs/messages.md) built from its results, to Slack, Microsoft Teams, Google Chat
-or email. It runs on whatever scheduler you already have: cron, Airflow, Dagster, Databricks Jobs.
+headline [message](docs/messages.md) built from its results, to Slack or email (Microsoft Teams and
+Google Chat are in preview). It runs on whatever scheduler you already have: cron, Airflow, Dagster, Databricks Jobs.
 
 If you know dbt, you already know DRE: a project of SQL and YAML, Jinja and macros, `ref()`,
 `source()`, folder config, tags, selectors, profiles and targets. dbt builds your tables; DRE
 delivers the last mile, the reports people receive. DRE is inspired by dbt and is an independent
 project, not affiliated with or endorsed by dbt Labs, Inc. (dbt is their trademark).
 [DRE and dbt, side by side](https://getdre.com/dbt/).
+<!-- package-description:end -->
 
 Website: [getdre.com](https://getdre.com).
 

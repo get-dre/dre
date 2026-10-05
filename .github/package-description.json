@@ -1,0 +1,13 @@
+{
+  "summary": "Reports as code: SQL and YAML in git, built into Excel, CSV or fixed-width files and headline messages, delivered to email, SFTP, cloud storage or Slack",
+  "keywords": [
+    "reports-as-code",
+    "reporting",
+    "sql",
+    "excel",
+    "cli"
+  ],
+  "classifiers": [
+    "Development Status :: 4 - Beta"
+  ]
+}

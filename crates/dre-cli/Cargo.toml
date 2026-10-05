@@ -1,6 +1,6 @@
 [package]
 name = "dre-cli"
-description = "The dre command: reports as code, SQL and YAML in, Excel, CSV or fixed-width files out, delivered"
+description = "Reports as code: SQL and YAML in git, built into Excel, CSV or fixed-width files and headline messages, delivered to email, SFTP, cloud storage or Slack"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 homepage = "https://getdre.com"
 documentation = "https://getdre.com/docs/"
 readme = "README.md"
-keywords = ["reporting", "reports-as-code", "sql", "excel", "cli"]
+keywords = ["reports-as-code", "reporting", "sql", "excel", "cli"]
 categories = ["command-line-utilities", "database"]
 exclude = ["tests/"]
 
