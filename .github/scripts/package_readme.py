@@ -12,8 +12,8 @@ their own install lines:
 - PyPI: build_wheels.py calls `pypi_readme()` for the wheel's long description.
 - crates.io: `sync` writes crates/dre-cli/README.md, which Cargo publishes.
 
-The one-line summary and the keywords live in .github/package-description.json: build_wheels.py
-reads them, and `check` fails when crates/dre-cli/Cargo.toml's `description` or `keywords` differ,
+The one-line summary, the keywords and the extra PyPI classifiers (the development status) live in
+.github/package-description.json: build_wheels.py reads them, and `check` fails when crates/dre-cli/Cargo.toml's `description` or `keywords` differ,
 or when crates/dre-cli/README.md is stale. The registries only show new text after a release.
 """
 

@@ -6,5 +6,8 @@
     "sql",
     "excel",
     "cli"
+  ],
+  "classifiers": [
+    "Development Status :: 4 - Beta"
   ]
 }

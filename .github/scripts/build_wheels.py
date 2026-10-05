@@ -140,6 +140,7 @@ def build(dre_version, plat, out_dir, dist=None, from_dir=None):
     files[f"{PKG}/__main__.py"] = (MAIN.encode(), False)
 
     dist_info = f"{PKG}-{version}.dist-info"
+    extra_classifiers = "".join(f"Classifier: {c}\n" for c in package_readme.meta()["classifiers"])
     metadata = f"""Metadata-Version: 2.1
 Name: {DIST_NAME}
 Version: {version}
@@ -152,8 +153,7 @@ Project-URL: Changelog, https://github.com/{REPO}/releases
 Keywords: {','.join(package_readme.meta()['keywords'])}
 License: GPL-3.0-only
 Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
-Classifier: Development Status :: 2 - Pre-Alpha
-Requires-Python: >=3.8
+{extra_classifiers}Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 
 """ + package_readme.pypi_readme((package_readme.ROOT / "README.md").read_text(), dre_version)
