@@ -61,6 +61,11 @@ jobs:
       - id: plan
         shell: bash  # with pipefail: a rejected tag fails here, not in the build
         run: python3 .github/scripts/release_plan.py "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+      # The PyPI and crates.io pages are built from the README: stale ones stop a core release
+      # here, before anything is published.
+      - name: Package pages match the README
+        if: steps.plan.outputs.kind == 'core'
+        run: python3 .github/scripts/package_readme.py check
 
   build:
     name: Build ${{ needs.plan.outputs.package }} (${{ matrix.platform }})
