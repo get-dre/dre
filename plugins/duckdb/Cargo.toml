@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 dre-protocol.workspace = true
 duckdb = { workspace = true, features = ["appender-arrow"] }
-arrow.workspace = true
+arrow = { workspace = true, features = ["ffi"] }
 serde_json.workspace = true
 
 [dev-dependencies]
