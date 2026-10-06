@@ -488,7 +488,7 @@ fn schema() -> jsonschema::Validator {
 fn assert_valid(v: &jsonschema::Validator, doc: &Value) {
     let errors: Vec<String> = v
         .iter_errors(doc)
-        .map(|e| format!("{e} at {}", e.instance_path))
+        .map(|e| format!("{e} at {}", e.instance_path()))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}\n{doc:#}");
 }
