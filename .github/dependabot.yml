@@ -1,0 +1,38 @@
+version: 2
+
+# Weekly dependency updates. Minor and patch bumps are grouped into one PR per
+# ecosystem; major bumps stay separate so a breaking change is reviewed alone.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        update-types: [minor, patch]
+
+  # The root workspace covers dre-core, dre-protocol, dre-cli, every plugin crate
+  # and the test helpers.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        update-types: [minor, patch]
+
+  # One entry for every Go module: the plugins and the protocol module they share.
+  - package-ecosystem: gomod
+    directories:
+      - /go/bigquery
+      - /go/databricks
+      - /go/plugin
+      - /go/snowflake
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      gomod:
+        update-types: [minor, patch]
