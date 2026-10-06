@@ -31,10 +31,11 @@ walkdir = "2"
 semver = { version = "1", features = ["serde"] }
 tempfile = "3"
 assert_cmd = "2"
-# Held at 58: the newest `duckdb` crate (1.10505) is built on arrow 58, and the DuckDB source
-# passes record batches straight between the two. Bump together when duckdb moves.
-arrow = "58"
-parquet = "58"
+# The newest `duckdb` crate (1.10506) is still built on arrow 58, so the DuckDB plugin converts
+# batches between that and this one through the Arrow C data interface (plugins/duckdb/src/bridge.rs).
+# Once duckdb moves to arrow 59, drop the bridge and use one version.
+arrow = "59"
+parquet = "59"
 duckdb = { version = "1.10505", features = ["bundled"] }
 
 # Native DuckDB debug symbols dominate development/test disk usage. Omit debug

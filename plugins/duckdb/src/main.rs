@@ -4,6 +4,8 @@
 //! directory), `threads`, `memory_limit`. One connection is held for the whole Binding, so temp
 //! tables and settings persist across statements.
 
+mod bridge;
+
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Schema};
@@ -154,7 +156,7 @@ impl Source for DuckDb {
         let mut rows = 0;
         while let Some(batch) = data.next_batch()? {
             rows += batch.num_rows() as u64;
-            appender.append_record_batch(batch)?;
+            appender.append_record_batch(bridge::to_duckdb(&batch)?)?;
         }
         appender.flush()?;
         Ok(Loaded {
@@ -168,7 +170,7 @@ impl Source for DuckDb {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(sql)?;
         let stream = stmt.stream_arrow([])?;
-        let schema = stream.get_schema();
+        let schema = bridge::schema_from_duckdb(&stream.get_schema())?;
         if schema.fields().is_empty() {
             return out.no_result(None);
         }
@@ -179,7 +181,7 @@ impl Source for DuckDb {
                     .and_then(|b| {
                         b.column(0)
                             .as_any()
-                            .downcast_ref::<arrow::array::Int64Array>()
+                            .downcast_ref::<duckdb::arrow::array::Int64Array>()
                             .map(|a| a.value(0))
                     })
                     .map(|n| n as u64);
@@ -191,9 +193,9 @@ impl Source for DuckDb {
             }
             None => {}
         }
-        out.begin(Arc::new(Schema::new(schema.fields().clone())))?;
+        out.begin(Arc::new(schema))?;
         while let Some(b) = next_batch(&mut stream)? {
-            if !out.batch(b)? {
+            if !out.batch(bridge::from_duckdb(&b)?)? {
                 break;
             }
         }
@@ -209,7 +211,7 @@ impl Source for DuckDb {
 }
 
 /// duckdb-rs panics if fetching fails mid-stream; turn that into an error.
-fn next_batch(stream: &mut duckdb::ArrowStream<'_>) -> Result<Option<arrow::array::RecordBatch>> {
+fn next_batch(stream: &mut duckdb::ArrowStream<'_>) -> Result<Option<duckdb::arrow::array::RecordBatch>> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stream.next())).map_err(|p| {
         let msg = p
             .downcast_ref::<String>()
