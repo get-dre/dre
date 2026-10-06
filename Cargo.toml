@@ -33,7 +33,7 @@ tempfile = "3"
 assert_cmd = "2"
 # Held at 58: the newest `duckdb` crate (1.10505) is built on arrow 58, and the DuckDB source
 # passes record batches straight between the two. Bump together when duckdb moves.
-arrow = "58"
+arrow = "59"
 parquet = "58"
 duckdb = { version = "1.10505", features = ["bundled"] }
 
