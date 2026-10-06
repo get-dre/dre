@@ -47,7 +47,7 @@ fn run_case(case: &Path, schema: &jsonschema::Validator, failures: &mut Vec<Stri
     if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&stdout) {
         let errors: Vec<String> = schema
             .iter_errors(&doc)
-            .map(|e| format!("{e} at {}", e.instance_path))
+            .map(|e| format!("{e} at {}", e.instance_path()))
             .collect();
         if !errors.is_empty() {
             failures.push(format!("{name}: output doesn't match the schema: {errors:#?}"));

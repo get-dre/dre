@@ -39,15 +39,20 @@ fn base(name: &str) -> String {
 
 /// The schema with an `$id`, and every other schema registered, so cross-file `$ref`s resolve.
 fn validator(name: &str) -> jsonschema::Validator {
-    let mut opts = jsonschema::options();
-    for other in FILES {
+    let resources = FILES.iter().map(|other| {
         let mut doc = raw(other);
         doc["$id"] = Value::String(base(other));
-        opts = opts.with_resource(base(other), jsonschema::Resource::from_contents(doc).unwrap());
-    }
+        (base(other), jsonschema::Resource::from_contents(doc))
+    });
+    let registry = jsonschema::Registry::new()
+        .extend(resources)
+        .and_then(jsonschema::RegistryBuilder::prepare)
+        .expect("the schemas register");
     let mut doc = raw(name);
     doc["$id"] = Value::String(base(name));
-    opts.build(&doc)
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&doc)
         .unwrap_or_else(|e| panic!("{name}.schema.json is not a valid schema: {e}"))
 }
 
@@ -416,7 +421,11 @@ fn every_project_the_parser_accepts_validates_against_the_schemas() {
             };
             files += 1;
             for e in by_kind(kind).iter_errors(&json) {
-                failures.push(format!("{} ({kind}): {e} at {}", path.display(), e.instance_path));
+                failures.push(format!(
+                    "{} ({kind}): {e} at {}",
+                    path.display(),
+                    e.instance_path()
+                ));
             }
         }
     }
