@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "x-dre-schema-version": "0.3",
   "title": "DRE profiles",
-  "description": "Connections and destinations, in `profiles.yml`: what reports read from and where outputs go. Kept outside the project (`~/.dre`, `--profiles-dir` or `DRE_PROFILES_DIR`). Every profile lists its targets (environments). Each profile the run uses picks one: `--target`, else `DRE_TARGET` (either sets every profile), else the profile's own `target`, else `dev`; a used profile without that entry is an error.",
   "type": "object",
+  "description": "Connections and destinations, in `profiles.yml`: what reports read from and where outputs go. Kept outside the project (`~/.dre`, `--profiles-dir` or `DRE_PROFILES_DIR`). Every profile lists its targets (environments). Each profile the run uses picks one: `--target`, else `DRE_TARGET` (either sets every profile), else the profile's own `target`, else `dev`; a used profile without that entry is an error.",
   "properties": {
     "connections": {
       "type": "object",
@@ -15,10 +15,10 @@
     "sources": {
       "type": "object",
       "description": "DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`.",
+      "deprecated": true,
       "additionalProperties": {
         "$ref": "#/$defs/connection"
-      },
-      "deprecated": true
+      }
     },
     "destinations": {
       "type": "object",
@@ -29,6 +29,12 @@
     }
   },
   "additionalProperties": false,
+  "not": {
+    "required": [
+      "connections",
+      "sources"
+    ]
+  },
   "$defs": {
     "connection": {
       "type": "object",
@@ -51,6 +57,25 @@
         "targets"
       ],
       "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "description": "One target of a profile: a connection or delivery configuration. `type` names the plugin; every other key is a field of that plugin (see the plugins reference), and secrets belong in `{{ env_var('NAME') }}`.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The plugin type of the connection, e.g. `duckdb`, `postgres`, `databricks`, `sftp`, `s3`. `local` needs no plugin."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": true,
+      "not": {
+        "required": [
+          "deliver"
+        ]
+      }
     },
     "destination": {
       "type": "object",
@@ -81,33 +106,14 @@
       ],
       "additionalProperties": false
     },
-    "target": {
-      "type": "object",
-      "description": "One target of a profile: a connection or delivery configuration. `type` names the plugin; every other key is a field of that plugin (see the plugins reference), and secrets belong in `{{ env_var('NAME') }}`.",
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "The plugin type of the connection, e.g. `duckdb`, `postgres`, `databricks`, `sftp`, `s3`. `local` needs no plugin."
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "additionalProperties": true,
-      "not": {
-        "required": [
-          "deliver"
-        ]
-      }
-    },
     "no_delivery": {
       "type": "object",
       "description": "A destination entry is a delivery configuration (`type` and the plugin's fields, as for a connection), or `{deliver: false}`: it deliberately delivers nowhere. The output stays in the target path, the run logs it, and `run_results.json` records the delivery as `not_delivered`. Destinations only.",
       "properties": {
         "deliver": {
+          "description": "`false`: this target delivers nowhere. Takes no other keys.",
           "const": false,
-          "x-doc-type": "`false`",
-          "description": "`false`: this target delivers nowhere. Takes no other keys."
+          "x-doc-type": "`false`"
         }
       },
       "required": [
@@ -115,11 +121,5 @@
       ],
       "additionalProperties": false
     }
-  },
-  "not": {
-    "required": [
-      "connections",
-      "sources"
-    ]
   }
 }

@@ -108,6 +108,29 @@ fn the_schemas_carry_dres_minor_version() {
     }
 }
 
+/// The schemas generated from the config structs are the ones committed. After changing a struct,
+/// `DRE_UPDATE_SCHEMAS=1 cargo test -p dre-cli --test schemas` rewrites them, then
+/// `.github/scripts/schema_docs.py generate` the reference pages.
+#[test]
+fn the_generated_schemas_are_committed() {
+    let v: Vec<&str> = env!("CARGO_PKG_VERSION").split(['.', '-']).collect();
+    let minor = format!("{}.{}", v[0], v[1]);
+    let update = std::env::var_os("DRE_UPDATE_SCHEMAS").is_some();
+    for (name, schema) in dre_core::config::schemas(&minor) {
+        let path = schemas_dir().join(format!("{name}.schema.json"));
+        let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+        if update {
+            std::fs::write(&path, &text).unwrap();
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap_or_default(),
+                text,
+                "{name}.schema.json is stale: run `DRE_UPDATE_SCHEMAS=1 cargo test -p dre-cli --test schemas`"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_schema_is_a_valid_schema() {
     for f in FILES {

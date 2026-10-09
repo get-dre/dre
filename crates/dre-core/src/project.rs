@@ -4716,7 +4716,7 @@ impl Loader {
                     }
                     uses.push(PluginUse {
                         plugin: id,
-                        file: profiles.file.as_ref().map(|f| f.display.clone()),
+                        file: profiles.file.clone(),
                         line: profiles.line_of(role, name),
                         what: format!("`type: {}` used by {role_name} profile `{name}`", out_.kind),
                     });
