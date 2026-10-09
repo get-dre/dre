@@ -7,6 +7,8 @@
 //! - [`Loose<T>`]: the value, or, when it has the wrong shape, what was found and where, so the
 //!   loader reports DRE's own message and carries on with the rest of the file instead of
 //!   stopping at the first problem.
+//! - [`OneOf<A, B>`]: an `A`, else a `B` (a query given by name or as a map), keeping both
+//!   readings' locations, which serde's untagged enums lose.
 //! - [`UnknownKeys`]: in a struct field named [`UNKNOWN`], the keys the struct doesn't define,
 //!   with their lines. A struct without that field ignores unknown keys. The field can also be a
 //!   [`Map`], to read the other keys' values (folder config: folder names next to `+` keys).
@@ -25,6 +27,7 @@ use super::node::{Key, Kind, Node};
 pub const UNKNOWN: &str = "$unknown";
 const LOCATED: &str = "$dre::Located";
 const LOOSE: &str = "$dre::Loose";
+const ONE_OF: &str = "$dre::OneOf";
 
 /// A config value of type `T` from `node`. Fails only where no [`Loose`] catches the problem.
 pub fn from_node<'a, T: Deserialize<'a>>(node: &'a Node) -> Result<T, Error> {
@@ -199,6 +202,47 @@ impl<T: JsonSchema> JsonSchema for Loose<T> {
     }
     fn inline_schema() -> bool {
         T::inline_schema()
+    }
+}
+
+/// An `A`, else a `B`, read from the same value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OneOf<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<'de, A: Deserialize<'de>, B: Deserialize<'de>> Deserialize<'de> for OneOf<A, B> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V<A, B>(PhantomData<(A, B)>);
+        impl<'de, A: Deserialize<'de>, B: Deserialize<'de>> Visitor<'de> for V<A, B> {
+            type Value = OneOf<A, B>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("one of two shapes")
+            }
+            fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+                if let Ok(Some(a)) = seq.next_element::<A>() {
+                    return Ok(OneOf::A(a));
+                }
+                match seq.next_element::<B>()? {
+                    Some(b) => Ok(OneOf::B(b)),
+                    None => Err(de::Error::custom("one of two shapes without a value")),
+                }
+            }
+        }
+        d.deserialize_newtype_struct(ONE_OF, V(PhantomData))
+    }
+}
+
+impl<A: JsonSchema, B: JsonSchema> JsonSchema for OneOf<A, B> {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("OneOf_{}_{}", A::schema_name(), B::schema_name()).into()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"oneOf": [g.subschema_for::<A>(), g.subschema_for::<B>()]})
+    }
+    fn inline_schema() -> bool {
+        true
     }
 }
 
@@ -424,6 +468,11 @@ impl<'a> Deserializer<'a> for NodeDe<'a> {
                 line: self.1,
                 at: 0,
             }),
+            ONE_OF => v.visit_seq(OneOfSeq {
+                node: self.0,
+                line: self.1,
+                at: 0,
+            }),
             _ => v.visit_newtype_struct(self),
         }
     }
@@ -589,6 +638,24 @@ impl<'de> MapAccess<'de> for RestEntries<'de> {
     }
 }
 
+/// `[A, B]` for [`OneOf`]: the same value, read twice.
+struct OneOfSeq<'a> {
+    node: &'a Node,
+    line: usize,
+    at: usize,
+}
+
+impl<'a> SeqAccess<'a> for OneOfSeq<'a> {
+    type Error = Error;
+    fn next_element_seed<T: DeserializeSeed<'a>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
+        self.at += 1;
+        match self.at {
+            1 | 2 => seed.deserialize(NodeDe(self.node, self.line)).map(Some),
+            _ => Ok(None),
+        }
+    }
+}
+
 /// `[line, column, value]` for [`Located`].
 struct LocatedSeq<'a> {
     node: &'a Node,
@@ -694,6 +761,31 @@ mod tests {
         );
         assert_eq!(sales.folders.iter().next().unwrap().0.value, "eu");
         assert_eq!(f.tags, ["a"]);
+    }
+
+    #[test]
+    fn one_of_reads_either_shape_and_keeps_lines() {
+        #[derive(Debug, Deserialize)]
+        struct Entry {
+            query: Located<String>,
+            #[serde(rename = "$unknown", default)]
+            unknown: UnknownKeys,
+        }
+        let n = parse("- a\n- {query: b, x: 1}\n- [c]\n").unwrap();
+        let items: Vec<Loose<OneOf<String, Entry>>> = from_node(&n).unwrap();
+        assert!(
+            matches!(&items[0], Loose::Ok(OneOf::A(s)) if s == "a"),
+            "{:?}",
+            items[0]
+        );
+        let Loose::Ok(OneOf::B(e)) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(
+            (e.query.value.as_str(), e.query.line, e.unknown.0[0].name.as_str()),
+            ("b", 2, "x")
+        );
+        assert!(matches!(&items[2], Loose::Bad(f) if f.kind == "a list" && f.line == 3));
     }
 
     #[test]

@@ -7,6 +7,7 @@
 pub mod de;
 pub mod node;
 pub mod project;
+pub mod report;
 
 /// The JSON Schema of a config file type, as committed in `docs/schemas/<name>.schema.json`.
 ///

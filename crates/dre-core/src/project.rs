@@ -45,6 +45,7 @@ const RESERVED_NAMES: &[&str] = &[
 use crate::config;
 use crate::config::de::{self, Loose};
 use crate::config::project::ProjectFile;
+use crate::config::report::{QueryItem, ReportFile};
 use crate::profiles::{LOCAL_TYPE, Profiles, Role};
 use crate::yaml::YamlFile;
 use crate::{constraints, options, preflight, schedule, selector, sqlsplit};
@@ -778,6 +779,13 @@ struct Fragment {
     explicit_name: bool,
     folder: Vec<String>,
     map: Mapping,
+    /// The keys DRE reads with typed config.
+    typed: ReportFile,
+}
+
+/// The line of a top-level key in a YAML file.
+fn key_line(yf: &YamlFile, key: &str) -> Option<usize> {
+    yf.node.entry(key).map(|(k, _)| k.line).filter(|l| *l > 0)
 }
 
 /// Folder-level config from `reports:` in `dre_project.yml`.
@@ -1659,19 +1667,30 @@ impl Loader {
                 self.diags.error(
                     "unknown-key",
                     Some(yf.display.clone()),
-                    yf.line_of(k, None),
+                    key_line(&yf, k),
                     format!("unknown report key `{k}`"),
                 );
             }
         }
+        let typed = match de::from_node::<Loose<ReportFile>>(&yf.node) {
+            Ok(Loose::Ok(r)) => r,
+            Ok(Loose::Bad(_)) => return,
+            Err(e) => {
+                self.diags
+                    .error("invalid-report", Some(yf.display.clone()), e.line, e.message);
+                return;
+            }
+        };
         let folder = folder_segments(yf.display.parent().unwrap_or(Path::new("")));
-        let (name, explicit_name) = match map.get("name") {
-            Some(Value::String(s)) if !s.is_empty() => (s.clone(), true),
-            Some(_) => {
+        let (name, explicit_name) = match &typed.name {
+            Some(de::Located {
+                value: Loose::Ok(s), ..
+            }) if !s.is_empty() => (s.clone(), true),
+            Some(n) => {
                 self.diags.error(
                     "invalid-field",
                     Some(yf.display.clone()),
-                    yf.line_of("name", None),
+                    n.line(),
                     "`name` must be a non-empty string",
                 );
                 return;
@@ -1695,6 +1714,7 @@ impl Loader {
             explicit_name,
             folder,
             map,
+            typed,
         });
     }
 
@@ -2365,21 +2385,24 @@ impl Loader {
         }
         let mut out = Vec::new();
         for (name, frags) in by_name {
-            let definers: Vec<&Fragment> = frags.iter().filter(|f| f.map.contains_key("queries")).collect();
+            let definers: Vec<usize> = (0..frags.len())
+                .filter(|i| frags[*i].map.contains_key("queries"))
+                .collect();
             if definers.len() > 1 {
+                let second = &frags[definers[1]].file;
                 self.diags.error(
                     "duplicate-report-name",
-                    Some(definers[1].file.display.clone()),
-                    definers[1].file.line_of("queries", None),
+                    Some(second.display.clone()),
+                    key_line(second, "queries"),
                     format!(
                         "report `{name}` is declared in both {} and {}; report names must be unique project-wide",
-                        definers[0].file.display.display(),
-                        definers[1].file.display.display()
+                        frags[definers[0]].file.display.display(),
+                        second.display.display()
                     ),
                 );
                 continue;
             }
-            let Some(def) = definers.first() else {
+            let Some(&def) = definers.first() else {
                 for f in &frags {
                     let msg = if f.explicit_name {
                         format!(
@@ -2394,8 +2417,9 @@ impl Loader {
                 continue;
             };
             let mut keys: BTreeMap<String, Located<Value>> = BTreeMap::new();
-            let mut ok = true;
-            for f in &frags {
+            let mut owner: BTreeMap<String, usize> = BTreeMap::new();
+            let mut lines: BTreeMap<String, Option<usize>> = BTreeMap::new();
+            for (i, f) in frags.iter().enumerate() {
                 for (k, v) in &f.map {
                     let Some(k) = k.as_str() else { continue };
                     if k == "name" || !REPORT_KEYS.contains(&k) {
@@ -2405,14 +2429,13 @@ impl Loader {
                         self.diags.error(
                             "conflicting-declaration",
                             Some(f.file.display.clone()),
-                            f.file.line_of(k, None),
+                            key_line(&f.file, k),
                             format!(
                                 "`{k}` for report `{name}` is declared in both {} and {}",
                                 prev.file.display.display(),
                                 f.file.display.display()
                             ),
                         );
-                        ok = false;
                         continue;
                     }
                     keys.insert(
@@ -2422,14 +2445,59 @@ impl Loader {
                             file: f.file.clone(),
                         },
                     );
+                    owner.insert(k.to_string(), i);
+                    lines.insert(k.to_string(), key_line(&f.file, k));
                 }
             }
-            let _ = ok;
+            let file = frags[def].file.clone();
+            let folder = frags[def].folder.clone();
+            let mut typed = ReportFile::default();
+            for (i, f) in frags.into_iter().enumerate() {
+                let owns = |k: &str| owner.get(k) == Some(&i);
+                let ReportFile {
+                    name: _,
+                    tags,
+                    queries,
+                    profile,
+                    default_set,
+                    vars,
+                    timezone,
+                    locale,
+                    schedule,
+                    unknown: _,
+                } = f.typed;
+                if owns("tags") {
+                    typed.tags = tags;
+                }
+                if owns("queries") {
+                    typed.queries = queries;
+                }
+                if owns("profile") {
+                    typed.profile = profile;
+                }
+                if owns("default_set") {
+                    typed.default_set = default_set;
+                }
+                if owns("vars") {
+                    typed.vars = vars;
+                }
+                if owns("timezone") {
+                    typed.timezone = timezone;
+                }
+                if owns("locale") {
+                    typed.locale = locale;
+                }
+                if owns("schedule") {
+                    typed.schedule = schedule;
+                }
+            }
             out.push(RawReport {
                 name,
-                file: def.file.clone(),
-                folder: def.folder.clone(),
+                file,
+                folder,
                 keys,
+                lines,
+                typed,
             });
         }
         out
@@ -2441,15 +2509,18 @@ impl Loader {
         index: &BTreeMap<String, Vec<PathBuf>>,
         referenced: &mut BTreeSet<String>,
     ) -> Vec<QueryEntry> {
-        let Some(q) = r.keys.get("queries") else {
+        let Some(q) = &r.typed.queries else {
             return Vec::new();
         };
-        let yf = q.file.clone();
-        let Some(items) = q.value.as_sequence() else {
+        let file = r
+            .keys
+            .get("queries")
+            .map_or_else(|| r.file.display.clone(), |k| k.file.display.clone());
+        let Loose::Ok(items) = &q.value else {
             self.diags.error(
                 "invalid-field",
-                Some(yf.display.clone()),
-                yf.line_of("queries", None),
+                Some(file),
+                q.line(),
                 format!("report `{}`: `queries` must be a list", r.name),
             );
             return Vec::new();
@@ -2457,18 +2528,18 @@ impl Loader {
         if items.is_empty() {
             self.diags.error(
                 "missing-queries",
-                Some(yf.display.clone()),
-                yf.line_of("queries", None),
+                Some(file.clone()),
+                q.line(),
                 format!("report `{}` has an empty `queries` list", r.name),
             );
         }
         let mut out = Vec::new();
         for item in items {
-            if let Some(e) = self.query_entry(&r.name, item, &yf, index) {
+            if let Some(e) = self.query_entry(&r.name, item, &file, index) {
                 referenced.insert(e.query.clone());
                 out.push(e);
-            } else if let Some(n) = entry_name(item) {
-                referenced.insert(n);
+            } else if let Some(n) = query_item_name(item) {
+                referenced.insert(n.to_string());
             }
         }
         out
@@ -2477,36 +2548,36 @@ impl Loader {
     fn query_entry(
         &mut self,
         report: &str,
-        item: &Value,
-        yf: &YamlFile,
+        item: &QueryItem,
+        file: &Path,
         index: &BTreeMap<String, Vec<PathBuf>>,
     ) -> Option<QueryEntry> {
-        let file = Some(yf.display.clone());
-        let (name, m) = match item {
-            Value::String(s) => (s.clone(), None),
-            Value::Mapping(m) => match m.get("query").and_then(Value::as_str) {
-                Some(s) => (s.to_string(), Some(m)),
-                None => {
+        let file = Some(file.to_path_buf());
+        let line = item.line();
+        let (name, m) = match &item.value {
+            Loose::Ok(de::OneOf::A(s)) => (s.clone(), None),
+            Loose::Ok(de::OneOf::B(m)) => match &m.query {
+                Some(Loose::Ok(s)) => (s.clone(), Some(m)),
+                _ => {
                     self.diags.error(
                         "invalid-field",
                         file,
-                        yf.line_of("queries", None),
+                        line,
                         format!("report `{report}`: a `queries` map entry needs a `query:` name"),
                     );
                     return None;
                 }
             },
-            _ => {
+            Loose::Bad(_) => {
                 self.diags.error(
                     "invalid-field",
                     file,
-                    yf.line_of("queries", None),
+                    line,
                     format!("report `{report}`: `queries` entries must be names or maps"),
                 );
                 return None;
             }
         };
-        let line = yf.line_containing(&name);
         if name.ends_with(".sql") || name.contains('/') || name.contains('\\') {
             self.diags.error(
                 "invalid-query-name",
@@ -2529,19 +2600,17 @@ impl Loader {
             columns: BTreeMap::new(),
         };
         if let Some(m) = m {
-            for k in m.keys().filter_map(Value::as_str) {
-                if !QUERY_ENTRY_KEYS.contains(&k) {
-                    self.diags.error(
-                        "unknown-key",
-                        file.clone(),
-                        line,
-                        format!("report `{report}`: unknown key `{k}` on query `{name}`"),
-                    );
-                }
+            for k in &m.unknown.0 {
+                self.diags.error(
+                    "unknown-key",
+                    file.clone(),
+                    Some(k.line),
+                    format!("report `{report}`: unknown key `{}` on query `{name}`", k.name),
+                );
             }
-            match m.get("profile") {
+            match &m.profile {
                 None => {}
-                Some(Value::String(p)) if !p.trim().is_empty() => e.profile = Some(p.clone()),
+                Some(Loose::Ok(p)) if !p.trim().is_empty() => e.profile = Some(p.clone()),
                 Some(_) => self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -2549,10 +2618,10 @@ impl Loader {
                     format!("report `{report}`: `profile` of `{name}` must be a connection name"),
                 ),
             }
-            e.tab_name = match m.get("tab_name") {
+            e.tab_name = match &m.tab_name {
                 None => None,
-                Some(Value::String(s)) => Some(s.clone()),
-                Some(Value::Sequence(_)) => {
+                Some(Loose::Ok(s)) => Some(s.clone()),
+                Some(Loose::Bad(f)) if f.kind == "a list" => {
                     self.diags.error(
                         "invalid-field",
                         file.clone(),
@@ -2561,7 +2630,7 @@ impl Loader {
                     );
                     None
                 }
-                Some(_) => {
+                Some(Loose::Bad(_)) => {
                     self.diags.error(
                         "invalid-field",
                         file.clone(),
@@ -2571,10 +2640,10 @@ impl Loader {
                     None
                 }
             };
-            match m.get("tab").map(Value::as_bool) {
+            match &m.tab {
                 None => {}
-                Some(Some(b)) => e.tab = b,
-                Some(None) => self.diags.error(
+                Some(Loose::Ok(b)) => e.tab = *b,
+                Some(Loose::Bad(_)) => self.diags.error(
                     "invalid-field",
                     file.clone(),
                     line,
@@ -2589,9 +2658,9 @@ impl Loader {
                     format!("report `{report}`: `{name}` has `tab: false`, so its `tab_name` would never be used; remove one of them"),
                 );
             }
-            if let Some(a) = m.get("anchor") {
-                match a.as_str() {
-                    Some(s) if options::is_cell(s) => e.anchor = Some(s.to_string()),
+            if let Some(a) = &m.anchor {
+                match a {
+                    Loose::Ok(s) if options::is_cell(s) => e.anchor = Some(s.clone()),
                     _ => self.diags.error(
                         "invalid-cell",
                         file.clone(),
@@ -2600,10 +2669,10 @@ impl Loader {
                     ),
                 }
             }
-            if let Some(h) = m.get("header") {
-                match h.as_bool() {
-                    Some(b) => e.header = Some(b),
-                    None => self.diags.error(
+            if let Some(h) = &m.header {
+                match h {
+                    Loose::Ok(b) => e.header = Some(*b),
+                    Loose::Bad(_) => self.diags.error(
                         "invalid-field",
                         file.clone(),
                         line,
@@ -2611,8 +2680,8 @@ impl Loader {
                     ),
                 }
             }
-            if let Some(c) = m.get("columns") {
-                let (columns, errs) = dre_protocol::options::parse_columns(&yaml_to_json(c));
+            if let Some(c) = &m.columns {
+                let (columns, errs) = dre_protocol::options::parse_columns(c);
                 for err in errs {
                     self.diags.error(
                         "invalid-field",
@@ -2657,14 +2726,15 @@ impl Loader {
         let located = |k: &str| {
             r.keys
                 .get(k)
-                .map(|l| (l.file.display.clone(), l.file.line_of(k, None)))
+                .map(|l| (l.file.display.clone(), r.lines.get(k).copied().flatten()))
         };
+        let typed = &r.typed;
 
         let mut tags: Vec<String> = layers.iter().flat_map(|l| l.tags.clone()).collect();
-        if let Some(t) = key("tags") {
-            match string_list(&t.value) {
-                Some(l) => tags.extend(l),
-                None => {
+        if let Some(t) = &typed.tags {
+            match &t.value {
+                Loose::Ok(l) => tags.extend(l.iter().cloned()),
+                Loose::Bad(_) => {
                     let (f, l) = located("tags").unwrap();
                     self.diags.error(
                         "invalid-field",
@@ -2687,14 +2757,14 @@ impl Loader {
             );
         }
 
-        let report_profile = match key("profile") {
-            Some(p) => match p.value.as_str() {
-                Some(s) => {
+        let report_profile = match &typed.profile {
+            Some(p) => match &p.value {
+                Loose::Ok(s) => {
                     let (f, l) = located("profile").unwrap();
                     used.connection(s, Some(f), l);
                     Some(s.to_string())
                 }
-                None => {
+                Loose::Bad(_) => {
                     let (f, l) = located("profile").unwrap();
                     self.diags.error(
                         "invalid-field",
@@ -2711,20 +2781,30 @@ impl Loader {
             .iter()
             .rev()
             .find_map(|l| l.profile.as_ref().map(|p| p.0.clone()));
-        let report_timezone = match key("timezone") {
+        let report_timezone = match &typed.timezone {
             Some(t) => {
                 let (f, l) = located("timezone").unwrap();
-                self.timezone_value(&t.value, &f, l, &format!("report `{name}`: `timezone`"))
+                self.timezone_str(
+                    t.value.ok().map(String::as_str),
+                    &f,
+                    l,
+                    &format!("report `{name}`: `timezone`"),
+                )
             }
             None => None,
         };
         let timezone = report_timezone
             .or_else(|| layers.iter().rev().find_map(|l| l.timezone.clone()))
             .or_else(|| project.timezone.clone());
-        let report_locale = match key("locale") {
+        let report_locale = match &typed.locale {
             Some(t) => {
                 let (f, l) = located("locale").unwrap();
-                self.locale_value(&t.value, &f, l, &format!("report `{name}`: `locale`"))
+                self.locale_str(
+                    t.value.ok().map(String::as_str),
+                    &f,
+                    l,
+                    &format!("report `{name}`: `locale`"),
+                )
             }
             None => None,
         };
@@ -2750,10 +2830,10 @@ impl Loader {
                 vars.extend(yaml_map_to_json(v));
             }
         }
-        if let Some(v) = key("vars") {
-            match v.value.as_mapping() {
-                Some(m) => vars.extend(yaml_map_to_json(m)),
-                None => {
+        if let Some(v) = &typed.vars {
+            match &v.value {
+                Loose::Ok(m) => vars.extend(m.clone()),
+                Loose::Bad(_) => {
                     let (f, l) = located("vars").unwrap();
                     self.diags.error(
                         "invalid-field",
@@ -2792,15 +2872,12 @@ impl Loader {
             }
         }
 
-        if key("schedule").is_some() {
+        if typed.schedule.is_some() {
             let (f, l) = located("schedule").unwrap();
             self.moved_to_schedules(&f, l, &format!("report `{name}`: `schedule`"));
         }
 
-        let default_set = match key("default_set") {
-            Some(d) => d.value.as_str().map(str::to_string),
-            None => None,
-        };
+        let default_set = typed.default_set.as_ref().and_then(|d| d.value.ok().cloned());
 
         let base = BindingBase {
             profile: base_profile,
@@ -5081,7 +5158,12 @@ struct RawReport {
     name: String,
     file: Rc<YamlFile>,
     folder: Vec<String>,
+    /// Each key's value and the fragment it's in, for the keys not yet read as typed config.
     keys: BTreeMap<String, Located<Value>>,
+    /// The line of each key, in its fragment.
+    lines: BTreeMap<String, Option<usize>>,
+    /// The typed keys, each from the fragment that declares it.
+    typed: ReportFile,
 }
 
 struct BindingBase {
@@ -5360,6 +5442,15 @@ fn string_list(v: &Value) -> Option<Vec<String>> {
         .iter()
         .map(|i| i.as_str().map(str::to_string))
         .collect()
+}
+
+/// The query a `queries:` item names, if it names one.
+fn query_item_name(item: &QueryItem) -> Option<&str> {
+    match &item.value {
+        Loose::Ok(de::OneOf::A(s)) => Some(s),
+        Loose::Ok(de::OneOf::B(e)) => e.query.as_ref().and_then(Loose::ok).map(String::as_str),
+        Loose::Bad(_) => None,
+    }
 }
 
 fn entry_name(v: &Value) -> Option<String> {
