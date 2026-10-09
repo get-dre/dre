@@ -131,6 +131,29 @@ fn the_generated_schemas_are_committed() {
     }
 }
 
+/// The schemas of the files DRE writes (`run_results.json`, the manifest) are generated from
+/// their types too: `DRE_UPDATE_SCHEMAS=1` rewrites them.
+#[test]
+fn the_generated_artifact_schemas_are_committed() {
+    let update = std::env::var_os("DRE_UPDATE_SCHEMAS").is_some();
+    for (file, schema) in dre_core::config::artifact_schemas() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs")
+            .join(file);
+        let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+        if update {
+            std::fs::write(&path, &text).unwrap();
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap_or_default(),
+                text,
+                "docs/{file} is stale: run `DRE_UPDATE_SCHEMAS=1 cargo test -p dre-cli --test schemas`"
+            );
+        }
+        jsonschema::validator_for(&schema).unwrap_or_else(|e| panic!("{file} is not a valid schema: {e}"));
+    }
+}
+
 #[test]
 fn every_schema_is_a_valid_schema() {
     for f in FILES {

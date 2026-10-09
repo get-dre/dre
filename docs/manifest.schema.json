@@ -1,282 +1,708 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/get-dre/dre/blob/master/docs/manifest.schema.json",
-  "title": "DRE project manifest, schema 2",
-  "description": "target/manifest.json, written by `dre compile`, `dre validate` and `dre run`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within schema 2; consumers should ignore fields they don't know. See docs/manifest.md.",
+  "title": "DRE project manifest",
   "type": "object",
-  "required": ["schema", "version", "project", "reports", "schedules", "sources", "plugins"],
+  "description": "target/manifest.json, written by `dre compile`, `dre validate` and `dre run`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within a version; consumers should ignore fields they don't know. See docs/manifest.md.",
   "properties": {
-    "schema": {"const": 2, "description": "The manifest format's version (2 since DRE 0.2: connections and sources)."},
-    "version": {"type": "string", "description": "The DRE version that wrote it."},
+    "schema_version": {
+      "description": "The format's version: `dre/manifest/v3` (DRE 0.4). Version 2 (DRE 0.2) had `\"schema\": 2` instead.",
+      "const": "dre/manifest/v3"
+    },
+    "version": {
+      "type": "string",
+      "description": "The DRE version that wrote it."
+    },
     "project": {
+      "$ref": "#/$defs/ManifestProject"
+    },
+    "reports": {
       "type": "object",
-      "required": ["name", "target", "checksum"],
-      "properties": {
-        "name": {"type": "string"},
-        "target": {
-          "type": "string",
-          "description": "The run's target (environment), `target.name` in templates: --target, else DRE_TARGET, else `dev`. Each profile's own entry may differ (its `target:` in profiles.yml)."
-        },
-        "default_profile": {"type": "string", "description": "The default connection's name, as written (it may hold Jinja)."},
-        "timezone": {"type": "string", "description": "The project's `timezone:` (IANA name)."},
-        "checksum": {
-          "$ref": "#/$defs/sha256",
-          "description": "Over the shared inputs: dre_project.yml, folder config, schedules.yml, dependencies.yml and other YAML that isn't a report's own, macros/, lookups/, and every .sql under reports/ that isn't a declared query. When it changes, every report may have changed."
-        }
+      "description": "By report name.",
+      "additionalProperties": {
+        "$ref": "#/$defs/report"
       }
     },
-    "reports": {"type": "object", "description": "By report name.", "additionalProperties": {"$ref": "#/$defs/report"}},
     "schedules": {
       "type": "object",
       "description": "By schedule name (schedules.yml).",
-      "additionalProperties": {"$ref": "#/$defs/schedule"}
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/schedule"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
     },
     "sources": {
       "type": "object",
       "description": "Declared sources (`sources:`), by name.",
-      "additionalProperties": {"$ref": "#/$defs/source"}
+      "additionalProperties": {
+        "$ref": "#/$defs/source"
+      }
     },
     "plugins": {
       "type": "array",
       "description": "The plugin packages the project declares.",
       "items": {
-        "type": "object",
-        "required": ["package", "version", "source"],
-        "properties": {
-          "package": {"type": "string"},
-          "version": {"type": "string", "description": "The version requirement (`*` for any)."},
-          "source": {
-            "type": "object",
-            "required": ["type"],
-            "properties": {
-              "type": {"enum": ["registry", "github", "local"]},
-              "location": {
-                "type": "string",
-                "description": "Another registry's URL or path, a GitHub `owner/repo`, or a local executable's path. Absent for DRE's default registry."
-              }
-            }
-          }
-        }
+        "$ref": "#/$defs/ManifestPlugin"
       }
     }
   },
+  "required": [
+    "schema_version",
+    "version",
+    "project",
+    "reports",
+    "schedules",
+    "sources",
+    "plugins"
+  ],
   "$defs": {
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "path": {"type": "string", "description": "Relative to the project root, with forward slashes."},
+    "ManifestProject": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "The run's target (environment), `target.name` in templates: --target, else DRE_TARGET, else `dev`. Each profile's own entry may differ (its `target:` in profiles.yml)."
+        },
+        "default_profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The default connection's name, as written (it may hold Jinja)."
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The project's `timezone:` (IANA name)."
+        },
+        "checksum": {
+          "type": "string",
+          "description": "Over the shared inputs: dre_project.yml, folder config, schedules.yml, dependencies.yml and other YAML that isn't a report's own, macros/, lookups/, and every .sql under reports/ that isn't a declared query. When it changes, every report may have changed.",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "name",
+        "target",
+        "checksum"
+      ]
+    },
+    "report": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "managed": {
+          "type": "boolean",
+          "description": "False for a bare .sql under reports/ (an unmanaged report)."
+        },
+        "file": {
+          "type": "string",
+          "description": "The defining YAML, or the .sql of an unmanaged report."
+        },
+        "folder": {
+          "type": "array",
+          "description": "Folder segments under reports/.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/query"
+          }
+        },
+        "depends_on": {
+          "description": "Every source any of the report's Bindings reads, `source.table`.",
+          "$ref": "#/$defs/DependsOn"
+        },
+        "checksum": {
+          "type": "string",
+          "description": "Over the defining file, every query file and any template.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Present when invalid: what's wrong.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/binding"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "managed",
+        "file",
+        "folder",
+        "tags",
+        "queries",
+        "depends_on",
+        "checksum",
+        "valid",
+        "bindings"
+      ]
+    },
     "query": {
       "type": "object",
-      "required": ["query", "file", "tab"],
       "properties": {
-        "query": {"type": "string"},
-        "file": {"$ref": "#/$defs/path"},
-        "profile": {"type": "string", "description": "The query's own `profile:`, as written."},
+        "query": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string",
+          "description": "Relative to the project root, with forward slashes."
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The query's own `profile:`, as written."
+        },
         "connection": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "In a Binding: the connection the query runs on, from the parse pass (its own `profile:`, a source's, else the inherited one). Null when none resolves."
         },
         "depends_on": {
-          "type": "object",
-          "required": ["sources"],
-          "properties": {
-            "sources": {
-              "type": "array",
-              "items": {"type": "string"},
-              "description": "`source.table` of every `source()` the query calls, in order of first use."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependsOn"
+            },
+            {
+              "type": "null"
             }
-          },
+          ],
           "description": "In a Binding: what the query reads."
         },
         "tab": {
           "type": "boolean",
           "description": "Whether its result becomes a tab (false: run for its effects only)."
         },
-        "tab_name": {"type": "string"},
-        "anchor": {"type": "string"},
-        "header": {"type": "boolean"},
-        "columns": {"type": "object", "description": "Per result column, how to show it (xlsx)."}
-      }
+        "tab_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "header": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "columns": {
+          "description": "Per result column, how to show it (xlsx)."
+        }
+      },
+      "required": [
+        "query",
+        "file",
+        "tab"
+      ]
     },
-    "report": {
+    "DependsOn": {
       "type": "object",
-      "required": ["name", "managed", "file", "folder", "tags", "queries", "depends_on", "checksum", "valid", "bindings"],
       "properties": {
-        "name": {"type": "string"},
-        "managed": {"type": "boolean", "description": "False for a bare .sql under reports/ (an unmanaged report)."},
-        "file": {"$ref": "#/$defs/path", "description": "The defining YAML, or the .sql of an unmanaged report."},
-        "folder": {"type": "array", "items": {"type": "string"}, "description": "Folder segments under reports/."},
-        "tags": {"type": "array", "items": {"type": "string"}},
-        "timezone": {"type": "string"},
-        "default_set": {"type": "string"},
-        "queries": {"type": "array", "items": {"$ref": "#/$defs/query"}},
-        "depends_on": {
-          "type": "object",
-          "required": ["sources"],
-          "properties": {"sources": {"type": "array", "items": {"type": "string"}}},
-          "description": "Every source any of the report's Bindings reads, `source.table`."
-        },
-        "checksum": {
-          "$ref": "#/$defs/sha256",
-          "description": "Over the defining file, every query file and any template."
-        },
-        "valid": {"type": "boolean"},
-        "errors": {"type": "array", "items": {"type": "string"}, "description": "Present when invalid: what's wrong."},
-        "bindings": {"type": "array", "items": {"$ref": "#/$defs/binding"}}
-      }
+        "sources": {
+          "type": "array",
+          "description": "`source.table` of every `source()` used, in order of first use.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "sources"
+      ]
     },
     "binding": {
       "type": "object",
-      "required": ["set", "profile", "vars", "queries", "output", "destinations", "outputs", "schedules"],
       "properties": {
-        "set": {"type": ["string", "null"], "description": "Null for a report without Sets."},
+        "set": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Null for a report without Sets."
+        },
         "profile": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The inherited connection (Set, report, folder `+profile`, `default_profile`), rendered. A query's own connection is on the query."
         },
-        "vars": {"type": "object", "description": "Fully merged: project < folders < report < Set."},
-        "queries": {"type": "array", "items": {"$ref": "#/$defs/query"}},
-        "output": {
+        "vars": {
           "type": "object",
-          "description": "The first output; every output is under `outputs`.",
-          "required": ["format", "options"],
-          "properties": {
-            "format": {"type": "string"},
-            "options": {"type": "object"},
-            "extension": {"type": "string"},
-            "template": {"$ref": "#/$defs/path", "description": "The template file, as declared."}
+          "description": "Fully merged: project < folders < report < Set.",
+          "additionalProperties": true
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/query"
           }
+        },
+        "output": {
+          "description": "The first output; every output is under `outputs`.",
+          "$ref": "#/$defs/ManifestOutput"
         },
         "destinations": {
           "type": "array",
           "description": "Every output's destinations, in delivery order.",
-          "items": {"$ref": "#/$defs/destination"}
+          "items": {
+            "$ref": "#/$defs/destination"
+          }
         },
         "outputs": {
           "type": "array",
           "description": "Every output, in declared order.",
           "items": {
-            "type": "object",
-            "required": ["format", "options", "destinations"],
-            "properties": {
-              "name": {"type": "string", "description": "The output's `name:`."},
-              "format": {"type": "string"},
-              "queries": {"type": "array", "items": {"type": "string"}, "description": "The queries it formats; absent means all of them."},
-              "when": {"type": "string", "description": "The `when:` condition, unrendered."},
-              "options": {"type": "object"},
-              "extension": {"type": "string"},
-              "template": {"$ref": "#/$defs/path", "description": "The template file, as declared."},
-              "destinations": {"type": "array", "description": "In delivery order.", "items": {"$ref": "#/$defs/destination"}}
-            }
+            "$ref": "#/$defs/ManifestOutput"
           }
         },
-        "schedules": {"type": "array", "items": {"type": "string"}, "description": "The schedules that run this Binding."}
-      }
+        "schedules": {
+          "type": "array",
+          "description": "The schedules that run this Binding.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "set",
+        "profile",
+        "vars",
+        "queries",
+        "output",
+        "destinations",
+        "outputs",
+        "schedules"
+      ]
+    },
+    "ManifestOutput": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The output's `name:`."
+        },
+        "format": {
+          "type": "string"
+        },
+        "queries": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "The queries it formats; absent means all of them.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The `when:` condition, unrendered."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "extension": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "template": {
+          "type": "string",
+          "description": "The template file, as declared."
+        },
+        "destinations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "In delivery order. (Absent on a Binding's `output`.)",
+          "items": {
+            "$ref": "#/$defs/destination"
+          }
+        }
+      },
+      "required": [
+        "format",
+        "options"
+      ]
     },
     "destination": {
       "type": "object",
-      "required": ["profile"],
       "properties": {
-        "profile": {"type": "string", "description": "The destination profile, rendered."},
-        "path": {"type": "string", "description": "The path template, unrendered."},
-        "attach": {"type": "array", "items": {"type": "string"}, "description": "A message output's entry: the outputs whose files go with the message."}
-      }
+        "profile": {
+          "type": "string",
+          "description": "The destination profile, rendered."
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The path template, unrendered."
+        },
+        "attach": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "A message output's entry: the outputs whose files go with the message.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "profile"
+      ]
     },
     "schedule": {
       "type": "object",
-      "required": ["name", "schedule", "vars", "bindings"],
       "properties": {
-        "name": {"type": "string"},
-        "report": {"type": "string"},
-        "select": {"type": "string"},
-        "set": {"type": "string"},
+        "name": {
+          "type": "string"
+        },
+        "report": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "select": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "schedule": {
           "type": "object",
           "description": "The resolved timing: `cron`, `every` or `rrule`, with `starting`, `at`, `except` and `also` when given. With `timing`, the shared timing's fields.",
-          "properties": {
-            "except": {"type": "array", "items": {"type": "string"}, "description": "Dates it doesn't fire on."},
-            "also": {"type": "array", "items": {"type": "string"}, "description": "Extra dates it fires on."}
-          }
+          "additionalProperties": true
         },
         "timing": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The timings.yml entry the timing comes from, when it's a shared one."
         },
-        "enabled": {"type": "boolean", "description": "False when the schedule is paused (`enabled: false`)."},
-        "vars": {"type": "object"},
-        "timezone": {"type": "string", "description": "The schedule's `timezone:`, or its shared timing's."},
+        "enabled": {
+          "type": "boolean",
+          "description": "False when the schedule is paused (`enabled: false`)."
+        },
+        "vars": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The schedule's `timezone:`, or its shared timing's."
+        },
         "bindings": {
           "type": "array",
           "description": "What `dre run --schedule <name>` runs.",
           "items": {
-            "type": "object",
-            "required": ["report", "set"],
-            "properties": {"report": {"type": "string"}, "set": {"type": ["string", "null"]}}
+            "$ref": "#/$defs/ScheduledBinding"
           }
         }
-      }
+      },
+      "required": [
+        "name",
+        "schedule",
+        "enabled",
+        "vars",
+        "bindings"
+      ]
+    },
+    "ScheduledBinding": {
+      "type": "object",
+      "properties": {
+        "report": {
+          "type": "string"
+        },
+        "set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "report",
+        "set"
+      ]
     },
     "source": {
       "type": "object",
-      "required": ["name", "file", "schema", "tags", "meta", "tables"],
       "properties": {
-        "name": {"type": "string"},
-        "file": {"$ref": "#/$defs/path", "description": "The YAML file declaring it."},
-        "profile": {
+        "name": {
+          "type": "string"
+        },
+        "file": {
           "type": "string",
+          "description": "The YAML file declaring it."
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The connection it lives on, rendered. Absent: it runs wherever its query runs."
         },
-        "database": {"type": "string", "description": "Rendered. Absent: `source()` renders two parts."},
-        "schema": {"type": "string", "description": "Rendered; the source's name unless set."},
-        "description": {"type": "string"},
-        "tags": {"type": "array", "items": {"type": "string"}},
-        "meta": {"type": "object"},
+        "database": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Rendered. Absent: `source()` renders two parts."
+        },
+        "schema": {
+          "type": "string",
+          "description": "Rendered; the source's name unless set."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "tables": {
           "type": "object",
           "description": "By table name.",
           "additionalProperties": {
-            "type": "object",
-            "required": ["name", "identifier", "quoting", "tags", "meta", "columns", "used_by"],
-            "properties": {
-              "name": {"type": "string"},
-              "identifier": {"type": "string", "description": "The real table name, rendered; the table's name unless set."},
-              "quoting": {
-                "type": "object",
-                "required": ["database", "schema", "identifier"],
-                "properties": {
-                  "database": {"type": "boolean"},
-                  "schema": {"type": "boolean"},
-                  "identifier": {"type": "boolean"}
-                },
-                "description": "Which parts `source()` quotes, the table's over the source's."
-              },
-              "description": {"type": "string"},
-              "tags": {"type": "array", "items": {"type": "string"}},
-              "meta": {"type": "object"},
-              "columns": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "required": ["name"],
-                  "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "data_type": {"type": "string"}
-                  }
-                }
-              },
-              "used_by": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "The reports that read it. Empty: unused."
-              }
-            }
+            "$ref": "#/$defs/ManifestTable"
           }
         },
         "errors": {
-          "type": "array",
-          "items": {"type": "string"},
-          "description": "Fields that didn't render (left as written)."
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Fields that didn't render (left as written).",
+          "items": {
+            "type": "string"
+          }
         }
-      }
+      },
+      "required": [
+        "name",
+        "file",
+        "schema",
+        "tags",
+        "meta",
+        "tables"
+      ]
+    },
+    "ManifestTable": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string",
+          "description": "The real table name, rendered; the table's name unless set."
+        },
+        "quoting": {
+          "type": "object",
+          "description": "Which parts `source()` quotes, the table's over the source's.",
+          "properties": {
+            "database": {
+              "type": "boolean"
+            },
+            "schema": {
+              "type": "boolean"
+            },
+            "identifier": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "database",
+            "schema",
+            "identifier"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "data_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "used_by": {
+          "type": "array",
+          "description": "The reports that read it. Empty: unused.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "identifier",
+        "quoting",
+        "tags",
+        "meta",
+        "columns",
+        "used_by"
+      ]
+    },
+    "ManifestPlugin": {
+      "type": "object",
+      "properties": {
+        "package": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "description": "The version requirement (`*` for any)."
+        },
+        "source": {
+          "$ref": "#/$defs/PluginSourceRecord"
+        }
+      },
+      "required": [
+        "package",
+        "version",
+        "source"
+      ]
+    },
+    "PluginSourceRecord": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "registry",
+            "github",
+            "local"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Another registry's URL or path, a GitHub `owner/repo`, or a local executable's path. Absent for DRE's default registry."
+        }
+      },
+      "required": [
+        "type"
+      ]
     }
   }
 }

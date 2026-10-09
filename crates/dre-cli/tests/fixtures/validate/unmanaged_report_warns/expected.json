@@ -334,7 +334,7 @@ exit: 1
       }
     },
     "schedules": {},
-    "schema": 2,
+    "schema_version": "dre/manifest/v3",
     "sources": {},
     "version": "$VERSION"
   }

@@ -83,7 +83,22 @@ fn compile_writes_the_whole_project() {
     let p = project();
     p.dre("compile", &["-s", "daily"]).ok();
     let m = manifest(&p);
-    assert_eq!(m["schema"], 2);
+    assert_eq!(m["schema_version"], "dre/manifest/v3");
+    assert!(m.get("schema").is_none());
+    // It validates against the published schema.
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/manifest.schema.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let errors: Vec<String> = jsonschema::validator_for(&schema)
+        .unwrap()
+        .iter_errors(&m)
+        .map(|e| e.to_string())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
     assert_eq!(m["project"]["target"], "dev");
     assert!(m["version"].is_string());
     assert_eq!(m["project"]["name"], "acme_reports");

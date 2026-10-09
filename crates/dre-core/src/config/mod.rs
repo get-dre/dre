@@ -18,28 +18,47 @@ pub mod sources;
 /// `version` is DRE's minor version (`x-dre-schema-version`): the schemas are published under
 /// `/schemas/v<minor>/`.
 pub fn schema<T: schemars::JsonSchema>(version: &str) -> serde_json::Value {
-    let settings = schemars::generate::SchemaSettings::draft2020_12();
-    let mut schema = settings.into_generator().into_root_schema_for::<T>().to_value();
+    let mut out = generated::<T>(schemars::generate::Contract::Deserialize);
     // An optional key is one that may be left out, not one that may be `null`.
-    without_null(&mut schema);
-    let serde_json::Value::Object(mut generated) = schema else {
-        unreachable!("a schema is an object")
-    };
-    generated.insert(
-        "$schema".into(),
-        "https://json-schema.org/draft/2020-12/schema".into(),
-    );
-    generated.insert("x-dre-schema-version".into(), version.into());
-    let mut out = serde_json::Value::Object(generated);
+    without_null(&mut out);
+    if let serde_json::Value::Object(m) = &mut out {
+        m.insert("x-dre-schema-version".into(), version.into());
+    }
     in_order(&mut out);
     out
 }
 
+/// The JSON Schema of a file DRE writes (`run_results.json`, the manifest), published at `id`
+/// (`docs/<file>.schema.json`). Its version is in the format's own `schema_version`.
+pub fn artifact_schema<T: schemars::JsonSchema>(id: &str) -> serde_json::Value {
+    // What DRE writes: a key that's always written is required, and `null` is a value.
+    let mut out = generated::<T>(schemars::generate::Contract::Serialize);
+    if let serde_json::Value::Object(m) = &mut out {
+        m.insert("$id".into(), id.into());
+    }
+    in_order(&mut out);
+    out
+}
+
+fn generated<T: schemars::JsonSchema>(contract: schemars::generate::Contract) -> serde_json::Value {
+    let mut settings = schemars::generate::SchemaSettings::draft2020_12();
+    settings.contract = contract;
+    let mut schema = settings.into_generator().into_root_schema_for::<T>().to_value();
+    if let serde_json::Value::Object(m) = &mut schema {
+        m.insert(
+            "$schema".into(),
+            "https://json-schema.org/draft/2020-12/schema".into(),
+        );
+    }
+    schema
+}
+
 /// Every schema object's keys in one order: what it is, then its shape, then the rest.
 fn in_order(v: &mut serde_json::Value) {
-    const ORDER: [&str; 13] = [
+    const ORDER: [&str; 14] = [
         "$schema",
         "x-dre-schema-version",
+        "$id",
         "title",
         "type",
         "description",
@@ -124,6 +143,24 @@ fn without_null(v: &mut serde_json::Value) {
         Value::Array(a) => a.iter_mut().for_each(without_null),
         _ => {}
     }
+}
+
+/// The schemas of the files DRE writes, by path under `docs/`.
+pub fn artifact_schemas() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "run-results.schema.json",
+            artifact_schema::<crate::run_results::RunResults>(
+                "https://github.com/get-dre/dre/blob/master/docs/run-results.schema.json",
+            ),
+        ),
+        (
+            "manifest.schema.json",
+            artifact_schema::<crate::manifest::Manifest>(
+                "https://github.com/get-dre/dre/blob/master/docs/manifest.schema.json",
+            ),
+        ),
+    ]
 }
 
 /// Every generated schema, by file name (`profiles` for `profiles.schema.json`).

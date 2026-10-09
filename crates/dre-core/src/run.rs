@@ -32,6 +32,7 @@ use crate::project::{Binding, PluginKind, Project, QueryEntry, Report};
 use crate::render::{
     Column, Connection, Connections, Mode, QueryRows, QueryRunner, RenderError, Renderer, RendererConfig,
 };
+use crate::run_results::{self, Delivery, RunResults};
 use crate::selector;
 use crate::sqlsplit::{self, StatementKind};
 
@@ -71,23 +72,23 @@ pub struct RunOptions {
 
 impl RunOptions {
     /// What the run was asked to do, for `run_results.json` and the log.
-    pub fn params(&self, date: NaiveDate) -> Json {
-        json!({
-            "selector": self.selector,
-            "set": self.set,
-            "schedule": self.schedule,
-            "target": self.target,
-            "profile": self.profile,
-            "vars": self.vars,
-            "run_date": date.to_string(),
-            "scheduled_at": self.scheduled_at.map(rfc3339),
-            "timezone": self.timezone,
-            "output_name": self.output_name,
-            "output_path": self.output_path,
-            "dry_run": self.dry_run,
-            "preview": self.preview,
-            "accept_schema_change": self.accept_schema_change,
-        })
+    pub fn params(&self, date: NaiveDate) -> run_results::Params {
+        run_results::Params {
+            selector: self.selector.clone(),
+            set: self.set.clone(),
+            schedule: self.schedule.clone(),
+            target: self.target.clone(),
+            profile: self.profile.clone(),
+            vars: self.vars.clone(),
+            run_date: date.to_string(),
+            scheduled_at: self.scheduled_at.map(rfc3339),
+            timezone: self.timezone.clone(),
+            output_name: self.output_name.clone(),
+            output_path: self.output_path.clone(),
+            dry_run: self.dry_run,
+            preview: self.preview,
+            accept_schema_change: self.accept_schema_change,
+        }
     }
 }
 
@@ -144,14 +145,7 @@ pub struct ShownMessage {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    Success,
-    Error,
-    DryRun,
-    Checked,
-}
+pub use crate::run_results::Status;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BindingOutcome {
@@ -712,7 +706,7 @@ struct OutputRun {
     /// Each file it wrote, and where it was first delivered.
     files: Vec<(PathBuf, Option<String>)>,
     /// One record per destination: `run_results.json`'s `deliveries`.
-    deliveries: Vec<Json>,
+    deliveries: Vec<Delivery>,
     delivery_note: Option<String>,
     /// `None` until it's done.
     status: Option<OutputStatus>,
@@ -1261,7 +1255,7 @@ impl<'a> BindingRun<'a> {
             let locations: Vec<&str> = run
                 .deliveries
                 .iter()
-                .filter_map(|d| d.get("location").and_then(Json::as_str))
+                .filter_map(|d| d.location.as_deref())
                 .collect();
             let files: Vec<String> = run
                 .files
@@ -2003,7 +1997,7 @@ impl<'a> BindingRun<'a> {
         let o = &mut self.outs[oi];
         o.status = Some(match &result {
             Err(_) => OutputStatus::Failed,
-            Ok(()) if o.deliveries.iter().any(|d| d["status"] == "delivered") => OutputStatus::Delivered,
+            Ok(()) if o.deliveries.iter().any(|d| d.status == "delivered") => OutputStatus::Delivered,
             Ok(()) => OutputStatus::Kept,
         });
         o.error = result.as_ref().err().map(|f| f.message.clone());
@@ -2047,14 +2041,15 @@ impl<'a> BindingRun<'a> {
                         ("failed", None, Some(e))
                     }
                 };
-            let mut record = json!({"profile": d.profile, "type": kind, "target": target, "status": status});
-            if let Some(l) = location {
-                record["location"] = json!(l);
-            }
-            if let Some(e) = error {
-                record["error"] = json!(e.message);
-                record["error_code"] = json!(e.code);
-            }
+            let record = Delivery {
+                profile: d.profile.clone(),
+                kind,
+                target,
+                status,
+                location,
+                error_code: error.as_ref().map(|e| e.code),
+                error: error.map(|e| e.message),
+            };
             self.outs[oi].deliveries.push(record);
         }
         let o = &mut self.outs[oi];
@@ -2299,31 +2294,30 @@ impl<'a> BindingRun<'a> {
     fn write_results(&self, status: &Status, error: Option<&Fail>) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.run_dir)?;
         // `outputs` lists every file (as before 0.3); `output_results` has one entry per output.
-        let mut outputs: Vec<Json> = Vec::new();
-        let mut output_results: Vec<Json> = Vec::new();
+        let mut outputs: Vec<run_results::OutputFile> = Vec::new();
+        let mut output_results: Vec<run_results::OutputResult> = Vec::new();
         for (o, run) in self.b.outputs.iter().zip(&self.outs) {
-            let files: Vec<Json> = run
+            let files: Vec<run_results::OutputFileRef> = run
                 .files
                 .iter()
-                .map(|(f, delivered)| {
-                    json!({
-                        "path": record_path(self.project, f),
-                        "size": std::fs::metadata(f).map(|m| m.len()).unwrap_or(0),
-                        "delivered_to": delivered,
-                    })
+                .map(|(f, delivered)| run_results::OutputFileRef {
+                    path: record_path(self.project, f),
+                    size: std::fs::metadata(f).map(|m| m.len()).unwrap_or(0),
+                    delivered_to: delivered.clone(),
                 })
                 .collect();
-            for f in &files {
-                let mut f = f.clone();
-                f["output"] = json!(o.name);
-                outputs.push(f);
-            }
-            let queries: Vec<&str> = self
+            outputs.extend(files.iter().map(|f| run_results::OutputFile {
+                path: f.path.clone(),
+                size: f.size,
+                delivered_to: f.delivered_to.clone(),
+                output: o.name.clone(),
+            }));
+            let queries: Vec<String> = self
                 .b
                 .queries
                 .iter()
                 .filter(|q| q.tab && o.feeds(&q.query))
-                .map(|q| q.query.as_str())
+                .map(|q| q.query.clone())
                 .collect();
             let status = match (run.status, status) {
                 (Some(s), _) => s,
@@ -2331,74 +2325,84 @@ impl<'a> BindingRun<'a> {
                 (None, _) => OutputStatus::Kept,
             }
             .as_str();
-            let mut record = json!({
-                "name": o.name,
-                "format": o.format,
-                "queries": queries,
-                "status": status,
-                "error": run.error,
-                "files": files,
-                "delivery": run.delivery_note,
-                "deliveries": run.deliveries,
+            output_results.push(run_results::OutputResult {
+                name: o.name.clone(),
+                format: o.format.clone(),
+                queries,
+                status,
+                error: run.error.clone(),
+                files,
+                delivery: run.delivery_note.clone(),
+                deliveries: run.deliveries.clone(),
+                when: run.when,
+                message: run
+                    .message
+                    .clone()
+                    .map(|(title, text)| run_results::Message { title, text }),
             });
-            if let Some(w) = run.when {
-                record["when"] = json!(w);
-            }
-            if let Some((title, text)) = &run.message {
-                record["message"] = json!({"title": title, "text": text});
-            }
-            output_results.push(record);
         }
         // In delivery order: file outputs, then messages.
         let order = (0..self.outs.len())
             .filter(|&i| !self.b.outputs[i].is_message())
             .chain((0..self.outs.len()).filter(|&i| self.b.outputs[i].is_message()));
-        let deliveries: Vec<&Json> = order.flat_map(|i| self.outs[i].deliveries.iter()).collect();
+        let deliveries: Vec<Delivery> = order
+            .flat_map(|i| self.outs[i].deliveries.iter().cloned())
+            .collect();
         let notes: Vec<&str> = self
             .outs
             .iter()
             .filter_map(|o| o.delivery_note.as_deref())
             .collect();
         let delivery = (!notes.is_empty()).then(|| notes.join("; "));
-        let results = json!({
-            "report": self.report.name,
-            "set": self.b.set,
-            "binding": self.b.dir_name(),
-            "managed": self.report.managed,
-            "profile": self.parsed.inherited,
-            "connections": self.parsed.connections(),
-            "target": self.target,
-            "schedule": self.opts.schedule,
-            "schedule_vars": self.schedule_vars,
-            "vars": self.rendered_vars,
-            "run_date": self.date.to_string(),
-            "scheduled_at": self.opts.scheduled_at.map(rfc3339),
-            "timezone": self.calendar.tz.name(),
-            "params": self.opts.params(self.date),
-            "status": status,
-            "error": error.map(|e| &e.message),
-            "error_code": error.map(|e| e.code),
-            "error_kind": error.map(|e| e.code.kind()),
-            "preview": self.opts.preview.is_some(),
-            "row_limit": self.opts.preview,
-            "started_at": self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            "duration_ms": self.started.elapsed().as_millis() as u64,
-            "result_sets": self.produced.iter().map(|p| json!({
-                "name": p.name,
-                "query": p.query,
-                "connection": p.connection,
-                "rows": p.rows,
-                "columns": p.schema.fields().iter().map(|f| f.name().clone()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-            "outputs": outputs,
-            "output_results": output_results,
-            "delivery": delivery,
-            "deliveries": deliveries,
-            "schema_drift": self.drift,
-            "target_path": self.project.target_dir,
-            "settings": self.project.settings,
-            "manifest_checksum": self.opts.manifest_checksum,
-        });
+        let results = RunResults {
+            schema_version: run_results::SCHEMA_VERSION,
+            report: self.report.name.clone(),
+            set: self.b.set.clone(),
+            binding: self.b.dir_name().to_string(),
+            managed: self.report.managed,
+            profile: self.parsed.inherited.clone(),
+            connections: self
+                .parsed
+                .connections()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            target: self.target.clone(),
+            schedule: self.opts.schedule.clone(),
+            schedule_vars: self.schedule_vars.clone(),
+            vars: self.rendered_vars.clone(),
+            run_date: self.date.to_string(),
+            scheduled_at: self.opts.scheduled_at.map(rfc3339),
+            timezone: self.calendar.tz.name().to_string(),
+            params: self.opts.params(self.date),
+            status: *status,
+            error: error.map(|e| e.message.clone()),
+            error_code: error.map(|e| e.code),
+            error_kind: error.map(|e| e.code.kind()),
+            preview: self.opts.preview.is_some(),
+            row_limit: self.opts.preview,
+            started_at: self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            duration_ms: self.started.elapsed().as_millis() as u64,
+            result_sets: self
+                .produced
+                .iter()
+                .map(|p| run_results::ResultSet {
+                    name: p.name.clone(),
+                    query: p.query.clone(),
+                    connection: p.connection.clone(),
+                    rows: p.rows,
+                    columns: p.schema.fields().iter().map(|f| f.name().clone()).collect(),
+                })
+                .collect(),
+            outputs,
+            output_results,
+            delivery,
+            deliveries,
+            schema_drift: self.drift.clone(),
+            target_path: self.project.target_dir.clone(),
+            settings: self.project.settings.clone(),
+            manifest_checksum: self.opts.manifest_checksum.clone(),
+        };
         std::fs::write(
             self.run_dir.join("run_results.json"),
             (crate::secrets::to_json_pretty(&results)? + "\n").as_bytes(),
@@ -3155,7 +3159,7 @@ impl BindingRun<'_> {
             .outs
             .iter()
             .flat_map(|o| o.deliveries.iter())
-            .filter_map(|d| d.get("location").and_then(Json::as_str))
+            .filter_map(|d| d.location.as_deref())
             .collect();
         let notes: Vec<&str> = self
             .outs

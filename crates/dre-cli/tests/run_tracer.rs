@@ -135,3 +135,27 @@ fn an_invalid_project_does_not_run() {
         .says("fix them before running");
     assert!(!p.path("target/run").exists());
 }
+
+/// Every run_results.json validates against the published schema, failed or not.
+#[test]
+fn run_results_match_the_published_schema() {
+    let schema: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/run-results.schema.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let p = project("queries: [summary]\n", "");
+    p.dre("run", &["daily"]).ok();
+    let ok = p.json("target/run/daily/default/run_results.json");
+    assert_eq!(ok["schema_version"], "dre/run-results/v1");
+    let errors: Vec<String> = validator.iter_errors(&ok).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    p.write("reports/ops/daily/summary.sql", "select nope from accounts\n");
+    p.dre("run", &["daily"]).failed();
+    let failed = p.json("target/run/daily/default/run_results.json");
+    let errors: Vec<String> = validator.iter_errors(&failed).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
