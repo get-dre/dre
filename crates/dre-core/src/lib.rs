@@ -6,6 +6,8 @@ pub mod config;
 pub mod constraints;
 pub mod dates;
 pub mod diag;
+pub mod engine;
+pub mod error;
 pub mod lock;
 pub mod lookups;
 pub mod manager;
