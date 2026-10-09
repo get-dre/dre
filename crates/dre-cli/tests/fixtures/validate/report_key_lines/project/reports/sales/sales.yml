@@ -1,0 +1,6 @@
+queries:
+  - query: orders
+    profile: warehouse
+  - query: totals
+    colour: red
+profile: [warehouse]

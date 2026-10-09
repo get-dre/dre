@@ -1,0 +1,8 @@
+exit: 1
+error[profiles-missing]: the project references profiles, but no profiles.yml was found at $CASE/no-profiles/profiles.yml (from --profiles-dir)
+error[undeclared-plugin]: reports/sales/sales.yml: format `csv` is used by report `sales` (csv is the built-in default output), but no plugin package the project declares provides it — add the package with the `csv` format under `plugins:` in dependencies.yml, then run `dre deps`
+error[unknown-key]: reports/sales/sales.yml:5: report `sales`: unknown key `colour` on query `totals`
+error[invalid-field]: reports/sales/sales.yml:6: report `sales`: `profile` must be a string
+  Profiles  $CASE/no-profiles/profiles.yml (from --profiles-dir, not found)
+    Target  dev (default)
+Validation failed: 4 errors, 0 warnings
