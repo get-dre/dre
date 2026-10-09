@@ -82,6 +82,36 @@ impl YamlFile {
     }
 }
 
+/// A `serde_yaml_ng` value as a node with no lines, to read typed config from values merged
+/// from several files (outputs).
+pub fn to_node(v: &Value) -> Node {
+    let kind = match v {
+        Value::Null => Kind::Null,
+        Value::Bool(b) => Kind::Bool(*b),
+        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => Kind::Int(i),
+            (None, Some(u), _) => Kind::UInt(u),
+            (_, _, f) => Kind::Float(f.unwrap_or(f64::NAN)),
+        },
+        Value::String(s) => Kind::Str(s.clone()),
+        Value::Sequence(s) => Kind::Seq(s.iter().map(to_node).collect()),
+        Value::Mapping(m) => Kind::Map(
+            m.iter()
+                .map(|(k, v)| {
+                    let name = scalar_str(k).unwrap_or_default();
+                    (node::Key { name, line: 0 }, to_node(v))
+                })
+                .collect(),
+        ),
+        Value::Tagged(t) => return to_node(&t.value),
+    };
+    Node {
+        kind,
+        line: 0,
+        column: 0,
+    }
+}
+
 /// A parsed node as a `serde_yaml_ng` value. Merge keys are already applied and keys are names.
 fn to_value(n: &Node) -> Value {
     match &n.kind {

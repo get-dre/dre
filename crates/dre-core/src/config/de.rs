@@ -205,6 +205,33 @@ impl<T: JsonSchema> JsonSchema for Loose<T> {
     }
 }
 
+/// A key that may be absent, unlike `Option`, which also reads `key: null` as absent. Use with
+/// `#[serde(default)]`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Maybe<T> {
+    #[default]
+    Absent,
+    Given(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Maybe<T> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        T::deserialize(d).map(Maybe::Given)
+    }
+}
+
+impl<T: JsonSchema> JsonSchema for Maybe<T> {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        T::schema_name()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        T::json_schema(g)
+    }
+    fn inline_schema() -> bool {
+        T::inline_schema()
+    }
+}
+
 /// An `A`, else a `B`, read from the same value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OneOf<A, B> {

@@ -45,7 +45,7 @@ const RESERVED_NAMES: &[&str] = &[
 use crate::config;
 use crate::config::de::{self, Loose};
 use crate::config::project::ProjectFile;
-use crate::config::report::{QueryItem, ReportFile, SetEntry, SetItem};
+use crate::config::report::{Output as OutputConfig, QueryItem, ReportFile, SetEntry, SetItem};
 use crate::profiles::{LOCAL_TYPE, Profiles, Role};
 use crate::yaml::YamlFile;
 use crate::{constraints, options, preflight, schedule, selector, sqlsplit};
@@ -2456,6 +2456,9 @@ impl Loader {
                 let owns = |k: &str| owner.get(k) == Some(&i);
                 let ReportFile {
                     name: _,
+                    output: _,
+                    plugins: _,
+                    sources: _,
                     tags,
                     queries,
                     profile,
@@ -3559,22 +3562,23 @@ impl Loader {
     ) -> Output {
         let file_path = file.to_path_buf();
         let file = Some(file_path.clone());
-        let format = m
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("csv")
-            .to_string();
+        let node = crate::yaml::to_node(&Value::Mapping(m.clone()));
+        let o: OutputConfig = match de::from_node(&node) {
+            Ok(o) => o,
+            // Every key is `Loose`, so a map always reads.
+            Err(e) => unreachable!("an output map reads as an output: {e}"),
+        };
+        let format = o
+            .format
+            .as_ref()
+            .and_then(Loose::ok)
+            .cloned()
+            .unwrap_or_else(|| "csv".to_string());
         // `message` is built in; every other format is a plugin.
         if format != MESSAGE_FORMAT {
             used.format(&format, ctx, &file_path);
         }
-        let mut opts = JsonMap::new();
-        for (k, v) in m {
-            let Some(k) = k.as_str() else { continue };
-            if !OUTPUT_SHARED_KEYS.contains(&k) {
-                opts.insert(k.to_string(), yaml_to_json(v));
-            }
-        }
+        let mut opts: JsonMap<String, Json> = o.options.0.into_iter().map(|(k, v)| (k.value, v)).collect();
         // The project's defaults for this format sit under whatever the layers set.
         if let Some(Value::Mapping(d)) = self.format_options.get(format.as_str()) {
             for (k, v) in d {
@@ -3585,10 +3589,12 @@ impl Loader {
                 }
             }
         }
-        let destinations = match m.get("destination") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::Mapping(d)) => self.typed_destination(d, ctx, &file, used).into_iter().collect(),
-            Some(Value::Sequence(list)) if list.is_empty() => {
+        let destinations = match o.destination {
+            None => Vec::new(),
+            Some(Loose::Ok(de::OneOf::A(d))) => {
+                self.typed_destination(d, ctx, &file, used).into_iter().collect()
+            }
+            Some(Loose::Ok(de::OneOf::B(list))) if list.is_empty() => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -3599,12 +3605,12 @@ impl Loader {
                 );
                 Vec::new()
             }
-            Some(Value::Sequence(list)) => {
+            Some(Loose::Ok(de::OneOf::B(list))) => {
                 let mut out = Vec::new();
-                for (i, d) in list.iter().enumerate() {
-                    match d.as_mapping() {
-                        Some(d) => out.extend(self.typed_destination(d, ctx, &file, used)),
-                        None => self.diags.error(
+                for (i, d) in list.into_iter().enumerate() {
+                    match d {
+                        Loose::Ok(d) => out.extend(self.typed_destination(d, ctx, &file, used)),
+                        Loose::Bad(_) => self.diags.error(
                             "invalid-field",
                             file.clone(),
                             None,
@@ -3614,7 +3620,7 @@ impl Loader {
                 }
                 out
             }
-            Some(_) => {
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -3624,8 +3630,8 @@ impl Loader {
                 Vec::new()
             }
         };
-        let template = match m.get("template") {
-            None | Some(Value::Null) => None,
+        let template = match o.template {
+            None => None,
             Some(t) => {
                 if format != "xlsx" {
                     self.diags.error(
@@ -3638,11 +3644,11 @@ impl Loader {
                 self.typed_template(t, ctx, &file, queries)
             }
         };
-        let extension = match m.get("extension") {
-            None => None,
-            Some(Value::Null) | Some(Value::Bool(false)) => Some(String::new()),
-            Some(Value::String(e)) => {
-                let e = e.strip_prefix('.').unwrap_or(e);
+        let extension = match o.extension {
+            de::Maybe::Absent => None,
+            de::Maybe::Given(Loose::Ok(None | Some(de::OneOf::B(false)))) => Some(String::new()),
+            de::Maybe::Given(Loose::Ok(Some(de::OneOf::A(e)))) => {
+                let e = e.strip_prefix('.').unwrap_or(&e).to_string();
                 if e.contains(['/', '\\']) || e.chars().any(char::is_whitespace) {
                     self.diags.error(
                         "invalid-output-option",
@@ -3653,9 +3659,9 @@ impl Loader {
                         ),
                     );
                 }
-                Some(e.to_string())
+                Some(e)
             }
-            Some(_) => {
+            de::Maybe::Given(_) => {
                 self.diags.error(
                     "invalid-output-option",
                     file.clone(),
@@ -3665,9 +3671,9 @@ impl Loader {
                 None
             }
         };
-        let name = match m.get("name") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(n)) if is_identifier(n) => Some(n.clone()),
+        let name = match o.name {
+            None => None,
+            Some(Loose::Ok(n)) if is_identifier(&n) => Some(n),
             Some(_) => {
                 self.diags.error(
                     "invalid-field",
@@ -3678,11 +3684,11 @@ impl Loader {
                 None
             }
         };
-        let when = match m.get("when") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(w)) => Some(w.clone()),
-            Some(Value::Bool(b)) => Some(b.to_string()),
-            Some(_) => {
+        let when = match o.when {
+            None => None,
+            Some(Loose::Ok(de::OneOf::A(w))) => Some(w),
+            Some(Loose::Ok(de::OneOf::B(b))) => Some(b.to_string()),
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -3692,10 +3698,10 @@ impl Loader {
                 None
             }
         };
-        let queries = m
-            .get("queries")
-            .and_then(string_list)
-            .map(|_| queries.iter().map(|q| q.query.clone()).collect());
+        let queries = match &o.queries {
+            Some(Loose::Ok(_)) => Some(queries.iter().map(|q| q.query.clone()).collect()),
+            _ => None,
+        };
         if extension.is_some() && format == "xlsx" {
             self.diags.error(
                 "invalid-output-option",
@@ -3719,12 +3725,12 @@ impl Loader {
     /// One `output.destination` entry: `profile`, optional `path`, and plugin options.
     fn typed_destination(
         &mut self,
-        d: &Mapping,
+        d: config::report::Destination,
         ctx: &str,
         file: &Option<PathBuf>,
         used: &mut Usage,
     ) -> Option<Destination> {
-        let Some(p) = d.get("profile").and_then(Value::as_str) else {
+        let Some(Loose::Ok(p)) = d.profile else {
             self.diags.error(
                 "invalid-field",
                 file.clone(),
@@ -3733,10 +3739,10 @@ impl Loader {
             );
             return None;
         };
-        let path = match d.get("path") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => Some(s.clone()),
-            Some(_) => {
+        let path = match d.path {
+            None => None,
+            Some(Loose::Ok(s)) => Some(s),
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -3746,16 +3752,13 @@ impl Loader {
                 None
             }
         };
-        used.destination(p, file.clone(), None);
-        let options = d
-            .iter()
-            .filter(|(k, _)| !is_one_of(k, DESTINATION_KEYS))
-            .filter_map(|(k, v)| Some((k.as_str()?.to_string(), yaml_to_json(v))))
-            .collect();
-        let attach = match d.get("attach") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::String(s)) => vec![s.clone()],
-            Some(v) => string_list(v).unwrap_or_else(|| {
+        used.destination(&p, file.clone(), None);
+        let options = d.options.0.into_iter().map(|(k, v)| (k.value, v)).collect();
+        let attach = match d.attach {
+            None => Vec::new(),
+            Some(Loose::Ok(de::OneOf::A(s))) => vec![s],
+            Some(Loose::Ok(de::OneOf::B(list))) => list,
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
@@ -3763,10 +3766,10 @@ impl Loader {
                     format!("{ctx}: destination `{p}`: `attach` must be an output name or a list of them"),
                 );
                 Vec::new()
-            }),
+            }
         };
         Some(Destination {
-            profile: p.to_string(),
+            profile: p,
             path,
             options,
             attach,
@@ -3775,7 +3778,7 @@ impl Loader {
 
     fn typed_template(
         &mut self,
-        t: &Value,
+        t: Loose<config::report::Template>,
         ctx: &str,
         file: &Option<PathBuf>,
         queries: &[QueryEntry],
@@ -3784,46 +3787,47 @@ impl Loader {
             s.diags
                 .error("invalid-template", file.clone(), None, format!("{ctx}: {msg}"))
         };
-        let Some(tf) = t.get("file").and_then(Value::as_str) else {
+        let Some(Loose::Ok(tf)) = t.ok().and_then(|t| t.file.clone()) else {
             err(self, "`output.template` needs a `file:`".into());
             return None;
         };
+        let Loose::Ok(t) = t else {
+            unreachable!("checked above")
+        };
         let mut bindings = Vec::new();
-        let items = match t.get("bindings") {
+        let items = match t.bindings {
             None => Vec::new(),
-            Some(Value::Sequence(s)) => s.clone(),
-            Some(_) => {
+            Some(Loose::Ok(s)) => s,
+            Some(Loose::Bad(_)) => {
                 err(self, "`output.template.bindings` must be a list".into());
                 Vec::new()
             }
         };
         let names: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
-        for (i, b) in items.iter().enumerate() {
+        for (i, b) in items.into_iter().enumerate() {
             let n = i + 1;
-            let Some(m) = b.as_mapping() else {
+            let Loose::Ok(m) = b else {
                 err(self, format!("template binding {n} must be a map"));
                 continue;
             };
-            let s = |k: &str| m.get(k).and_then(Value::as_str).map(str::to_string);
-            for k in m.keys().filter_map(Value::as_str) {
-                if !TEMPLATE_BINDING_KEYS.contains(&k) {
-                    err(self, format!("template binding {n} has unknown key `{k}`"));
-                }
+            let s = |v: &Option<Loose<String>>| v.as_ref().and_then(Loose::ok).cloned();
+            for k in &m.unknown.0 {
+                err(self, format!("template binding {n} has unknown key `{}`", k.name));
             }
-            let Some(sheet) = s("sheet") else {
+            let Some(sheet) = s(&m.sheet) else {
                 err(self, format!("template binding {n} needs a `sheet:`"));
                 continue;
             };
             let tb = TemplateBinding {
                 sheet,
-                query: s("query"),
-                result_index: m.get("result_index").and_then(Value::as_u64).map(|x| x as usize),
-                anchor: s("anchor"),
-                header: m.get("header").and_then(Value::as_bool),
-                columns: m.get("columns").and_then(string_list),
-                cell: s("cell"),
-                value: s("value"),
-                column: s("column"),
+                query: s(&m.query),
+                result_index: m.result_index.as_ref().and_then(Loose::ok).map(|x| *x as usize),
+                anchor: s(&m.anchor),
+                header: m.header.as_ref().and_then(Loose::ok).copied(),
+                columns: m.columns.as_ref().and_then(Loose::ok).cloned(),
+                cell: s(&m.cell),
+                value: s(&m.value),
+                column: s(&m.column),
             };
             if let Some(q) = &tb.query
                 && !names.contains(&q.as_str())
@@ -3835,8 +3839,8 @@ impl Loader {
                     ),
                 );
             }
-            if let Some(ri) = m.get("result_index")
-                && ri.as_u64().is_none_or(|x| x == 0)
+            if let Some(ri) = &m.result_index
+                && ri.ok().is_none_or(|x| *x == 0)
             {
                 err(
                     self,
@@ -3899,10 +3903,7 @@ impl Loader {
             }
             bindings.push(tb);
         }
-        Some(Template {
-            file: tf.to_string(),
-            bindings,
-        })
+        Some(Template { file: tf, bindings })
     }
 
     // -- unmanaged reports --------------------------------------------------------------------

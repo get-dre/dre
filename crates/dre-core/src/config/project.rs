@@ -154,7 +154,7 @@ fn output_ref(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"$ref": "report.schema.json#/$defs/output"})
 }
 
-fn sources_ref(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+pub(super) fn sources_ref(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"$ref": "sources.schema.json#/properties/sources"})
 }
 
@@ -166,7 +166,7 @@ fn format_options(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type": "object", "additionalProperties": {"type": "object"}})
 }
 
-fn plugins(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+pub(super) fn plugins(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "oneOf": [
             {
