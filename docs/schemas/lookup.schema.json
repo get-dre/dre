@@ -2,22 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "x-dre-schema-version": "0.3",
   "title": "DRE lookup config",
-  "description": "The optional config of a lookup, `lookups/<name>.yml` next to a csv, xlsx, xls, json or jsonl file. (A `.yml` lookup that holds the rows themselves can also set `rows`.)",
   "type": "object",
+  "description": "The optional config of a lookup, `lookups/<name>.yml` next to a csv, xlsx, xls, json or jsonl file. (A `.yml` lookup that holds the rows themselves can also set `rows`.)",
   "properties": {
     "columns": {
       "type": "object",
       "description": "Types for columns; without it every value is text.",
       "additionalProperties": {
         "type": "string",
+        "description": "One of `string`, `integer`, `number`, `boolean`, `date`.",
         "enum": [
           "string",
           "integer",
           "number",
           "boolean",
           "date"
-        ],
-        "description": "One of `string`, `integer`, `number`, `boolean`, `date`."
+        ]
       }
     },
     "sheet": {
@@ -26,13 +26,13 @@
     },
     "load": {
       "type": "string",
+      "description": "How the lookup reaches the database: inlined into the SQL, loaded into a temp table, or chosen by size (`auto`).",
       "enum": [
         "auto",
         "inline",
         "temp_table"
       ],
-      "default": "auto",
-      "description": "How the lookup reaches the database: inlined into the SQL, loaded into a temp table, or chosen by size (`auto`)."
+      "default": "auto"
     },
     "rows": {
       "type": "array",

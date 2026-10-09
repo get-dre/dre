@@ -67,7 +67,7 @@ pub struct ProjectFile {
     /// Where DRE writes its generated files (compiled SQL, run outputs, the manifest). Default: `target/` in the project. `--target-path` and `DRE_TARGET_PATH` override it.
     pub target_path: Option<Located<Loose<String>>>,
     /// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.
-    #[schemars(schema_with = "plugins")]
+    #[schemars(schema_with = "super::dependencies::plugins")]
     #[serde(default)]
     pub plugins: Option<IgnoredAny>,
     /// dbt-style source declarations (see the sources schema). May be written in any project YAML file.
@@ -164,43 +164,4 @@ fn any_map(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 fn format_options(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type": "object", "additionalProperties": {"type": "object"}})
-}
-
-pub(super) fn plugins(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({
-        "oneOf": [
-            {
-                "type": "array",
-                "items": {
-                    "description": "One plugin package: just its name, a `name: \"<version>\"` pair, or a map with `name` and where to get it.",
-                    "oneOf": [
-                        {"type": "string", "description": "A package name, e.g. `duckdb`. Any version."},
-                        {
-                            "type": "object",
-                            "description": "A package name mapped to a version constraint, e.g. `duckdb: \">=1.0\"`.",
-                            "additionalProperties": true,
-                            "minProperties": 1,
-                            "maxProperties": 1
-                        },
-                        {
-                            "type": "object",
-                            "description": "A package with its source.",
-                            "properties": {
-                                "name": {"type": "string", "description": "The package name: lowercase letters, digits and `_`."},
-                                "version": {"type": "string", "description": "A version constraint such as `1.2.0` or `>=1.0`. Not allowed with `local`."},
-                                "github": {"type": "string", "description": "Install from the releases of this GitHub repository, `owner/repo`."},
-                                "local": {"type": "string", "description": "Use the package folder at this path as it is."},
-                                "registry": {"type": "string", "description": "Install from this registry index (a URL or a path) instead of the default one."}
-                            },
-                            "required": ["name"],
-                            "additionalProperties": false
-                        }
-                    ]
-                }
-            },
-            {"type": "object", "description": "Package names mapped to version constraints.", "additionalProperties": true},
-            {"type": "null"}
-        ],
-        "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)"
-    })
 }

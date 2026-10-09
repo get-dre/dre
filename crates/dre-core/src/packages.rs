@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use serde_yaml_ng::Value;
 
+use crate::config::de::Loose;
+use crate::config::dependencies::DependenciesFile;
 use crate::diag::Diagnostics;
 use crate::lock::{Lock, LockedPackage};
 use crate::plugins::DEPS_DIR;
@@ -70,23 +71,33 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
         let Some(yf) = YamlFile::load(&path, PathBuf::from(f), &mut quiet) else {
             continue; // the project load reports the parse error
         };
-        let Some(list) = yf.value.get("packages") else {
+        let Ok(dependencies) = crate::config::de::from_node::<DependenciesFile>(&yf.node) else {
+            continue; // the project load reports its shape
+        };
+        let Some(packages) = dependencies.packages else {
             continue;
         };
-        let Some(list) = list.as_sequence() else {
+        let line = packages.line();
+        let Loose::Ok(list) = packages.value else {
             diags.error(
                 "invalid-packages",
                 Some(yf.display.clone()),
-                yf.line_of("packages", None),
+                line,
                 "`packages` must be a list",
             );
             continue;
         };
         for entry in list {
-            let line = yf.line_of("packages", None);
-            let get = |k: &str| entry.get(k).and_then(Value::as_str).map(str::to_string);
-            let source = match (get("git"), get("local"), get("package")) {
-                (Some(url), None, None) => match get("revision") {
+            let get = |v: Option<&Loose<String>>| v.and_then(Loose::ok).cloned();
+            let entry = entry.ok();
+            let (git, local, package, revision) = (
+                get(entry.and_then(|e| e.git.as_ref())),
+                get(entry.and_then(|e| e.local.as_ref())),
+                get(entry.and_then(|e| e.package.as_ref())),
+                get(entry.and_then(|e| e.revision.as_ref())),
+            );
+            let source = match (git, local, package) {
+                (Some(url), None, None) => match revision {
                     Some(revision) => Source::Git { url, revision },
                     None => {
                         diags.error(

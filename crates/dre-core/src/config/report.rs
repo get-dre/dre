@@ -46,7 +46,7 @@ pub struct ReportFile {
     pub locale: Option<Located<Loose<String>>>,
     /// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.
     #[serde(default)]
-    #[schemars(schema_with = "super::project::plugins")]
+    #[schemars(schema_with = "super::dependencies::plugins")]
     pub plugins: Option<IgnoredAny>,
     /// dbt-style source declarations (see the sources schema). May be written in any project YAML file.
     #[serde(default)]

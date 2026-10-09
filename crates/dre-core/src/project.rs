@@ -4653,17 +4653,12 @@ impl Loader {
     /// A `plugins:` entry in its map form: `{name: foo, github: acme/dre-foo, version: "^1"}`.
     fn plugin_entry(
         &mut self,
-        m: &Mapping,
-        yf: &YamlFile,
+        m: &config::dependencies::PluginEntry,
+        file: &Path,
         line: Option<usize>,
     ) -> Option<(String, Option<Value>, PluginSource)> {
-        let file = Some(yf.display.clone());
-        let name = m
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let line = yf.line_of(&name, line);
+        let file = Some(file.to_path_buf());
+        let name = m.name.ok().cloned().unwrap_or_default();
         let err = |s: &mut Self, msg: String| {
             s.diags.error(
                 "invalid-plugin-declaration",
@@ -4676,21 +4671,24 @@ impl Loader {
             err(self, "`name` must be a non-empty string".into());
             return None;
         }
-        for k in m.keys().filter_map(Value::as_str) {
-            if !PLUGIN_ENTRY_KEYS.contains(&k) {
-                err(
-                    self,
-                    format!(
-                        "unknown key `{k}`; use `name`, `version` and one of `github`, `local`, `registry`"
-                    ),
-                );
-                return None;
-            }
+        if let Some(k) = m.unknown.0.first() {
+            err(
+                self,
+                format!(
+                    "unknown key `{}`; use `name`, `version` and one of `github`, `local`, `registry`",
+                    k.name
+                ),
+            );
+            return None;
         }
-        let given: Vec<(&str, &str)> = ["github", "local", "registry"]
-            .into_iter()
-            .filter_map(|k| m.get(k).map(|v| (k, v.as_str().unwrap_or(""))))
-            .collect();
+        let given: Vec<(&str, &str)> = [
+            ("github", &m.github),
+            ("local", &m.local),
+            ("registry", &m.registry),
+        ]
+        .into_iter()
+        .filter_map(|(k, v)| v.as_ref().map(|v| (k, v.as_str().unwrap_or(""))))
+        .collect();
         let source = match given.as_slice() {
             [] => PluginSource::Default,
             [(k, "")] => {
@@ -4706,7 +4704,7 @@ impl Loader {
                 PluginSource::Github(r.to_string())
             }
             [("local", p)] => {
-                if m.get("version").is_some() {
+                if m.version.is_some() {
                     err(
                         self,
                         "a `local` package has no `version`: it's used as it is".into(),
@@ -4721,7 +4719,7 @@ impl Loader {
                 return None;
             }
         };
-        Some((name, m.get("version").cloned(), source))
+        Some((name, m.version.as_ref().map(json_to_yaml_value), source))
     }
 
     /// The `plugins:` declarations, merged across files; and every plugin the project uses, for
@@ -4734,43 +4732,52 @@ impl Loader {
             source: PluginSource,
         }
         let mut by_package: BTreeMap<String, Vec<Decl>> = BTreeMap::new();
-        for (yf, m) in decls {
-            for (block, v) in m {
-                if block.as_str() != Some(PLUGINS_KEY) {
+        for (yf, _) in decls {
+            {
+                let Ok(config::dependencies::PluginsKey { plugins: Some(v) }) = de::from_node(&yf.node)
+                else {
                     continue;
-                }
-                let line = yf.line_of(PLUGINS_KEY, None);
+                };
+                let line = v.line();
                 let file = Some(yf.display.clone());
-                let entries: Vec<(String, Option<Value>, PluginSource)> = match v {
-                    Value::Sequence(items) => items
-                        .iter()
-                        .filter_map(|i| match i {
-                            Value::String(s) => Some((s.clone(), None, PluginSource::Default)),
-                            Value::Mapping(m) if m.get("name").is_some() => self.plugin_entry(m, yf, line),
-                            Value::Mapping(m) if m.len() == 1 => {
-                                let (k, v) = m.iter().next().unwrap();
-                                k.as_str()
-                                    .map(|k| (k.to_string(), Some(v.clone()), PluginSource::Default))
-                            }
-                            _ => {
-                                self.diags.error(
-                                    "invalid-plugin-declaration",
-                                    file.clone(),
-                                    line,
-                                    "each `plugins` entry is a package name, `name: \"<version>\"`, or a map with `name:` and one of `github:`, `local:`, `registry:`",
-                                );
-                                None
+                let entries: Vec<(String, Option<Value>, PluginSource, Option<usize>)> = match v.value {
+                    Loose::Ok(de::OneOf::A(items)) => items
+                        .into_iter()
+                        .filter_map(|i| {
+                            let iline = i.line();
+                            match i.value {
+                                Loose::Ok(de::OneOf::A(name)) => Some((name.0, None, PluginSource::Default, iline)),
+                                Loose::Ok(de::OneOf::B(de::OneOf::B(entry))) => self
+                                    .plugin_entry(&entry, &yf.display, iline)
+                                    .map(|(n, c, s)| (n, c, s, iline)),
+                                Loose::Ok(de::OneOf::B(de::OneOf::A(pin))) => Some((
+                                    pin.name.value,
+                                    Some(json_to_yaml_value(&pin.version)),
+                                    PluginSource::Default,
+                                    iline,
+                                )),
+                                Loose::Bad(_) => {
+                                    self.diags.error(
+                                        "invalid-plugin-declaration",
+                                        file.clone(),
+                                        iline,
+                                        "each `plugins` entry is a package name, `name: \"<version>\"`, or a map with `name:` and one of `github:`, `local:`, `registry:`",
+                                    );
+                                    None
+                                }
                             }
                         })
                         .collect(),
-                    Value::Mapping(m) => m
-                        .iter()
-                        .filter_map(|(k, v)| {
-                            k.as_str().map(|k| (k.to_string(), Some(v.clone()), PluginSource::Default))
+                    Loose::Ok(de::OneOf::B(m)) => m
+                        .0
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let kline = k.line();
+                            (k.value, Some(json_to_yaml_value(&v)), PluginSource::Default, kline)
                         })
                         .collect(),
-                    Value::Null => Vec::new(),
-                    _ => {
+                    Loose::Bad(f) if f.kind == "nothing" => Vec::new(),
+                    Loose::Bad(_) => {
                         self.diags.error(
                             "invalid-plugin-declaration",
                             file.clone(),
@@ -4780,12 +4787,12 @@ impl Loader {
                         continue;
                     }
                 };
-                for (name, c, source) in entries {
+                for (name, c, source, eline) in entries {
                     if !dre_protocol::valid_name(&name) {
                         self.diags.error(
                             "invalid-plugin-declaration",
                             file.clone(),
-                            yf.line_of(&name, line),
+                            eline,
                             format!(
                                 "plugin package `{name}`: a package name is lowercase letters, digits and `_`"
                             ),
@@ -4806,7 +4813,7 @@ impl Loader {
                         Err(e) => self.diags.error(
                             "invalid-version-constraint",
                             file.clone(),
-                            yf.line_of(&name, line),
+                            eline,
                             format!("plugin package `{name}`: invalid version constraint `{raw}`: {e}"),
                         ),
                     }

@@ -266,7 +266,17 @@ impl<A: JsonSchema, B: JsonSchema> JsonSchema for OneOf<A, B> {
         format!("OneOf_{}_{}", A::schema_name(), B::schema_name()).into()
     }
     fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"oneOf": [g.subschema_for::<A>(), g.subschema_for::<B>()]})
+        // `OneOf<A, OneOf<B, C>>` is one list of three alternatives.
+        let mut alternatives = Vec::new();
+        for s in [g.subschema_for::<A>(), g.subschema_for::<B>()] {
+            match s.as_object() {
+                Some(o) if o.len() == 1 && o.contains_key("oneOf") => {
+                    alternatives.extend(o["oneOf"].as_array().into_iter().flatten().cloned());
+                }
+                _ => alternatives.push(s.to_value()),
+            }
+        }
+        schemars::json_schema!({"oneOf": alternatives})
     }
     fn inline_schema() -> bool {
         true

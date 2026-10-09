@@ -5,6 +5,8 @@
 //! its JSON Schema in `docs/schemas/` (with `schemars`).
 
 pub mod de;
+pub mod dependencies;
+pub mod lookup;
 pub mod node;
 pub mod project;
 pub mod report;
@@ -132,5 +134,7 @@ pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
         ("schedules", schema::<schedule::SchedulesFile>(version)),
         ("timings", schema::<schedule::TimingsFile>(version)),
         ("profiles", schema::<crate::profiles::ProfilesFile>(version)),
+        ("dependencies", schema::<dependencies::DependenciesFile>(version)),
+        ("lookup", schema::<lookup::LookupFile>(version)),
     ]
 }
