@@ -24,6 +24,7 @@ use serde_json::{Map as JsonMap, Value as Json, json};
 
 use crate::codes::Code;
 use crate::dates::Calendar;
+use crate::engine::{CancelToken, Events, RunEvent, RunStore};
 use crate::lookups::Table;
 use crate::message::QueryResult;
 use crate::parse::ParsedBinding;
@@ -264,27 +265,64 @@ impl RunSummary {
     }
 }
 
+/// What a run will do: the Bindings to run, and the run's target with every profile's entry.
+pub struct Plan<'a> {
+    pub bindings: Vec<(&'a Report, Binding)>,
+    pub targets: RunTargets,
+}
+
+/// Run what `opts` selects: [`plan`] it, then run the plan on a worker thread while this thread
+/// shows its events through `ui`.
 pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary {
     let mut summary = RunSummary::default();
+    let Some(plan) = plan(project, opts, ui, &mut summary) else {
+        return summary;
+    };
+    ui.targets(&plan.targets);
+    ui.plan(plan.bindings.len());
+    let (plugin_log, sql_log) = (ui.plugin_log(), ui.sql_log());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cancel = CancelToken::new();
+    let outcomes = std::thread::scope(|s| {
+        let worker = s.spawn(|| execute(project, &plan, opts, &cancel, Events::new(tx)));
+        for e in rx {
+            crate::engine::dispatch(ui, e, &plugin_log, &sql_log);
+        }
+        worker.join().expect("the run's worker doesn't panic")
+    });
+    summary.outcomes.extend(outcomes);
+    summary
+}
+
+/// Which Bindings `opts` selects, and every profile's entry for the run. Asking which Set to run
+/// happens here, through `ui`. A selection that fails for one report is recorded as that
+/// report's failed outcome in `summary`; a failure that stops the whole run is `None`, with
+/// `summary.error` set.
+pub fn plan<'a>(
+    project: &'a Project,
+    opts: &RunOptions,
+    ui: &mut dyn Ui,
+    summary: &mut RunSummary,
+) -> Option<Plan<'a>> {
     if let Err(e) = crate::target::ensure(&project.target_dir) {
         summary.error = Some(format!(
             "can't write to the target path {} (from {}): {e}",
             project.target_dir.display(),
             project.target_source
         ));
-        return summary;
+        return None;
     }
     let planned: Vec<(&Report, Binding)> = match &opts.schedule {
         Some(name) => {
             if !project.schedules.iter().any(|e| &e.name == name) {
                 summary.error = Some(unknown_schedule(project, name));
-                return summary;
+                return None;
             }
             match schedule_bindings(project, name, opts) {
                 Ok(p) => p,
                 Err(e) => {
                     summary.error = Some(e);
-                    return summary;
+                    return None;
                 }
             }
         }
@@ -294,12 +332,12 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
                 Some(s) => match selector::resolve(project, s) {
                     Ok(r) if r.is_empty() => {
                         summary.error = Some(format!("selector `{s}` matches no report"));
-                        return summary;
+                        return None;
                     }
                     Ok(r) => r,
                     Err(e) => {
                         summary.error = Some(e.to_string());
-                        return summary;
+                        return None;
                     }
                 },
             };
@@ -335,22 +373,43 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
     };
     // Every profile the run uses needs an entry for it, before anything runs.
     match run_targets(project, &planned, opts) {
-        Ok(t) => ui.targets(&t),
+        Ok(targets) => Some(Plan {
+            bindings: planned,
+            targets,
+        }),
         Err(e) => {
             summary.error = Some(e);
             summary.missing_entry = true;
-            return summary;
+            None
         }
     }
-    ui.plan(planned.len());
-    for (report, b) in &planned {
-        ui.binding_start(&report.name, b.set.as_deref());
-        let mut r = BindingRun::new(project, report, b, opts, ui);
+}
+
+/// Run a plan's Bindings in order, reporting through `events`; a cancelled run starts no further
+/// Binding.
+pub fn execute(
+    project: &Project,
+    plan: &Plan<'_>,
+    opts: &RunOptions,
+    cancel: &CancelToken,
+    events: Events,
+) -> Vec<BindingOutcome> {
+    let store = RunStore::new(&project.target_dir);
+    let mut outcomes = Vec::new();
+    for (report, b) in &plan.bindings {
+        if cancel.is_cancelled() {
+            break;
+        }
+        events.emit(RunEvent::BindingStart {
+            report: report.name.clone(),
+            set: b.set.clone(),
+        });
+        let mut r = BindingRun::new(project, report, b, opts, events.clone(), &store);
         let outcome = r.run();
-        ui.binding_end(&outcome);
-        summary.outcomes.push(outcome);
+        events.emit(RunEvent::BindingEnd(outcome.clone()));
+        outcomes.push(outcome);
     }
-    summary
+    outcomes
 }
 
 /// A profile a run uses, and its entry.
@@ -676,7 +735,8 @@ struct BindingRun<'a> {
     /// `run.date`: `DRE_RUN_DATE`, else today in the run's timezone.
     date: NaiveDate,
     calendar: Calendar,
-    ui: &'a mut dyn Ui,
+    ui: Events,
+    store: &'a RunStore,
     compiled_dir: PathBuf,
     run_dir: PathBuf,
     schema_dir: PathBuf,
@@ -748,47 +808,8 @@ struct RenderedDest {
     attach: Vec<String>,
 }
 
-/// Why a Binding (or one of its steps) failed: a registered code and the message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Fail {
-    code: Code,
-    message: String,
-}
-
-impl Fail {
-    fn new(code: Code, message: impl Into<String>) -> Fail {
-        Fail {
-            code,
-            message: message.into(),
-        }
-    }
-
-    /// The step's own code, unless a more specific one is already set.
-    fn or(mut self, code: Code) -> Fail {
-        if self.code == Code::RunFailed {
-            self.code = code;
-        }
-        self
-    }
-}
-
-impl From<String> for Fail {
-    fn from(message: String) -> Fail {
-        Fail::new(Code::RunFailed, message)
-    }
-}
-
-impl From<&str> for Fail {
-    fn from(message: &str) -> Fail {
-        Fail::new(Code::RunFailed, message)
-    }
-}
-
-impl std::fmt::Display for Fail {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
+/// Why a Binding (or one of its steps) failed.
+type Fail = crate::error::Error;
 
 fn masked_source_error(error: &HostError, sensitive: bool) -> String {
     let error = error.to_string();
@@ -817,10 +838,9 @@ impl<'a> BindingRun<'a> {
         report: &'a Report,
         b: &'a Binding,
         opts: &'a RunOptions,
-        ui: &'a mut dyn Ui,
+        ui: Events,
+        store: &'a RunStore,
     ) -> Self {
-        let t = &project.target_dir;
-        let rel = Path::new(&report.name).join(b.dir_name());
         let schedule = opts
             .schedule
             .as_ref()
@@ -858,9 +878,10 @@ impl<'a> BindingRun<'a> {
             date,
             calendar,
             ui,
-            compiled_dir: t.join("compiled").join(&rel),
-            run_dir: t.join("run").join(&rel),
-            schema_dir: t.join("schema").join(&rel),
+            store,
+            compiled_dir: store.compiled_dir(&report.name, b.dir_name()),
+            run_dir: store.run_dir(&report.name, b.dir_name()),
+            schema_dir: store.schema_dir(&report.name, b.dir_name()),
             target: project.target_name.clone(),
             parsed: ParsedBinding::default(),
             pool: None,
@@ -2403,10 +2424,7 @@ impl<'a> BindingRun<'a> {
             settings: self.project.settings.clone(),
             manifest_checksum: self.opts.manifest_checksum.clone(),
         };
-        std::fs::write(
-            self.run_dir.join("run_results.json"),
-            (crate::secrets::to_json_pretty(&results)? + "\n").as_bytes(),
-        )
+        self.store.write_results(&self.run_dir, &results)
     }
 
     /// `dre validate --live`: execute temp creates, `check` everything else, each on its
