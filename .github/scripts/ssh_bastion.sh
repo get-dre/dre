@@ -36,7 +36,7 @@ docker network create dre-test-ssh >/dev/null 2>&1 || true
 # Postgres wants its key owned by itself with mode 0600, which a bind mount can't promise.
 docker run -d --name dre-test-pg-tls --network dre-test-ssh --network-alias db.internal \
   -p 5433:5432 -e POSTGRES_USER=dre -e POSTGRES_PASSWORD=dre -e POSTGRES_DB=dre \
-  -v "$work/pg:/certs:ro" --entrypoint sh postgres:17-alpine -c '
+  -v "$work/pg:/certs:ro" --entrypoint sh postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24 -c '
     install -o postgres -m 600 /certs/server.key /var/lib/postgresql/server.key
     install -o postgres -m 644 /certs/server.crt /var/lib/postgresql/server.crt
     exec docker-entrypoint.sh postgres -c ssl=on \
@@ -44,7 +44,7 @@ docker run -d --name dre-test-pg-tls --network dre-test-ssh --network-alias db.i
   >/dev/null
 
 docker run -d --name dre-test-bastion --network dre-test-ssh -p 2223:22 \
-  -v "$key.pub:/keys/id.pub:ro" alpine:3 sh -c '
+  -v "$key.pub:/keys/id.pub:ro" alpine:3@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 sh -c '
     apk add --no-cache openssh >/dev/null
     adduser -D dre && echo dre:dre-pass | chpasswd
     mkdir -p /home/dre/.ssh && cp /keys/id.pub /home/dre/.ssh/authorized_keys

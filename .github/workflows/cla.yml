@@ -10,14 +10,16 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, closed]
 
-permissions:
-  actions: write
-  contents: write
-  pull-requests: write
-  statuses: write
+permissions: {}
 
 jobs:
   cla:
+    # Writes signatures to the cla-signatures branch, comments on and sets the status of the PR.
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      statuses: write
     if: >
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request && (

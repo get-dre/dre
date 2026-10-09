@@ -1,0 +1,21 @@
+# zizmor (the workflow security check in security.yml): findings accepted on purpose, each with
+# its reason. Everything else fails CI.
+rules:
+  dangerous-triggers:
+    ignore:
+      # The CLA bot has to comment on and set a status for pull requests from forks. It runs no
+      # code from the pull request (no checkout), only the pinned bot action.
+      - cla.yml
+  archived-uses:
+    ignore:
+      # The CLA bot's repository is archived but the action still works; it's pinned by SHA and
+      # holds only this workflow's token. To replace when a maintained equivalent is chosen.
+      - cla.yml
+  artipacked:
+    ignore:
+      # The release job pushes the skills-latest branch with the checkout's token. It uploads no
+      # artifacts.
+      - skills-release.yml
+  self-repository:
+    # Local reusable workflows (`uses: ./.github/workflows/…`) run from the same commit already.
+    disable: true

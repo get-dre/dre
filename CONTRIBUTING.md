@@ -82,7 +82,15 @@ python3 .github/scripts/security_scan.py go
 ```
 
 `rust` runs `cargo deny` with [`deny.toml`](deny.toml); `go` runs `govulncheck` and `go-licenses`
-in each module under `go/`. In CI, the JSON reports are kept as the run's `security-report-*`
+in each module under `go/`.
+
+The same workflow checks the workflows themselves with [zizmor](https://docs.zizmor.sh/)
+(`pipx run zizmor .github/workflows`). Every third-party action is pinned by its full commit SHA,
+with the version as a comment (`uses: actions/checkout@<sha> # v7.0.1`), and Dependabot updates
+the pins. Every container image is pinned by digest (`postgres:17-alpine@sha256:…`), and the
+weekly `Image digests` workflow proposes new digests. Each job asks only for the permissions it
+needs. Findings accepted on purpose are listed in [`.github/zizmor.yml`](.github/zizmor.yml), each
+with its reason. In CI, the JSON reports are kept as the run's `security-report-*`
 artifacts.
 
 ### When the security scan fails

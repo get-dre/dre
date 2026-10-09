@@ -48,23 +48,30 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
+# Read-only by default; a job that publishes asks for more itself.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Test the checker
         run: python3 .github/scripts/test_skills.py
-      - uses: dtolnay/rust-toolchain@stable
+      # The runner's rustup, not a third-party action: the newest stable Rust.
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
       # The same build as CI's Linux test job (`cargo build --workspace --bins`, same CARGO_*
       # variables), so restore that job's cache (its key is named after the job, `test`) and save
       # none of our own: the repo's caches have to fit in 10 GB.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v2-rust
           shared-key: test
           save-if: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum

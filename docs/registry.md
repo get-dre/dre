@@ -107,6 +107,10 @@ The index update adds every package release it doesn't list yet, not only the on
 several packages can be tagged at once. `gh workflow run release.yml -f tag=registry` runs it on
 its own.
 
+To try a release before tagging it, run the workflow as a dry run from a branch:
+`gh workflow run release.yml --ref <branch> -f tag=duckdb-v1.0.1 -f dry_run=true` runs the
+security scan and builds and checks everything, and publishes nothing.
+
 For a package released some other way:
 
 1. Build the executable for every platform and upload the artifacts to a GitHub Release.
