@@ -67,9 +67,15 @@ jobs:
         if: steps.plan.outputs.kind == 'core'
         run: python3 .github/scripts/package_readme.py check
 
+  # Known vulnerabilities and licences (security.yml): a failure stops the release before the build.
+  security:
+    name: Security scan
+    needs: plan
+    uses: ./.github/workflows/security.yml
+
   build:
     name: Build ${{ needs.plan.outputs.package }} (${{ matrix.platform }})
-    needs: plan
+    needs: [plan, security]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -101,6 +107,8 @@ jobs:
         if: needs.plan.outputs.go != ''
         with:
           go-version-file: ${{ needs.plan.outputs.go }}/go.mod
+          # The newest patch release, with the standard library's latest security fixes.
+          check-latest: true
           cache-dependency-path: ${{ needs.plan.outputs.go }}/go.sum
 
       - name: Install OpenSSL headers
