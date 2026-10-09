@@ -5,10 +5,13 @@
 //! its JSON Schema in `docs/schemas/` (with `schemars`).
 
 pub mod de;
+pub mod dependencies;
+pub mod lookup;
 pub mod node;
 pub mod project;
 pub mod report;
 pub mod schedule;
+pub mod sources;
 
 /// The JSON Schema of a config file type, as committed in `docs/schemas/<name>.schema.json`.
 ///
@@ -132,5 +135,8 @@ pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
         ("schedules", schema::<schedule::SchedulesFile>(version)),
         ("timings", schema::<schedule::TimingsFile>(version)),
         ("profiles", schema::<crate::profiles::ProfilesFile>(version)),
+        ("dependencies", schema::<dependencies::DependenciesFile>(version)),
+        ("lookup", schema::<lookup::LookupFile>(version)),
+        ("sources", schema::<sources::SourcesFile>(version)),
     ]
 }

@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "x-dre-schema-version": "0.3",
   "title": "DRE dependencies",
-  "description": "Plugin packages and macro packages, in `dependencies.yml` or `packages.yml` at the project root.",
   "type": "object",
+  "description": "Plugin packages and macro packages, in `dependencies.yml` or `packages.yml` at the project root.",
   "properties": {
     "plugins": {
       "description": "The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.",
+      "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)",
       "oneOf": [
         {
           "type": "array",
@@ -65,8 +66,7 @@
         {
           "type": "null"
         }
-      ],
-      "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)"
+      ]
     },
     "packages": {
       "type": "array",

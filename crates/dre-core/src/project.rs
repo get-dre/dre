@@ -1718,10 +1718,28 @@ impl Loader {
         let mut out: BTreeMap<String, SourceDef> = BTreeMap::new();
         for yf in files {
             let file = Some(yf.display.clone());
-            let top = yf.line_of(SOURCES_KEY, None);
-            let items = match yf.value.get(SOURCES_KEY) {
-                Some(Value::Sequence(items)) => items,
-                Some(Value::Null) => continue,
+            let top = key_line(yf, SOURCES_KEY);
+            let plugin_names = match yf.node.get(SOURCES_KEY).map(|n| &n.kind) {
+                Some(crate::config::node::Kind::Seq(items)) => items.iter().all(|i| i.as_str().is_some()),
+                _ => false,
+            };
+            if plugin_names {
+                // DRE 0.0.x declared source plugins here.
+                self.diags.error(
+                    "moved-plugin-declaration",
+                    file,
+                    top,
+                    "`sources:` declares tables now (dbt's format); list plugin packages under `plugins:` instead (e.g. `plugins: [duckdb]`)",
+                );
+                continue;
+            }
+            let items = match de::from_node::<Loose<config::sources::SourcesFile>>(&yf.node) {
+                Ok(Loose::Ok(f)) => f.sources.map(|s| s.value),
+                _ => None,
+            };
+            let items = match items {
+                Some(Loose::Ok(Some(items))) => items,
+                Some(Loose::Ok(None)) => continue,
                 _ => {
                     self.diags.error(
                         "invalid-source",
@@ -1732,16 +1750,6 @@ impl Loader {
                     continue;
                 }
             };
-            if items.iter().all(Value::is_string) {
-                // DRE 0.0.x declared source plugins here.
-                self.diags.error(
-                    "moved-plugin-declaration",
-                    file,
-                    top,
-                    "`sources:` declares tables now (dbt's format); list plugin packages under `plugins:` instead (e.g. `plugins: [duckdb]`)",
-                );
-                continue;
-            }
             let mut unsupported: BTreeSet<String> = BTreeSet::new();
             for item in items {
                 if let Some(src) = self.source_def(yf, item, &mut unsupported) {
@@ -1779,12 +1787,13 @@ impl Loader {
     fn source_def(
         &mut self,
         yf: &YamlFile,
-        item: &Value,
+        item: de::Located<Loose<config::sources::Source>>,
         unsupported: &mut BTreeSet<String>,
     ) -> Option<SourceDef> {
         let file = Some(yf.display.clone());
-        let top = yf.line_of(SOURCES_KEY, None);
-        let Some(m) = item.as_mapping() else {
+        let top = key_line(yf, SOURCES_KEY);
+        let item_line = item.line().or(top);
+        let Loose::Ok(m) = item.value else {
             self.diags.error(
                 "invalid-source",
                 file,
@@ -1793,74 +1802,80 @@ impl Loader {
             );
             return None;
         };
-        let Some(name) = m.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()) else {
+        let Some(name) = m
+            .name
+            .as_ref()
+            .and_then(Loose::ok)
+            .filter(|n| !n.is_empty())
+            .cloned()
+        else {
             self.diags
                 .error("invalid-source", file, top, "every source needs a `name`");
             return None;
         };
-        let line = yf.line_containing(&format!("name: {name}")).or(top);
+        let line = item_line;
         let ctx = format!("source `{name}`");
         let mut ok = self.source_keys(
-            yf,
-            m,
+            &yf.display,
+            &m.unknown,
+            &m.dbt_keys(),
             &ctx,
-            line,
             SOURCE_KEYS,
-            DBT_SOURCE_KEYS,
             "source",
             unsupported,
         );
-        let mut text = |s: &mut Self, k: &str| -> Option<String> {
-            match m.get(k) {
-                None | Some(Value::Null) => None,
-                Some(v) => match crate::yaml::scalar_str(v) {
-                    Some(t) if !v.is_mapping() && !v.is_sequence() => Some(t),
-                    _ => {
-                        s.diags.error(
-                            "invalid-source",
-                            file.clone(),
-                            line,
-                            format!("{ctx}: `{k}` must be a string"),
-                        );
-                        ok = false;
-                        None
-                    }
-                },
+        let mut text = |s: &mut Self, k: &str, v: &Option<Loose<de::Text>>| -> Option<String> {
+            match v {
+                None => None,
+                Some(Loose::Ok(t)) => Some(t.0.clone()),
+                Some(Loose::Bad(_)) => {
+                    s.diags.error(
+                        "invalid-source",
+                        file.clone(),
+                        line,
+                        format!("{ctx}: `{k}` must be a string"),
+                    );
+                    ok = false;
+                    None
+                }
             }
         };
-        let description = text(self, "description");
-        let database = text(self, "database");
-        let schema = text(self, "schema");
-        let profile = text(self, "profile");
-        let quoting = self.quoting(yf, m, &ctx, line);
-        let tags = self.source_tags(yf, m, &ctx, line);
-        let meta = self.source_meta(yf, m, &ctx, line);
+        let description = text(self, "description", &m.description);
+        let database = text(self, "database", &m.database);
+        let schema = text(self, "schema", &m.schema);
+        let profile = text(self, "profile", &m.profile);
+        let quoting = self.quoting(&yf.display, m.quoting, &ctx, line);
+        let tags = self.source_tags(&yf.display, m.tags, &ctx, line);
+        let meta = self.source_meta(&yf.display, m.meta, &ctx, line);
         let mut tables = Vec::new();
-        match m.get("tables") {
-            None | Some(Value::Null) => {}
-            Some(Value::Sequence(ts)) => {
+        match m.tables {
+            None | Some(Loose::Ok(None)) => {}
+            Some(Loose::Ok(Some(ts))) => {
                 // Duplicates by name, whether or not each entry is otherwise valid.
                 let mut names = BTreeSet::new();
-                for n in ts.iter().filter_map(|t| t.get("name").and_then(Value::as_str)) {
-                    if !names.insert(n) {
+                for t in &ts {
+                    let Some(n) = t.value.ok().and_then(|t| t.name.as_ref()).and_then(Loose::ok) else {
+                        continue;
+                    };
+                    if !names.insert(n.clone()) {
                         self.diags.error(
                             "duplicate-source-table",
                             file.clone(),
-                            yf.line_containing(&format!("name: {n}")).or(line),
+                            t.line().or(line),
                             format!("{ctx} declares table `{n}` twice"),
                         );
                         ok = false;
                     }
                 }
                 for t in ts {
-                    if let Some(t) = self.source_table(yf, name, t, line, unsupported)
+                    if let Some(t) = self.source_table(yf, &name, t, line, unsupported)
                         && !tables.iter().any(|x: &SourceTableDef| x.name == t.name)
                     {
                         tables.push(t);
                     }
                 }
             }
-            Some(_) => {
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-source",
                     file.clone(),
@@ -1889,12 +1904,13 @@ impl Loader {
         &mut self,
         yf: &YamlFile,
         source: &str,
-        item: &Value,
+        item: de::Located<Loose<config::sources::Table>>,
         source_line: Option<usize>,
         unsupported: &mut BTreeSet<String>,
     ) -> Option<SourceTableDef> {
         let file = Some(yf.display.clone());
-        let Some(m) = item.as_mapping() else {
+        let item_line = item.line();
+        let Loose::Ok(m) = item.value else {
             self.diags.error(
                 "invalid-source",
                 file,
@@ -1903,7 +1919,13 @@ impl Loader {
             );
             return None;
         };
-        let Some(name) = m.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()) else {
+        let Some(name) = m
+            .name
+            .as_ref()
+            .and_then(Loose::ok)
+            .filter(|n| !n.is_empty())
+            .cloned()
+        else {
             self.diags.error(
                 "invalid-source",
                 file,
@@ -1912,47 +1934,44 @@ impl Loader {
             );
             return None;
         };
-        let line = yf.line_containing(&format!("name: {name}")).or(source_line);
+        let line = item_line.or(source_line);
         let ctx = format!("source `{source}`, table `{name}`");
         let mut ok = self.source_keys(
-            yf,
-            m,
+            &yf.display,
+            &m.unknown,
+            &m.dbt_keys(),
             &ctx,
-            line,
             SOURCE_TABLE_KEYS,
-            DBT_SOURCE_TABLE_KEYS,
             "table",
             unsupported,
         );
-        let mut text = |s: &mut Self, k: &str| -> Option<String> {
-            match m.get(k) {
-                None | Some(Value::Null) => None,
-                Some(v) => match crate::yaml::scalar_str(v) {
-                    Some(t) if !v.is_mapping() && !v.is_sequence() => Some(t),
-                    _ => {
-                        s.diags.error(
-                            "invalid-source",
-                            file.clone(),
-                            line,
-                            format!("{ctx}: `{k}` must be a string"),
-                        );
-                        ok = false;
-                        None
-                    }
-                },
+        let mut text = |s: &mut Self, k: &str, v: &Option<Loose<de::Text>>| -> Option<String> {
+            match v {
+                None => None,
+                Some(Loose::Ok(t)) => Some(t.0.clone()),
+                Some(Loose::Bad(_)) => {
+                    s.diags.error(
+                        "invalid-source",
+                        file.clone(),
+                        line,
+                        format!("{ctx}: `{k}` must be a string"),
+                    );
+                    ok = false;
+                    None
+                }
             }
         };
-        let identifier = text(self, "identifier");
-        let description = text(self, "description");
-        let quoting = self.quoting(yf, m, &ctx, line);
-        let tags = self.source_tags(yf, m, &ctx, line);
-        let meta = self.source_meta(yf, m, &ctx, line);
+        let identifier = text(self, "identifier", &m.identifier);
+        let description = text(self, "description", &m.description);
+        let quoting = self.quoting(&yf.display, m.quoting, &ctx, line);
+        let tags = self.source_tags(&yf.display, m.tags, &ctx, line);
+        let meta = self.source_meta(&yf.display, m.meta, &ctx, line);
         let mut columns: Vec<SourceColumn> = Vec::new();
-        match m.get("columns") {
-            None | Some(Value::Null) => {}
-            Some(Value::Sequence(cs)) => {
+        match m.columns {
+            None | Some(Loose::Ok(None)) => {}
+            Some(Loose::Ok(Some(cs))) => {
                 for c in cs {
-                    let Some(cm) = c.as_mapping() else {
+                    let Loose::Ok(cm) = c else {
                         self.diags.error(
                             "invalid-source",
                             file.clone(),
@@ -1962,7 +1981,13 @@ impl Loader {
                         ok = false;
                         continue;
                     };
-                    let Some(cname) = cm.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()) else {
+                    let Some(cname) = cm
+                        .name
+                        .as_ref()
+                        .and_then(Loose::ok)
+                        .filter(|n| !n.is_empty())
+                        .cloned()
+                    else {
                         self.diags.error(
                             "invalid-source",
                             file.clone(),
@@ -1974,16 +1999,15 @@ impl Loader {
                     };
                     let cctx = format!("{ctx}, column `{cname}`");
                     ok &= self.source_keys(
-                        yf,
-                        cm,
+                        &yf.display,
+                        &cm.unknown,
+                        &cm.dbt_keys(),
                         &cctx,
-                        line,
                         SOURCE_COLUMN_KEYS,
-                        DBT_SOURCE_COLUMN_KEYS,
                         "column",
                         unsupported,
                     );
-                    if columns.iter().any(|c| c.name.eq_ignore_ascii_case(cname)) {
+                    if columns.iter().any(|c| c.name.eq_ignore_ascii_case(&cname)) {
                         self.diags.error(
                             "duplicate-source-column",
                             file.clone(),
@@ -1993,15 +2017,15 @@ impl Loader {
                         ok = false;
                         continue;
                     }
-                    let s = |k: &str| cm.get(k).and_then(crate::yaml::scalar_str);
+                    let s = |v: &Option<Loose<de::Text>>| v.as_ref().and_then(Loose::ok).map(|t| t.0.clone());
                     columns.push(SourceColumn {
-                        name: cname.to_string(),
-                        description: s("description"),
-                        data_type: s("data_type"),
+                        name: cname,
+                        description: s(&cm.description),
+                        data_type: s(&cm.data_type),
                     });
                 }
             }
-            Some(_) => {
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-source",
                     file.clone(),
@@ -2012,7 +2036,7 @@ impl Loader {
             }
         }
         ok.then(|| SourceTableDef {
-            name: name.to_string(),
+            name,
             identifier,
             description,
             quoting,
@@ -2022,107 +2046,125 @@ impl Loader {
         })
     }
 
-    /// Every key of one source, table or column map: DRE's own pass, dbt's are collected into
+    /// The keys of one source, table or column map that aren't DRE's: dbt's are collected into
     /// `unsupported`, anything else is an error. Returns false on an error.
     #[allow(clippy::too_many_arguments)]
     fn source_keys(
         &mut self,
-        yf: &YamlFile,
-        m: &Mapping,
-        ctx: &str,
-        line: Option<usize>,
-        known: &[&str],
+        file: &Path,
+        unknown: &de::UnknownKeys,
         dbt: &[&str],
+        ctx: &str,
+        known: &[&str],
         level: &str,
         unsupported: &mut BTreeSet<String>,
     ) -> bool {
-        let mut ok = true;
-        for k in m.keys().filter_map(Value::as_str) {
-            if known.contains(&k) {
-                continue;
-            }
-            if dbt.contains(&k) {
-                unsupported.insert(format!("{level} `{k}`"));
-                continue;
-            }
+        for k in dbt {
+            unsupported.insert(format!("{level} `{k}`"));
+        }
+        for k in &unknown.0 {
             self.diags.error(
                 "unknown-key",
-                Some(yf.display.clone()),
-                yf.line_of(k, line).or(line),
-                format!("{ctx}: unknown key `{k}`; a {level} takes {}", known.join(", ")),
+                Some(file.to_path_buf()),
+                Some(k.line),
+                format!(
+                    "{ctx}: unknown key `{}`; a {level} takes {}",
+                    k.name,
+                    known.join(", ")
+                ),
             );
-            ok = false;
         }
-        ok
+        unknown.0.is_empty()
     }
 
-    fn quoting(&mut self, yf: &YamlFile, m: &Mapping, ctx: &str, line: Option<usize>) -> QuotingDef {
+    fn quoting(
+        &mut self,
+        file: &Path,
+        v: Option<Loose<config::sources::Quoting>>,
+        ctx: &str,
+        line: Option<usize>,
+    ) -> QuotingDef {
         let mut q = QuotingDef::default();
-        let Some(v) = m.get("quoting") else { return q };
+        let Some(v) = v else { return q };
         let bad = |s: &mut Self, msg: String| {
             s.diags.error(
                 "invalid-source",
-                Some(yf.display.clone()),
+                Some(file.to_path_buf()),
                 line,
                 format!("{ctx}: {msg}"),
             )
         };
-        let Some(qm) = v.as_mapping() else {
+        let Loose::Ok(qm) = v else {
             bad(
                 self,
                 "`quoting` must be a map of `database`, `schema` and `identifier` to true or false".into(),
             );
             return q;
         };
-        for (k, v) in qm {
-            let k = k.as_str().unwrap_or_default();
-            let Some(b) = v.as_bool() else {
-                bad(self, format!("`quoting.{k}` must be true or false"));
-                continue;
-            };
-            match k {
-                "database" => q.database = Some(b),
-                "schema" => q.schema = Some(b),
-                "identifier" => q.identifier = Some(b),
-                _ => bad(
+        for (k, v, slot) in [
+            ("database", qm.database, &mut q.database),
+            ("schema", qm.schema, &mut q.schema),
+            ("identifier", qm.identifier, &mut q.identifier),
+        ] {
+            match v {
+                None => {}
+                Some(Loose::Ok(b)) => *slot = Some(b),
+                Some(Loose::Bad(_)) => bad(self, format!("`quoting.{k}` must be true or false")),
+            }
+        }
+        for (k, v) in qm.unknown.0 {
+            if v.is_boolean() {
+                bad(
                     self,
-                    format!("unknown `quoting` key `{k}`; use `database`, `schema` or `identifier`"),
-                ),
+                    format!(
+                        "unknown `quoting` key `{}`; use `database`, `schema` or `identifier`",
+                        k.value
+                    ),
+                );
+            } else {
+                bad(self, format!("`quoting.{}` must be true or false", k.value));
             }
         }
         q
     }
 
-    fn source_tags(&mut self, yf: &YamlFile, m: &Mapping, ctx: &str, line: Option<usize>) -> Vec<String> {
-        match m.get("tags") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::String(t)) => vec![t.clone()],
-            Some(v) => string_list(v).unwrap_or_else(|| {
+    fn source_tags(
+        &mut self,
+        file: &Path,
+        v: Option<Loose<config::sources::Tags>>,
+        ctx: &str,
+        line: Option<usize>,
+    ) -> Vec<String> {
+        match v {
+            None => Vec::new(),
+            Some(Loose::Ok(config::sources::Tags(de::OneOf::A(t)))) => vec![t],
+            Some(Loose::Ok(config::sources::Tags(de::OneOf::B(l)))) => l,
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-source",
-                    Some(yf.display.clone()),
+                    Some(file.to_path_buf()),
                     line,
                     format!("{ctx}: `tags` must be a list of strings"),
                 );
                 Vec::new()
-            }),
+            }
         }
     }
 
     fn source_meta(
         &mut self,
-        yf: &YamlFile,
-        m: &Mapping,
+        file: &Path,
+        v: Option<Loose<config::sources::Meta>>,
         ctx: &str,
         line: Option<usize>,
     ) -> JsonMap<String, Json> {
-        match m.get("meta") {
-            None | Some(Value::Null) => JsonMap::new(),
-            Some(Value::Mapping(mm)) => yaml_map_to_json(mm),
-            Some(_) => {
+        match v {
+            None => JsonMap::new(),
+            Some(Loose::Ok(m)) => m.0,
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     "invalid-source",
-                    Some(yf.display.clone()),
+                    Some(file.to_path_buf()),
                     line,
                     format!("{ctx}: `meta` must be a map"),
                 );
@@ -4653,17 +4695,12 @@ impl Loader {
     /// A `plugins:` entry in its map form: `{name: foo, github: acme/dre-foo, version: "^1"}`.
     fn plugin_entry(
         &mut self,
-        m: &Mapping,
-        yf: &YamlFile,
+        m: &config::dependencies::PluginEntry,
+        file: &Path,
         line: Option<usize>,
     ) -> Option<(String, Option<Value>, PluginSource)> {
-        let file = Some(yf.display.clone());
-        let name = m
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let line = yf.line_of(&name, line);
+        let file = Some(file.to_path_buf());
+        let name = m.name.ok().cloned().unwrap_or_default();
         let err = |s: &mut Self, msg: String| {
             s.diags.error(
                 "invalid-plugin-declaration",
@@ -4676,21 +4713,24 @@ impl Loader {
             err(self, "`name` must be a non-empty string".into());
             return None;
         }
-        for k in m.keys().filter_map(Value::as_str) {
-            if !PLUGIN_ENTRY_KEYS.contains(&k) {
-                err(
-                    self,
-                    format!(
-                        "unknown key `{k}`; use `name`, `version` and one of `github`, `local`, `registry`"
-                    ),
-                );
-                return None;
-            }
+        if let Some(k) = m.unknown.0.first() {
+            err(
+                self,
+                format!(
+                    "unknown key `{}`; use `name`, `version` and one of `github`, `local`, `registry`",
+                    k.name
+                ),
+            );
+            return None;
         }
-        let given: Vec<(&str, &str)> = ["github", "local", "registry"]
-            .into_iter()
-            .filter_map(|k| m.get(k).map(|v| (k, v.as_str().unwrap_or(""))))
-            .collect();
+        let given: Vec<(&str, &str)> = [
+            ("github", &m.github),
+            ("local", &m.local),
+            ("registry", &m.registry),
+        ]
+        .into_iter()
+        .filter_map(|(k, v)| v.as_ref().map(|v| (k, v.as_str().unwrap_or(""))))
+        .collect();
         let source = match given.as_slice() {
             [] => PluginSource::Default,
             [(k, "")] => {
@@ -4706,7 +4746,7 @@ impl Loader {
                 PluginSource::Github(r.to_string())
             }
             [("local", p)] => {
-                if m.get("version").is_some() {
+                if m.version.is_some() {
                     err(
                         self,
                         "a `local` package has no `version`: it's used as it is".into(),
@@ -4721,7 +4761,7 @@ impl Loader {
                 return None;
             }
         };
-        Some((name, m.get("version").cloned(), source))
+        Some((name, m.version.as_ref().map(json_to_yaml_value), source))
     }
 
     /// The `plugins:` declarations, merged across files; and every plugin the project uses, for
@@ -4734,43 +4774,52 @@ impl Loader {
             source: PluginSource,
         }
         let mut by_package: BTreeMap<String, Vec<Decl>> = BTreeMap::new();
-        for (yf, m) in decls {
-            for (block, v) in m {
-                if block.as_str() != Some(PLUGINS_KEY) {
+        for (yf, _) in decls {
+            {
+                let Ok(config::dependencies::PluginsKey { plugins: Some(v) }) = de::from_node(&yf.node)
+                else {
                     continue;
-                }
-                let line = yf.line_of(PLUGINS_KEY, None);
+                };
+                let line = v.line();
                 let file = Some(yf.display.clone());
-                let entries: Vec<(String, Option<Value>, PluginSource)> = match v {
-                    Value::Sequence(items) => items
-                        .iter()
-                        .filter_map(|i| match i {
-                            Value::String(s) => Some((s.clone(), None, PluginSource::Default)),
-                            Value::Mapping(m) if m.get("name").is_some() => self.plugin_entry(m, yf, line),
-                            Value::Mapping(m) if m.len() == 1 => {
-                                let (k, v) = m.iter().next().unwrap();
-                                k.as_str()
-                                    .map(|k| (k.to_string(), Some(v.clone()), PluginSource::Default))
-                            }
-                            _ => {
-                                self.diags.error(
-                                    "invalid-plugin-declaration",
-                                    file.clone(),
-                                    line,
-                                    "each `plugins` entry is a package name, `name: \"<version>\"`, or a map with `name:` and one of `github:`, `local:`, `registry:`",
-                                );
-                                None
+                let entries: Vec<(String, Option<Value>, PluginSource, Option<usize>)> = match v.value {
+                    Loose::Ok(de::OneOf::A(items)) => items
+                        .into_iter()
+                        .filter_map(|i| {
+                            let iline = i.line();
+                            match i.value {
+                                Loose::Ok(de::OneOf::A(name)) => Some((name.0, None, PluginSource::Default, iline)),
+                                Loose::Ok(de::OneOf::B(de::OneOf::B(entry))) => self
+                                    .plugin_entry(&entry, &yf.display, iline)
+                                    .map(|(n, c, s)| (n, c, s, iline)),
+                                Loose::Ok(de::OneOf::B(de::OneOf::A(pin))) => Some((
+                                    pin.name.value,
+                                    Some(json_to_yaml_value(&pin.version)),
+                                    PluginSource::Default,
+                                    iline,
+                                )),
+                                Loose::Bad(_) => {
+                                    self.diags.error(
+                                        "invalid-plugin-declaration",
+                                        file.clone(),
+                                        iline,
+                                        "each `plugins` entry is a package name, `name: \"<version>\"`, or a map with `name:` and one of `github:`, `local:`, `registry:`",
+                                    );
+                                    None
+                                }
                             }
                         })
                         .collect(),
-                    Value::Mapping(m) => m
-                        .iter()
-                        .filter_map(|(k, v)| {
-                            k.as_str().map(|k| (k.to_string(), Some(v.clone()), PluginSource::Default))
+                    Loose::Ok(de::OneOf::B(m)) => m
+                        .0
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let kline = k.line();
+                            (k.value, Some(json_to_yaml_value(&v)), PluginSource::Default, kline)
                         })
                         .collect(),
-                    Value::Null => Vec::new(),
-                    _ => {
+                    Loose::Bad(f) if f.kind == "nothing" => Vec::new(),
+                    Loose::Bad(_) => {
                         self.diags.error(
                             "invalid-plugin-declaration",
                             file.clone(),
@@ -4780,12 +4829,12 @@ impl Loader {
                         continue;
                     }
                 };
-                for (name, c, source) in entries {
+                for (name, c, source, eline) in entries {
                     if !dre_protocol::valid_name(&name) {
                         self.diags.error(
                             "invalid-plugin-declaration",
                             file.clone(),
-                            yf.line_of(&name, line),
+                            eline,
                             format!(
                                 "plugin package `{name}`: a package name is lowercase letters, digits and `_`"
                             ),
@@ -4806,7 +4855,7 @@ impl Loader {
                         Err(e) => self.diags.error(
                             "invalid-version-constraint",
                             file.clone(),
-                            yf.line_of(&name, line),
+                            eline,
                             format!("plugin package `{name}`: invalid version constraint `{raw}`: {e}"),
                         ),
                     }

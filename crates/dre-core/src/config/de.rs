@@ -232,6 +232,50 @@ impl<T: JsonSchema> JsonSchema for Maybe<T> {
     }
 }
 
+/// A scalar read as text: a string, or a number or boolean as written (`schema: 2024`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Text(pub String);
+
+impl<'de> Deserialize<'de> for Text {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl Visitor<'_> for V {
+            type Value = Text;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Text, E> {
+                Ok(Text(v.to_string()))
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<Text, E> {
+                Ok(Text(v.to_string()))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<Text, E> {
+                Ok(Text(v.to_string()))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<Text, E> {
+                Ok(Text(v.to_string()))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<Text, E> {
+                Ok(Text(v.to_string()))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+impl JsonSchema for Text {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "String".into()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(g)
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+}
+
 /// An `A`, else a `B`, read from the same value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OneOf<A, B> {
@@ -266,7 +310,17 @@ impl<A: JsonSchema, B: JsonSchema> JsonSchema for OneOf<A, B> {
         format!("OneOf_{}_{}", A::schema_name(), B::schema_name()).into()
     }
     fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"oneOf": [g.subschema_for::<A>(), g.subschema_for::<B>()]})
+        // `OneOf<A, OneOf<B, C>>` is one list of three alternatives.
+        let mut alternatives = Vec::new();
+        for s in [g.subschema_for::<A>(), g.subschema_for::<B>()] {
+            match s.as_object() {
+                Some(o) if o.len() == 1 && o.contains_key("oneOf") => {
+                    alternatives.extend(o["oneOf"].as_array().into_iter().flatten().cloned());
+                }
+                _ => alternatives.push(s.to_value()),
+            }
+        }
+        schemars::json_schema!({"oneOf": alternatives})
     }
     fn inline_schema() -> bool {
         true

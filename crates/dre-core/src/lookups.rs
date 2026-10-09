@@ -27,8 +27,9 @@ use arrow::record_batch::RecordBatch;
 use chrono::NaiveDate;
 use regex::Regex;
 use serde_json::Value as Json;
-use serde_yaml_ng::Value;
 
+use crate::config::de::{self, Loose};
+use crate::config::lookup::{ColumnType, LoadName, LookupFile};
 use crate::diag::Diagnostics;
 use crate::yaml::YamlFile;
 
@@ -47,19 +48,6 @@ pub enum ColType {
     Number,
     Boolean,
     Date,
-}
-
-impl ColType {
-    fn parse(s: &str) -> Option<ColType> {
-        Some(match s {
-            "string" => ColType::String,
-            "integer" => ColType::Integer,
-            "number" => ColType::Number,
-            "boolean" => ColType::Boolean,
-            "date" => ColType::Date,
-            _ => return None,
-        })
-    }
 }
 
 /// How `ref()` hands a lookup to SQL.
@@ -174,8 +162,8 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
             // A bare list of rows.
             let yf_rows = std::fs::read_to_string(root.join(&l.file))
                 .ok()
-                .and_then(|t| serde_yaml_ng::from_str::<Value>(&t).ok())
-                .and_then(|v| serde_json::to_value(v).ok());
+                .and_then(|t| crate::config::node::parse(&t).ok())
+                .map(|n| n.to_json());
             l.inline_rows = yf_rows;
         }
         out.insert(name, l);
@@ -185,10 +173,10 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
 
 fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagnostics) -> bool {
     let file = Some(yf.display.clone());
-    let m = match &yf.value {
-        Value::Mapping(m) => m,
+    let cfg = match de::from_node::<Loose<LookupFile>>(&yf.node) {
+        Ok(Loose::Ok(c)) => c,
         // A `.yml` lookup may be just a list of rows.
-        Value::Sequence(_) if is_data => return true,
+        Ok(Loose::Bad(f)) if is_data && f.kind == "a list" => return true,
         _ => {
             diags.error(
                 "invalid-lookup",
@@ -204,66 +192,81 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
         }
     };
     let mut ok = true;
-    for k in m.keys() {
-        let k = k.as_str().unwrap_or_default();
-        if !CONFIG_KEYS.contains(&k) || (k == "rows" && !is_data) || (k == "sheet" && is_data) {
-            diags.error(
-                "invalid-lookup",
-                file.clone(),
-                yf.line_of(k, None),
-                format!(
-                    "unknown key `{k}` in lookup config (expected: columns, sheet, load{})",
-                    if is_data { ", rows" } else { "" }
-                ),
-            );
-            ok = false;
-        }
+    let mut unknown: Vec<(String, Option<usize>)> = cfg
+        .unknown
+        .0
+        .iter()
+        .map(|k| (k.name.clone(), Some(k.line)))
+        .collect();
+    if !is_data && let Some(r) = &cfg.rows {
+        unknown.push(("rows".into(), r.line()));
     }
-    if let Some(cols) = m.get("columns") {
-        match cols.as_mapping() {
-            Some(cols) => {
-                for (k, v) in cols {
-                    let (Some(c), Some(t)) = (k.as_str(), v.as_str()) else {
-                        continue;
-                    };
-                    match ColType::parse(t) {
-                        Some(t) => {
-                            l.types.insert(c.to_string(), t);
+    if is_data && let Some(s) = &cfg.sheet {
+        unknown.push(("sheet".into(), s.line()));
+    }
+    unknown.sort_by_key(|(_, line)| *line);
+    for (k, line) in unknown {
+        diags.error(
+            "invalid-lookup",
+            file.clone(),
+            line,
+            format!(
+                "unknown key `{k}` in lookup config (expected: columns, sheet, load{})",
+                if is_data { ", rows" } else { "" }
+            ),
+        );
+        ok = false;
+    }
+    if let Some(cols) = &cfg.columns {
+        match &cols.value {
+            Loose::Ok(cols) => {
+                for (c, t) in cols.iter() {
+                    match t {
+                        Loose::Ok(t) => {
+                            l.types.insert(c.value.clone(), (*t).into());
                         }
-                        None => {
+                        Loose::Bad(f) if f.kind == "a string" => {
+                            let t = yf
+                                .node
+                                .get("columns")
+                                .and_then(|n| n.get(&c.value))
+                                .and_then(|n| n.as_str())
+                                .unwrap_or_default();
                             diags.error(
                                 "invalid-lookup",
                                 file.clone(),
-                                yf.line_of(c, None),
-                                format!("column `{c}` has type `{t}`; use string, integer, number, boolean or date"),
+                                c.line(),
+                                format!("column `{}` has type `{t}`; use string, integer, number, boolean or date", c.value),
                             );
                             ok = false;
                         }
+                        // Not a type name at all: read as text.
+                        Loose::Bad(_) => {}
                     }
                 }
             }
-            None => {
+            Loose::Bad(_) => {
                 diags.error(
                     "invalid-lookup",
                     file.clone(),
-                    yf.line_of("columns", None),
+                    cols.line(),
                     "`columns` must map column names to types",
                 );
                 ok = false;
             }
         }
     }
-    l.sheet = m.get("sheet").and_then(Value::as_str).map(str::to_string);
-    if let Some(v) = m.get("load") {
-        l.load = match v.as_str() {
-            Some("auto") => Load::Auto,
-            Some("inline") => Load::Inline,
-            Some("temp_table") => Load::TempTable,
-            _ => {
+    l.sheet = cfg.sheet.as_ref().and_then(|s| s.value.ok()).cloned();
+    if let Some(v) = &cfg.load {
+        l.load = match v.value {
+            Loose::Ok(LoadName::Auto) => Load::Auto,
+            Loose::Ok(LoadName::Inline) => Load::Inline,
+            Loose::Ok(LoadName::TempTable) => Load::TempTable,
+            Loose::Bad(_) => {
                 diags.error(
                     "invalid-lookup",
                     file.clone(),
-                    yf.line_of("load", None),
+                    v.line(),
                     "`load` must be auto, inline or temp_table",
                 );
                 ok = false;
@@ -272,8 +275,8 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
         };
     }
     if is_data {
-        match m.get("rows") {
-            Some(rows) => l.inline_rows = serde_json::to_value(rows).ok(),
+        match cfg.rows {
+            Some(rows) => l.inline_rows = Some(rows.value),
             None => {
                 diags.error(
                     "invalid-lookup",
@@ -286,6 +289,18 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
         }
     }
     ok
+}
+
+impl From<ColumnType> for ColType {
+    fn from(t: ColumnType) -> ColType {
+        match t {
+            ColumnType::String => ColType::String,
+            ColumnType::Integer => ColType::Integer,
+            ColumnType::Number => ColType::Number,
+            ColumnType::Boolean => ColType::Boolean,
+            ColumnType::Date => ColType::Date,
+        }
+    }
 }
 
 /// Raw rows: column names, then text cells (`None` for empty), with each row's label for errors.
