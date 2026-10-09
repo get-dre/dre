@@ -8,6 +8,7 @@ pub mod de;
 pub mod node;
 pub mod project;
 pub mod report;
+pub mod schedule;
 
 /// The JSON Schema of a config file type, as committed in `docs/schemas/<name>.schema.json`.
 ///
@@ -127,6 +128,9 @@ pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
     vec![
         ("project", schema::<project::ProjectFile>(version)),
         ("report", schema::<report::ReportFile>(version)),
+        ("sets", schema::<schedule::SetsFile>(version)),
+        ("schedules", schema::<schedule::SchedulesFile>(version)),
+        ("timings", schema::<schedule::TimingsFile>(version)),
         ("profiles", schema::<crate::profiles::ProfilesFile>(version)),
     ]
 }

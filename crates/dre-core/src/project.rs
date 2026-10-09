@@ -1275,12 +1275,8 @@ impl Loader {
         }
     }
 
-    /// A `timezone:` value: an IANA name, else an error at `line`.
-    fn timezone_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
-        self.timezone_str(v.as_str(), file, line, what)
-    }
-
-    /// A `timezone:` value that is `None` when it isn't a string.
+    /// A `timezone:` value: an IANA name, else an error at `line` (`v` is `None` when it isn't a
+    /// string).
     fn timezone_str(
         &mut self,
         v: Option<&str>,
@@ -1300,12 +1296,8 @@ impl Loader {
         None
     }
 
-    /// A `locale:` value: a tag the number filters know (`de-DE`), else an error at `line`.
-    fn locale_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
-        self.locale_str(v.as_str(), file, line, what)
-    }
-
-    /// A `locale:` value that is `None` when it isn't a string.
+    /// A `locale:` value: a tag the number filters know (`de-DE`), else an error at `line` (`v`
+    /// is `None` when it isn't a string).
     fn locale_str(
         &mut self,
         v: Option<&str>,
@@ -2223,11 +2215,13 @@ impl Loader {
         let mut out = BTreeMap::new();
         let mut seen: BTreeMap<String, PathBuf> = BTreeMap::new();
         for yf in files {
-            let Some(m) = yf.value.as_mapping() else { continue };
-            for (k, v) in m {
-                let Some(name) = k.as_str() else { continue };
-                let line = yf.line_of(name, None);
-                if let Some(prev) = seen.get(name) {
+            let Ok(Loose::Ok(sets)) = de::from_node::<Loose<config::schedule::SetsFile>>(&yf.node) else {
+                continue;
+            };
+            for (k, v) in sets.0.0 {
+                let line = k.line();
+                let name = k.value;
+                if let Some(prev) = seen.get(&name) {
                     self.diags.error(
                         "duplicate-set",
                         Some(yf.display.clone()),
@@ -2236,9 +2230,18 @@ impl Loader {
                     );
                     continue;
                 }
-                seen.insert(name.to_string(), yf.display.clone());
-                let profile = v.get("profile").and_then(Value::as_str).map(str::to_string);
-                if v.get("profile").is_some() && profile.is_none() {
+                seen.insert(name.clone(), yf.display.clone());
+                // Anything but a map is a Set with the report's defaults.
+                let v = match v {
+                    Loose::Ok(Some(v)) => Some(v),
+                    _ => None,
+                };
+                let profile = v
+                    .as_ref()
+                    .and_then(|v| v.profile.as_ref())
+                    .and_then(Loose::ok)
+                    .cloned();
+                if v.as_ref().is_some_and(|v| v.profile.is_some()) && profile.is_none() {
                     self.diags.error(
                         "invalid-field",
                         Some(yf.display.clone()),
@@ -2246,14 +2249,19 @@ impl Loader {
                         format!("Set `{name}`: `profile` must be a string"),
                     );
                 }
-                let locale = match v.get("locale") {
-                    None | Some(Value::Null) => None,
-                    Some(l) => self.locale_value(l, &yf.display, line, &format!("Set `{name}`: `locale`")),
+                let locale = match v.as_ref().and_then(|v| v.locale.as_ref()) {
+                    None => None,
+                    Some(l) => self.locale_str(
+                        l.ok().map(String::as_str),
+                        &yf.display,
+                        line,
+                        &format!("Set `{name}`: `locale`"),
+                    ),
                 };
-                let vars = match v.get("vars") {
-                    Some(Value::Mapping(m)) => yaml_map_to_json(m),
-                    None | Some(Value::Null) => JsonMap::new(),
-                    Some(_) => {
+                let vars = match v.as_ref().and_then(|v| v.vars.as_ref()) {
+                    Some(Loose::Ok(m)) => m.clone(),
+                    None => JsonMap::new(),
+                    Some(Loose::Bad(_)) => {
                         self.diags.error(
                             "invalid-field",
                             Some(yf.display.clone()),
@@ -2264,7 +2272,7 @@ impl Loader {
                     }
                 };
                 out.insert(
-                    name.to_string(),
+                    name,
                     SetDef {
                         profile,
                         vars,
@@ -4057,13 +4065,16 @@ impl Loader {
         let mut broken = BTreeSet::new();
         let mut seen: BTreeMap<String, String> = BTreeMap::new();
         for yf in files {
-            let Some(m) = yf.value.as_mapping() else { continue };
-            for (k, v) in m {
+            let Ok(Loose::Ok(timings)) = de::from_node::<Loose<config::schedule::TimingsFile>>(&yf.node)
+            else {
+                continue;
+            };
+            for (k, v) in timings.0.0 {
                 let file = Some(yf.display.clone());
-                let Some(name) = k.as_str() else { continue };
-                let line = yf.line_of(name, None);
+                let line = k.line();
+                let name = k.value;
                 let mut ok = true;
-                if !is_identifier(name) {
+                if !is_identifier(&name) {
                     self.diags.error(
                         "invalid-timing",
                         file.clone(),
@@ -4074,7 +4085,7 @@ impl Loader {
                     );
                     ok = false;
                 }
-                if let Some(prev) = seen.get(name) {
+                if let Some(prev) = seen.get(&name) {
                     self.diags.error(
                         "duplicate-timing-name",
                         file.clone(),
@@ -4084,35 +4095,34 @@ impl Loader {
                     continue;
                 }
                 seen.insert(
-                    name.to_string(),
+                    name.clone(),
                     format!("{}:{}", yf.display.display(), line.unwrap_or(0)),
                 );
-                let Some(t) = v.as_mapping() else {
+                let Loose::Ok(t) = v else {
                     self.diags.error(
                         "invalid-timing",
                         file.clone(),
                         line,
                         format!("timing `{name}` must be a map, e.g. `{{cron: \"0 6 1 * *\", timezone: Australia/Sydney}}`"),
                     );
-                    broken.insert(name.to_string());
+                    broken.insert(name);
                     continue;
                 };
-                let mut block = Mapping::new();
-                for (k, v) in t {
-                    let Some(k) = k.as_str() else { continue };
-                    if !schedule::TIMING_KEYS.contains(&k) {
-                        self.diags.error(
-                            "invalid-timing",
-                            file.clone(),
-                            line,
-                            format!("timing `{name}`: unknown key `{k}`"),
-                        );
-                        ok = false;
-                    } else if k != "timezone" {
-                        block.insert(Value::String(k.to_string()), v.clone());
-                    }
+                for k in &t.unknown.0 {
+                    self.diags.error(
+                        "invalid-timing",
+                        file.clone(),
+                        line,
+                        format!("timing `{name}`: unknown key `{}`", k.name),
+                    );
+                    ok = false;
                 }
-                let shape = schedule::validate_block(&block, "a timing", "`cron`, `every` or `rrule`");
+                let block = t.block();
+                let shape = schedule::validate_block(
+                    &json_to_yaml(block.clone()),
+                    "a timing",
+                    "`cron`, `every` or `rrule`",
+                );
                 for e in &shape {
                     self.diags.error(
                         "invalid-timing",
@@ -4122,11 +4132,11 @@ impl Loader {
                     );
                     ok = false;
                 }
-                let timezone = match t.get("timezone") {
+                let timezone = match &t.timezone {
                     None => None,
                     Some(v) => {
-                        let tz = self.timezone_value(
-                            v,
+                        let tz = self.timezone_str(
+                            v.ok().map(String::as_str),
                             &yf.display,
                             line,
                             &format!("timing `{name}`: `timezone`"),
@@ -4135,7 +4145,6 @@ impl Loader {
                         tz
                     }
                 };
-                let block = yaml_map_to_json(&block);
                 if shape.is_empty() {
                     for (code, msg) in schedule::strictness(&block) {
                         self.diags
@@ -4152,7 +4161,7 @@ impl Loader {
                 }
                 if ok {
                     out.insert(
-                        name.to_string(),
+                        name,
                         Timing {
                             schedule: block,
                             timezone,
@@ -4160,7 +4169,7 @@ impl Loader {
                         },
                     );
                 } else {
-                    broken.insert(name.to_string());
+                    broken.insert(name);
                 }
             }
         }
@@ -4177,19 +4186,21 @@ impl Loader {
         let mut used_timings = BTreeSet::new();
         let mut seen: BTreeMap<String, String> = BTreeMap::new();
         for yf in files {
-            let Some(items) = yf.value.as_sequence() else {
+            let Ok(Loose::Ok(items)) = de::from_node::<Loose<config::schedule::SchedulesFile>>(&yf.node)
+            else {
                 continue;
             };
-            for (i, item) in items.iter().enumerate() {
-                let m = item.as_mapping().unwrap();
-                let line = nth_item_line(&yf.text, i);
+            for item in &items.0 {
+                // Schedules files are recognised by every item being a map with a name or target.
+                let Loose::Ok(m) = &item.value else { continue };
+                let line = item.line();
                 let file = Some(yf.display.clone());
-                let s = |k: &str| m.get(k).and_then(Value::as_str).map(str::to_string);
-                let (select, report, set) = (s("select"), s("report"), s("set"));
+                let s = |v: &Option<Loose<String>>| v.as_ref().and_then(Loose::ok).cloned();
+                let (select, report, set) = (s(&m.select), s(&m.report), s(&m.set));
                 let mut ok = true;
-                let name = match s("name") {
-                    Some(n) if is_identifier(&n) => {
-                        if let Some(prev) = seen.get(&n) {
+                let name = match &m.name {
+                    Some(Loose::Ok(n)) if is_identifier(n) => {
+                        if let Some(prev) = seen.get(n) {
                             self.diags.error(
                                 "duplicate-schedule-name",
                                 file.clone(),
@@ -4202,9 +4213,9 @@ impl Loader {
                             n.clone(),
                             format!("{}:{}", yf.display.display(), line.unwrap_or(0)),
                         );
-                        n
+                        n.clone()
                     }
-                    Some(n) => {
+                    Some(Loose::Ok(n)) => {
                         self.diags.error(
                             "invalid-schedule",
                             file.clone(),
@@ -4212,9 +4223,9 @@ impl Loader {
                             format!("schedule name `{n}` must be letters, digits and `_`, not starting with a digit"),
                         );
                         ok = false;
-                        n
+                        n.clone()
                     }
-                    None => {
+                    _ => {
                         self.diags.error(
                             "invalid-schedule",
                             file.clone(),
@@ -4225,10 +4236,10 @@ impl Loader {
                         String::new()
                     }
                 };
-                let vars = match m.get("vars") {
+                let vars = match &m.vars {
                     None => JsonMap::new(),
-                    Some(Value::Mapping(v)) => yaml_map_to_json(v),
-                    Some(_) => {
+                    Some(Loose::Ok(v)) => v.clone(),
+                    Some(Loose::Bad(_)) => {
                         self.diags.error(
                             "invalid-schedule",
                             file.clone(),
@@ -4239,30 +4250,22 @@ impl Loader {
                         JsonMap::new()
                     }
                 };
-                let mut sched = Mapping::new();
-                for (k, v) in m {
-                    let Some(k) = k.as_str() else { continue };
-                    if SCHEDULE_ENTRY_KEYS.contains(&k) {
-                        continue;
-                    }
-                    if !schedule::SCHEDULE_KEYS.contains(&k) {
-                        self.diags.error(
-                            "invalid-schedule",
-                            file.clone(),
-                            line,
-                            format!("unknown schedule key `{k}`"),
-                        );
-                        continue;
-                    }
-                    sched.insert(Value::String(k.to_string()), v.clone());
+                for k in &m.unknown.0 {
+                    self.diags.error(
+                        "invalid-schedule",
+                        file.clone(),
+                        line,
+                        format!("unknown schedule key `{}`", k.name),
+                    );
                 }
-                let timing = match m.get("timing") {
+                let sched = m.block();
+                let timing = match &m.timing {
                     None => None,
-                    Some(Value::String(t)) => {
+                    Some(Loose::Ok(t)) => {
                         used_timings.insert(t.clone());
                         Some(t.clone())
                     }
-                    Some(_) => {
+                    Some(Loose::Bad(_)) => {
                         self.diags.error(
                             "invalid-schedule",
                             file.clone(),
@@ -4278,12 +4281,7 @@ impl Loader {
                 let mut resolved = None;
                 let shape = if let Some(t) = &timing {
                     let mut errs = Vec::new();
-                    let own: Vec<String> = m
-                        .keys()
-                        .filter_map(Value::as_str)
-                        .filter(|k| schedule::TIMING_KEYS.contains(k))
-                        .map(|k| format!("`{k}`"))
-                        .collect();
+                    let own: Vec<String> = m.timing_keys().into_iter().map(|k| format!("`{k}`")).collect();
                     if !own.is_empty() {
                         let keys = match own.split_last() {
                             Some((last, [])) => last.clone(),
@@ -4315,15 +4313,19 @@ impl Loader {
                     }
                     errs
                 } else {
-                    schedule::validate_block(&sched, "a schedule", "`timing`, `cron`, `every` or `rrule`")
+                    schedule::validate_block(
+                        &json_to_yaml(sched.clone()),
+                        "a schedule",
+                        "`timing`, `cron`, `every` or `rrule`",
+                    )
                 };
                 if shape.is_empty() && timing.is_none() {
-                    let block = yaml_map_to_json(&sched);
-                    for (code, msg) in schedule::strictness(&block) {
+                    let block = &sched;
+                    for (code, msg) in schedule::strictness(block) {
                         self.diags
                             .error(code, file.clone(), line, format!("schedule `{name}`: {msg}"));
                     }
-                    if let Some(msg) = schedule::no_time(&block) {
+                    if let Some(msg) = schedule::no_time(block) {
                         self.diags.warning(
                             "schedule-no-time",
                             file.clone(),
@@ -4407,12 +4409,12 @@ impl Loader {
                     );
                     ok = false;
                 }
-                let timezone = match (m.get("timezone"), &timing) {
+                let timezone = match (&m.timezone, &timing) {
                     (None, Some(t)) => project.timings.get(t).and_then(|d| d.timezone.clone()),
                     (None, None) => None,
                     (Some(v), _) => {
-                        let t = self.timezone_value(
-                            v,
+                        let t = self.timezone_str(
+                            v.value.ok().map(String::as_str),
                             &yf.display,
                             line,
                             &format!("schedule `{name}`: `timezone`"),
@@ -4421,10 +4423,10 @@ impl Loader {
                         t
                     }
                 };
-                let enabled = match m.get("enabled") {
+                let enabled = match &m.enabled {
                     None => true,
-                    Some(Value::Bool(b)) => *b,
-                    Some(_) => {
+                    Some(Loose::Ok(b)) => *b,
+                    Some(Loose::Bad(_)) => {
                         self.diags.error(
                             "invalid-schedule",
                             file.clone(),
@@ -4441,7 +4443,7 @@ impl Loader {
                         select,
                         report,
                         set,
-                        schedule: resolved.unwrap_or_else(|| yaml_map_to_json(&sched)),
+                        schedule: resolved.unwrap_or(sched),
                         timing,
                         enabled,
                         vars,
@@ -5486,14 +5488,6 @@ fn entry_name(v: &Value) -> Option<String> {
 fn dedup(v: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     v.retain(|t| seen.insert(t.clone()));
-}
-
-fn nth_item_line(text: &str, n: usize) -> Option<usize> {
-    text.lines()
-        .enumerate()
-        .filter(|(_, l)| l.starts_with("- ") || l.trim() == "-")
-        .nth(n)
-        .map(|(i, _)| i + 1)
 }
 
 /// A JSON value as YAML, for the output merging that still works on YAML.
