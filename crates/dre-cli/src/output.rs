@@ -108,8 +108,7 @@ impl Printer {
 
     /// Also write every event, at debug level, to `<project>/logs/dre.log`.
     pub fn log_to(&self, project: &Path) {
-        let max_lines = std::env::var("DRE_LOG_MAX_LINES")
-            .ok()
+        let max_lines = dre_core::settings::env(dre_core::settings::LOG_MAX_LINES)
             .and_then(|v| v.parse().ok())
             .filter(|n| *n > 0)
             .unwrap_or(LOG_MAX_LINES);

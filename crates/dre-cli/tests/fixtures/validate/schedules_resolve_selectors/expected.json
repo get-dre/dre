@@ -18,6 +18,48 @@ exit: 0
       }
     ]
   },
+  "settings": [
+    {
+      "name": "timezone",
+      "value": null,
+      "source": "default"
+    },
+    {
+      "name": "run_date",
+      "value": null,
+      "source": "default"
+    },
+    {
+      "name": "scheduled_at",
+      "value": null,
+      "source": "default"
+    },
+    {
+      "name": "target",
+      "value": "dev",
+      "source": "default"
+    },
+    {
+      "name": "target_path",
+      "value": "$CASE/project/target",
+      "source": "default"
+    },
+    {
+      "name": "profiles_dir",
+      "value": "$CASE/profiles",
+      "source": "--profiles-dir"
+    },
+    {
+      "name": "plugins_dir",
+      "value": "$PLUGINS",
+      "source": "DRE_PLUGINS_DIR"
+    },
+    {
+      "name": "registry_url",
+      "value": "https://github.com/get-dre/dre/releases/download/registry/packages.json",
+      "source": "default"
+    }
+  ],
   "errors": 0,
   "warnings": 1,
   "diagnostics": [

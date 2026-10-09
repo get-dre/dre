@@ -55,7 +55,7 @@ pub const OLD_CONNECTIONS_SECTION: &str = "sources";
 /// The run's target (environment), and a profile's entry, when nothing chooses one.
 pub const DEFAULT_TARGET: &str = "dev";
 /// The environment variable choosing the run's target, below `--target`.
-pub const TARGET_ENV: &str = "DRE_TARGET";
+pub const TARGET_ENV: &str = crate::settings::TARGET;
 
 /// Which section of profiles.yml a profile lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -124,7 +124,7 @@ impl RunTarget {
                 from: TargetSource::Flag,
             };
         }
-        if let Some(t) = std::env::var(TARGET_ENV).ok().filter(|t| !t.is_empty()) {
+        if let Some(t) = crate::settings::env(TARGET_ENV) {
             return RunTarget {
                 name: t,
                 from: TargetSource::Env,
@@ -214,7 +214,7 @@ pub fn locate(cli: Option<&Path>, project: Option<&Path>) -> (PathBuf, &'static 
     if let Some(p) = cli {
         return (p.to_path_buf(), "--profiles-dir");
     }
-    if let Some(p) = std::env::var_os("DRE_PROFILES_DIR").filter(|p| !p.is_empty()) {
+    if let Some(p) = crate::settings::env(crate::settings::PROFILES_DIR) {
         return (PathBuf::from(p), "DRE_PROFILES_DIR");
     }
     if let Some(p) = project.filter(|p| p.join(PROFILES_FILE).is_file()) {

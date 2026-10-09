@@ -254,6 +254,9 @@ pub struct Project {
     pub sources: BTreeMap<String, SourceDef>,
     #[serde(skip)]
     pub profiles: Profiles,
+    /// Every setting and where its value came from.
+    #[serde(skip)]
+    pub settings: crate::settings::Settings,
 }
 
 impl Project {
@@ -743,6 +746,9 @@ pub struct LoadOptions {
     pub vars: BTreeMap<String, String>,
     /// `--target-path`, above `DRE_TARGET_PATH` and `target_path:`.
     pub target_path: Option<String>,
+    /// The settings the command line resolved (the run's timezone, date and scheduled
+    /// instant); the load adds the project's.
+    pub settings: crate::settings::Settings,
 }
 
 /// Parse and validate the project at `root`. Returns the resolved project when it could be
@@ -880,8 +886,8 @@ impl Loader {
                 self.target = t;
             }
             Err(e) => {
-                let from_file = self.opts.target_path.is_none()
-                    && std::env::var(crate::target::ENV).map_or(true, |v| v.is_empty());
+                let from_file =
+                    self.opts.target_path.is_none() && crate::settings::env(crate::target::ENV).is_none();
                 self.diags.error(
                     "invalid-target-path",
                     from_file.then(|| PathBuf::from(PROJECT_FILE)),
@@ -907,6 +913,7 @@ impl Loader {
             crate::profiles::locate(self.opts.profiles_dir.as_deref(), Some(&self.root));
         project.profiles = Profiles::load(&profiles_dir, found_by, &mut self.diags);
         project.profiles.run = project.run_target();
+        self.record_settings(&mut project);
 
         // Folder config needs the folder list to warn about folders that don't exist.
         let folder_cfg = self.parse_folder_config(&pyaml.display, folders_cfg, &project.folders);
@@ -1249,7 +1256,58 @@ impl Loader {
             parse_errors: BTreeMap::new(),
             sources: BTreeMap::new(),
             profiles: Profiles::default(),
+            settings: self.opts.settings.clone(),
         })
+    }
+
+    /// The settings the load resolved, beside the command line's.
+    fn record_settings(&self, project: &mut Project) {
+        use crate::settings::{self, Source};
+        let s = &mut project.settings;
+        let target = &project.profiles.run;
+        let target_source = match target.from {
+            crate::profiles::TargetSource::Flag => Source::Flag("--target"),
+            crate::profiles::TargetSource::Env => Source::Env(settings::TARGET),
+            crate::profiles::TargetSource::Default => Source::Default,
+        };
+        s.set("target", Some(target.name.clone()), target_source);
+        let path_source = match self.target.source {
+            crate::target::Source::Flag => Source::Flag("--target-path"),
+            crate::target::Source::Env => Source::Env(settings::TARGET_PATH),
+            crate::target::Source::Project => Source::Project(crate::target::KEY),
+            crate::target::Source::Default => Source::Default,
+        };
+        s.set(
+            "target_path",
+            Some(crate::slash(&self.target.dir).display().to_string()),
+            path_source,
+        );
+        let dir_source = match project.profiles.found_by {
+            "--profiles-dir" => Source::Flag("--profiles-dir"),
+            "DRE_PROFILES_DIR" => Source::Env(settings::PROFILES_DIR),
+            "the project directory" => Source::Found("the project directory"),
+            _ => Source::Default,
+        };
+        let dir = project.profiles.path.parent().map(|d| d.display().to_string());
+        s.set("profiles_dir", dir, dir_source);
+        let env_or_default = |var: &'static str| match settings::env(var) {
+            Some(_) => Source::Env(var),
+            None => Source::Default,
+        };
+        s.set(
+            "plugins_dir",
+            Some(
+                crate::slash(&crate::plugins::plugins_dir(Some(&self.root)))
+                    .display()
+                    .to_string(),
+            ),
+            env_or_default(settings::PLUGINS_DIR),
+        );
+        s.set(
+            "registry_url",
+            Some(crate::manager::registry_url()),
+            env_or_default(settings::REGISTRY_URL),
+        );
     }
 
     /// An optional string key of a typed file: its value, else an error.

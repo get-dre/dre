@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use dre_core::project::{self, LoadOptions};
+use dre_core::settings;
 
 #[derive(Parser)]
 #[command(name = "dre", version = dre_core::version(), about = "DRE, the Declarative Reporting Engine: SQL in, formatted files out")]
@@ -212,9 +213,7 @@ struct ProjectArgs {
 impl ProjectArgs {
     /// `--timezone`, else `DRE_TIMEZONE`.
     fn timezone(&self) -> Option<String> {
-        self.timezone
-            .clone()
-            .or_else(|| std::env::var("DRE_TIMEZONE").ok().filter(|t| !t.is_empty()))
+        settings::flag_or_env(self.timezone.as_deref(), "--timezone", settings::TIMEZONE).map(|(v, _)| v)
     }
 
     fn load_options(&self) -> LoadOptions {
@@ -226,6 +225,7 @@ impl ProjectArgs {
             date: run_date(),
             scheduled_at: run_at().ok().flatten(),
             timezone: self.timezone(),
+            settings: settings::run_settings(self.timezone.as_deref()),
         }
     }
 }
@@ -378,6 +378,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
                 "from": p.target_from.to_string(),
                 "profiles": targets.as_ref().map(|t| t.profiles.clone()).unwrap_or_default(),
             })),
+            "settings": project.as_ref().map(|p| &p.settings),
             "errors": diags.error_count(),
             "warnings": diags.warning_count(),
             "diagnostics": diags.sorted(),
@@ -407,6 +408,9 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
             printer.line(output::Tone::Note, "Profiles", &profiles_line(&p.profiles));
             let line = targets.as_ref().map_or_else(|| target_line(p), |t| t.line());
             printer.line(output::Tone::Note, "Target", &line);
+            for s in p.settings.lines() {
+                printer.detail(output::Tone::Note, "Setting", &s);
+            }
         }
         let (e, w) = (diags.error_count(), diags.warning_count());
         let verdict = if ok { "passed" } else { "failed" };
@@ -765,21 +769,19 @@ fn report_diags(diags: &dre_core::Diagnostics, printer: &output::Printer) -> boo
 }
 
 pub(crate) fn run_date() -> Option<chrono::NaiveDate> {
-    std::env::var("DRE_RUN_DATE")
-        .ok()
-        .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+    settings::env(settings::RUN_DATE).and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
 }
 
 /// `DRE_RUN_AT`: the instant a scheduled run was scheduled for (RFC 3339). Checked before any
 /// project command starts, so callers can treat an error as unset.
 pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
-    match std::env::var("DRE_RUN_AT") {
-        Ok(v) if !v.is_empty() => chrono::DateTime::parse_from_rfc3339(&v)
+    match settings::env(settings::RUN_AT) {
+        Some(v) => chrono::DateTime::parse_from_rfc3339(&v)
             .map(|t| Some(t.with_timezone(&chrono::Utc)))
             .map_err(|_| {
                 format!("DRE_RUN_AT: `{v}` isn't an RFC 3339 date-time (e.g. 2026-09-01T06:00:00Z)")
             }),
-        _ => Ok(None),
+        None => Ok(None),
     }
 }
 
@@ -792,6 +794,9 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         return ExitCode::FAILURE;
     };
     printer.log_to(&project.root);
+    for s in project.settings.lines() {
+        printer.detail(output::Tone::Note, "Setting", &s);
+    }
     if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
         return ExitCode::FAILURE;
     }

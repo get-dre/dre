@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::lookups::LOOKUPS_DIR;
 use crate::project::{MACROS_DIR, PROJECT_FILE, REPORTS_DIR, TARGET_DIR};
 
-pub const ENV: &str = "DRE_TARGET_PATH";
+pub const ENV: &str = crate::settings::TARGET_PATH;
 /// The project-file key.
 pub const KEY: &str = "target_path";
 /// Dropped in every target folder DRE creates, so `dre clean` only deletes DRE's own folders.
@@ -58,7 +58,7 @@ impl TargetPath {
 /// project file's `target_path` (`project_value`), else `target/`. Checks that it's local and
 /// clear of the project's sources.
 pub fn resolve(root: &Path, flag: Option<&str>, project_value: Option<&str>) -> Result<TargetPath, String> {
-    let env = std::env::var(ENV).ok();
+    let env = crate::settings::env(ENV);
     let (value, source) = match (flag, env.as_deref(), project_value) {
         (Some(v), _, _) => (v, Source::Flag),
         (None, Some(v), _) if !v.is_empty() => (v, Source::Env),
