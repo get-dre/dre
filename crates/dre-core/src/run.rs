@@ -2298,6 +2298,7 @@ impl<'a> BindingRun<'a> {
             "deliveries": deliveries,
             "schema_drift": self.drift,
             "target_path": self.project.target_dir,
+            "settings": self.project.settings,
             "manifest_checksum": self.opts.manifest_checksum,
         });
         std::fs::write(

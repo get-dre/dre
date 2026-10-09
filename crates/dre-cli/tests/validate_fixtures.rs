@@ -12,7 +12,8 @@
 //! - `expected.txt`  golden human-readable output: exit code, then stdout
 //! - `expected.json` golden `--json` output (optional)
 //!
-//! Absolute paths are replaced by `$CASE` so goldens are machine-independent.
+//! Absolute paths are replaced by `$CASE` (and the stand-in plugins folder by `$PLUGINS`) so
+//! goldens are machine-independent.
 //! Run with `UPDATE_GOLDEN=1` to rewrite goldens, then review the diff by eye.
 
 use std::path::{Path, PathBuf};
@@ -136,6 +137,9 @@ fn run_case(orig: &Path, json: bool) -> String {
     let code = out.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stdout = stdout.replace(&case_str.replace('\\', "/"), "$CASE");
+    // The stand-in plugins folder is a temporary directory (`plugins_dir` in the settings).
+    let plugins = dre_core::slash(&stand_in_plugins()).display().to_string();
+    let stdout = stdout.replace(&plugins, "$PLUGINS");
     // The manifest records the DRE version that wrote it; keep the goldens release-independent.
     let stdout = stdout.replace(
         &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),

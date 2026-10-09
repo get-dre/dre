@@ -26,6 +26,7 @@ pub mod schedule;
 mod schema;
 pub mod secrets;
 pub mod selector;
+pub mod settings;
 pub mod sqlsplit;
 pub mod target;
 pub mod values;

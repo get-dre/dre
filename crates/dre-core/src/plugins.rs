@@ -47,9 +47,7 @@ pub const DEPS_DIR: &str = "dre_deps";
 
 /// `DRE_PLUGINS_DIR`, when set: plugins live and install there, for every project.
 pub fn override_dir() -> Option<PathBuf> {
-    std::env::var_os("DRE_PLUGINS_DIR")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
+    crate::settings::env(crate::settings::PLUGINS_DIR).map(PathBuf::from)
 }
 
 /// The shared download cache, which project installs link from; also where `dre init` installs

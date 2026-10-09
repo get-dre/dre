@@ -70,7 +70,8 @@ pub fn ls(a: LsArgs) -> ExitCode {
         vars: a.vars.iter().cloned().collect(),
         date: crate::run_date(),
         scheduled_at: crate::run_at().ok().flatten(),
-        timezone: std::env::var("DRE_TIMEZONE").ok().filter(|t| !t.is_empty()),
+        timezone: dre_core::settings::env(dre_core::settings::TIMEZONE),
+        settings: dre_core::settings::run_settings(None),
     };
     let (project, diags) = project::load(&a.project_dir, &opts);
     let Some(project) = project else {

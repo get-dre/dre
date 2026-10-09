@@ -148,17 +148,12 @@ pub fn platform() -> String {
 }
 
 pub fn registry_url() -> String {
-    std::env::var("DRE_REGISTRY_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_REGISTRY.to_string())
+    crate::settings::env(crate::settings::REGISTRY_URL).unwrap_or_else(|| DEFAULT_REGISTRY.to_string())
 }
 
 /// The GitHub API DRE talks to: `DRE_GITHUB_API_URL` (GitHub Enterprise, tests), else GitHub's.
 pub fn github_api() -> String {
-    std::env::var("DRE_GITHUB_API_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
+    crate::settings::env(crate::settings::GITHUB_API_URL)
         .unwrap_or_else(|| "https://api.github.com".into())
         .trim_end_matches('/')
         .to_string()
