@@ -30,11 +30,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-use serde_yaml_ng::Value;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
+use crate::config::de::{self, Found, Located, Loose, Map, UnknownKeys};
+use crate::config::node;
 use crate::diag::Diagnostics;
-use crate::yaml::YamlFile;
 
 pub const PROFILES_FILE: &str = "profiles.yml";
 
@@ -187,8 +188,11 @@ pub struct Profiles {
     pub path: PathBuf,
     /// Why that directory: `--profiles-dir`, `DRE_PROFILES_DIR`, `the project directory` or `~/.dre`.
     pub found_by: &'static str,
-    /// `None` when the file doesn't exist; loading problems are reported when it's needed.
-    pub file: Option<YamlFile>,
+    /// The file as shown in diagnostics; `None` when it doesn't exist. Loading problems are
+    /// reported when it's needed.
+    pub file: Option<PathBuf>,
+    /// Every profile each section declares, broken ones too, with its name's line.
+    declared: BTreeMap<Role, BTreeMap<String, usize>>,
     pub connections: BTreeMap<String, Profile>,
     pub destinations: BTreeMap<String, Profile>,
     /// The section connections were read from: `connections`, or 0.1's `sources`.
@@ -230,91 +234,92 @@ impl Profiles {
         if !path.is_file() {
             return out;
         }
-        let Some(yf) = YamlFile::load(&path, path.clone(), diags) else {
-            // Parsed badly: treat as present-but-empty so references don't pile up extra errors.
-            out.file = Some(YamlFile {
-                display: path,
-                text: String::new(),
-                value: Value::Null,
-            });
-            return out;
+        // Parsed badly or not, the file exists: references to it don't pile up extra errors.
+        out.file = Some(path.clone());
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                diags.error("io-error", Some(path), None, format!("cannot read file: {e}"));
+                return out;
+            }
+        };
+        let tree = match node::parse(&text) {
+            Ok(n) => n,
+            Err(e) => {
+                diags.error(
+                    "yaml-syntax",
+                    Some(path),
+                    e.line,
+                    format!("invalid YAML: {}", e.message),
+                );
+                return out;
+            }
         };
         let file = Some(path.clone());
-        match &yf.value {
-            Value::Mapping(m) => {
-                let both = m.contains_key("connections") && m.contains_key(OLD_CONNECTIONS_SECTION);
-                for (k, v) in m {
-                    let key = k.as_str().unwrap_or_default();
-                    let role = match key {
-                        "connections" => Role::Connection,
-                        OLD_CONNECTIONS_SECTION if both => {
-                            diags.error(
-                                "invalid-profiles",
-                                file.clone(),
-                                yf.line_of(key, None),
-                                "profiles.yml has both `connections:` and `sources:`; `sources:` is the old name of `connections:`, so move its profiles under `connections:`",
-                            );
-                            continue;
-                        }
-                        OLD_CONNECTIONS_SECTION => {
-                            diags.warning(
-                                "profiles-sources-renamed",
-                                file.clone(),
-                                yf.line_of(key, None),
-                                "`sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x",
-                            );
-                            out.connections_section = OLD_CONNECTIONS_SECTION;
-                            Role::Connection
-                        }
-                        "destinations" => Role::Destination,
-                        _ => {
-                            diags.error(
-                                "invalid-profiles",
-                                file.clone(),
-                                yf.line_of(key, None),
-                                format!(
-                                    "unknown profiles.yml section `{key}`; profiles go under `connections:` or `destinations:`"
-                                ),
-                            );
-                            continue;
-                        }
-                    };
-                    let section_line = yf.line_of(key, None);
-                    let parsed = match v {
-                        Value::Mapping(ps) => ps
-                            .iter()
-                            .filter_map(|(k, v)| {
-                                let name = k.as_str()?;
-                                parse_profile(role, name, v, &yf, section_line, diags)
-                                    .map(|p| (name.to_string(), p))
-                            })
-                            .collect(),
-                        Value::Null => BTreeMap::new(),
-                        _ => {
-                            diags.error(
-                                "invalid-profiles",
-                                file.clone(),
-                                section_line,
-                                format!("`{key}` must be a map of profile names"),
-                            );
-                            BTreeMap::new()
-                        }
-                    };
-                    match role {
-                        Role::Connection => out.connections = parsed,
-                        Role::Destination => out.destinations = parsed,
-                    }
-                }
+        let raw: Loose<ProfilesFile> = match de::from_node(&tree) {
+            Ok(r) => r,
+            Err(e) => {
+                diags.error("invalid-profiles", file, e.line, e.message);
+                return out;
             }
-            Value::Null => {}
-            _ => diags.error(
+        };
+        let raw = match raw {
+            Loose::Ok(r) => r,
+            Loose::Bad(Found { kind: "nothing", .. }) => return out,
+            Loose::Bad(_) => {
+                diags.error(
+                    "invalid-profiles",
+                    file,
+                    None,
+                    "profiles.yml must be a map with `connections:` and/or `destinations:`",
+                );
+                return out;
+            }
+        };
+        for k in &raw.unknown.0 {
+            diags.error(
                 "invalid-profiles",
-                file,
-                None,
-                "profiles.yml must be a map with `connections:` and/or `destinations:`",
-            ),
+                file.clone(),
+                Some(k.line),
+                format!(
+                    "unknown profiles.yml section `{}`; profiles go under `connections:` or `destinations:`",
+                    k.name
+                ),
+            );
         }
-        out.file = Some(yf);
+        let connections = match (raw.connections, raw.sources) {
+            (Some(c), Some(s)) => {
+                diags.error(
+                    "invalid-profiles",
+                    file.clone(),
+                    s.line(),
+                    "profiles.yml has both `connections:` and `sources:`; `sources:` is the old name of `connections:`, so move its profiles under `connections:`",
+                );
+                Some(("connections", c))
+            }
+            (Some(c), None) => Some(("connections", c)),
+            (None, Some(s)) => {
+                diags.warning(
+                    "profiles-sources-renamed",
+                    file.clone(),
+                    s.line(),
+                    "`sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x",
+                );
+                out.connections_section = OLD_CONNECTIONS_SECTION;
+                Some((OLD_CONNECTIONS_SECTION, s))
+            }
+            (None, None) => None,
+        };
+        if let Some((key, section)) = connections {
+            let (parsed, declared) = parse_section(Role::Connection, key, section, &path, diags);
+            out.connections = parsed;
+            out.declared.insert(Role::Connection, declared);
+        }
+        if let Some(section) = raw.destinations {
+            let (parsed, declared) = parse_section(Role::Destination, "destinations", section, &path, diags);
+            out.destinations = parsed;
+            out.declared.insert(Role::Destination, declared);
+        }
         out
     }
 
@@ -345,10 +350,7 @@ impl Profiles {
 
     /// Whether a (possibly partially broken) profile of this name is declared in its section.
     pub fn declares(&self, role: Role, name: &str) -> bool {
-        self.file
-            .as_ref()
-            .and_then(|f| f.value.get(self.section_key(role)))
-            .is_some_and(|s| s.get(name).is_some())
+        self.declared.get(&role).is_some_and(|s| s.contains_key(name))
     }
 
     /// Whether `name` means the built-in local destination (no `local` profile is defined).
@@ -356,10 +358,9 @@ impl Profiles {
         name == LOCAL_TYPE && !self.destinations.contains_key(name)
     }
 
-    /// Best-effort line of a profile's name in the file.
+    /// The line of a profile's name in the file.
     pub fn line_of(&self, role: Role, name: &str) -> Option<usize> {
-        let f = self.file.as_ref()?;
-        f.line_of(name, f.line_of(self.section_key(role), None))
+        self.declared.get(&role)?.get(name).copied()
     }
 
     /// The entry a profile uses in this run: the run's target when `--target` or `DRE_TARGET`
@@ -425,18 +426,45 @@ impl Profiles {
     }
 }
 
+/// A section's profiles, and every profile name it declares with its line.
+fn parse_section<P: Into<RawProfile>>(
+    role: Role,
+    key: &str,
+    section: Section<P>,
+    path: &Path,
+    diags: &mut Diagnostics,
+) -> (BTreeMap<String, Profile>, BTreeMap<String, usize>) {
+    let Loose::Ok(profiles) = section.value else {
+        diags.error(
+            "invalid-profiles",
+            Some(path.to_path_buf()),
+            section.line(),
+            format!("`{key}` must be a map of profile names"),
+        );
+        return Default::default();
+    };
+    let declared = profiles.iter().map(|(k, _)| (k.value.clone(), k.line)).collect();
+    let parsed = profiles
+        .0
+        .into_iter()
+        .filter_map(|(name, p)| {
+            parse_profile(role, &name, p.map(|p| p.map(Into::into)), path, diags).map(|p| (name.value, p))
+        })
+        .collect();
+    (parsed, declared)
+}
+
 fn parse_profile(
     role: Role,
-    name: &str,
-    v: &Value,
-    yf: &YamlFile,
-    section_line: Option<usize>,
+    name: &Located<String>,
+    v: Located<Loose<RawProfile>>,
+    path: &Path,
     diags: &mut Diagnostics,
 ) -> Option<Profile> {
-    let file = Some(yf.display.clone());
-    let line = yf.line_of(name, section_line);
-    let what = format!("{} profile `{name}`", role.as_str());
-    let Some(m) = v.as_mapping() else {
+    let file = Some(path.to_path_buf());
+    let line = name.line();
+    let what = format!("{} profile `{}`", role.as_str(), name.value);
+    let Loose::Ok(m) = v.value else {
         diags.error(
             "invalid-profile",
             file,
@@ -445,21 +473,24 @@ fn parse_profile(
         );
         return None;
     };
-    let own_target = match m.get("target") {
+    let target_line = m.target.as_ref().and_then(Located::line);
+    let own_target = match m.target {
         None => None,
-        Some(Value::String(t)) if !t.trim().is_empty() => Some(t.clone()),
-        Some(_) => {
+        Some(Located {
+            value: Loose::Ok(t), ..
+        }) if !t.trim().is_empty() => Some(t),
+        Some(t) => {
             diags.error(
                 "invalid-profile",
                 file.clone(),
-                yf.line_of("target", line),
+                t.line(),
                 format!("{what}: `target` must be the name of one of its `targets`"),
             );
             return None;
         }
     };
-    let Some(targets) = m.get("targets").and_then(Value::as_mapping) else {
-        let hint = if m.contains_key("outputs") {
+    let Some(Loose::Ok(targets)) = m.targets.map(|t| t.value) else {
+        let hint = if m.outputs.is_some() {
             " (`outputs:` is now `targets:`)"
         } else {
             ""
@@ -475,14 +506,16 @@ fn parse_profile(
     let mut parsed = BTreeMap::new();
     let mut nowhere = std::collections::BTreeSet::new();
     let mut ok = true;
-    for (k, o) in targets {
-        let Some(tname) = k.as_str() else { continue };
+    for (tname, o) in targets.0 {
+        let tline = tname.line();
+        let tname = tname.value;
+        let o = o.value;
         if let Some(d) = o.get("deliver") {
             let problem = if role == Role::Connection {
                 Some("`deliver: false` is only for destinations; a connection entry needs a `type`")
-            } else if d != &Value::Bool(false) {
+            } else if d != &serde_json::Value::Bool(false) {
                 Some("`deliver` can only be `false` (an entry that delivers just has a `type`)")
-            } else if o.as_mapping().is_some_and(|m| m.len() > 1) {
+            } else if o.as_object().is_some_and(|m| m.len() > 1) {
                 Some("`deliver: false` takes no other settings: the entry delivers nowhere")
             } else {
                 None
@@ -492,42 +525,36 @@ fn parse_profile(
                     diags.error(
                         "invalid-profile",
                         file.clone(),
-                        yf.line_of(tname, line),
+                        tline,
                         format!("target `{tname}` of {what}: {p}"),
                     );
                     ok = false;
                 }
                 None => {
-                    nowhere.insert(tname.to_string());
+                    nowhere.insert(tname);
                 }
             }
             continue;
         }
-        let kind = o.get("type").and_then(Value::as_str);
-        let Some(kind) = kind else {
+        let Some(kind) = o.get("type").and_then(serde_json::Value::as_str) else {
             diags.error(
                 "invalid-profile",
                 file.clone(),
-                yf.line_of(tname, line),
+                tline,
                 format!("target `{tname}` of {what} has no `type`"),
             );
             ok = false;
             continue;
         };
-        let fields = match serde_json::to_value(o) {
-            Ok(serde_json::Value::Object(mut f)) => {
+        let kind = kind.to_string();
+        let fields = match o {
+            serde_json::Value::Object(mut f) => {
                 f.remove("type");
                 f
             }
             _ => serde_json::Map::new(),
         };
-        parsed.insert(
-            tname.to_string(),
-            ProfileTarget {
-                kind: kind.to_string(),
-                fields,
-            },
-        );
+        parsed.insert(tname, ProfileTarget { kind, fields });
     }
     if let Some(t) = &own_target
         && ok
@@ -539,7 +566,7 @@ fn parse_profile(
         diags.error(
             "invalid-profile",
             file.clone(),
-            yf.line_of("target", line),
+            target_line,
             format!(
                 "{what}: `target: {t}` isn't one of its targets ({})",
                 has.into_iter().cloned().collect::<Vec<_>>().join(", ")
@@ -552,4 +579,250 @@ fn parse_profile(
         targets: parsed,
         nowhere,
     })
+}
+
+// The file's shape. These types are what's read, and they generate profiles.schema.json; their
+// doc comments are its descriptions. Values the loader checks itself, to say what's wrong in
+// DRE's words, are `Loose`.
+
+/// A section of profiles by name, each checked by the loader.
+type Section<P> = Located<Loose<Map<Located<Loose<P>>>>>;
+
+/// Connections and destinations, in `profiles.yml`: what reports read from and where outputs go. Kept outside the project (`~/.dre`, `--profiles-dir` or `DRE_PROFILES_DIR`). Every profile lists its targets (environments). Each profile the run uses picks one: `--target`, else `DRE_TARGET` (either sets every profile), else the profile's own `target`, else `dev`; a used profile without that entry is an error.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(title = "DRE profiles", deny_unknown_fields)]
+#[schemars(extend("not" = {"required": ["connections", "sources"]}))]
+pub struct ProfilesFile {
+    /// Database connections, referenced by `default_profile`, `profile:` (report, query, Set, folder `+profile`) and a source's `profile`.
+    connections: Option<Section<ConnectionProfile>>,
+    /// DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`.
+    #[schemars(extend("deprecated" = true))]
+    sources: Option<Section<ConnectionProfile>>,
+    /// Delivery targets, referenced by `output.destination.profile`.
+    destinations: Option<Section<DestinationProfile>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    unknown: UnknownKeys,
+}
+
+/// A named connection with one entry per target (environment).
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "connection", deny_unknown_fields)]
+pub struct ConnectionProfile {
+    /// This profile's entry when neither `--target` nor `DRE_TARGET` is set (dbt's key). Default: `dev`. It doesn't change `target.name`, the run's target.
+    target: Option<Located<Loose<String>>>,
+    /// The environments of this connection, by name (e.g. `dev`, `prod`).
+    #[schemars(required, extend("minProperties" = 1))]
+    targets: Option<Located<Loose<Map<Located<ConnectionEntry>>>>>,
+    /// DRE 0.1's name for `targets`, read only to say so.
+    #[schemars(skip)]
+    outputs: Option<serde::de::IgnoredAny>,
+}
+
+/// A named destination with one entry per target (environment).
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "destination", deny_unknown_fields)]
+pub struct DestinationProfile {
+    /// The environments of this destination, by name (e.g. `dev`, `prod`). An entry is a delivery configuration, or `{deliver: false}` to deliver nowhere on that target.
+    #[schemars(required, extend("minProperties" = 1))]
+    targets: Option<Located<Loose<Map<Located<DestinationEntry>>>>>,
+    /// This profile's entry when neither `--target` nor `DRE_TARGET` is set (dbt's key). Default: `dev`. It doesn't change `target.name`, the run's target.
+    target: Option<Located<Loose<String>>>,
+    #[schemars(skip)]
+    outputs: Option<serde::de::IgnoredAny>,
+}
+
+/// Either kind of profile, as the loader checks it.
+pub struct RawProfile {
+    target: Option<Located<Loose<String>>>,
+    targets: Option<Located<Loose<Map<Located<serde_json::Value>>>>>,
+    outputs: Option<serde::de::IgnoredAny>,
+}
+
+fn entries<E: Into<serde_json::Value>>(
+    t: Option<Located<Loose<Map<Located<E>>>>>,
+) -> Option<Located<Loose<Map<Located<serde_json::Value>>>>> {
+    t.map(|t| {
+        t.map(|t| match t {
+            Loose::Ok(m) => Loose::Ok(Map(m
+                .0
+                .into_iter()
+                .map(|(k, v)| (k, v.map(Into::into)))
+                .collect())),
+            Loose::Bad(f) => Loose::Bad(f),
+        })
+    })
+}
+
+impl From<ConnectionProfile> for RawProfile {
+    fn from(p: ConnectionProfile) -> RawProfile {
+        RawProfile {
+            target: p.target,
+            targets: entries(p.targets),
+            outputs: p.outputs,
+        }
+    }
+}
+
+impl From<DestinationProfile> for RawProfile {
+    fn from(p: DestinationProfile) -> RawProfile {
+        RawProfile {
+            target: p.target,
+            targets: entries(p.targets),
+            outputs: p.outputs,
+        }
+    }
+}
+
+/// A connection's target: `type` and the plugin's fields, passed on unchecked.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct ConnectionEntry(serde_json::Value);
+
+/// A destination's target: a delivery configuration, or `{deliver: false}`.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct DestinationEntry(serde_json::Value);
+
+impl From<ConnectionEntry> for serde_json::Value {
+    fn from(e: ConnectionEntry) -> Self {
+        e.0
+    }
+}
+
+impl From<DestinationEntry> for serde_json::Value {
+    fn from(e: DestinationEntry) -> Self {
+        e.0
+    }
+}
+
+impl JsonSchema for ConnectionEntry {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ConnectionEntry".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        g.subschema_for::<TargetEntry>()
+    }
+}
+
+impl JsonSchema for DestinationEntry {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DestinationEntry".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [g.subschema_for::<TargetEntry>(), g.subschema_for::<NoDelivery>()]
+        })
+    }
+}
+
+/// One target of a profile: a connection or delivery configuration. `type` names the plugin; every other key is a field of that plugin (see the plugins reference), and secrets belong in `{{ env_var('NAME') }}`.
+#[derive(JsonSchema)]
+#[schemars(rename = "target", extend("additionalProperties" = true, "not" = {"required": ["deliver"]}))]
+#[allow(dead_code)]
+struct TargetEntry {
+    /// The plugin type of the connection, e.g. `duckdb`, `postgres`, `databricks`, `sftp`, `s3`. `local` needs no plugin.
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// A destination entry is a delivery configuration (`type` and the plugin's fields, as for a connection), or `{deliver: false}`: it deliberately delivers nowhere. The output stays in the target path, the run logs it, and `run_results.json` records the delivery as `not_delivered`. Destinations only.
+#[derive(JsonSchema)]
+#[schemars(rename = "no_delivery", deny_unknown_fields)]
+#[allow(dead_code)]
+struct NoDelivery {
+    /// `false`: this target delivers nowhere. Takes no other keys.
+    #[schemars(schema_with = "deliver_false")]
+    deliver: bool,
+}
+
+fn deliver_false(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"const": false, "x-doc-type": "`false`"})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(yaml: &str) -> (Profiles, Diagnostics) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PROFILES_FILE), yaml).unwrap();
+        let mut diags = Diagnostics::default();
+        let p = Profiles::load(dir.path(), "--profiles-dir", &mut diags);
+        (p, diags)
+    }
+
+    fn errors(d: &Diagnostics) -> Vec<(Option<usize>, String)> {
+        d.sorted()
+            .into_iter()
+            .map(|d| (d.line, d.message.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_name_used_twice_gets_the_line_of_the_one_meant() {
+        // Searching the text for `wat:` finds the profile on line 2 first.
+        let (_, d) = load("connections:\n  wat:\n    targets:\n      dev: {type: duckdb}\nwat: {}\n");
+        assert_eq!(
+            errors(&d),
+            [(
+                Some(5),
+                "unknown profiles.yml section `wat`; profiles go under `connections:` or `destinations:`"
+                    .into()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_target_named_like_a_key_gets_its_own_line() {
+        let yaml = "connections:\n  w:\n    target: target\n    targets:\n      dev: {type: duckdb}\n      target: {path: x}\n";
+        let (_, d) = load(yaml);
+        assert_eq!(
+            errors(&d),
+            [(
+                Some(6),
+                "target `target` of connection profile `w` has no `type`".into()
+            )]
+        );
+    }
+
+    #[test]
+    fn jinja_values_and_yaml_1_1_words_are_strings_passed_on() {
+        let yaml = "connections:\n  w:\n    targets:\n      dev:\n        type: postgres\n        password: \"{{ env_var('PG_PASSWORD') }}\"\n        sslmode: no\n";
+        let (p, d) = load(yaml);
+        assert!(errors(&d).is_empty(), "{:?}", errors(&d));
+        let t = p.get(Role::Connection, "w").unwrap().targets.get("dev").unwrap();
+        assert_eq!(t.kind, "postgres");
+        assert_eq!(t.fields["password"], "{{ env_var('PG_PASSWORD') }}");
+        assert_eq!(t.fields["sslmode"], "no");
+        assert_eq!(p.line_of(Role::Connection, "w"), Some(2));
+    }
+
+    #[test]
+    fn syntax_errors_have_their_line() {
+        let (p, d) = load("connections:\n  w: [\n");
+        assert!(p.exists());
+        let e = errors(&d);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].1.starts_with("invalid YAML: "), "{e:?}");
+        assert!(e[0].0.is_some(), "{e:?}");
+    }
+
+    #[test]
+    fn merge_keys_share_settings_between_targets() {
+        let yaml = "connections:\n  w:\n    targets:\n      dev: &dev {type: duckdb, path: dev.duckdb}\n      ci: {<<: *dev, path: ci.duckdb}\n";
+        let (p, d) = load(yaml);
+        assert!(errors(&d).is_empty());
+        let ci = p.get(Role::Connection, "w").unwrap().targets.get("ci").unwrap();
+        assert_eq!(
+            (ci.kind.as_str(), &ci.fields["path"]),
+            ("duckdb", &serde_json::json!("ci.duckdb"))
+        );
+    }
 }
