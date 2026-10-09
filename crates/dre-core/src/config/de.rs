@@ -688,7 +688,10 @@ mod tests {
         let n = parse("+tags: [a]\nsales:\n  +tags: [b]\n  eu: {}\n").unwrap();
         let f: Folder = from_node(&n).unwrap();
         let (name, sales) = f.folders.iter().next().unwrap();
-        assert_eq!((name.value.as_str(), name.line, &sales.tags[..]), ("sales", 2, &["b".to_string()][..]));
+        assert_eq!(
+            (name.value.as_str(), name.line, &sales.tags[..]),
+            ("sales", 2, &["b".to_string()][..])
+        );
         assert_eq!(sales.folders.iter().next().unwrap().0.value, "eu");
         assert_eq!(f.tags, ["a"]);
     }

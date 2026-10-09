@@ -1,0 +1,9 @@
+name: acme_reports
+reports:
+  sales:
+    +tags: [daily]
+    wat:
+      +tags: [x]
+    +colour: red
+wat: 1
+vars: [a]

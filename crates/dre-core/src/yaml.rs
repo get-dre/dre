@@ -44,7 +44,12 @@ impl YamlFile {
                 })
             }
             Err(e) => {
-                diags.error("yaml-syntax", Some(display), e.line, format!("invalid YAML: {}", e.message));
+                diags.error(
+                    "yaml-syntax",
+                    Some(display),
+                    e.line,
+                    format!("invalid YAML: {}", e.message),
+                );
                 None
             }
         }
