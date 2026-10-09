@@ -3,7 +3,8 @@
 
 use chrono::NaiveTime;
 use serde_json::{Map as JsonMap, Value as Json};
-use serde_yaml_ng::{Mapping, Value};
+type Mapping = JsonMap<String, Json>;
+use serde_json::Value;
 
 pub const SCHEDULE_KEYS: &[&str] = &["cron", "every", "rrule", "starting", "at", "except", "also"];
 /// Keys of a timings.yml entry: a timing and its timezone.
@@ -60,7 +61,7 @@ pub fn validate_block(m: &Mapping, what: &str, forms: &str) -> Vec<String> {
     }
     for key in ["except", "also"] {
         let Some(v) = m.get(key) else { continue };
-        let ok = v.as_sequence().is_some_and(|l| {
+        let ok = v.as_array().is_some_and(|l| {
             l.iter().all(|d| {
                 d.as_str()
                     .is_some_and(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok())
@@ -70,7 +71,7 @@ pub fn validate_block(m: &Mapping, what: &str, forms: &str) -> Vec<String> {
             errs.push(format!("`{key}` must be a list of dates in YYYY-MM-DD form"));
         }
     }
-    if has("also") && errs.is_empty() && time_of_day(&crate::project::yaml_map_to_json(m)).is_none() {
+    if has("also") && errs.is_empty() && time_of_day(m).is_none() {
         errs.push(
             "`also` needs a schedule that fires at one time of day (e.g. `0 6 * * *` or `at: \"06:00\"`), so the added dates fire then"
                 .into(),
@@ -96,14 +97,14 @@ pub fn validate_block(m: &Mapping, what: &str, forms: &str) -> Vec<String> {
 }
 
 fn validate_every(v: &Value) -> Result<(), String> {
-    let Some(m) = v.as_mapping() else {
+    let Some(m) = v.as_object() else {
         return Err("`every` must be a map with one unit, e.g. `{days: 5}`".into());
     };
     if m.len() != 1 {
         return Err("`every` must have exactly one unit: `days`, `weeks` or `months`".into());
     }
     let (k, n) = m.iter().next().unwrap();
-    let unit = k.as_str().unwrap_or("");
+    let unit = k.as_str();
     if !matches!(unit, "days" | "weeks" | "months") {
         return Err(format!(
             "unknown `every` unit `{unit}`: use `days`, `weeks` or `months`"

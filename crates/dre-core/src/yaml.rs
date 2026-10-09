@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_yaml_ng::Value;
+use serde_json::Value;
 
 use crate::config::node::{self, Kind, Node};
 use crate::diag::Diagnostics;
@@ -35,7 +35,7 @@ impl YamlFile {
     pub fn parse(text: String, display: PathBuf, diags: &mut Diagnostics) -> Option<YamlFile> {
         match node::parse(&text) {
             Ok(node) => {
-                let value = to_value(&node);
+                let value = node.to_json();
                 Some(YamlFile {
                     display,
                     text,
@@ -82,8 +82,8 @@ impl YamlFile {
     }
 }
 
-/// A `serde_yaml_ng` value as a node with no lines, to read typed config from values merged
-/// from several files (outputs).
+/// A value as a node with no lines, to read typed config from values merged from several files
+/// (outputs).
 pub fn to_node(v: &Value) -> Node {
     let kind = match v {
         Value::Null => Kind::Null,
@@ -94,40 +94,25 @@ pub fn to_node(v: &Value) -> Node {
             (_, _, f) => Kind::Float(f.unwrap_or(f64::NAN)),
         },
         Value::String(s) => Kind::Str(s.clone()),
-        Value::Sequence(s) => Kind::Seq(s.iter().map(to_node).collect()),
-        Value::Mapping(m) => Kind::Map(
+        Value::Array(s) => Kind::Seq(s.iter().map(to_node).collect()),
+        Value::Object(m) => Kind::Map(
             m.iter()
                 .map(|(k, v)| {
-                    let name = scalar_str(k).unwrap_or_default();
-                    (node::Key { name, line: 0 }, to_node(v))
+                    (
+                        node::Key {
+                            name: k.clone(),
+                            line: 0,
+                        },
+                        to_node(v),
+                    )
                 })
                 .collect(),
         ),
-        Value::Tagged(t) => return to_node(&t.value),
     };
     Node {
         kind,
         line: 0,
         column: 0,
-    }
-}
-
-/// A parsed node as a `serde_yaml_ng` value. Merge keys are already applied and keys are names.
-fn to_value(n: &Node) -> Value {
-    match &n.kind {
-        Kind::Null => Value::Null,
-        Kind::Bool(b) => Value::Bool(*b),
-        Kind::Int(i) => Value::Number((*i).into()),
-        Kind::UInt(u) => Value::Number((*u).into()),
-        Kind::Float(f) => Value::Number((*f).into()),
-        Kind::Str(s) => Value::String(s.clone()),
-        Kind::Seq(items) => Value::Sequence(items.iter().map(to_value).collect()),
-        Kind::Map(entries) => Value::Mapping(
-            entries
-                .iter()
-                .map(|(k, v)| (Value::String(k.name.clone()), to_value(v)))
-                .collect(),
-        ),
     }
 }
 

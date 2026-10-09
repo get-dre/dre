@@ -140,3 +140,11 @@ pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
         ("sources", schema::<sources::SourcesFile>(version)),
     ]
 }
+
+/// YAML for a file DRE writes itself (`dre.lock`, a profile `dre init` adds): block style,
+/// every string on one line.
+pub fn to_yaml<T: serde::Serialize>(value: &T) -> Result<String, String> {
+    let mut options = serde_saphyr::SerializerOptions::default();
+    options.prefer_block_scalars = false;
+    serde_saphyr::to_string_with_options(value, options).map_err(|e| e.to_string())
+}

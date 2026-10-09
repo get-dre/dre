@@ -438,7 +438,7 @@ fn every_project_the_parser_accepts_validates_against_the_schemas() {
             let Some(yf) = YamlFile::load(&path, path.clone(), &mut d) else {
                 continue;
             };
-            let json = project::yaml_to_json(&yf.value);
+            let json = yf.value.clone();
             let Some(kind) = forced.or_else(|| kind_of(&root, &path, &json)) else {
                 continue;
             };
@@ -528,7 +528,7 @@ fn what_dre_new_writes_validates_and_points_at_the_schemas() {
             format!("# yaml-language-server: $schema=https://getdre.com/schemas/v{minor}/{kind}.schema.json"),
             "{rel}"
         );
-        let mut doc: Value = project::yaml_to_json(&serde_yaml_ng::from_str(&text).unwrap());
+        let mut doc: Value = dre_core::config::node::parse(&text).unwrap().to_json();
         if doc.is_null() {
             // All comments: check the commented-out example instead.
             let example: String = text
@@ -537,7 +537,7 @@ fn what_dre_new_writes_validates_and_points_at_the_schemas() {
                 .take_while(|l| !l.starts_with("# Then"))
                 .map(|l| format!("{}\n", l.strip_prefix("# ").unwrap_or("")))
                 .collect();
-            doc = project::yaml_to_json(&serde_yaml_ng::from_str(&example).unwrap());
+            doc = dre_core::config::node::parse(&example).unwrap().to_json();
             assert!(doc.is_object(), "{rel}: {example}");
         }
         let errors: Vec<String> = validator(kind).iter_errors(&doc).map(|e| e.to_string()).collect();

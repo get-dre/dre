@@ -158,7 +158,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
 fn manifest_name(dir: &Path) -> Result<String, String> {
     let p = dir.join(PACKAGE_FILE);
     let text = std::fs::read_to_string(&p).map_err(|_| format!("{} has no {PACKAGE_FILE}", dir.display()))?;
-    let m: Manifest = serde_yaml_ng::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
+    let m: Manifest = serde_saphyr::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
     if m.name.is_empty()
         || !m.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         || m.name.starts_with(|c: char| c.is_ascii_digit())
