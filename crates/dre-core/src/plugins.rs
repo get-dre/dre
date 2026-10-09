@@ -13,6 +13,8 @@ use std::sync::Mutex;
 
 use dre_protocol::{PluginId, executable_name, parse_executable_name, parse_package_executable_name};
 use semver::{Version, VersionReq};
+
+use crate::codes::Code;
 use serde::{Deserialize, Serialize};
 
 /// What an installed version's directory holds besides the executable.
@@ -401,7 +403,7 @@ pub fn check_uses(project: &crate::project::Project, diags: &mut crate::Diagnost
         let PluginId { kind, name } = &u.plugin;
         diags.push(crate::Diagnostic {
             severity: crate::Severity::Error,
-            code: "undeclared-plugin",
+            code: Code::UndeclaredPlugin,
             message: format!(
                 "{}, but no plugin package the project declares provides it — add the package with the `{name}` {kind} under `plugins:` in dependencies.yml, then run `dre deps`",
                 u.what

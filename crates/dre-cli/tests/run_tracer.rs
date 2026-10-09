@@ -110,6 +110,10 @@ fn bad_sql_fails_the_run_and_is_recorded() {
         "{}",
         r["error"]
     );
+    assert_eq!(
+        (r["error_code"].as_str(), r["error_kind"].as_str()),
+        (Some("query-failed"), Some("query"))
+    );
 }
 
 #[test]

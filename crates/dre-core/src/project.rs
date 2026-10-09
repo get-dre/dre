@@ -15,6 +15,7 @@ use serde_json::{Map as JsonMap, Value as Json};
 /// A map as read from YAML (or merged from several files).
 type Mapping = JsonMap<String, Json>;
 
+use crate::codes::Code;
 use crate::dates::{WeekNumbering, WeekStart};
 use crate::diag::Diagnostics;
 use crate::lookups::{self, DEFAULT_INLINE_MAX_ROWS, LOOKUPS_DIR, Lookup};
@@ -835,7 +836,7 @@ impl Loader {
         let pfile = self.root.join(PROJECT_FILE);
         if !pfile.is_file() {
             self.diags.error(
-                "project-file-missing",
+                Code::ProjectFileMissing,
                 Some(PathBuf::from(PROJECT_FILE)),
                 None,
                 format!(
@@ -854,7 +855,7 @@ impl Loader {
             Ok(Loose::Ok(p)) => p,
             Ok(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-project",
+                    Code::InvalidProject,
                     Some(pyaml.display.clone()),
                     None,
                     format!("{PROJECT_FILE} must be a map"),
@@ -862,8 +863,12 @@ impl Loader {
                 return None;
             }
             Err(e) => {
-                self.diags
-                    .error("invalid-project", Some(pyaml.display.clone()), e.line, e.message);
+                self.diags.error(
+                    Code::InvalidProject,
+                    Some(pyaml.display.clone()),
+                    e.line,
+                    e.message,
+                );
                 return None;
             }
         };
@@ -875,7 +880,7 @@ impl Loader {
             }) => Some(t.as_str()),
             Some(_) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     Some(PathBuf::from(PROJECT_FILE)),
                     target_line,
                     "`target_path` must be a path",
@@ -892,7 +897,7 @@ impl Loader {
                 let from_file =
                     self.opts.target_path.is_none() && crate::settings::env(crate::target::ENV).is_none();
                 self.diags.error(
-                    "invalid-target-path",
+                    Code::InvalidTargetPath,
                     from_file.then(|| PathBuf::from(PROJECT_FILE)),
                     from_file.then_some(target_line).flatten(),
                     e,
@@ -979,7 +984,7 @@ impl Loader {
         for (name, l) in &project.lookups {
             if let Some(sql) = sql_index.get(name) {
                 self.diags.error(
-                    "duplicate-ref-name",
+                    Code::DuplicateRefName,
                     Some(l.file.clone()),
                     None,
                     format!(
@@ -989,7 +994,8 @@ impl Loader {
                 );
             }
             if let Err(e) = lookups::read(&self.root, l) {
-                self.diags.error("invalid-lookup", Some(l.file.clone()), None, e);
+                self.diags
+                    .error(Code::InvalidLookup, Some(l.file.clone()), None, e);
             }
         }
         // A file used through `ref()` is shared SQL, not an unmanaged report.
@@ -1018,7 +1024,7 @@ impl Loader {
             let path = &path[0];
             if let Some(other) = managed_names.get(name) {
                 self.diags.error(
-                    "duplicate-report-name",
+                    Code::DuplicateReportName,
                     Some(path.clone()),
                     None,
                     format!(
@@ -1058,7 +1064,7 @@ impl Loader {
         }
         if let Some(t) = &pf.target {
             self.diags.error(
-                "removed-key",
+                Code::RemovedKey,
                 file.clone(),
                 t.line(),
                 "`target` in dre_project.yml was removed in DRE 0.2.1: give each profile its default with `target:` in profiles.yml, or choose the run's target with DRE_TARGET or --target",
@@ -1066,7 +1072,7 @@ impl Loader {
         }
         for k in &pf.unknown.0 {
             self.diags.error(
-                "unknown-key",
+                Code::UnknownKey,
                 file.clone(),
                 Some(k.line),
                 format!("unknown key `{}`", k.name),
@@ -1078,7 +1084,7 @@ impl Loader {
             }) if !s.trim().is_empty() => Some(s),
             Some(n) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     n.line(),
                     "`name` must be a non-empty string",
@@ -1087,7 +1093,7 @@ impl Loader {
             }
             None => {
                 self.diags.error(
-                    "missing-field",
+                    Code::MissingField,
                     file.clone(),
                     None,
                     "missing required field `name`",
@@ -1111,7 +1117,7 @@ impl Loader {
             }) => m,
             Some(v) => {
                 self.diags
-                    .error("invalid-field", file.clone(), v.line(), "`vars` must be a map");
+                    .error(Code::InvalidField, file.clone(), v.line(), "`vars` must be a map");
                 JsonMap::new()
             }
         };
@@ -1122,7 +1128,7 @@ impl Loader {
             }) if n > 0 => n,
             Some(v) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     v.line(),
                     "`run_query_max_rows` must be a positive whole number",
@@ -1144,7 +1150,7 @@ impl Loader {
                     .collect();
             }
             Some(f) => self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 file.clone(),
                 f.line(),
                 "`format_options` must map format names to their options, e.g. `delimited: {delimiter: \"|\"}`",
@@ -1157,7 +1163,7 @@ impl Loader {
             }) => b,
             Some(v) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     v.line(),
                     "`mask_secrets` must be true or false",
@@ -1180,7 +1186,7 @@ impl Loader {
             }) => w,
             Some(v) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     v.line(),
                     "`week_start` must be `monday` or `sunday`",
@@ -1195,7 +1201,7 @@ impl Loader {
             }) => w,
             Some(v) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     v.line(),
                     "`week_numbering` must be `iso` or `us`",
@@ -1210,7 +1216,7 @@ impl Loader {
             }) => n,
             Some(v) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     v.line(),
                     "`lookup_inline_max_rows` must be a whole number",
@@ -1326,7 +1332,7 @@ impl Loader {
             } => Some(s),
             v => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     Some(file.to_path_buf()),
                     v.line(),
                     format!("`{key}` must be a string"),
@@ -1353,7 +1359,7 @@ impl Loader {
             None => format!("{what} must be a string, an IANA timezone name such as `Australia/Sydney`"),
         };
         self.diags
-            .error("invalid-timezone", Some(file.to_path_buf()), line, msg);
+            .error(Code::InvalidTimezone, Some(file.to_path_buf()), line, msg);
         None
     }
 
@@ -1374,7 +1380,7 @@ impl Loader {
             None => format!("{what} must be a string, a locale such as `de-DE`"),
         };
         self.diags
-            .error("invalid-locale", Some(file.to_path_buf()), line, msg);
+            .error(Code::InvalidLocale, Some(file.to_path_buf()), line, msg);
         None
     }
 
@@ -1385,7 +1391,7 @@ impl Loader {
         let line = v.line();
         let Loose::Ok(list) = v.value else {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 Some(file.to_path_buf()),
                 line,
                 "`dispatch` must be a list of `{macro_namespace, search_order}`",
@@ -1408,7 +1414,7 @@ impl Loader {
                     out.insert(ns, order);
                 }
                 _ => self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     Some(file.to_path_buf()),
                     line,
                     "each `dispatch` entry needs `macro_namespace` and a non-empty `search_order` list",
@@ -1439,7 +1445,7 @@ impl Loader {
             };
             if let Some(c) = clash {
                 self.diags.error(
-                    "package-name-clash",
+                    Code::PackageNameClash,
                     None,
                     None,
                     format!(
@@ -1453,7 +1459,7 @@ impl Loader {
             for n in order {
                 if n != &project.name && !project.packages.iter().any(|p| &p.name == n) {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         Some(PathBuf::from(PROJECT_FILE)),
                         None,
                         format!("`dispatch` for `{ns}` searches `{n}`, which is neither this project nor an installed package"),
@@ -1479,7 +1485,7 @@ impl Loader {
             let line = node.line();
             let Loose::Ok(f) = node.value else {
                 self.diags.error(
-                    "invalid-folder-config",
+                    Code::InvalidFolderConfig,
                     display.clone(),
                     line,
                     format!("folder config for `{}` must be a map", dotted(&path)),
@@ -1490,7 +1496,7 @@ impl Loader {
             let mut cfg = FolderCfg::default();
             let bad = |s: &mut Self, k: &str, kline: Option<usize>, what: &str| {
                 s.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     display.clone(),
                     kline,
                     format!("`{k}` must be {what}"),
@@ -1537,7 +1543,7 @@ impl Loader {
             for (k, v) in f.rest.0 {
                 if k.value.starts_with('+') {
                     self.diags.error(
-                        "unknown-key",
+                        Code::UnknownKey,
                         display.clone(),
                         k.line(),
                         format!(
@@ -1555,7 +1561,7 @@ impl Loader {
             if any && !path.is_empty() {
                 if !folders.contains(&path) {
                     self.diags.warning(
-                        "unknown-folder",
+                        Code::UnknownFolder,
                         display.clone(),
                         line,
                         format!(
@@ -1663,7 +1669,7 @@ impl Loader {
                     .any(|f| yf.display == Path::new(f));
                 if !dependency_file && m.contains_key("packages") {
                     self.diags.error(
-                        "misplaced-packages",
+                        Code::MisplacedPackages,
                         Some(yf.display.clone()),
                         yf.line_of("packages", None),
                         "`packages:` goes in dependencies.yml or packages.yml at the project root",
@@ -1698,7 +1704,7 @@ impl Loader {
                     sets.push(yf.clone());
                 } else {
                     self.diags.warning(
-                        "unrecognized-yaml",
+                        Code::UnrecognizedYaml,
                         Some(yf.display.clone()),
                         None,
                         "not recognised as report, Set, plugin or schedule config; ignored",
@@ -1706,7 +1712,7 @@ impl Loader {
                 }
             }
             _ => self.diags.warning(
-                "unrecognized-yaml",
+                Code::UnrecognizedYaml,
                 Some(yf.display.clone()),
                 None,
                 "not recognised as report, Set, plugin or schedule config; ignored",
@@ -1718,7 +1724,7 @@ impl Loader {
         for k in map.keys().map(String::as_str) {
             if !REPORT_KEYS.contains(&k) {
                 self.diags.error(
-                    "unknown-key",
+                    Code::UnknownKey,
                     Some(yf.display.clone()),
                     key_line(&yf, k),
                     format!("unknown report key `{k}`"),
@@ -1730,7 +1736,7 @@ impl Loader {
             Ok(Loose::Bad(_)) => return,
             Err(e) => {
                 self.diags
-                    .error("invalid-report", Some(yf.display.clone()), e.line, e.message);
+                    .error(Code::InvalidReport, Some(yf.display.clone()), e.line, e.message);
                 return;
             }
         };
@@ -1741,7 +1747,7 @@ impl Loader {
             }) if !s.is_empty() => (s.clone(), true),
             Some(n) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     Some(yf.display.clone()),
                     n.line(),
                     "`name` must be a non-empty string",
@@ -1752,7 +1758,7 @@ impl Loader {
                 Some(f) => (f.clone(), false),
                 None => {
                     self.diags.error(
-                        "missing-field",
+                        Code::MissingField,
                         Some(yf.display.clone()),
                         None,
                         "a report outside a report folder needs an explicit `name:`",
@@ -1787,7 +1793,7 @@ impl Loader {
             if plugin_names {
                 // DRE 0.0.x declared source plugins here.
                 self.diags.error(
-                    "moved-plugin-declaration",
+                    Code::MovedPluginDeclaration,
                     file,
                     top,
                     "`sources:` declares tables now (dbt's format); list plugin packages under `plugins:` instead (e.g. `plugins: [duckdb]`)",
@@ -1803,7 +1809,7 @@ impl Loader {
                 Some(Loose::Ok(None)) => continue,
                 _ => {
                     self.diags.error(
-                        "invalid-source",
+                        Code::InvalidSource,
                         file,
                         top,
                         "`sources` must be a list of sources, as in dbt: `- name: sales` with `tables:`",
@@ -1816,7 +1822,7 @@ impl Loader {
                 if let Some(src) = self.source_def(yf, item, &mut unsupported) {
                     if let Some(prev) = out.get(&src.name) {
                         self.diags.error(
-                            "duplicate-source",
+                            Code::DuplicateSource,
                             file.clone(),
                             src.line,
                             format!(
@@ -1832,7 +1838,7 @@ impl Loader {
             }
             if !unsupported.is_empty() {
                 self.diags.warning(
-                    "source-key-not-supported",
+                    Code::SourceKeyNotSupported,
                     file,
                     top,
                     format!(
@@ -1856,7 +1862,7 @@ impl Loader {
         let item_line = item.line().or(top);
         let Loose::Ok(m) = item.value else {
             self.diags.error(
-                "invalid-source",
+                Code::InvalidSource,
                 file,
                 top,
                 "each source must be a map with `name:` and `tables:`",
@@ -1871,7 +1877,7 @@ impl Loader {
             .cloned()
         else {
             self.diags
-                .error("invalid-source", file, top, "every source needs a `name`");
+                .error(Code::InvalidSource, file, top, "every source needs a `name`");
             return None;
         };
         let line = item_line;
@@ -1891,7 +1897,7 @@ impl Loader {
                 Some(Loose::Ok(t)) => Some(t.0.clone()),
                 Some(Loose::Bad(_)) => {
                     s.diags.error(
-                        "invalid-source",
+                        Code::InvalidSource,
                         file.clone(),
                         line,
                         format!("{ctx}: `{k}` must be a string"),
@@ -1920,7 +1926,7 @@ impl Loader {
                     };
                     if !names.insert(n.clone()) {
                         self.diags.error(
-                            "duplicate-source-table",
+                            Code::DuplicateSourceTable,
                             file.clone(),
                             t.line().or(line),
                             format!("{ctx} declares table `{n}` twice"),
@@ -1938,7 +1944,7 @@ impl Loader {
             }
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-source",
+                    Code::InvalidSource,
                     file.clone(),
                     line,
                     format!("{ctx}: `tables` must be a list"),
@@ -1973,7 +1979,7 @@ impl Loader {
         let item_line = item.line();
         let Loose::Ok(m) = item.value else {
             self.diags.error(
-                "invalid-source",
+                Code::InvalidSource,
                 file,
                 source_line,
                 format!("source `{source}`: each table must be a map with a `name`"),
@@ -1988,7 +1994,7 @@ impl Loader {
             .cloned()
         else {
             self.diags.error(
-                "invalid-source",
+                Code::InvalidSource,
                 file,
                 source_line,
                 format!("source `{source}`: every table needs a `name`"),
@@ -2012,7 +2018,7 @@ impl Loader {
                 Some(Loose::Ok(t)) => Some(t.0.clone()),
                 Some(Loose::Bad(_)) => {
                     s.diags.error(
-                        "invalid-source",
+                        Code::InvalidSource,
                         file.clone(),
                         line,
                         format!("{ctx}: `{k}` must be a string"),
@@ -2034,7 +2040,7 @@ impl Loader {
                 for c in cs {
                     let Loose::Ok(cm) = c else {
                         self.diags.error(
-                            "invalid-source",
+                            Code::InvalidSource,
                             file.clone(),
                             line,
                             format!("{ctx}: each column must be a map with a `name`"),
@@ -2050,7 +2056,7 @@ impl Loader {
                         .cloned()
                     else {
                         self.diags.error(
-                            "invalid-source",
+                            Code::InvalidSource,
                             file.clone(),
                             line,
                             format!("{ctx}: every column needs a `name`"),
@@ -2070,7 +2076,7 @@ impl Loader {
                     );
                     if columns.iter().any(|c| c.name.eq_ignore_ascii_case(&cname)) {
                         self.diags.error(
-                            "duplicate-source-column",
+                            Code::DuplicateSourceColumn,
                             file.clone(),
                             line,
                             format!("{ctx} declares column `{cname}` twice"),
@@ -2088,7 +2094,7 @@ impl Loader {
             }
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-source",
+                    Code::InvalidSource,
                     file.clone(),
                     line,
                     format!("{ctx}: `columns` must be a list"),
@@ -2125,7 +2131,7 @@ impl Loader {
         }
         for k in &unknown.0 {
             self.diags.error(
-                "unknown-key",
+                Code::UnknownKey,
                 Some(file.to_path_buf()),
                 Some(k.line),
                 format!(
@@ -2149,7 +2155,7 @@ impl Loader {
         let Some(v) = v else { return q };
         let bad = |s: &mut Self, msg: String| {
             s.diags.error(
-                "invalid-source",
+                Code::InvalidSource,
                 Some(file.to_path_buf()),
                 line,
                 format!("{ctx}: {msg}"),
@@ -2202,7 +2208,7 @@ impl Loader {
             Some(Loose::Ok(config::sources::Tags(de::OneOf::B(l)))) => l,
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-source",
+                    Code::InvalidSource,
                     Some(file.to_path_buf()),
                     line,
                     format!("{ctx}: `tags` must be a list of strings"),
@@ -2224,7 +2230,7 @@ impl Loader {
             Some(Loose::Ok(m)) => m.0,
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-source",
+                    Code::InvalidSource,
                     Some(file.to_path_buf()),
                     line,
                     format!("{ctx}: `meta` must be a map"),
@@ -2326,7 +2332,7 @@ impl Loader {
                 let name = k.value;
                 if let Some(prev) = seen.get(&name) {
                     self.diags.error(
-                        "duplicate-set",
+                        Code::DuplicateSet,
                         Some(yf.display.clone()),
                         line,
                         format!("Set `{name}` is also declared in {}", prev.display()),
@@ -2346,7 +2352,7 @@ impl Loader {
                     .cloned();
                 if v.as_ref().is_some_and(|v| v.profile.is_some()) && profile.is_none() {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         Some(yf.display.clone()),
                         line,
                         format!("Set `{name}`: `profile` must be a string"),
@@ -2366,7 +2372,7 @@ impl Loader {
                     None => JsonMap::new(),
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             Some(yf.display.clone()),
                             line,
                             format!("Set `{name}`: `vars` must be a map"),
@@ -2417,7 +2423,7 @@ impl Loader {
                     names.insert(name);
                 } else if !lookups.contains_key(&name) {
                     self.diags.error(
-                        "unknown-ref",
+                        Code::UnknownRef,
                         Some(file.clone()),
                         Some(line),
                         format!("`ref('{name}')`: there's no `{name}.sql` under reports/ and no lookup `{name}` under lookups/"),
@@ -2444,7 +2450,7 @@ impl Loader {
                         cycle.push(next.clone());
                         let file = index[path.last().unwrap()][0].clone();
                         self.diags.error(
-                            "ref-cycle",
+                            Code::RefCycle,
                             Some(file),
                             Some(*line),
                             format!("`ref()` cycle: {}", cycle.join(" → ")),
@@ -2470,7 +2476,7 @@ impl Loader {
         for (name, paths) in &index {
             if paths.len() > 1 {
                 self.diags.error(
-                    "duplicate-sql-name",
+                    Code::DuplicateSqlName,
                     Some(paths[1].clone()),
                     None,
                     format!(
@@ -2502,7 +2508,7 @@ impl Loader {
             if definers.len() > 1 {
                 let second = &frags[definers[1]].file;
                 self.diags.error(
-                    "duplicate-report-name",
+                    Code::DuplicateReportName,
                     Some(second.display.clone()),
                     key_line(second, "queries"),
                     format!(
@@ -2523,7 +2529,7 @@ impl Loader {
                         format!("report `{name}` has no `queries`")
                     };
                     self.diags
-                        .error("missing-queries", Some(f.file.display.clone()), None, msg);
+                        .error(Code::MissingQueries, Some(f.file.display.clone()), None, msg);
                 }
                 continue;
             };
@@ -2538,7 +2544,7 @@ impl Loader {
                     }
                     if let Some(prev) = keys.get(k) {
                         self.diags.error(
-                            "conflicting-declaration",
+                            Code::ConflictingDeclaration,
                             Some(f.file.display.clone()),
                             key_line(&f.file, k),
                             format!(
@@ -2636,7 +2642,7 @@ impl Loader {
             .map_or_else(|| r.file.display.clone(), |k| k.file.display.clone());
         let Loose::Ok(items) = &q.value else {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 Some(file),
                 q.line(),
                 format!("report `{}`: `queries` must be a list", r.name),
@@ -2645,7 +2651,7 @@ impl Loader {
         };
         if items.is_empty() {
             self.diags.error(
-                "missing-queries",
+                Code::MissingQueries,
                 Some(file.clone()),
                 q.line(),
                 format!("report `{}` has an empty `queries` list", r.name),
@@ -2678,7 +2684,7 @@ impl Loader {
                 Some(Loose::Ok(s)) => (s.clone(), Some(m)),
                 _ => {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file,
                         line,
                         format!("report `{report}`: a `queries` map entry needs a `query:` name"),
@@ -2688,7 +2694,7 @@ impl Loader {
             },
             Loose::Bad(_) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file,
                     line,
                     format!("report `{report}`: `queries` entries must be names or maps"),
@@ -2698,7 +2704,7 @@ impl Loader {
         };
         if name.ends_with(".sql") || name.contains('/') || name.contains('\\') {
             self.diags.error(
-                "invalid-query-name",
+                Code::InvalidQueryName,
                 file,
                 line,
                 format!(
@@ -2720,7 +2726,7 @@ impl Loader {
         if let Some(m) = m {
             for k in &m.unknown.0 {
                 self.diags.error(
-                    "unknown-key",
+                    Code::UnknownKey,
                     file.clone(),
                     Some(k.line),
                     format!("report `{report}`: unknown key `{}` on query `{name}`", k.name),
@@ -2730,7 +2736,7 @@ impl Loader {
                 None => {}
                 Some(Loose::Ok(p)) if !p.trim().is_empty() => e.profile = Some(p.clone()),
                 Some(_) => self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     line,
                     format!("report `{report}`: `profile` of `{name}` must be a connection name"),
@@ -2741,7 +2747,7 @@ impl Loader {
                 Some(Loose::Ok(s)) => Some(s.clone()),
                 Some(Loose::Bad(f)) if f.kind == "a list" => {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("report `{report}`: {}", one_tab_per_file(&name)),
@@ -2750,7 +2756,7 @@ impl Loader {
                 }
                 Some(Loose::Bad(_)) => {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("report `{report}`: `tab_name` of `{name}` must be a string"),
@@ -2762,7 +2768,7 @@ impl Loader {
                 None => {}
                 Some(Loose::Ok(b)) => e.tab = *b,
                 Some(Loose::Bad(_)) => self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     line,
                     format!("report `{report}`: `tab` of `{name}` must be true or false"),
@@ -2770,7 +2776,7 @@ impl Loader {
             }
             if !e.tab && e.tab_name.is_some() {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     line,
                     format!("report `{report}`: `{name}` has `tab: false`, so its `tab_name` would never be used; remove one of them"),
@@ -2780,7 +2786,7 @@ impl Loader {
                 match a {
                     Loose::Ok(s) if options::is_cell(s) => e.anchor = Some(s.clone()),
                     _ => self.diags.error(
-                        "invalid-cell",
+                        Code::InvalidCell,
                         file.clone(),
                         line,
                         format!("report `{report}`: `anchor` of `{name}` must be a cell reference like `A1`"),
@@ -2791,7 +2797,7 @@ impl Loader {
                 match h {
                     Loose::Ok(b) => e.header = Some(*b),
                     Loose::Bad(_) => self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("report `{report}`: `header` of `{name}` must be true or false"),
@@ -2802,7 +2808,7 @@ impl Loader {
                 let (columns, errs) = dre_protocol::options::parse_columns(c);
                 for err in errs {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("report `{report}`: query `{name}`: {err}"),
@@ -2818,7 +2824,7 @@ impl Loader {
             }
             None => {
                 self.diags.error(
-                    "unknown-query",
+                    Code::UnknownQuery,
                     file,
                     line,
                     format!("report `{report}`: query `{name}` doesn't match any .sql file under reports/"),
@@ -2855,7 +2861,7 @@ impl Loader {
                 Loose::Bad(_) => {
                     let (f, l) = located("tags").unwrap();
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         Some(f),
                         l,
                         format!("report `{name}`: `tags` must be a list of strings"),
@@ -2868,7 +2874,7 @@ impl Loader {
         if key("profile").is_some() && key("sets").is_some() {
             let (f, l) = located("sets").unwrap();
             self.diags.error(
-                "profile-and-sets",
+                Code::ProfileAndSets,
                 Some(f),
                 l,
                 format!("report `{name}` declares both `profile:` and `sets:`; use one or the other"),
@@ -2885,7 +2891,7 @@ impl Loader {
                 Loose::Bad(_) => {
                     let (f, l) = located("profile").unwrap();
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         Some(f),
                         l,
                         format!("report `{name}`: `profile` must be a string"),
@@ -2954,7 +2960,7 @@ impl Loader {
                 Loose::Bad(_) => {
                     let (f, l) = located("vars").unwrap();
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         Some(f),
                         l,
                         format!("report `{name}`: `vars` must be a map"),
@@ -2975,7 +2981,7 @@ impl Loader {
         }
         for p in merge_problems {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 Some(r.file.display.clone()),
                 None,
                 format!("report `{name}`: folder config: {p}"),
@@ -2986,7 +2992,7 @@ impl Loader {
             for p in layer_outputs(&mut outputs, &o.value) {
                 let (f, l) = located("output").unwrap();
                 self.diags
-                    .error("invalid-field", Some(f), l, format!("report `{name}`: {p}"));
+                    .error(Code::InvalidField, Some(f), l, format!("report `{name}`: {p}"));
             }
         }
 
@@ -3015,7 +3021,7 @@ impl Loader {
             {
                 let (f, l) = located("default_set").unwrap();
                 self.diags.error(
-                    "unknown-default-set",
+                    Code::UnknownDefaultSet,
                     Some(f),
                     l,
                     format!("report `{name}`: `default_set` `{d}` isn't one of the report's `sets:`"),
@@ -3025,7 +3031,7 @@ impl Loader {
             if default_set.is_some() {
                 let (f, l) = located("default_set").unwrap();
                 self.diags.error(
-                    "unknown-default-set",
+                    Code::UnknownDefaultSet,
                     Some(f),
                     l,
                     format!("report `{name}`: `default_set` needs a `sets:` list"),
@@ -3073,7 +3079,7 @@ impl Loader {
         let sets_line = sets.line();
         let Loose::Ok(items) = &sets.value else {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 file,
                 sets_line,
                 format!("report `{report}`: `sets` must be a list"),
@@ -3090,7 +3096,7 @@ impl Loader {
                     Some(Loose::Ok(n)) => (n.clone(), Some(m)),
                     _ => {
                         self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             line,
                             format!("report `{report}`: a `sets:` map entry needs a `name:`"),
@@ -3100,7 +3106,7 @@ impl Loader {
                 },
                 Loose::Bad(_) => {
                     self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("report `{report}`: `sets:` entries must be names or maps"),
@@ -3110,7 +3116,7 @@ impl Loader {
             };
             if !seen.insert(name.clone()) {
                 self.diags.error(
-                    "duplicate-set",
+                    Code::DuplicateSet,
                     file.clone(),
                     line,
                     format!("report `{report}` lists Set `{name}` more than once"),
@@ -3120,7 +3126,7 @@ impl Loader {
             let registry = project.sets.get(&name);
             if inline.is_none() && registry.is_none() {
                 self.diags.error(
-                    "unknown-set",
+                    Code::UnknownSet,
                     file.clone(),
                     line,
                     format!("report `{report}`: Set `{name}` isn't declared in sets.yml"),
@@ -3155,7 +3161,7 @@ impl Loader {
                 let ctx = format!("report `{report}`, Set `{name}`");
                 for k in &m.unknown.0 {
                     self.diags.error(
-                        "unknown-key",
+                        Code::UnknownKey,
                         file.clone(),
                         Some(k.line),
                         format!("{ctx}: unknown key `{}`", k.name),
@@ -3174,7 +3180,7 @@ impl Loader {
                             used.connection(p, file.clone(), pline);
                         }
                         Loose::Bad(_) => self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             pline,
                             format!("{ctx}: `profile` must be a string"),
@@ -3185,7 +3191,7 @@ impl Loader {
                     Some(Loose::Ok(v)) => b.vars.extend(v.clone()),
                     None => {}
                     Some(Loose::Bad(_)) => self.diags.error(
-                        "invalid-field",
+                        Code::InvalidField,
                         file.clone(),
                         line,
                         format!("{ctx}: `vars` must be a map"),
@@ -3194,7 +3200,7 @@ impl Loader {
                 if let Some(o) = &m.output {
                     for p in layer_outputs(&mut b.outputs, o) {
                         self.diags
-                            .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
+                            .error(Code::InvalidField, file.clone(), line, format!("{ctx}: {p}"));
                     }
                 }
                 if m.schedule.is_some() {
@@ -3213,7 +3219,7 @@ impl Loader {
                 let listed: Vec<&str> = queries.iter().map(|q| q.query.as_str()).collect();
                 match (&m.exclude, &m.queries) {
                     (Some(_), Some(_)) => self.diags.error(
-                        "exclude-and-queries",
+                        Code::ExcludeAndQueries,
                         file.clone(),
                         line,
                         format!("{ctx}: use either `exclude:` or `queries:`, not both"),
@@ -3223,7 +3229,7 @@ impl Loader {
                             for q in names {
                                 if !listed.contains(&q.as_str()) {
                                     self.diags.error(
-                                        "unknown-query",
+                                        Code::UnknownQuery,
                                         file.clone(),
                                         ex.line(),
                                         format!("{ctx}: `exclude` names `{q}`, which isn't in the report's `queries:`"),
@@ -3233,7 +3239,7 @@ impl Loader {
                             qs.retain(|q| !names.contains(&q.query));
                         }
                         Loose::Bad(_) => self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             line,
                             format!("{ctx}: `exclude` must be a list of query names"),
@@ -3261,7 +3267,7 @@ impl Loader {
                                                 None => {}
                                                 Some(Loose::Ok(s)) => q.tab_name = Some(s.clone()),
                                                 Some(Loose::Bad(_)) => self.diags.error(
-                                                    "invalid-field",
+                                                    Code::InvalidField,
                                                     file.clone(),
                                                     line,
                                                     format!("{ctx}: {}", one_tab_per_file(&qn)),
@@ -3274,7 +3280,7 @@ impl Loader {
                                         sub.push(q);
                                     }
                                     None => self.diags.error(
-                                        "unknown-query",
+                                        Code::UnknownQuery,
                                         file.clone(),
                                         ov.line(),
                                         format!("{ctx}: `queries` names `{qn}`, which isn't in the report's `queries:`"),
@@ -3284,7 +3290,7 @@ impl Loader {
                             qs = sub;
                         }
                         Loose::Bad(_) => self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             line,
                             format!("{ctx}: `queries` must be a list"),
@@ -3297,7 +3303,7 @@ impl Loader {
                     Some(Loose::Ok(t)) => Some(t.clone()),
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             line,
                             format!("{ctx}: `tab_names` must be a map of query name to tab name"),
@@ -3365,14 +3371,14 @@ impl Loader {
                     Some(e) => match v {
                         Value::String(s) => e.tab_name = Some(s.clone()),
                         _ => self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             Some(file.clone()),
                             None,
                             format!("{ctx}: {}", one_tab_per_file(q)),
                         ),
                     },
                     None => self.diags.error(
-                        "unknown-query",
+                        Code::UnknownQuery,
                         Some(file.clone()),
                         None,
                         format!("{ctx}: `tab_names` names `{q}`, which isn't one of this Binding's queries"),
@@ -3426,7 +3432,7 @@ impl Loader {
                         Some(names) => {
                             for n in names.iter().filter(|n| !queries.iter().any(|q| &&q.query == n)) {
                                 self.diags.error(
-                                "unknown-query",
+                                Code::UnknownQuery,
                                 at.clone(),
                                 None,
                                 format!("{octx}: `queries` names `{n}`, which isn't one of this Binding's queries"),
@@ -3440,7 +3446,7 @@ impl Loader {
                         }
                         None => {
                             self.diags.error(
-                                "invalid-field",
+                                Code::InvalidField,
                                 at.clone(),
                                 None,
                                 format!("{octx}: `queries` must be a list of query names"),
@@ -3458,7 +3464,7 @@ impl Loader {
                 && !seen.insert(n.clone())
             {
                 self.diags.error(
-                    "duplicate-output",
+                    Code::DuplicateOutput,
                     at.clone(),
                     None,
                     format!("{ctx}: output `{n}` is declared twice; output names must be unique"),
@@ -3471,7 +3477,7 @@ impl Loader {
             let ext = o.extension.clone().unwrap_or_else(|| o.format.clone());
             if !exts.insert(ext) {
                 self.diags.error(
-                    "duplicate-output",
+                    Code::DuplicateOutput,
                     at.clone(),
                     None,
                     format!(
@@ -3489,7 +3495,7 @@ impl Loader {
                 .collect();
             if !formats.is_empty() && !formats.contains(&"xlsx") {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     at.clone(),
                     None,
                     format!(
@@ -3519,7 +3525,7 @@ impl Loader {
                     };
                     if let Some(p) = problem {
                         self.diags.error(
-                            "invalid-destination-option",
+                            Code::InvalidDestinationOption,
                             at.clone(),
                             None,
                             format!("{octx}: destination `{}`: `attach: {a}`: {p}", d.profile),
@@ -3531,7 +3537,7 @@ impl Loader {
         for q in queries.iter().filter(|q| q.tab) {
             if !outputs.iter().any(|o| o.feeds(&q.query)) {
                 self.diags.warning(
-                    "unused-query",
+                    Code::UnusedQuery,
                     at.clone(),
                     None,
                     format!(
@@ -3557,8 +3563,12 @@ impl Loader {
     ) {
         let at = Some(file.to_path_buf());
         let err = |s: &mut Self, msg: String| {
-            s.diags
-                .error("invalid-output-option", at.clone(), None, format!("{ctx}: {msg}"))
+            s.diags.error(
+                Code::InvalidOutputOption,
+                at.clone(),
+                None,
+                format!("{ctx}: {msg}"),
+            )
         };
         // (what, source) of every template to check.
         let mut templates: Vec<(String, String)> = Vec::new();
@@ -3704,7 +3714,7 @@ impl Loader {
             }
             Some(Loose::Ok(de::OneOf::B(list))) if list.is_empty() => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!(
@@ -3719,7 +3729,7 @@ impl Loader {
                     match d {
                         Loose::Ok(d) => out.extend(self.typed_destination(d, ctx, &file, used)),
                         Loose::Bad(_) => self.diags.error(
-                            "invalid-field",
+                            Code::InvalidField,
                             file.clone(),
                             None,
                             format!("{ctx}: `output.destination` entry {} must be a map", i + 1),
@@ -3730,7 +3740,7 @@ impl Loader {
             }
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!("{ctx}: `output.destination` must be a map or a list of maps"),
@@ -3743,7 +3753,7 @@ impl Loader {
             Some(t) => {
                 if format != "xlsx" {
                     self.diags.error(
-                        "invalid-output-option",
+                        Code::InvalidOutputOption,
                         file.clone(),
                         None,
                         format!("{ctx}: `output.template` only applies to the xlsx format"),
@@ -3759,7 +3769,7 @@ impl Loader {
                 let e = e.strip_prefix('.').unwrap_or(&e).to_string();
                 if e.contains(['/', '\\']) || e.chars().any(char::is_whitespace) {
                     self.diags.error(
-                        "invalid-output-option",
+                        Code::InvalidOutputOption,
                         file.clone(),
                         None,
                         format!(
@@ -3771,7 +3781,7 @@ impl Loader {
             }
             de::Maybe::Given(_) => {
                 self.diags.error(
-                    "invalid-output-option",
+                    Code::InvalidOutputOption,
                     file.clone(),
                     None,
                     format!("{ctx}: `extension` must be a string (`aba`), or `\"\"`/`false` for none"),
@@ -3784,7 +3794,7 @@ impl Loader {
             Some(Loose::Ok(n)) if is_identifier(&n) => Some(n),
             Some(_) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!("{ctx}: output `name` must be an identifier (letters, digits, `_`)"),
@@ -3798,7 +3808,7 @@ impl Loader {
             Some(Loose::Ok(de::OneOf::B(b))) => Some(b.to_string()),
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!("{ctx}: `when` must be a Jinja expression (a string)"),
@@ -3812,7 +3822,7 @@ impl Loader {
         };
         if extension.is_some() && format == "xlsx" {
             self.diags.error(
-                "invalid-output-option",
+                Code::InvalidOutputOption,
                 file.clone(),
                 None,
                 format!("{ctx}: `extension` doesn't apply to xlsx (Excel only opens .xlsx workbooks)"),
@@ -3840,7 +3850,7 @@ impl Loader {
     ) -> Option<Destination> {
         let Some(Loose::Ok(p)) = d.profile else {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 file.clone(),
                 None,
                 format!("{ctx}: `output.destination` needs a `profile:` naming a profiles.yml entry"),
@@ -3852,7 +3862,7 @@ impl Loader {
             Some(Loose::Ok(s)) => Some(s),
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!("{ctx}: destination `{p}`: `path` must be a string"),
@@ -3868,7 +3878,7 @@ impl Loader {
             Some(Loose::Ok(de::OneOf::B(list))) => list,
             Some(Loose::Bad(_)) => {
                 self.diags.error(
-                    "invalid-field",
+                    Code::InvalidField,
                     file.clone(),
                     None,
                     format!("{ctx}: destination `{p}`: `attach` must be an output name or a list of them"),
@@ -3893,7 +3903,7 @@ impl Loader {
     ) -> Option<Template> {
         let err = |s: &mut Self, msg: String| {
             s.diags
-                .error("invalid-template", file.clone(), None, format!("{ctx}: {msg}"))
+                .error(Code::InvalidTemplate, file.clone(), None, format!("{ctx}: {msg}"))
         };
         let Some(Loose::Ok(tf)) = t.ok().and_then(|t| t.file.clone()) else {
             err(self, "`output.template` needs a `file:`".into());
@@ -4051,14 +4061,14 @@ impl Loader {
         }
         for p in merge_problems {
             self.diags.error(
-                "invalid-field",
+                Code::InvalidField,
                 Some(path.to_path_buf()),
                 None,
                 format!("folder config: {p}"),
             );
         }
         self.diags.warning(
-            "unmanaged-report",
+            Code::UnmanagedReport,
             Some(path.to_path_buf()),
             None,
             format!(
@@ -4132,7 +4142,7 @@ impl Loader {
                 let body = sqlsplit::strip_leading_comments(&st.text);
                 let line = st.line + st.text[..st.text.len() - body.len()].matches('\n').count();
                 self.diags.error(
-                    "unmanaged-side-effect",
+                    Code::UnmanagedSideEffect,
                     Some(path.to_path_buf()),
                     Some(line),
                     format!(
@@ -4149,7 +4159,7 @@ impl Loader {
     /// Schedules live only in schedules.yml (named, with vars); anywhere else is an error.
     fn moved_to_schedules(&mut self, file: &Path, line: Option<usize>, ctx: &str) {
         self.diags.error(
-            "schedule-moved",
+            Code::ScheduleMoved,
             Some(file.to_path_buf()),
             line,
             format!(
@@ -4176,7 +4186,7 @@ impl Loader {
                 let mut ok = true;
                 if !is_identifier(&name) {
                     self.diags.error(
-                        "invalid-timing",
+                        Code::InvalidTiming,
                         file.clone(),
                         line,
                         format!(
@@ -4187,7 +4197,7 @@ impl Loader {
                 }
                 if let Some(prev) = seen.get(&name) {
                     self.diags.error(
-                        "duplicate-timing-name",
+                        Code::DuplicateTimingName,
                         file.clone(),
                         line,
                         format!("timing `{name}` is already declared at {prev}; timing names must be unique"),
@@ -4200,7 +4210,7 @@ impl Loader {
                 );
                 let Loose::Ok(t) = v else {
                     self.diags.error(
-                        "invalid-timing",
+                        Code::InvalidTiming,
                         file.clone(),
                         line,
                         format!("timing `{name}` must be a map, e.g. `{{cron: \"0 6 1 * *\", timezone: Australia/Sydney}}`"),
@@ -4210,7 +4220,7 @@ impl Loader {
                 };
                 for k in &t.unknown.0 {
                     self.diags.error(
-                        "invalid-timing",
+                        Code::InvalidTiming,
                         file.clone(),
                         line,
                         format!("timing `{name}`: unknown key `{}`", k.name),
@@ -4221,7 +4231,7 @@ impl Loader {
                 let shape = schedule::validate_block(&block, "a timing", "`cron`, `every` or `rrule`");
                 for e in &shape {
                     self.diags.error(
-                        "invalid-timing",
+                        Code::InvalidTiming,
                         file.clone(),
                         line,
                         format!("timing `{name}`: {e}"),
@@ -4248,7 +4258,7 @@ impl Loader {
                     }
                     if let Some(msg) = schedule::no_time(&block) {
                         self.diags.warning(
-                            "schedule-no-time",
+                            Code::ScheduleNoTime,
                             file.clone(),
                             line,
                             format!("timing `{name}`: {msg}"),
@@ -4298,7 +4308,7 @@ impl Loader {
                     Some(Loose::Ok(n)) if is_identifier(n) => {
                         if let Some(prev) = seen.get(n) {
                             self.diags.error(
-                                "duplicate-schedule-name",
+                                Code::DuplicateScheduleName,
                                 file.clone(),
                                 line,
                                 format!("schedule `{n}` is already declared at {prev}; schedule names must be unique"),
@@ -4313,7 +4323,7 @@ impl Loader {
                     }
                     Some(Loose::Ok(n)) => {
                         self.diags.error(
-                            "invalid-schedule",
+                            Code::InvalidSchedule,
                             file.clone(),
                             line,
                             format!("schedule name `{n}` must be letters, digits and `_`, not starting with a digit"),
@@ -4323,7 +4333,7 @@ impl Loader {
                     }
                     _ => {
                         self.diags.error(
-                            "invalid-schedule",
+                            Code::InvalidSchedule,
                             file.clone(),
                             line,
                             "every schedule needs a `name`",
@@ -4337,7 +4347,7 @@ impl Loader {
                     Some(Loose::Ok(v)) => v.clone(),
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
-                            "invalid-schedule",
+                            Code::InvalidSchedule,
                             file.clone(),
                             line,
                             format!("schedule `{name}`: `vars` must be a map"),
@@ -4348,7 +4358,7 @@ impl Loader {
                 };
                 for k in &m.unknown.0 {
                     self.diags.error(
-                        "invalid-schedule",
+                        Code::InvalidSchedule,
                         file.clone(),
                         line,
                         format!("unknown schedule key `{}`", k.name),
@@ -4363,7 +4373,7 @@ impl Loader {
                     }
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
-                            "invalid-schedule",
+                            Code::InvalidSchedule,
                             file.clone(),
                             line,
                             format!(
@@ -4399,7 +4409,7 @@ impl Loader {
                                 format!("valid names: {}", names.join(", "))
                             };
                             self.diags.error(
-                                "unknown-timing",
+                                Code::UnknownTiming,
                                 file.clone(),
                                 line,
                                 format!("schedule `{name}`: no timing `{t}`; {valid}"),
@@ -4419,7 +4429,7 @@ impl Loader {
                     }
                     if let Some(msg) = schedule::no_time(block) {
                         self.diags.warning(
-                            "schedule-no-time",
+                            Code::ScheduleNoTime,
                             file.clone(),
                             line,
                             format!("schedule `{name}`: {msg}"),
@@ -4427,12 +4437,12 @@ impl Loader {
                     }
                 }
                 for e in shape {
-                    self.diags.error("invalid-schedule", file.clone(), line, e);
+                    self.diags.error(Code::InvalidSchedule, file.clone(), line, e);
                     ok = false;
                 }
                 if select.is_some() && report.is_some() {
                     self.diags.error(
-                        "invalid-schedule",
+                        Code::InvalidSchedule,
                         file.clone(),
                         line,
                         "use either `select:` or `report:`, not both",
@@ -4441,7 +4451,7 @@ impl Loader {
                 }
                 if select.is_some() && set.is_some() {
                     self.diags.error(
-                        "invalid-schedule",
+                        Code::InvalidSchedule,
                         file.clone(),
                         line,
                         "`set:` only applies with `report:`",
@@ -4452,7 +4462,7 @@ impl Loader {
                     match selector::resolve(project, sel) {
                         Ok(r) if r.is_empty() => {
                             self.diags.error(
-                                "selector-matches-nothing",
+                                Code::SelectorMatchesNothing,
                                 file.clone(),
                                 line,
                                 format!("selector `{sel}` matches no report"),
@@ -4470,7 +4480,7 @@ impl Loader {
                     match project.report(rn) {
                         None => {
                             self.diags.error(
-                                "selector-matches-nothing",
+                                Code::SelectorMatchesNothing,
                                 file.clone(),
                                 line,
                                 format!("report `{rn}` doesn't exist"),
@@ -4482,7 +4492,7 @@ impl Loader {
                                 && r.binding(sn).is_none()
                             {
                                 self.diags.error(
-                                    "selector-matches-nothing",
+                                    Code::SelectorMatchesNothing,
                                     file.clone(),
                                     line,
                                     format!("report `{rn}` has no Set `{sn}`"),
@@ -4494,7 +4504,7 @@ impl Loader {
                 }
                 if select.is_none() && report.is_none() {
                     self.diags.error(
-                        "invalid-schedule",
+                        Code::InvalidSchedule,
                         file.clone(),
                         line,
                         format!("schedule `{name}` needs `report:` (optionally with `set:`) or `select:`"),
@@ -4520,7 +4530,7 @@ impl Loader {
                     Some(Loose::Ok(b)) => *b,
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
-                            "invalid-schedule",
+                            Code::InvalidSchedule,
                             file.clone(),
                             line,
                             format!("schedule `{name}`: `enabled` must be true or false"),
@@ -4548,7 +4558,7 @@ impl Loader {
         for (name, t) in &project.timings {
             if !used_timings.contains(name) {
                 self.diags.warning(
-                    "unused-timing",
+                    Code::UnusedTiming,
                     Some(t.location.0.clone()),
                     t.location.1,
                     format!("timing `{name}` isn't used by any schedule"),
@@ -4618,7 +4628,7 @@ impl Loader {
                     for (bn, pb) in &rendered[i + 1..] {
                         if let Some(same) = pa.iter().find(|p| pb.contains(p)) {
                             self.diags.warning(
-                                "schedule-path-clash",
+                                Code::SchedulePathClash,
                                 Some(report.file.clone()),
                                 None,
                                 format!(
@@ -4674,7 +4684,7 @@ impl Loader {
                     .unwrap_or(chrono_tz::Tz::UTC);
                 if renders != fires && seen.insert(report) {
                     self.diags.warning(
-                        "schedule-timezone-mismatch",
+                        Code::ScheduleTimezoneMismatch,
                         Some(e.location.0.clone()),
                         e.location.1,
                         format!(
@@ -4699,7 +4709,7 @@ impl Loader {
         }
         if !profiles.exists() {
             self.diags.error(
-                "profiles-missing",
+                Code::ProfilesMissing,
                 None,
                 None,
                 if profiles.found_by == "~/.dre" {
@@ -4727,7 +4737,7 @@ impl Loader {
                 }
                 if !profiles.declares(role, name) {
                     self.diags.error(
-                        "unknown-profile",
+                        Code::UnknownProfile,
                         file.clone(),
                         *line,
                         format!(
@@ -4753,7 +4763,7 @@ impl Loader {
         let name = m.name.ok().cloned().unwrap_or_default();
         let err = |s: &mut Self, msg: String| {
             s.diags.error(
-                "invalid-plugin-declaration",
+                Code::InvalidPluginDeclaration,
                 file.clone(),
                 line,
                 format!("plugin package `{name}`: {msg}"),
@@ -4850,7 +4860,7 @@ impl Loader {
                                 )),
                                 Loose::Bad(_) => {
                                     self.diags.error(
-                                        "invalid-plugin-declaration",
+                                        Code::InvalidPluginDeclaration,
                                         file.clone(),
                                         iline,
                                         "each `plugins` entry is a package name, `name: \"<version>\"`, or a map with `name:` and one of `github:`, `local:`, `registry:`",
@@ -4871,7 +4881,7 @@ impl Loader {
                     Loose::Bad(f) if f.kind == "nothing" => Vec::new(),
                     Loose::Bad(_) => {
                         self.diags.error(
-                            "invalid-plugin-declaration",
+                            Code::InvalidPluginDeclaration,
                             file.clone(),
                             line,
                             "`plugins` must be a list like `- duckdb: \">=1.0\"`",
@@ -4882,7 +4892,7 @@ impl Loader {
                 for (name, c, source, eline) in entries {
                     if !dre_protocol::valid_name(&name) {
                         self.diags.error(
-                            "invalid-plugin-declaration",
+                            Code::InvalidPluginDeclaration,
                             file.clone(),
                             eline,
                             format!(
@@ -4903,7 +4913,7 @@ impl Loader {
                             source,
                         }),
                         Err(e) => self.diags.error(
-                            "invalid-version-constraint",
+                            Code::InvalidVersionConstraint,
                             file.clone(),
                             eline,
                             format!("plugin package `{name}`: invalid version constraint `{raw}`: {e}"),
@@ -4923,7 +4933,7 @@ impl Loader {
                 .unwrap_or_default();
             if let Some(other) = ds.iter().find(|d| !d.source.is_default() && d.source != source) {
                 self.diags.error(
-                    "conflicting-plugin-sources",
+                    Code::ConflictingPluginSources,
                     Some(other.file.clone()),
                     None,
                     format!(
@@ -4941,7 +4951,7 @@ impl Loader {
                     for b in &ds[i + 1..] {
                         if !constraints::compatible(&[&a.req, &b.req]) {
                             self.diags.error(
-                                "conflicting-plugin-constraints",
+                                Code::ConflictingPluginConstraints,
                                 Some(b.file.clone()),
                                 None,
                                 format!(
@@ -5017,7 +5027,7 @@ impl Loader {
     /// `sources:`, `formats:` or `destinations:` where plugins were once declared.
     fn old_plugin_key(&mut self, yf: &YamlFile, key: &str) {
         self.diags.error(
-            "moved-plugin-declaration",
+            Code::MovedPluginDeclaration,
             Some(yf.display.clone()),
             yf.line_of(key, None),
             format!(
@@ -5132,7 +5142,7 @@ impl Loader {
         if let Err((line, msg)) = preflight::check_syntax(&file.to_string_lossy(), src) {
             let line = fixed_line.or(line.map(|l| l + line_offset));
             self.diags.error(
-                "jinja-syntax",
+                Code::JinjaSyntax,
                 f.clone(),
                 line,
                 format!("Jinja syntax error: {msg}"),
@@ -5145,7 +5155,7 @@ impl Loader {
         {
             if std::env::var_os(&c.name).is_none() {
                 self.diags.error(
-                    "unset-env-var",
+                    Code::UnsetEnvVar,
                     f.clone(),
                     Some(fixed_line.unwrap_or(c.line + line_offset)),
                     format!(
@@ -5157,7 +5167,7 @@ impl Loader {
         }
         for (name, instead, line) in preflight::removed_names(src) {
             self.diags.error(
-                "removed-template-name",
+                Code::RemovedTemplateName,
                 f.clone(),
                 Some(fixed_line.unwrap_or(line + line_offset)),
                 format!("`{name}` was removed in DRE 0.2: use {instead}"),
@@ -5165,7 +5175,7 @@ impl Loader {
         }
         for (r, line) in preflight::unknown_run_refs(src) {
             self.diags.error(
-                "unknown-run-attribute",
+                Code::UnknownRunAttribute,
                 f.clone(),
                 Some(fixed_line.unwrap_or(line + line_offset)),
                 format!(
@@ -5190,7 +5200,7 @@ impl Loader {
         {
             if !vars.contains_key(&c.name) && !cli.contains(c.name.as_str()) {
                 self.diags.error(
-                    "unresolved-var",
+                    Code::UnresolvedVar,
                     Some(file.to_path_buf()),
                     Some(c.line + line_offset),
                     format!(
@@ -5215,7 +5225,7 @@ impl Loader {
                 }
                 let Some(path) = find_template(&self.root, &t.file) else {
                     self.diags.error(
-                        "missing-template",
+                        Code::MissingTemplate,
                         Some(r.file.clone()),
                         None,
                         format!("report `{}`: template file `{}` doesn't exist", r.name, t.file),
@@ -5227,7 +5237,7 @@ impl Loader {
                         for tb in &t.bindings {
                             if !sheets.contains(&tb.sheet) {
                                 self.diags.error(
-                                    "invalid-template",
+                                    Code::InvalidTemplate,
                                     Some(r.file.clone()),
                                     None,
                                     format!(
@@ -5242,7 +5252,7 @@ impl Loader {
                         }
                     }
                     Err(e) => self.diags.error(
-                        "invalid-template",
+                        Code::InvalidTemplate,
                         Some(r.file.clone()),
                         None,
                         format!("report `{}`: can't read template `{}`: {e}", r.name, t.file),

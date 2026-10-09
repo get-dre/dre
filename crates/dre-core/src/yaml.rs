@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::codes::Code;
 use crate::config::node::{self, Kind, Node};
 use crate::diag::Diagnostics;
 
@@ -25,7 +26,12 @@ impl YamlFile {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) => {
-                diags.error("io-error", Some(display), None, format!("cannot read file: {e}"));
+                diags.error(
+                    Code::IoError,
+                    Some(display),
+                    None,
+                    format!("cannot read file: {e}"),
+                );
                 return None;
             }
         };
@@ -45,7 +51,7 @@ impl YamlFile {
             }
             Err(e) => {
                 diags.error(
-                    "yaml-syntax",
+                    Code::YamlSyntax,
                     Some(display),
                     e.line,
                     format!("invalid YAML: {}", e.message),

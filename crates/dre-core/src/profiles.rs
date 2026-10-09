@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::codes::Code;
 use crate::config::de::{self, Found, Located, Loose, Map, UnknownKeys};
 use crate::config::node;
 use crate::diag::Diagnostics;
@@ -239,7 +240,7 @@ impl Profiles {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
-                diags.error("io-error", Some(path), None, format!("cannot read file: {e}"));
+                diags.error(Code::IoError, Some(path), None, format!("cannot read file: {e}"));
                 return out;
             }
         };
@@ -247,7 +248,7 @@ impl Profiles {
             Ok(n) => n,
             Err(e) => {
                 diags.error(
-                    "yaml-syntax",
+                    Code::YamlSyntax,
                     Some(path),
                     e.line,
                     format!("invalid YAML: {}", e.message),
@@ -259,7 +260,7 @@ impl Profiles {
         let raw: Loose<ProfilesFile> = match de::from_node(&tree) {
             Ok(r) => r,
             Err(e) => {
-                diags.error("invalid-profiles", file, e.line, e.message);
+                diags.error(Code::InvalidProfiles, file, e.line, e.message);
                 return out;
             }
         };
@@ -268,7 +269,7 @@ impl Profiles {
             Loose::Bad(Found { kind: "nothing", .. }) => return out,
             Loose::Bad(_) => {
                 diags.error(
-                    "invalid-profiles",
+                    Code::InvalidProfiles,
                     file,
                     None,
                     "profiles.yml must be a map with `connections:` and/or `destinations:`",
@@ -278,7 +279,7 @@ impl Profiles {
         };
         for k in &raw.unknown.0 {
             diags.error(
-                "invalid-profiles",
+                Code::InvalidProfiles,
                 file.clone(),
                 Some(k.line),
                 format!(
@@ -290,7 +291,7 @@ impl Profiles {
         let connections = match (raw.connections, raw.sources) {
             (Some(c), Some(s)) => {
                 diags.error(
-                    "invalid-profiles",
+                    Code::InvalidProfiles,
                     file.clone(),
                     s.line(),
                     "profiles.yml has both `connections:` and `sources:`; `sources:` is the old name of `connections:`, so move its profiles under `connections:`",
@@ -300,7 +301,7 @@ impl Profiles {
             (Some(c), None) => Some(("connections", c)),
             (None, Some(s)) => {
                 diags.warning(
-                    "profiles-sources-renamed",
+                    Code::ProfilesSourcesRenamed,
                     file.clone(),
                     s.line(),
                     "`sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x",
@@ -436,7 +437,7 @@ fn parse_section<P: Into<RawProfile>>(
 ) -> (BTreeMap<String, Profile>, BTreeMap<String, usize>) {
     let Loose::Ok(profiles) = section.value else {
         diags.error(
-            "invalid-profiles",
+            Code::InvalidProfiles,
             Some(path.to_path_buf()),
             section.line(),
             format!("`{key}` must be a map of profile names"),
@@ -466,7 +467,7 @@ fn parse_profile(
     let what = format!("{} profile `{}`", role.as_str(), name.value);
     let Loose::Ok(m) = v.value else {
         diags.error(
-            "invalid-profile",
+            Code::InvalidProfile,
             file,
             line,
             format!("{what} must be a map with `targets`"),
@@ -481,7 +482,7 @@ fn parse_profile(
         }) if !t.trim().is_empty() => Some(t),
         Some(t) => {
             diags.error(
-                "invalid-profile",
+                Code::InvalidProfile,
                 file.clone(),
                 t.line(),
                 format!("{what}: `target` must be the name of one of its `targets`"),
@@ -496,7 +497,7 @@ fn parse_profile(
             ""
         };
         diags.error(
-            "invalid-profile",
+            Code::InvalidProfile,
             file,
             line,
             format!("{what} needs a map of named `targets`{hint}"),
@@ -523,7 +524,7 @@ fn parse_profile(
             match problem {
                 Some(p) => {
                     diags.error(
-                        "invalid-profile",
+                        Code::InvalidProfile,
                         file.clone(),
                         tline,
                         format!("target `{tname}` of {what}: {p}"),
@@ -538,7 +539,7 @@ fn parse_profile(
         }
         let Some(kind) = o.get("type").and_then(serde_json::Value::as_str) else {
             diags.error(
-                "invalid-profile",
+                Code::InvalidProfile,
                 file.clone(),
                 tline,
                 format!("target `{tname}` of {what} has no `type`"),
@@ -564,7 +565,7 @@ fn parse_profile(
         let mut has: Vec<&String> = parsed.keys().chain(&nowhere).collect();
         has.sort();
         diags.error(
-            "invalid-profile",
+            Code::InvalidProfile,
             file.clone(),
             target_line,
             format!(

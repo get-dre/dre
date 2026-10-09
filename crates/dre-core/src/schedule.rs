@@ -1,8 +1,10 @@
 //! Schedule timings: their shape, and the checks shared by `dre validate` and
 //! `dre schedule ls`. Core never fires schedules; `occurrences` works out when they would.
 
+use crate::codes::Code;
 use chrono::NaiveTime;
 use serde_json::{Map as JsonMap, Value as Json};
+
 type Mapping = JsonMap<String, Json>;
 use serde_json::Value;
 
@@ -357,12 +359,12 @@ pub fn time_of_day(timing: &JsonMap<String, Json>) -> Option<NaiveTime> {
 /// Problems that are warnings on 0.1.x and errors from 0.2.0: a timing whose occurrences would
 /// depend on when you look (no anchor), or one finer than a minute. `dre schedule ls` lists such
 /// a schedule under `problems`, without occurrences. Each is `(code, message)`.
-pub fn strictness(timing: &JsonMap<String, Json>) -> Vec<(&'static str, String)> {
+pub fn strictness(timing: &JsonMap<String, Json>) -> Vec<(Code, String)> {
     let mut out = Vec::new();
     let anchored = timing.contains_key("starting");
     if timing.contains_key("every") && !anchored {
         out.push((
-            "schedule-needs-anchor",
+            Code::ScheduleNeedsAnchor,
             "`every` needs `starting` (its first date): it counts from it, so its occurrences would depend on when you look".to_string(),
         ));
     }
@@ -376,13 +378,13 @@ pub fn strictness(timing: &JsonMap<String, Json>) -> Vec<(&'static str, String)>
     let freq = part(&parts, "FREQ").unwrap_or("");
     if matches!(freq, "SECONDLY" | "MINUTELY") {
         out.push((
-            "schedule-too-frequent",
+            Code::ScheduleTooFrequent,
             format!("`FREQ={freq}` is finer than DRE schedules go: use `FREQ=HOURLY` with `BYMINUTE`, or a cron expression"),
         ));
     }
     if part(&parts, "BYSECOND").is_some() {
         out.push((
-            "schedule-seconds",
+            Code::ScheduleSeconds,
             "`BYSECOND` isn't supported: schedules fire on whole minutes".to_string(),
         ));
     }
@@ -405,7 +407,7 @@ pub fn strictness(timing: &JsonMap<String, Json>) -> Vec<(&'static str, String)>
         };
         if let Some(why) = why {
             out.push((
-                "schedule-needs-anchor",
+                Code::ScheduleNeedsAnchor,
                 format!("this rule needs `starting` (its first date): {why}, so its occurrences would depend on when you look"),
             ));
         }

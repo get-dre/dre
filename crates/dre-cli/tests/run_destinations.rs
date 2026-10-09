@@ -116,6 +116,8 @@ fn a_failed_destination_does_not_stop_the_next_one() {
     let r = results(&p);
     assert_eq!(r["status"], "error");
     assert_eq!(r["deliveries"][0]["status"], "failed");
+    assert_eq!(r["error_code"], "delivery-failed");
+    assert_eq!(r["deliveries"][0]["error_code"], "delivery-failed");
     assert!(
         r["deliveries"][0]["error"]
             .as_str()

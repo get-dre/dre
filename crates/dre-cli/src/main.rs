@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+use dre_core::codes::Code;
 use dre_core::project::{self, LoadOptions};
 use dre_core::settings;
 
@@ -75,6 +76,14 @@ enum Command {
     /// Commands about DRE itself rather than a project.
     #[command(subcommand)]
     System(system::SystemCommand),
+    /// Explain an error code (`dre explain unknown-key`): what it means and how to fix it.
+    Explain(ExplainArgs),
+}
+
+#[derive(Args)]
+struct ExplainArgs {
+    /// The code, as in `error[unknown-key]`.
+    code: String,
 }
 
 #[derive(Args)]
@@ -306,6 +315,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     match cli.command {
+        Command::Explain(a) => explain(&a.code),
         Command::Validate(a) => validate(a, &printer),
         Command::Run(a) => run(a, printer),
         Command::Compile(a) => compile(a, printer),
@@ -327,6 +337,49 @@ fn main() -> ExitCode {
     }
 }
 
+/// `dre explain <code>`: the registry's explanation of a code.
+fn explain(code: &str) -> ExitCode {
+    let code = code
+        .trim()
+        .trim_start_matches("error[")
+        .trim_start_matches("warning[")
+        .trim_end_matches(']');
+    if let Some(c) = dre_core::codes::Code::parse(code) {
+        println!(
+            "{code} ({})\n\n{}\n\n{}\n\n{}#{code}",
+            c.kind(),
+            c.summary(),
+            c.explanation(),
+            dre_core::codes::REFERENCE_URL
+        );
+        return ExitCode::SUCCESS;
+    }
+    if let Some((plugin, _)) = code.split_once('/') {
+        println!(
+            "`{code}` is a code of the `{plugin}` plugin; see its page in the plugins reference: https://getdre.com/docs/plugins/"
+        );
+        return ExitCode::SUCCESS;
+    }
+    let near: Vec<&str> = dre_core::codes::Code::ALL
+        .iter()
+        .map(|c| c.as_str())
+        .filter(|s| s.contains(code) || code.contains(s))
+        .collect();
+    let hint = if near.is_empty() {
+        format!("; every code is listed at {}", dre_core::codes::REFERENCE_URL)
+    } else {
+        format!(
+            "; did you mean {}?",
+            near.iter()
+                .map(|s| format!("`{s}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    eprintln!("error: no code `{code}`{hint}");
+    ExitCode::from(2)
+}
+
 fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
     // With auto-install off, a missing package is reported by the load.
     if !a.project.no_auto_install {
@@ -346,7 +399,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
         dre_core::secrets::set_enabled(p.mask_secrets);
     }
     if let Err(e) = write_manifest(project.as_ref(), &report_errors, &a.project) {
-        diags.error("target-path-unwritable", None, None, e);
+        diags.error(Code::TargetPathUnwritable, None, None, e);
     }
     if let Some(p) = &project {
         // Plugins aren't installed when the project already has errors, so a missing one is then
@@ -362,7 +415,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
         _ => (Vec::new(), None),
     };
     if let Some(w) = targets.as_ref().and_then(dre_core::run::RunTargets::mismatch) {
-        diags.warning("target-mismatch", None, None, w);
+        diags.warning(Code::TargetMismatch, None, None, w);
     }
     let ok = !diags.has_errors();
     if a.json {
@@ -479,9 +532,9 @@ fn compile_for_validate(
     let summary = dre_core::run::run(project, &opts, &mut ui);
     if let Some(e) = summary.error {
         let code = if summary.missing_entry {
-            "missing-target-entry"
+            Code::MissingTargetEntry
         } else {
-            "invalid-selector"
+            Code::InvalidSelector
         };
         diags.error(code, None, None, e);
     }
@@ -497,7 +550,7 @@ fn compile_for_validate(
         if err.contains("run_query() failed:") || (err.contains("`columns('") && err.contains("')` failed:"))
         {
             diags.warning(
-                "compile-needs-run",
+                Code::CompileNeedsRun,
                 None,
                 None,
                 format!(
@@ -508,7 +561,7 @@ fn compile_for_validate(
             continue;
         }
         diags.error(
-            "compile-failed",
+            Code::CompileFailed,
             None,
             None,
             format!(
@@ -559,14 +612,10 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
     let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
-        return ExitCode::FAILURE;
+        return ExitCode::from(summary.exit_code());
     }
     printer.finish("compile");
-    if summary.failed() {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
-    }
+    ExitCode::from(summary.exit_code())
 }
 
 fn validate_live(
@@ -590,14 +639,10 @@ fn validate_live(
     let summary = dre_core::run::run(project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
-        return ExitCode::FAILURE;
+        return ExitCode::from(summary.exit_code());
     }
     printer.finish("validate --live");
-    if summary.failed() {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
-    }
+    ExitCode::from(summary.exit_code())
 }
 
 /// `-s` values (joined: space means union) or the positional selector.
@@ -847,14 +892,10 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
-        return ExitCode::FAILURE;
+        return ExitCode::from(summary.exit_code());
     }
     printer.finish("run");
-    if summary.failed() {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
-    }
+    ExitCode::from(summary.exit_code())
 }
 
 fn clean(a: CleanArgs) -> ExitCode {

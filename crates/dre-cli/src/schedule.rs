@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use clap::{Args, Subcommand, ValueEnum};
+use dre_core::codes::Code;
 use dre_core::occurrences::{self, Request, Window};
 use dre_core::project::{self, LoadOptions};
 use serde_json::Value as Json;
@@ -149,12 +150,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
 /// An error about profiles.yml or the profiles a project names, which listing schedules doesn't
 /// need.
 fn about_profiles(d: &dre_core::Diagnostic, project: Option<&project::Project>) -> bool {
-    const CODES: &[&str] = &[
-        "unknown-profile",
-        "unknown-target",
-        "missing-target",
-        "profiles-missing",
-    ];
+    const CODES: &[Code] = &[Code::UnknownProfile, Code::ProfilesMissing];
     CODES.contains(&d.code) || project.is_some_and(|p| d.file.as_deref() == Some(p.profiles.path.as_path()))
 }
 

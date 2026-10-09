@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::codes::Code;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -15,8 +17,8 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub severity: Severity,
-    /// Stable, kebab-case identifier for tooling (e.g. `duplicate-report-name`).
-    pub code: &'static str,
+    /// Its registered code (`duplicate-report-name`), serialized as the slug.
+    pub code: Code,
     pub message: String,
     /// Path relative to the project root, or absolute for files outside it (profiles.yml).
     pub file: Option<PathBuf>,
@@ -57,7 +59,7 @@ impl Diagnostics {
 
     pub fn error(
         &mut self,
-        code: &'static str,
+        code: Code,
         file: Option<PathBuf>,
         line: Option<usize>,
         message: impl Into<String>,
@@ -74,7 +76,7 @@ impl Diagnostics {
 
     pub fn warning(
         &mut self,
-        code: &'static str,
+        code: Code,
         file: Option<PathBuf>,
         line: Option<usize>,
         message: impl Into<String>,

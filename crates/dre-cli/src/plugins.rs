@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use dre_core::codes::Code;
 use dre_core::lock::Lock;
 use dre_core::manager::{self, Index, IndexPackage};
 use dre_core::project::{self, LoadOptions, PluginSource, Project};
@@ -56,9 +57,9 @@ pub fn check_for_validate(
     if let Err(errors) = r {
         for e in errors {
             if install {
-                diags.error("plugin-install-failed", None, None, e);
+                diags.error(Code::PluginInstallFailed, None, None, e);
             } else {
-                diags.warning("plugin-not-installed", None, None, e);
+                diags.warning(Code::PluginNotInstalled, None, None, e);
             }
         }
     }
