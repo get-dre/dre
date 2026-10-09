@@ -1,0 +1,8 @@
+queries: [orders]
+sets:
+  - name: eu
+    exclude: [orders]
+  - name: us
+    colour: blue
+    exclude: [nope]
+  - us
