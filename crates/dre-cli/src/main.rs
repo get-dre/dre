@@ -883,7 +883,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         .date
         .or(opts.scheduled_at.map(|t| t.date_naive()))
         .unwrap_or_else(|| chrono::Utc::now().date_naive());
-    let mut params = opts.params(date);
+    let mut params = serde_json::to_value(opts.params(date)).unwrap_or_default();
     params["target"] = serde_json::json!(project.target_name);
     params["profiles"] = serde_json::json!(project.profiles.path);
     params["target_path"] = serde_json::json!(project.target_dir);

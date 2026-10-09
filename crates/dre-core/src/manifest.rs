@@ -8,15 +8,17 @@
 //! is rendered with the run's target, vars, environment variables and `run.*`, and each query's
 //! sources and connection come from the parse pass. Two targets can give two manifests.
 //!
-//! The format is a public, versioned contract (`docs/manifest.md`, `docs/manifest.schema.json`):
-//! adding optional fields keeps [`SCHEMA`]; removing, renaming or re-typing a field, or changing
-//! what one means, bumps it.
+//! The format is a public, versioned contract (`docs/manifest.md`; `docs/manifest.schema.json` is
+//! generated from [`Manifest`]): adding optional fields keeps [`SCHEMA_VERSION`]; removing,
+//! renaming or re-typing a field, or changing what one means, bumps it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map as JsonMap, Value as Json, json};
+use schemars::JsonSchema;
+use serde::Serialize;
+use serde_json::{Map as JsonMap, Value as Json};
 use sha2::{Digest, Sha256};
 
 use crate::diag::{Diagnostics, Severity};
@@ -24,7 +26,7 @@ use crate::lookups::LOOKUPS_DIR;
 use crate::project::{Binding, MACROS_DIR, PluginSource, Project, QueryEntry, REPORTS_DIR, Report};
 
 /// The manifest format's version.
-pub const SCHEMA: u64 = 2;
+pub const SCHEMA_VERSION: &str = "dre/manifest/v3";
 /// The manifest's file name in the target folder.
 pub const FILE: &str = "manifest.json";
 
@@ -38,7 +40,7 @@ pub fn path(project: &Project) -> PathBuf {
 
 /// The whole project's manifest.
 pub fn build(project: &Project, errors: &ReportErrors) -> Json {
-    let schedules: JsonMap<String, Json> = project
+    let schedules = project
         .schedules
         .iter()
         .map(|e| (e.name.clone(), schedule(project, &e.name)))
@@ -70,17 +72,307 @@ pub fn subset(
     document(project, reports, schedules, errors)
 }
 
+// -- the format ---------------------------------------------------------------------------------
+
+type Map = JsonMap<String, Json>;
+
+/// target/manifest.json, written by `dre compile`, `dre validate` and `dre run`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within a version; consumers should ignore fields they don't know. See docs/manifest.md.
+#[derive(Serialize, JsonSchema)]
+#[schemars(title = "DRE project manifest")]
+pub struct Manifest {
+    /// The format's version: `dre/manifest/v3` (DRE 0.4). Version 2 (DRE 0.2) had `"schema": 2` instead.
+    #[schemars(schema_with = "manifest_version")]
+    pub schema_version: &'static str,
+    /// The DRE version that wrote it.
+    pub version: String,
+    pub project: ManifestProject,
+    /// By report name.
+    pub reports: BTreeMap<String, ManifestReport>,
+    /// By schedule name (schedules.yml).
+    pub schedules: BTreeMap<String, Option<ManifestSchedule>>,
+    /// Declared sources (`sources:`), by name.
+    pub sources: BTreeMap<String, ManifestSource>,
+    /// The plugin packages the project declares.
+    pub plugins: Vec<ManifestPlugin>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ManifestProject {
+    pub name: String,
+    /// The run's target (environment), `target.name` in templates: --target, else DRE_TARGET, else `dev`. Each profile's own entry may differ (its `target:` in profiles.yml).
+    pub target: String,
+    /// The default connection's name, as written (it may hold Jinja).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_profile: Option<String>,
+    /// The project's `timezone:` (IANA name).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    /// Over the shared inputs: dre_project.yml, folder config, schedules.yml, dependencies.yml and other YAML that isn't a report's own, macros/, lookups/, and every .sql under reports/ that isn't a declared query. When it changes, every report may have changed.
+    #[schemars(schema_with = "sha256")]
+    pub checksum: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(rename = "report")]
+pub struct ManifestReport {
+    pub name: String,
+    /// False for a bare .sql under reports/ (an unmanaged report).
+    pub managed: bool,
+    /// The defining YAML, or the .sql of an unmanaged report.
+    #[schemars(schema_with = "path_schema")]
+    pub file: String,
+    /// Folder segments under reports/.
+    pub folder: Vec<String>,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_set: Option<String>,
+    pub queries: Vec<ManifestQuery>,
+    /// Every source any of the report's Bindings reads, `source.table`.
+    pub depends_on: DependsOn,
+    /// Over the defining file, every query file and any template.
+    #[schemars(schema_with = "sha256")]
+    pub checksum: String,
+    pub valid: bool,
+    /// Present when invalid: what's wrong.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Vec<String>>,
+    pub bindings: Vec<ManifestBinding>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct DependsOn {
+    /// `source.table` of every `source()` used, in order of first use.
+    pub sources: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(rename = "query")]
+pub struct ManifestQuery {
+    pub query: String,
+    #[schemars(schema_with = "path_schema")]
+    pub file: String,
+    /// The query's own `profile:`, as written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// In a Binding: the connection the query runs on, from the parse pass (its own `profile:`, a source's, else the inherited one). Null when none resolves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<Option<String>>,
+    /// In a Binding: what the query reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<DependsOn>,
+    /// Whether its result becomes a tab (false: run for its effects only).
+    pub tab: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<bool>,
+    /// Per result column, how to show it (xlsx).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Json>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(rename = "binding")]
+pub struct ManifestBinding {
+    /// Null for a report without Sets.
+    pub set: Option<String>,
+    /// The inherited connection (Set, report, folder `+profile`, `default_profile`), rendered. A query's own connection is on the query.
+    pub profile: Option<String>,
+    /// Fully merged: project < folders < report < Set.
+    pub vars: Map,
+    pub queries: Vec<ManifestQuery>,
+    /// The first output; every output is under `outputs`.
+    pub output: ManifestOutput,
+    /// Every output's destinations, in delivery order.
+    pub destinations: Vec<ManifestDestination>,
+    /// Every output, in declared order.
+    pub outputs: Vec<ManifestOutput>,
+    /// The schedules that run this Binding.
+    pub schedules: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema, Clone, Default)]
+pub struct ManifestOutput {
+    /// The output's `name:`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub format: String,
+    /// The queries it formats; absent means all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<String>>,
+    /// The `when:` condition, unrendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+    pub options: Map,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension: Option<String>,
+    /// The template file, as declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "path_schema")]
+    pub template: Option<String>,
+    /// In delivery order. (Absent on a Binding's `output`.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destinations: Option<Vec<ManifestDestination>>,
+}
+
+#[derive(Serialize, JsonSchema, Clone)]
+#[schemars(rename = "destination")]
+pub struct ManifestDestination {
+    /// The destination profile, rendered.
+    pub profile: String,
+    /// The path template, unrendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// A message output's entry: the outputs whose files go with the message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attach: Option<Vec<String>>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(rename = "schedule")]
+pub struct ManifestSchedule {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub select: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set: Option<String>,
+    /// The resolved timing: `cron`, `every` or `rrule`, with `starting`, `at`, `except` and `also` when given. With `timing`, the shared timing's fields.
+    pub schedule: Map,
+    /// The timings.yml entry the timing comes from, when it's a shared one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<String>,
+    /// False when the schedule is paused (`enabled: false`).
+    pub enabled: bool,
+    pub vars: Map,
+    /// The schedule's `timezone:`, or its shared timing's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    /// What `dre run --schedule <name>` runs.
+    pub bindings: Vec<ScheduledBinding>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ScheduledBinding {
+    pub report: String,
+    pub set: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(rename = "source")]
+pub struct ManifestSource {
+    pub name: String,
+    /// The YAML file declaring it.
+    #[schemars(schema_with = "path_schema")]
+    pub file: String,
+    /// The connection it lives on, rendered. Absent: it runs wherever its query runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Rendered. Absent: `source()` renders two parts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+    /// Rendered; the source's name unless set.
+    pub schema: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub meta: Map,
+    /// By table name.
+    pub tables: BTreeMap<String, ManifestTable>,
+    /// Fields that didn't render (left as written).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Vec<String>>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ManifestTable {
+    pub name: String,
+    /// The real table name, rendered; the table's name unless set.
+    pub identifier: String,
+    /// Which parts `source()` quotes, the table's over the source's.
+    #[schemars(schema_with = "quoting")]
+    pub quoting: crate::render::Quoting,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub meta: Map,
+    #[schemars(schema_with = "columns")]
+    pub columns: Vec<crate::project::SourceColumn>,
+    /// The reports that read it. Empty: unused.
+    pub used_by: BTreeSet<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ManifestPlugin {
+    pub package: String,
+    /// The version requirement (`*` for any).
+    pub version: String,
+    pub source: PluginSourceRecord,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PluginSourceRecord {
+    #[serde(rename = "type")]
+    #[schemars(schema_with = "plugin_source_type")]
+    pub kind: &'static str,
+    /// Another registry's URL or path, a GitHub `owner/repo`, or a local executable's path. Absent for DRE's default registry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+}
+
+fn manifest_version(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"const": SCHEMA_VERSION})
+}
+
+fn sha256(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "string", "pattern": "^[0-9a-f]{64}$"})
+}
+
+fn path_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "string", "description": "Relative to the project root, with forward slashes."})
+}
+
+fn plugin_source_type(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"enum": ["registry", "github", "local"]})
+}
+
+fn quoting(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "properties": {"database": {"type": "boolean"}, "schema": {"type": "boolean"}, "identifier": {"type": "boolean"}},
+        "required": ["database", "schema", "identifier"]
+    })
+}
+
+fn columns(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "data_type": {"type": "string"}},
+            "required": ["name"]
+        }
+    })
+}
+
+// -- building it --------------------------------------------------------------------------------
+
 fn document(
     project: &Project,
     reports: Vec<(&Report, Vec<&Binding>)>,
-    schedules: JsonMap<String, Json>,
+    schedules: BTreeMap<String, Option<ManifestSchedule>>,
     errors: &ReportErrors,
 ) -> Json {
-    let reports: JsonMap<String, Json> = reports
+    let reports = reports
         .into_iter()
         .map(|(r, bs)| (r.name.clone(), report(project, r, &bs, errors.get(&r.name))))
         .collect();
-    let plugins: Vec<Json> = project
+    let plugins = project
         .plugins
         .iter()
         .map(|p| {
@@ -90,45 +382,37 @@ fn document(
                 PluginSource::Github(r) => ("github", Some(r.clone())),
                 PluginSource::Local(l) => ("local", Some(l.clone())),
             };
-            let mut source = JsonMap::new();
-            source.insert("type".into(), json!(kind));
-            if let Some(l) = location {
-                source.insert("location".into(), json!(l));
+            ManifestPlugin {
+                package: p.name.clone(),
+                version: p.version.clone(),
+                source: PluginSourceRecord { kind, location },
             }
-            json!({"package": p.name, "version": p.version, "source": source})
         })
         .collect();
-    let mut proj = JsonMap::new();
-    proj.insert("name".into(), json!(project.name));
-    proj.insert("target".into(), json!(project.target_name));
-    insert_some(&mut proj, "default_profile", project.default_profile.as_ref());
-    insert_some(&mut proj, "timezone", project.timezone.as_ref());
-    proj.insert("checksum".into(), json!(project_checksum(project)));
-    let doc = json!({
-        "schema": SCHEMA,
-        "version": crate::version(),
-        "project": proj,
-        "reports": reports,
-        "schedules": schedules,
-        "sources": sources(project),
-        "plugins": plugins,
-    });
-    sorted(doc)
+    let doc = Manifest {
+        schema_version: SCHEMA_VERSION,
+        version: crate::version().to_string(),
+        project: ManifestProject {
+            name: project.name.clone(),
+            target: project.target_name.clone(),
+            default_profile: project.default_profile.clone(),
+            timezone: project.timezone.clone(),
+            checksum: project_checksum(project),
+        },
+        reports,
+        schedules,
+        sources: sources(project),
+        plugins,
+    };
+    sorted(serde_json::to_value(doc).expect("a manifest serializes"))
 }
 
-fn report(project: &Project, r: &Report, bindings: &[&Binding], errors: Option<&Vec<String>>) -> Json {
-    let mut m = JsonMap::new();
-    m.insert("name".into(), json!(r.name));
-    m.insert("managed".into(), json!(r.managed));
-    m.insert("file".into(), json!(slash(&r.file)));
-    m.insert("folder".into(), json!(r.folder));
-    m.insert("tags".into(), json!(r.tags));
-    insert_some(&mut m, "timezone", r.timezone.as_ref());
-    insert_some(&mut m, "default_set", r.default_set.as_ref());
-    m.insert(
-        "queries".into(),
-        json!(r.queries.iter().map(|q| query(q, None)).collect::<Vec<_>>()),
-    );
+fn report(
+    project: &Project,
+    r: &Report,
+    bindings: &[&Binding],
+    errors: Option<&Vec<String>>,
+) -> ManifestReport {
     // Every source any Binding reads, as `depends_on` says it in dbt.
     let mut used: Vec<String> = Vec::new();
     for p in r.bindings.iter().filter_map(|b| b.parsed.as_ref()) {
@@ -138,121 +422,109 @@ fn report(project: &Project, r: &Report, bindings: &[&Binding], errors: Option<&
             }
         }
     }
-    m.insert("depends_on".into(), json!({"sources": used}));
-    m.insert("checksum".into(), json!(report_checksum(project, r)));
     let errors = errors.cloned().unwrap_or_default();
-    m.insert("valid".into(), json!(errors.is_empty()));
-    if !errors.is_empty() {
-        m.insert("errors".into(), json!(errors));
+    ManifestReport {
+        name: r.name.clone(),
+        managed: r.managed,
+        file: slash(&r.file),
+        folder: r.folder.clone(),
+        tags: r.tags.clone(),
+        timezone: r.timezone.clone(),
+        default_set: r.default_set.clone(),
+        queries: r.queries.iter().map(|q| query(q, None)).collect(),
+        depends_on: DependsOn { sources: used },
+        checksum: report_checksum(project, r),
+        valid: errors.is_empty(),
+        errors: (!errors.is_empty()).then_some(errors),
+        bindings: bindings.iter().map(|b| binding(b)).collect(),
     }
-    m.insert(
-        "bindings".into(),
-        json!(bindings.iter().map(|b| binding(b)).collect::<Vec<_>>()),
-    );
-    Json::Object(m)
 }
 
 /// A query entry; with the parse pass's result (`parsed`), also its connection and sources.
-fn query(q: &QueryEntry, parsed: Option<&crate::parse::ParsedQuery>) -> Json {
-    let mut m = JsonMap::new();
-    m.insert("query".into(), json!(q.query));
-    m.insert("file".into(), json!(slash(&q.path)));
-    insert_some(&mut m, "profile", q.profile.as_ref());
-    if let Some(p) = parsed {
-        m.insert("connection".into(), json!(p.connection));
-        m.insert("depends_on".into(), json!({"sources": p.sources}));
+fn query(q: &QueryEntry, parsed: Option<&crate::parse::ParsedQuery>) -> ManifestQuery {
+    ManifestQuery {
+        query: q.query.clone(),
+        file: slash(&q.path),
+        profile: q.profile.clone(),
+        connection: parsed.map(|p| p.connection.clone()),
+        depends_on: parsed.map(|p| DependsOn {
+            sources: p.sources.clone(),
+        }),
+        tab: q.tab,
+        tab_name: q.tab_name.clone(),
+        anchor: q.anchor.clone(),
+        header: q.header,
+        columns: (!q.columns.is_empty()).then(|| serde_json::to_value(&q.columns).unwrap_or(Json::Null)),
     }
-    m.insert("tab".into(), json!(q.tab));
-    insert_some(&mut m, "tab_name", q.tab_name.as_ref());
-    insert_some(&mut m, "anchor", q.anchor.as_ref());
-    insert_some(&mut m, "header", q.header.as_ref());
-    if !q.columns.is_empty() {
-        m.insert(
-            "columns".into(),
-            serde_json::to_value(&q.columns).unwrap_or(Json::Null),
-        );
-    }
-    Json::Object(m)
 }
 
-fn binding(b: &Binding) -> Json {
+fn binding(b: &Binding) -> ManifestBinding {
     let parsed = b.parsed.as_deref();
     // Destinations are numbered across every output, as the parse pass renders them.
     let mut next = 0;
-    let outputs: Vec<(JsonMap<String, Json>, Vec<Json>)> = b
+    let outputs: Vec<ManifestOutput> = b
         .outputs
         .iter()
         .map(|o| {
-            let mut output = JsonMap::new();
-            insert_some(&mut output, "name", o.name.as_ref());
-            output.insert("format".into(), json!(o.format));
-            insert_some(&mut output, "queries", o.queries.as_ref());
-            insert_some(&mut output, "when", o.when.as_ref());
-            output.insert("options".into(), Json::Object(o.options.clone()));
-            insert_some(&mut output, "extension", o.extension.as_ref());
-            if let Some(t) = &o.template {
-                output.insert("template".into(), json!(t.file));
-            }
-            let destinations: Vec<Json> = o
+            let destinations = o
                 .destinations
                 .iter()
                 .map(|d| {
-                    let mut m = JsonMap::new();
                     let rendered = parsed.and_then(|p| p.destinations.get(next).cloned().flatten());
                     next += 1;
-                    m.insert(
-                        "profile".into(),
-                        json!(rendered.unwrap_or_else(|| d.profile.clone())),
-                    );
-                    insert_some(&mut m, "path", d.path.as_ref());
-                    if !d.attach.is_empty() {
-                        m.insert("attach".into(), json!(d.attach));
+                    ManifestDestination {
+                        profile: rendered.unwrap_or_else(|| d.profile.clone()),
+                        path: d.path.clone(),
+                        attach: (!d.attach.is_empty()).then(|| d.attach.clone()),
                     }
-                    Json::Object(m)
                 })
                 .collect();
-            (output, destinations)
+            ManifestOutput {
+                name: o.name.clone(),
+                format: o.format.clone(),
+                queries: o.queries.clone(),
+                when: o.when.clone(),
+                options: o.options.clone(),
+                extension: o.extension.clone(),
+                template: o.template.as_ref().map(|t| t.file.clone()),
+                destinations: Some(destinations),
+            }
         })
         .collect();
-    let output = outputs.first().map(|(o, _)| o.clone()).unwrap_or_default();
-    let destinations: Vec<Json> = outputs.iter().flat_map(|(_, d)| d.clone()).collect();
-    let outputs: Vec<Json> = outputs
-        .into_iter()
-        .map(|(mut o, d)| {
-            o.insert("destinations".into(), json!(d));
-            Json::Object(o)
+    let output = outputs
+        .first()
+        .map(|o| ManifestOutput {
+            destinations: None,
+            ..o.clone()
         })
+        .unwrap_or_default();
+    let destinations = outputs
+        .iter()
+        .flat_map(|o| o.destinations.clone().unwrap_or_default())
         .collect();
-    let mut m = JsonMap::new();
-    m.insert("set".into(), json!(b.set));
-    m.insert(
-        "profile".into(),
-        json!(parsed.map_or(b.profile.clone(), |p| p.inherited.clone())),
-    );
-    m.insert("vars".into(), Json::Object(b.vars.clone()));
-    m.insert(
-        "queries".into(),
-        json!(
-            b.queries
-                .iter()
-                .map(|q| query(q, parsed.and_then(|p| p.query(&q.query))))
-                .collect::<Vec<_>>()
-        ),
-    );
-    m.insert("output".into(), Json::Object(output));
-    m.insert("destinations".into(), json!(destinations));
-    m.insert("outputs".into(), json!(outputs));
-    m.insert("schedules".into(), json!(b.schedules));
-    Json::Object(m)
+    ManifestBinding {
+        set: b.set.clone(),
+        profile: parsed.map_or(b.profile.clone(), |p| p.inherited.clone()),
+        vars: b.vars.clone(),
+        queries: b
+            .queries
+            .iter()
+            .map(|q| query(q, parsed.and_then(|p| p.query(&q.query))))
+            .collect(),
+        output,
+        destinations,
+        outputs,
+        schedules: b.schedules.clone(),
+    }
 }
 
 /// Every declared source, with its fields rendered for the run's inputs (project vars, `--var`,
 /// the target, and `run.*` with no report: the run date, but a fixed `run.now` unless
-/// `DRE_RUN_AT` sets it, so the bytes don't change by the second). A field that doesn't render is left as written, with
-/// the problem under `errors`.
-fn sources(project: &Project) -> Json {
+/// `DRE_RUN_AT` sets it, so the bytes don't change by the second). A field that doesn't render
+/// is left as written, with the problem under `errors`.
+fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
     if project.sources.is_empty() {
-        return json!({});
+        return BTreeMap::new();
     }
     let inputs = &project.inputs;
     let calendar = crate::dates::Calendar {
@@ -287,7 +559,7 @@ fn sources(project: &Project) -> Json {
             }
         }
     }
-    let mut out = JsonMap::new();
+    let mut out = BTreeMap::new();
     for (name, s) in &project.sources {
         let mut errors: Vec<String> = Vec::new();
         let mut render = |key: &str, v: &str| match limited.render(&format!("`{key}`"), v) {
@@ -297,86 +569,73 @@ fn sources(project: &Project) -> Json {
                 v.to_string()
             }
         };
-        let mut m = JsonMap::new();
-        m.insert("name".into(), json!(name));
-        m.insert("file".into(), json!(slash(&s.file)));
-        if let Some(p) = &s.profile {
-            m.insert("profile".into(), json!(render("profile", p)));
-        }
-        if let Some(d) = &s.database {
-            m.insert("database".into(), json!(render("database", d)));
-        }
-        m.insert(
-            "schema".into(),
-            json!(render("schema", s.schema.as_deref().unwrap_or(name))),
-        );
-        insert_some(&mut m, "description", s.description.as_ref());
-        m.insert("tags".into(), json!(s.tags));
-        m.insert("meta".into(), Json::Object(s.meta.clone()));
-        let tables: JsonMap<String, Json> = s
+        let profile = s.profile.as_ref().map(|p| render("profile", p));
+        let database = s.database.as_ref().map(|d| render("database", d));
+        let schema = render("schema", s.schema.as_deref().unwrap_or(name));
+        let tables = s
             .tables
             .iter()
             .map(|t| {
                 let key = format!("{name}.{}", t.name);
-                let mut tm = JsonMap::new();
-                tm.insert("name".into(), json!(t.name));
-                tm.insert(
-                    "identifier".into(),
-                    json!(render("identifier", t.identifier.as_deref().unwrap_or(&t.name))),
-                );
-                tm.insert("quoting".into(), json!(t.quoting.over(&s.quoting)));
-                insert_some(&mut tm, "description", t.description.as_ref());
-                tm.insert("tags".into(), json!(t.tags));
-                tm.insert("meta".into(), Json::Object(t.meta.clone()));
-                tm.insert("columns".into(), json!(t.columns));
-                tm.insert(
-                    "used_by".into(),
-                    json!(used.get(&key).cloned().unwrap_or_default()),
-                );
-                (t.name.clone(), Json::Object(tm))
+                let table = ManifestTable {
+                    name: t.name.clone(),
+                    identifier: render("identifier", t.identifier.as_deref().unwrap_or(&t.name)),
+                    quoting: t.quoting.over(&s.quoting),
+                    description: t.description.clone(),
+                    tags: t.tags.clone(),
+                    meta: t.meta.clone(),
+                    columns: t.columns.clone(),
+                    used_by: used.get(&key).cloned().unwrap_or_default(),
+                };
+                (t.name.clone(), table)
             })
             .collect();
-        m.insert("tables".into(), Json::Object(tables));
-        if !errors.is_empty() {
-            m.insert("errors".into(), json!(errors));
-        }
-        out.insert(name.clone(), Json::Object(m));
+        out.insert(
+            name.clone(),
+            ManifestSource {
+                name: name.clone(),
+                file: slash(&s.file),
+                profile,
+                database,
+                schema,
+                description: s.description.clone(),
+                tags: s.tags.clone(),
+                meta: s.meta.clone(),
+                tables,
+                errors: (!errors.is_empty()).then_some(errors),
+            },
+        );
     }
-    Json::Object(out)
+    out
 }
 
-fn schedule(project: &Project, name: &str) -> Json {
-    let Some(e) = project.schedules.iter().find(|e| e.name == name) else {
-        return Json::Null;
-    };
-    let bindings: Vec<Json> = project
+fn schedule(project: &Project, name: &str) -> Option<ManifestSchedule> {
+    let e = project.schedules.iter().find(|e| e.name == name)?;
+    let bindings = project
         .reports
         .iter()
         .flat_map(|r| {
             r.bindings
                 .iter()
                 .filter(|b| b.schedules.iter().any(|s| s == name))
-                .map(|b| json!({"report": r.name, "set": b.set}))
+                .map(|b| ScheduledBinding {
+                    report: r.name.clone(),
+                    set: b.set.clone(),
+                })
         })
         .collect();
-    let mut m = JsonMap::new();
-    m.insert("name".into(), json!(e.name));
-    insert_some(&mut m, "report", e.report.as_ref());
-    insert_some(&mut m, "select", e.select.as_ref());
-    insert_some(&mut m, "set", e.set.as_ref());
-    m.insert("schedule".into(), Json::Object(e.schedule.clone()));
-    insert_some(&mut m, "timing", e.timing.as_ref());
-    m.insert("enabled".into(), json!(e.enabled));
-    m.insert("vars".into(), Json::Object(e.vars.clone()));
-    insert_some(&mut m, "timezone", e.timezone.as_ref());
-    m.insert("bindings".into(), json!(bindings));
-    Json::Object(m)
-}
-
-fn insert_some<T: serde::Serialize>(m: &mut JsonMap<String, Json>, key: &str, v: Option<&T>) {
-    if let Some(v) = v {
-        m.insert(key.into(), serde_json::to_value(v).unwrap_or(Json::Null));
-    }
+    Some(ManifestSchedule {
+        name: e.name.clone(),
+        report: e.report.clone(),
+        select: e.select.clone(),
+        set: e.set.clone(),
+        schedule: e.schedule.clone(),
+        timing: e.timing.clone(),
+        enabled: e.enabled,
+        vars: e.vars.clone(),
+        timezone: e.timezone.clone(),
+        bindings,
+    })
 }
 
 fn slash(p: &Path) -> String {

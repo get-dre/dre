@@ -70,7 +70,7 @@ compares manifests should build both with the same target and vars.
 
 ```json
 {
-  "schema": 2,
+  "schema_version": "dre/manifest/v3",
   "version": "0.2.0",
   "project": {"name": "acme_reports", "target": "dev", "default_profile": "warehouse", "timezone": "UTC", "checksum": "…"},
   "reports": {
@@ -235,11 +235,22 @@ xlsx template.
 
 ## Versioning
 
-The manifest's format is a public contract. [manifest.schema.json](manifest.schema.json) is the
-JSON Schema for schema 2. Schema 1 (DRE 0.1) had no sources, target or per-query connection.
+Both files are public contracts with a `schema_version`, and JSON Schemas generated from DRE's
+own types: [manifest.schema.json](manifest.schema.json) for the manifest (`dre/manifest/v3`) and
+[run-results.schema.json](run-results.schema.json) for `run_results.json`
+(`dre/run-results/v1`).
 
-- Adding an optional field keeps the schema number. Ignore fields you don't know.
-- Removing, renaming or re-typing a field, or changing what a field means, bumps it. Check
-  `schema` and refuse a number you don't support.
+- Adding an optional field keeps the version. Ignore fields you don't know.
+- Removing, renaming or re-typing a field, or changing what a field means, bumps it: in a minor
+  DRE release before 1.0, a major one after. Check `schema_version` and refuse one you don't
+  support.
+
+> **Changed in 0.4.** The manifest's `"schema": 2` is replaced by
+> `"schema_version": "dre/manifest/v3"`, with nothing else changed. `run_results.json` gains
+> `schema_version` (`dre/run-results/v1`), and a failed run's `error_code` and `error_kind` (see
+> the [error codes reference](reference-error-codes.md)).
+
+Before 0.4 the manifest had `"schema": 2` (DRE 0.2 and 0.3) or `"schema": 1` (DRE 0.1, without
+sources, target or per-query connection).
 
 The idea of a project manifest comes from dbt; the format and code are DRE's own.

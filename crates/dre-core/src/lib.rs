@@ -23,6 +23,7 @@ pub mod profiles;
 pub mod project;
 pub mod render;
 pub mod run;
+pub mod run_results;
 pub mod schedule;
 mod schema;
 pub mod secrets;

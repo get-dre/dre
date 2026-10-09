@@ -112,7 +112,7 @@ fn json_is_the_manifests_shape_for_what_matched() {
     let r = p.dre("ls", &["--schedule", "close_a", "--output", "json"]);
     r.ok();
     let j: Value = serde_json::from_str(&r.stdout).unwrap();
-    assert_eq!(j["schema"], full["schema"]);
+    assert_eq!(j["schema_version"], full["schema_version"]);
     assert_eq!(j["version"], full["version"]);
     assert_eq!(j["project"], full["project"]);
     assert_eq!(j["schedules"], json!({"close_a": full["schedules"]["close_a"]}));
