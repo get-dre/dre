@@ -2,12 +2,14 @@
 //!
 //! Frames are read on a background thread so core can time out a silent plugin during the
 //! handshake and never blocks forever on a plugin that has died. stderr is drained on another
-//! thread, forwarded to a log sink and kept (last lines) for error messages.
+//! thread, forwarded to a log sink and kept (last lines) for error messages. A plugin's `log` and
+//! `progress` messages (protocol 1) go to the same sink.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -17,11 +19,13 @@ use arrow::datatypes::SchemaRef;
 use serde_json::{Map, Value};
 
 use crate::frame::{self, Frame, FrameError};
-use crate::msg::{ConnectionField, DeliveryFile, Request, Response, ResultSetMeta};
+use crate::msg::{ConnectionField, DeliveryFile, Envelope, LogLevel, Request, Response, ResultSetMeta};
 use crate::options::OptionField;
-use crate::{Kind, MAX_VERSION, MIN_VERSION, PluginId, parse_executable_name};
+use crate::{CORE_MIN_VERSION, Kind, MAX_VERSION, PluginId, parse_executable_name, parse_package_executable_name};
 
-/// Receives each stderr line a plugin writes.
+/// Receives each line a plugin logs: `(plugin, line)`. A `log` message arrives prefixed by its
+/// level (`info: `, `warning: ` for warn and error, `debug: ` for debug and trace), as does
+/// `progress` (`info: `); a stderr line arrives as written.
 pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// A log sink that prefixes each plugin line with the plugin's file name, on core's stderr.
@@ -86,10 +90,12 @@ pub enum HostError {
         expected: &'static str,
         got: String,
     },
-    /// The plugin reported an error for a request.
+    /// The plugin reported an error for a request, with its kind and code when it gave them.
     Plugin {
         plugin: String,
         message: String,
+        kind: Option<String>,
+        code: Option<String>,
     },
     Arrow {
         plugin: String,
@@ -122,19 +128,22 @@ impl std::fmt::Display for HostError {
                 plugin,
                 core,
                 plugin_range,
-            } => write!(
-                f,
-                "plugin `{plugin}` speaks protocol versions {}..={}, but this DRE core speaks {}..={}; update {}",
-                plugin_range.0,
-                plugin_range.1,
-                core.0,
-                core.1,
-                if plugin_range.1 < core.0 {
-                    "the plugin"
-                } else {
-                    "DRE"
+            } => {
+                write!(
+                    f,
+                    "plugin `{plugin}` speaks protocol versions {}..={}, but this DRE core speaks {}..={}; ",
+                    plugin_range.0, plugin_range.1, core.0, core.1,
+                )?;
+                if plugin_range.1 >= core.0 {
+                    return f.write_str("update DRE");
                 }
-            ),
+                let package = parse_package_executable_name(plugin)
+                    .or_else(|| parse_executable_name(plugin).map(|(_, n)| n));
+                match package {
+                    Some(p) => write!(f, "update the plugin with `dre plugin update {p}`"),
+                    None => f.write_str("update the plugin"),
+                }
+            }
             HostError::Timeout { plugin, waiting_for } => {
                 write!(
                     f,
@@ -158,8 +167,40 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
+impl HostError {
+    fn plugin(plugin: &str, message: impl Into<String>) -> HostError {
+        HostError::Plugin {
+            plugin: plugin.to_string(),
+            message: message.into(),
+            kind: None,
+            code: None,
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
+/// Asks a running request to stop, from any thread (see [`PluginProcess::canceller`]).
+#[derive(Clone)]
+pub struct Canceller {
+    stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
+    current: Arc<AtomicU64>,
+}
+
+impl Canceller {
+    /// Send `cancel` for the request running now, if any. Returns whether one was sent.
+    pub fn cancel(&self) -> bool {
+        let id = self.current.load(Ordering::SeqCst);
+        if id == 0 {
+            return false;
+        }
+        let mut stdin = self.stdin.lock().unwrap();
+        let Some(w) = stdin.as_mut() else {
+            return false;
+        };
+        frame::write_json(w, &Envelope::new(Some(id), Request::Cancel {})).is_ok()
+    }
+}
 /// A message from the plugin.
 pub enum Incoming {
     Json(Response),
@@ -186,8 +227,14 @@ pub struct PluginProcess {
     label: String,
     path: PathBuf,
     child: Child,
-    stdin: Option<BufWriter<ChildStdin>>,
+    /// Shared with [`Canceller`]s; `None` once closed.
+    stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
     rx: Receiver<std::result::Result<Frame, FrameError>>,
+    log: LogSink,
+    /// The last request id given out.
+    last_id: u64,
+    /// The request running now (0: none).
+    current: Arc<AtomicU64>,
     stderr: Arc<Mutex<VecDeque<String>>>,
     /// Forwards stderr; joined on close/drop so no log line is lost when the plugin exits.
     stderr_thread: Option<std::thread::JoinHandle<()>>,
@@ -226,7 +273,7 @@ impl PluginProcess {
         if let Some(id) = plugin {
             p.serve = Some(id.clone());
         }
-        p.handshake((MIN_VERSION, MAX_VERSION), timeout)?;
+        p.handshake((CORE_MIN_VERSION, MAX_VERSION), timeout)?;
         Ok(p)
     }
 
@@ -286,7 +333,7 @@ impl PluginProcess {
             })?;
         let stdout = child.stdout.take().unwrap();
         let stderr_pipe = child.stderr.take().unwrap();
-        let stdin = child.stdin.take().map(BufWriter::new);
+        let stdin = Arc::new(Mutex::new(child.stdin.take().map(BufWriter::new)));
 
         let (tx, rx) = channel();
         std::thread::spawn(move || {
@@ -302,10 +349,11 @@ impl PluginProcess {
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let tail = stderr.clone();
         let who = label.clone();
+        let sink = log.clone();
         let stderr_thread = std::thread::spawn(move || {
             for line in BufReader::new(stderr_pipe).lines() {
                 let Ok(line) = line else { break };
-                log(&who, &line);
+                sink(&who, &line);
                 let mut t = tail.lock().unwrap();
                 if t.len() == STDERR_TAIL {
                     t.pop_front();
@@ -320,6 +368,9 @@ impl PluginProcess {
             child,
             stdin,
             rx,
+            log,
+            last_id: 0,
+            current: Arc::new(AtomicU64::new(0)),
             stderr,
             stderr_thread: Some(stderr_thread),
             info: None,
@@ -360,13 +411,10 @@ impl PluginProcess {
                 if let Some(want) = &self.serve
                     && (want.kind != kind || want.name != name)
                 {
-                    return Err(HostError::Plugin {
-                        plugin: self.label.clone(),
-                        message: format!(
-                            "`{}` was asked for the {want} plugin but serves {kind}/{name}",
-                            self.label
-                        ),
-                    });
+                    return Err(HostError::plugin(
+                        &self.label,
+                        format!("`{}` was asked for the {want} plugin but serves {kind}/{name}", self.label),
+                    ));
                 }
                 if provides.is_empty() {
                     provides.push(PluginId::new(kind, name.clone()));
@@ -389,9 +437,11 @@ impl PluginProcess {
                 core: (min, max),
                 plugin_range: (min_version, max_version),
             }),
-            Incoming::Json(Response::Error { message }) => Err(HostError::Plugin {
+            Incoming::Json(Response::Error { message, kind, code }) => Err(HostError::Plugin {
                 plugin: self.label.clone(),
                 message,
+                kind,
+                code,
             }),
             other => Err(self.unexpected("a hello reply", &other)),
         }
@@ -407,6 +457,20 @@ impl PluginProcess {
 
     pub fn info(&self) -> &PluginInfo {
         self.info.as_ref().expect("handshake completed")
+    }
+
+    /// A handle that can cancel the running request from another thread. Only a plugin on
+    /// protocol 1 or later understands `cancel`.
+    pub fn canceller(&self) -> Canceller {
+        Canceller {
+            stdin: self.stdin.clone(),
+            current: self.current.clone(),
+        }
+    }
+
+    /// The protocol version settled on in the handshake (0 before it).
+    fn version(&self) -> u32 {
+        self.info.as_ref().map_or(0, |i| i.protocol_version)
     }
 
     pub fn has(&self, capability: &str) -> bool {
@@ -450,9 +514,23 @@ impl PluginProcess {
         }
     }
 
+    /// Send a request. From protocol 1 it carries an id: a new one, or for the messages that
+    /// continue a request (`result_set_end`, `finish`, `cancel`) the running request's.
     pub fn send(&mut self, req: &Request) -> Result<()> {
-        let ok = match self.stdin.as_mut() {
-            Some(w) => frame::write_json(w, req).is_ok(),
+        let id = match req {
+            _ if self.version() == 0 => None,
+            Request::Hello { .. } => None,
+            Request::ResultSetEnd {} | Request::Finish {} | Request::Cancel {} => {
+                Some(self.current.load(Ordering::SeqCst)).filter(|id| *id != 0)
+            }
+            _ => {
+                self.last_id += 1;
+                self.current.store(self.last_id, Ordering::SeqCst);
+                Some(self.last_id)
+            }
+        };
+        let ok = match self.stdin.lock().unwrap().as_mut() {
+            Some(w) => frame::write_json(w, &Envelope::new(id, req)).is_ok(),
             None => false,
         };
         if ok { Ok(()) } else { Err(self.write_failed()) }
@@ -467,18 +545,20 @@ impl PluginProcess {
             self.early = Some(f);
         }
         if let Some(Ok(Frame::Json(v))) = &self.early
-            && let Ok(Response::Error { message }) = serde_json::from_value::<Response>(v.clone())
+            && let Ok(Response::Error { message, kind, code }) = serde_json::from_value::<Response>(v.clone())
         {
             return Err(HostError::Plugin {
                 plugin: self.label.clone(),
                 message,
+                kind,
+                code,
             });
         }
         let ipc = frame::encode_batch(batch).map_err(|e| HostError::Arrow {
             plugin: self.label.clone(),
             message: e.to_string(),
         })?;
-        let ok = match self.stdin.as_mut() {
+        let ok = match self.stdin.lock().unwrap().as_mut() {
             Some(w) => frame::write_arrow(w, &ipc).is_ok(),
             None => false,
         };
@@ -489,9 +569,11 @@ impl PluginProcess {
     fn write_failed(&mut self) -> HostError {
         match self.rx.recv_timeout(Duration::from_secs(2)) {
             Ok(Ok(Frame::Json(v))) => match serde_json::from_value::<Response>(v) {
-                Ok(Response::Error { message }) => HostError::Plugin {
+                Ok(Response::Error { message, kind, code }) => HostError::Plugin {
                     plugin: self.label.clone(),
                     message,
+                    kind,
+                    code,
                 },
                 _ => self.crashed(),
             },
@@ -499,8 +581,23 @@ impl PluginProcess {
         }
     }
 
-    /// Receive the next message. `timeout` of `None` waits as long as the plugin is alive.
+    /// Receive the next message. `timeout` of `None` waits as long as the plugin is alive. `log`
+    /// and `progress` messages go to the log sink on the way.
     pub fn recv(&mut self, timeout: Option<Duration>, waiting_for: &'static str) -> Result<Incoming> {
+        loop {
+            match self.recv_any(timeout, waiting_for)? {
+                Incoming::Json(Response::Log { level, message, fields }) => {
+                    (self.log)(&self.label, &log_line(level, &message, &fields));
+                }
+                Incoming::Json(Response::Progress { message, done, total }) => {
+                    (self.log)(&self.label, &progress_line(message.as_deref(), done, total));
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
+    fn recv_any(&mut self, timeout: Option<Duration>, waiting_for: &'static str) -> Result<Incoming> {
         let got = match timeout {
             _ if self.early.is_some() => self.early.take(),
             Some(t) => match self.rx.recv_timeout(t) {
@@ -516,8 +613,18 @@ impl PluginProcess {
             None => self.rx.recv().ok(),
         };
         match got {
-            Some(Ok(Frame::Json(v))) => match serde_json::from_value::<Response>(v.clone()) {
-                Ok(r) => Ok(Incoming::Json(r)),
+            Some(Ok(Frame::Json(v))) => match serde_json::from_value::<Envelope<Response>>(v.clone()) {
+                Ok(Envelope { id: Some(id), body }) if !matches!(body, Response::Log { .. } | Response::Progress { .. }) => {
+                    let current = self.current.load(Ordering::SeqCst);
+                    if id != current {
+                        return Err(HostError::Malformed {
+                            plugin: self.label.clone(),
+                            message: format!("a reply to request {id} arrived while request {current} was running"),
+                        });
+                    }
+                    Ok(Incoming::Json(body))
+                }
+                Ok(e) => Ok(Incoming::Json(e.body)),
                 Err(e) => Err(HostError::Malformed {
                     plugin: self.label.clone(),
                     message: format!("unknown message {v}: {e}"),
@@ -535,9 +642,11 @@ impl PluginProcess {
     /// Receive a JSON response, turning `error` into `HostError::Plugin`.
     pub fn recv_json(&mut self, waiting_for: &'static str) -> Result<Response> {
         match self.recv(None, waiting_for)? {
-            Incoming::Json(Response::Error { message }) => Err(HostError::Plugin {
+            Incoming::Json(Response::Error { message, kind, code }) => Err(HostError::Plugin {
                 plugin: self.label.clone(),
                 message,
+                kind,
+                code,
             }),
             Incoming::Json(r) => Ok(r),
             other => Err(self.unexpected(waiting_for, &other)),
@@ -643,20 +752,19 @@ impl PluginProcess {
                     }
                 }
                 Incoming::Json(Response::ResultEnd { .. }) => break,
-                Incoming::Json(Response::Error { message }) => {
+                Incoming::Json(Response::Error { message, kind, code }) => {
                     return Err(HostError::Plugin {
                         plugin: self.label.clone(),
                         message,
+                        kind,
+                        code,
                     });
                 }
                 other => return Err(self.unexpected("result data", &other)),
             }
         }
         if let Some(e) = sink_error {
-            return Err(HostError::Plugin {
-                plugin: self.label.clone(),
-                message: e,
-            });
+            return Err(HostError::plugin(&self.label, e));
         }
         let schema = schema.ok_or_else(|| HostError::Malformed {
             plugin: self.label.clone(),
@@ -772,13 +880,13 @@ impl PluginProcess {
             },
             many => {
                 if !self.has(crate::CAP_MULTI_FILE) {
-                    return Err(HostError::Plugin {
-                        plugin: self.label.clone(),
-                        message: format!(
+                    return Err(HostError::plugin(
+                        &self.label,
+                        format!(
                             "{} files in one delivery, but the plugin doesn't advertise `multi_file`",
                             many.len()
                         ),
-                    });
+                    ));
                 }
                 Request::Deliver {
                     local_path: None,
@@ -806,10 +914,10 @@ impl PluginProcess {
         options: Map<String, Value>,
     ) -> Result<String> {
         if !self.has(crate::CAP_MESSAGE) {
-            return Err(HostError::Plugin {
-                plugin: self.label.clone(),
-                message: "a message, but the plugin doesn't advertise `message`".into(),
-            });
+            return Err(HostError::plugin(
+                &self.label,
+                "a message, but the plugin doesn't advertise `message`",
+            ));
         }
         self.send(&Request::Deliver {
             local_path: None,
@@ -829,7 +937,7 @@ impl PluginProcess {
     pub fn close(mut self) -> Result<()> {
         let _ = self.send(&Request::Close {});
         let _ = self.recv(Some(Duration::from_secs(5)), "the close reply");
-        self.stdin.take();
+        self.stdin.lock().unwrap().take();
         for _ in 0..250 {
             if let Ok(Some(_)) = self.child.try_wait() {
                 return Ok(());
@@ -842,7 +950,7 @@ impl PluginProcess {
 
     /// Raw access for protocol tests: write arbitrary bytes to the plugin.
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<()> {
-        let ok = match self.stdin.as_mut() {
+        let ok = match self.stdin.lock().unwrap().as_mut() {
             Some(w) => w.write_all(bytes).and_then(|_| w.flush()).is_ok(),
             None => false,
         };
@@ -851,7 +959,7 @@ impl PluginProcess {
 
     /// Wait up to `timeout` for the process to exit.
     pub fn wait_exit(&mut self, timeout: Duration) -> Option<ExitStatus> {
-        self.stdin.take();
+        self.stdin.lock().unwrap().take();
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {
             if let Ok(Some(s)) = self.child.try_wait() {
@@ -880,7 +988,9 @@ impl PluginProcess {
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
-        self.stdin.take();
+        if let Ok(mut stdin) = self.stdin.lock() {
+            stdin.take();
+        }
         if let Ok(None) = self.child.try_wait() {
             // Give it a moment to exit on its own (stdin is closed), then insist.
             for _ in 0..25 {
@@ -893,6 +1003,37 @@ impl Drop for PluginProcess {
             let _ = self.child.wait();
         }
         self.drain_stderr();
+    }
+}
+
+/// A `log` message as a log sink line: prefixed by its level, then its fields as `key=value`.
+fn log_line(level: LogLevel, message: &str, fields: &Map<String, Value>) -> String {
+    let prefix = match level {
+        LogLevel::Error | LogLevel::Warn => "warning: ",
+        LogLevel::Info => "info: ",
+        LogLevel::Debug | LogLevel::Trace => "debug: ",
+    };
+    let mut line = format!("{prefix}{message}");
+    for (k, v) in fields {
+        match v {
+            Value::String(s) => line.push_str(&format!(" {k}={s}")),
+            v => line.push_str(&format!(" {k}={v}")),
+        }
+    }
+    line
+}
+
+/// A `progress` message as a log sink line.
+fn progress_line(message: Option<&str>, done: Option<u64>, total: Option<u64>) -> String {
+    let count = match (done, total) {
+        (Some(d), Some(t)) => format!("{d}/{t}"),
+        (Some(d), None) => d.to_string(),
+        _ => String::new(),
+    };
+    match (message, count.is_empty()) {
+        (Some(m), true) => format!("info: {m}"),
+        (Some(m), false) => format!("info: {m} ({count})"),
+        (None, _) => format!("info: {count}"),
     }
 }
 

@@ -1,4 +1,4 @@
-//! The DRE plugin protocol, version 0.
+//! The DRE plugin protocol, version 1.
 //!
 //! Plugins ship in packages: one executable, `dre-plugin-<package>`, serving every plugin the
 //! package provides (a single plugin may also be named `dre-<kind>-<name>`). It talks to DRE core
@@ -27,9 +27,11 @@ pub mod util;
 /// This crate's version (its own, not DRE's); the fixture plugins report it.
 pub const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Protocol versions this build speaks.
+/// Protocol versions the plugin SDK speaks: a plugin built on it also works with an older core.
 pub const MIN_VERSION: u32 = 0;
-pub const MAX_VERSION: u32 = 0;
+pub const MAX_VERSION: u32 = 1;
+/// The oldest protocol version core accepts from a plugin.
+pub const CORE_MIN_VERSION: u32 = 1;
 
 /// Capability: can hold one session (and its temp objects) across requests.
 pub const CAP_SESSIONS: &str = "sessions";
