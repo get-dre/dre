@@ -8,7 +8,8 @@
 //!   loader reports DRE's own message and carries on with the rest of the file instead of
 //!   stopping at the first problem.
 //! - [`UnknownKeys`]: in a struct field named [`UNKNOWN`], the keys the struct doesn't define,
-//!   with their lines. A struct without that field ignores unknown keys.
+//!   with their lines. A struct without that field ignores unknown keys. The field can also be a
+//!   [`Map`], to read the other keys' values (folder config: folder names next to `+` keys).
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -215,8 +216,11 @@ impl<'de> Deserialize<'de> for UnknownKeys {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<UnknownKeys, A::Error> {
                 let mut keys = Vec::new();
-                while let Some((name, line)) = m.next_entry::<String, usize>()? {
-                    keys.push(Key { name, line });
+                while let Some((k, _)) = m.next_entry::<Located<String>, de::IgnoredAny>()? {
+                    keys.push(Key {
+                        name: k.value,
+                        line: k.line,
+                    });
                 }
                 Ok(UnknownKeys(keys))
             }
@@ -504,24 +508,25 @@ struct Entries<'a> {
     value: Option<(&'a Node, usize)>,
     /// A struct's fields: other keys are skipped (and collected when it has [`UNKNOWN`]).
     fields: Option<&'static [&'static str]>,
-    unknown: Vec<(String, usize)>,
+    unknown: Vec<&'a (Key, Node)>,
     unknown_done: bool,
 }
 
 enum Pending<'a> {
     Node(&'a Node, usize),
-    Unknown(Vec<(String, usize)>),
+    Unknown(Vec<&'a (Key, Node)>),
 }
 
 impl<'a> MapAccess<'a> for Entries<'a> {
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'a>>(&mut self, seed: K) -> Result<Option<K::Value>, Error> {
-        for (k, v) in self.entries.by_ref() {
+        for entry in self.entries.by_ref() {
+            let (k, v) = entry;
             if let Some(fields) = self.fields
                 && (!fields.contains(&k.name.as_str()) || k.name == UNKNOWN)
             {
-                self.unknown.push((k.name.clone(), k.line));
+                self.unknown.push(entry);
                 continue;
             }
             self.value = Some((v, k.line));
@@ -542,8 +547,45 @@ impl<'a> MapAccess<'a> for Entries<'a> {
         };
         match pending {
             Pending::Node(n, line) => seed.deserialize(NodeDe(n, line)),
-            Pending::Unknown(keys) => seed.deserialize(de::value::MapDeserializer::new(keys.into_iter())),
+            Pending::Unknown(entries) => seed.deserialize(Rest(entries)),
         }
+    }
+}
+
+/// The entries a struct doesn't define, for its [`UNKNOWN`] field: a map of them.
+struct Rest<'a>(Vec<&'a (Key, Node)>);
+
+impl<'de> Deserializer<'de> for Rest<'de> {
+    type Error = Error;
+    fn deserialize_any<V: Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        v.visit_map(RestEntries {
+            entries: self.0.into_iter(),
+            value: None,
+        })
+    }
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf option
+        unit unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+struct RestEntries<'a> {
+    entries: std::vec::IntoIter<&'a (Key, Node)>,
+    value: Option<&'a (Key, Node)>,
+}
+
+impl<'de> MapAccess<'de> for RestEntries<'de> {
+    type Error = Error;
+    fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Error> {
+        let Some(entry) = self.entries.next() else {
+            return Ok(None);
+        };
+        self.value = Some(entry);
+        seed.deserialize(KeyDe(&entry.0)).map(Some)
+    }
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Error> {
+        let (k, v) = self.value.take().expect("a value follows its key");
+        seed.deserialize(NodeDe(v, k.line))
     }
 }
 
@@ -632,6 +674,23 @@ mod tests {
             panic!()
         };
         assert_eq!((f.kind, f.line), ("a string", 2));
+    }
+
+    #[test]
+    fn the_unknown_field_can_read_the_other_keys_values() {
+        #[derive(Debug, Deserialize)]
+        struct Folder {
+            #[serde(rename = "+tags", default)]
+            tags: Vec<String>,
+            #[serde(rename = "$unknown", default)]
+            folders: Map<Folder>,
+        }
+        let n = parse("+tags: [a]\nsales:\n  +tags: [b]\n  eu: {}\n").unwrap();
+        let f: Folder = from_node(&n).unwrap();
+        let (name, sales) = f.folders.iter().next().unwrap();
+        assert_eq!((name.value.as_str(), name.line, &sales.tags[..]), ("sales", 2, &["b".to_string()][..]));
+        assert_eq!(sales.folders.iter().next().unwrap().0.value, "eu");
+        assert_eq!(f.tags, ["a"]);
     }
 
     #[test]

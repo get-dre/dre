@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_yaml_ng::Value;
 
+use crate::config::node::{self, Kind, Node};
 use crate::diag::Diagnostics;
 
 /// A parsed YAML file, kept with its source text so keys can be located for diagnostics.
@@ -12,7 +13,10 @@ pub struct YamlFile {
     /// Path as shown in diagnostics (relative to the project root when inside it).
     pub display: PathBuf,
     pub text: String,
+    /// The file as the value config not yet read into typed structs works on.
     pub value: Value,
+    /// The parsed file, with every value's line.
+    pub node: Node,
 }
 
 impl YamlFile {
@@ -29,32 +33,18 @@ impl YamlFile {
     }
 
     pub fn parse(text: String, display: PathBuf, diags: &mut Diagnostics) -> Option<YamlFile> {
-        match serde_yaml_ng::from_str::<Value>(&text) {
-            Ok(mut value) => {
-                if let Err(e) = merge_keys(&mut value) {
-                    diags.error(
-                        "yaml-syntax",
-                        Some(display),
-                        None,
-                        format!("invalid YAML merge key (`<<`): {e}"),
-                    );
-                    return None;
-                }
-                if !string_keys(&mut value) {
-                    diags.error(
-                        "yaml-syntax",
-                        Some(display),
-                        None,
-                        "a map key is a list or a map; keys must be names",
-                    );
-                    return None;
-                }
-                Some(YamlFile { display, text, value })
+        match node::parse(&text) {
+            Ok(node) => {
+                let value = to_value(&node);
+                Some(YamlFile {
+                    display,
+                    text,
+                    value,
+                    node,
+                })
             }
             Err(e) => {
-                let line = e.location().map(|l| l.line());
-                let msg = strip_location(&e.to_string());
-                diags.error("yaml-syntax", Some(display), line, format!("invalid YAML: {msg}"));
+                diags.error("yaml-syntax", Some(display), e.line, format!("invalid YAML: {}", e.message));
                 None
             }
         }
@@ -87,68 +77,22 @@ impl YamlFile {
     }
 }
 
-/// Apply YAML merge keys (`<<: *base`, `<<: [*a, *b]`): keys written out win, then earlier
-/// maps in a list. A merged map's own `<<` is resolved first, so merges can chain
-/// (`prod: {<<: *verify}` where `verify: &verify {<<: *dev, ...}`).
-fn merge_keys(v: &mut Value) -> Result<(), &'static str> {
-    match v {
-        Value::Mapping(m) => {
-            if let Some(src) = m.remove("<<") {
-                let sources = match src {
-                    Value::Mapping(_) => vec![src],
-                    Value::Sequence(list) => list,
-                    _ => return Err("`<<` must be a map or a list of maps"),
-                };
-                for mut s in sources {
-                    merge_keys(&mut s)?;
-                    let Value::Mapping(s) = s else {
-                        return Err("`<<` must be a map or a list of maps");
-                    };
-                    for (k, v) in s {
-                        m.entry(k).or_insert(v);
-                    }
-                }
-            }
-            m.values_mut().try_for_each(merge_keys)
-        }
-        Value::Sequence(list) => list.iter_mut().try_for_each(merge_keys),
-        Value::Tagged(t) => merge_keys(&mut t.value),
-        _ => Ok(()),
-    }
-}
-
-/// Turn scalar mapping keys into strings. Unquoted `null:`, `true:` or `2024:` are YAML
-/// null/bool/number keys, but every key DRE reads is a name: `null: "NULL"` means the
-/// option `null`, not a missing key. False when a key is a list or a map.
-fn string_keys(v: &mut Value) -> bool {
-    match v {
-        Value::Mapping(m) => {
-            if m.keys().any(|k| !k.is_string()) {
-                let old = std::mem::take(m);
-                for (k, v) in old {
-                    let k = match k {
-                        Value::Null => Value::String("null".into()),
-                        Value::Bool(b) => Value::String(b.to_string()),
-                        Value::Number(n) => Value::String(n.to_string()),
-                        Value::String(s) => Value::String(s),
-                        _ => return false,
-                    };
-                    m.insert(k, v);
-                }
-            }
-            m.values_mut().all(string_keys)
-        }
-        Value::Sequence(s) => s.iter_mut().all(string_keys),
-        Value::Tagged(t) => string_keys(&mut t.value),
-        _ => true,
-    }
-}
-
-fn strip_location(msg: &str) -> String {
-    // serde_yaml_ng appends " at line X column Y"; the line is reported separately.
-    match msg.find(" at line ") {
-        Some(i) => msg[..i].to_string(),
-        None => msg.to_string(),
+/// A parsed node as a `serde_yaml_ng` value. Merge keys are already applied and keys are names.
+fn to_value(n: &Node) -> Value {
+    match &n.kind {
+        Kind::Null => Value::Null,
+        Kind::Bool(b) => Value::Bool(*b),
+        Kind::Int(i) => Value::Number((*i).into()),
+        Kind::UInt(u) => Value::Number((*u).into()),
+        Kind::Float(f) => Value::Number((*f).into()),
+        Kind::Str(s) => Value::String(s.clone()),
+        Kind::Seq(items) => Value::Sequence(items.iter().map(to_value).collect()),
+        Kind::Map(entries) => Value::Mapping(
+            entries
+                .iter()
+                .map(|(k, v)| (Value::String(k.name.clone()), to_value(v)))
+                .collect(),
+        ),
     }
 }
 
