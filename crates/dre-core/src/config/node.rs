@@ -117,6 +117,8 @@ pub fn parse(text: &str) -> Result<Node, SyntaxError> {
     options.strict_booleans = true;
     options.duplicate_keys = serde_saphyr::options::DuplicateKeyPolicy::Error;
     options.with_snippet = false;
+    // `.inf` and `.nan` are values like any other; a plugin decides what they mean.
+    options.reject_non_finite_typeless_float = false;
     if text.trim().is_empty() {
         return Ok(Node::null());
     }
@@ -139,6 +141,11 @@ fn syntax_error(e: &serde_saphyr::Error) -> SyntaxError {
         .captures(first)
         .map_or(first, |c| c.get(1).map_or(first, |m| m.as_str()));
     let message = message.replace(", set DuplicateKeyPolicy in Options if acceptable", "");
+    let message = if message.contains("merge value must be") {
+        "invalid YAML merge key (`<<`): `<<` must be a map or a list of maps".to_string()
+    } else {
+        message
+    };
     SyntaxError { line, message }
 }
 
@@ -151,8 +158,11 @@ enum Raw {
     Float(f64),
     Str(String),
     Seq(Vec<Spanned<Raw>>),
-    Map(Vec<(Spanned<String>, Spanned<Raw>)>),
+    Map(Vec<(Spanned<KeyRaw>, Spanned<Raw>)>),
 }
+
+/// A map key as written: a scalar, kept as its spelling (`null`, `true`, `2024`).
+struct KeyRaw(String);
 
 impl From<Spanned<Raw>> for Node {
     fn from(s: Spanned<Raw>) -> Node {
@@ -169,7 +179,7 @@ impl From<Spanned<Raw>> for Node {
                     .into_iter()
                     .map(|(k, v)| {
                         let key = Key {
-                            name: k.value,
+                            name: k.value.0,
                             line: k.referenced.line() as usize,
                         };
                         (key, Node::from(v))
@@ -233,6 +243,52 @@ impl<'de> Deserialize<'de> for Raw {
                     entries.push(e);
                 }
                 Ok(Raw::Map(entries))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// The message for a key that's a list or a map.
+pub const COMPLEX_KEY: &str = "a map key is a list or a map; keys must be names";
+
+impl<'de> Deserialize<'de> for KeyRaw {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = KeyRaw;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a key")
+            }
+            fn visit_unit<E>(self) -> Result<KeyRaw, E> {
+                Ok(KeyRaw("null".into()))
+            }
+            fn visit_none<E>(self) -> Result<KeyRaw, E> {
+                Ok(KeyRaw("null".into()))
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v.to_string()))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v.to_string()))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v.to_string()))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v.to_string()))
+            }
+            fn visit_str<E>(self, v: &str) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v.to_string()))
+            }
+            fn visit_string<E>(self, v: String) -> Result<KeyRaw, E> {
+                Ok(KeyRaw(v))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<KeyRaw, A::Error> {
+                Err(serde::de::Error::custom(COMPLEX_KEY))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<KeyRaw, A::Error> {
+                Err(serde::de::Error::custom(COMPLEX_KEY))
             }
         }
         d.deserialize_any(V)

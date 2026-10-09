@@ -1,0 +1,9 @@
+exit: 1
+warning[unknown-folder]: dre_project.yml:3: folder config for `sales` matches no folder under reports/
+warning[unknown-folder]: dre_project.yml:5: folder config for `sales.wat` matches no folder under reports/
+error[unknown-key]: dre_project.yml:7: unknown folder config `+colour`; folder config keys are +tags, +output, +profile, +schedule, +vars, +timezone, +locale
+error[unknown-key]: dre_project.yml:8: unknown key `wat`
+error[invalid-field]: dre_project.yml:9: `vars` must be a map
+  Profiles  $CASE/no-profiles/profiles.yml (from --profiles-dir, not found)
+    Target  dev (default)
+Validation failed: 3 errors, 2 warnings

@@ -42,6 +42,9 @@ const RESERVED_NAMES: &[&str] = &[
     "connection",
     "destination",
 ];
+use crate::config;
+use crate::config::de::{self, Loose};
+use crate::config::project::ProjectFile;
 use crate::profiles::{LOCAL_TYPE, Profiles, Role};
 use crate::yaml::YamlFile;
 use crate::{constraints, options, preflight, schedule, selector, sqlsplit};
@@ -830,18 +833,39 @@ impl Loader {
             PathBuf::from(PROJECT_FILE),
             &mut self.diags,
         )?);
-        let project_target = pyaml.value.get(crate::target::KEY).and_then(Value::as_str);
-        if let Some(v) = pyaml.value.get(crate::target::KEY)
-            && !v.is_string()
-        {
-            self.diags.error(
-                "invalid-field",
-                Some(PathBuf::from(PROJECT_FILE)),
-                pyaml.line_of(crate::target::KEY, None),
-                "`target_path` must be a path",
-            );
-            return None;
-        }
+        let mut pfile_typed = match de::from_node::<Loose<ProjectFile>>(&pyaml.node) {
+            Ok(Loose::Ok(p)) => p,
+            Ok(Loose::Bad(_)) => {
+                self.diags.error(
+                    "invalid-project",
+                    Some(pyaml.display.clone()),
+                    None,
+                    format!("{PROJECT_FILE} must be a map"),
+                );
+                return None;
+            }
+            Err(e) => {
+                self.diags
+                    .error("invalid-project", Some(pyaml.display.clone()), e.line, e.message);
+                return None;
+            }
+        };
+        let target_line = pfile_typed.target_path.as_ref().and_then(de::Located::line);
+        let project_target = match &pfile_typed.target_path {
+            None => None,
+            Some(de::Located {
+                value: Loose::Ok(t), ..
+            }) => Some(t.as_str()),
+            Some(_) => {
+                self.diags.error(
+                    "invalid-field",
+                    Some(PathBuf::from(PROJECT_FILE)),
+                    target_line,
+                    "`target_path` must be a path",
+                );
+                return None;
+            }
+        };
         match crate::target::resolve(&self.root, self.opts.target_path.as_deref(), project_target) {
             Ok(t) => {
                 self.target_inside = crate::target::inside(&self.root, &t.dir);
@@ -853,15 +877,15 @@ impl Loader {
                 self.diags.error(
                     "invalid-target-path",
                     from_file.then(|| PathBuf::from(PROJECT_FILE)),
-                    from_file
-                        .then(|| pyaml.line_of(crate::target::KEY, None))
-                        .flatten(),
+                    from_file.then_some(target_line).flatten(),
                     e,
                 );
                 return None;
             }
         }
-        let mut project = self.parse_project_file(&pyaml)?;
+        let folders_cfg = pfile_typed.reports.take();
+        let default_profile_line = pfile_typed.default_profile.as_ref().and_then(de::Located::line);
+        let mut project = self.parse_project_file(&pyaml, pfile_typed)?;
 
         let found = self.discover();
         project.folders = found.folders.clone();
@@ -877,14 +901,10 @@ impl Loader {
         project.profiles.run = project.run_target();
 
         // Folder config needs the folder list to warn about folders that don't exist.
-        let folder_cfg = self.parse_folder_config(&pyaml, &project.folders);
+        let folder_cfg = self.parse_folder_config(&pyaml.display, folders_cfg, &project.folders);
         let mut used = Usage::default();
         if let Some(p) = &project.default_profile {
-            used.connection(
-                p,
-                Some(pyaml.display.clone()),
-                pyaml.line_of("default_profile", None),
-            );
+            used.connection(p, Some(pyaml.display.clone()), default_profile_line);
         }
         for cfg in folder_cfg.values() {
             if let Some((p, line)) = &cfg.profile {
@@ -1011,43 +1031,38 @@ impl Loader {
 
     // -- dre_project.yml ----------------------------------------------------------------------
 
-    fn parse_project_file(&mut self, yf: &Rc<YamlFile>) -> Option<Project> {
+    fn parse_project_file(&mut self, yf: &Rc<YamlFile>, pf: ProjectFile) -> Option<Project> {
         let file = Some(yf.display.clone());
-        let Some(m) = yf.value.as_mapping() else {
-            self.diags.error(
-                "invalid-project",
-                file,
-                None,
-                format!("{PROJECT_FILE} must be a map"),
-            );
-            return None;
-        };
-        for k in m.keys().filter_map(Value::as_str) {
-            if OLD_PLUGIN_KEYS.contains(&k) {
+        for (k, line) in [("destinations", &pf.destinations), ("formats", &pf.formats)] {
+            if line.is_some() {
                 self.old_plugin_key(yf, k);
-            } else if k == "target" {
-                self.diags.error(
-                    "removed-key",
-                    file.clone(),
-                    yf.line_of(k, None),
-                    "`target` in dre_project.yml was removed in DRE 0.2.1: give each profile its default with `target:` in profiles.yml, or choose the run's target with DRE_TARGET or --target",
-                );
-            } else if !PROJECT_KEYS.contains(&k) && !PLUGIN_KEYS.contains(&k) {
-                self.diags.error(
-                    "unknown-key",
-                    file.clone(),
-                    yf.line_of(k, None),
-                    format!("unknown key `{k}`"),
-                );
             }
         }
-        let name = match m.get("name") {
-            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.clone()),
-            Some(_) => {
+        if let Some(t) = &pf.target {
+            self.diags.error(
+                "removed-key",
+                file.clone(),
+                t.line(),
+                "`target` in dre_project.yml was removed in DRE 0.2.1: give each profile its default with `target:` in profiles.yml, or choose the run's target with DRE_TARGET or --target",
+            );
+        }
+        for k in &pf.unknown.0 {
+            self.diags.error(
+                "unknown-key",
+                file.clone(),
+                Some(k.line),
+                format!("unknown key `{}`", k.name),
+            );
+        }
+        let name = match pf.name {
+            Some(de::Located {
+                value: Loose::Ok(s), ..
+            }) if !s.trim().is_empty() => Some(s),
+            Some(n) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
-                    yf.line_of("name", None),
+                    n.line(),
                     "`name` must be a non-empty string",
                 );
                 None
@@ -1062,95 +1077,128 @@ impl Loader {
                 None
             }
         };
-        let default_profile = self.opt_string(yf, m, "default_profile");
+        let default_profile_line = pf.default_profile.as_ref().and_then(de::Located::line);
+        let default_profile = self.typed_string(&yf.display, pf.default_profile, "default_profile");
         let run_target = crate::profiles::RunTarget::resolve(self.opts.target.as_deref());
-        let default_set = self.opt_string(yf, m, "default_set");
-        let vars = self.opt_vars(yf, m.get("vars"), "vars");
-        let run_query_max_rows = match m.get("run_query_max_rows") {
-            None => DEFAULT_RUN_QUERY_MAX_ROWS,
-            Some(v) => match v.as_u64() {
-                Some(n) if n > 0 => n,
-                _ => {
-                    self.diags.error(
-                        "invalid-field",
-                        file.clone(),
-                        yf.line_of("run_query_max_rows", None),
-                        "`run_query_max_rows` must be a positive whole number",
-                    );
-                    DEFAULT_RUN_QUERY_MAX_ROWS
-                }
-            },
+        let default_set = self.typed_string(&yf.display, pf.default_set, "default_set");
+        let vars = match pf.vars {
+            None
+            | Some(de::Located {
+                value: Loose::Ok(None),
+                ..
+            }) => JsonMap::new(),
+            Some(de::Located {
+                value: Loose::Ok(Some(m)),
+                ..
+            }) => m,
+            Some(v) => {
+                self.diags
+                    .error("invalid-field", file.clone(), v.line(), "`vars` must be a map");
+                JsonMap::new()
+            }
         };
-        let dispatch = self.parse_dispatch(yf, m.get("dispatch"));
-        match m.get("format_options") {
-            None | Some(Value::Null) => {}
-            Some(Value::Mapping(f)) if f.values().all(|v| v.is_mapping()) => self.format_options = f.clone(),
-            Some(_) => self.diags.error(
-                "invalid-field",
-                file.clone(),
-                yf.line_of("format_options", None),
-                "`format_options` must map format names to their options, e.g. `delimited: {delimiter: \"|\"}`",
-            ),
-        }
-        let mask_secrets = match m.get("mask_secrets") {
-            None => true,
-            Some(Value::Bool(b)) => *b,
-            Some(_) => {
+        let run_query_max_rows = match pf.run_query_max_rows {
+            None => DEFAULT_RUN_QUERY_MAX_ROWS,
+            Some(de::Located {
+                value: Loose::Ok(n), ..
+            }) if n > 0 => n,
+            Some(v) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
-                    yf.line_of("mask_secrets", None),
+                    v.line(),
+                    "`run_query_max_rows` must be a positive whole number",
+                );
+                DEFAULT_RUN_QUERY_MAX_ROWS
+            }
+        };
+        let dispatch = self.parse_dispatch(&yf.display, pf.dispatch);
+        match pf.format_options {
+            None | Some(de::Located { value: Loose::Ok(None), .. }) => {}
+            Some(de::Located { value: Loose::Ok(Some(f)), .. }) if f.iter().all(|(_, v)| v.ok().is_some()) => {
+                self.format_options = f
+                    .0
+                    .into_iter()
+                    .filter_map(|(k, v)| match v {
+                        Loose::Ok(m) => Some((Value::String(k.value), Value::Mapping(json_to_yaml(m)))),
+                        Loose::Bad(_) => None,
+                    })
+                    .collect();
+            }
+            Some(f) => self.diags.error(
+                "invalid-field",
+                file.clone(),
+                f.line(),
+                "`format_options` must map format names to their options, e.g. `delimited: {delimiter: \"|\"}`",
+            ),
+        }
+        let mask_secrets = match pf.mask_secrets {
+            None => true,
+            Some(de::Located {
+                value: Loose::Ok(b), ..
+            }) => b,
+            Some(v) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    v.line(),
                     "`mask_secrets` must be true or false",
                 );
                 true
             }
         };
-        let timezone = match m.get("timezone") {
-            None => None,
-            Some(v) => self.timezone_value(v, &yf.display, yf.line_of("timezone", None), "`timezone`"),
-        };
-        let locale = match m.get("locale") {
-            None => None,
-            Some(v) => self.locale_value(v, &yf.display, yf.line_of("locale", None), "`locale`"),
-        };
-        let week_start = match m.get("week_start") {
+        let timezone = pf.timezone.and_then(|v| {
+            let line = v.line();
+            self.timezone_str(v.value.ok().map(String::as_str), &yf.display, line, "`timezone`")
+        });
+        let locale = pf.locale.and_then(|v| {
+            let line = v.line();
+            self.locale_str(v.value.ok().map(String::as_str), &yf.display, line, "`locale`")
+        });
+        let week_start = match pf.week_start {
             None => WeekStart::Monday,
-            Some(v) => v.as_str().and_then(WeekStart::parse).unwrap_or_else(|| {
+            Some(de::Located {
+                value: Loose::Ok(w), ..
+            }) => w,
+            Some(v) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
-                    yf.line_of("week_start", None),
+                    v.line(),
                     "`week_start` must be `monday` or `sunday`",
                 );
                 WeekStart::Monday
-            }),
+            }
         };
-        let week_numbering = match m.get("week_numbering") {
+        let week_numbering = match pf.week_numbering {
             None => WeekNumbering::Iso,
-            Some(v) => v.as_str().and_then(WeekNumbering::parse).unwrap_or_else(|| {
+            Some(de::Located {
+                value: Loose::Ok(w), ..
+            }) => w,
+            Some(v) => {
                 self.diags.error(
                     "invalid-field",
                     file.clone(),
-                    yf.line_of("week_numbering", None),
+                    v.line(),
                     "`week_numbering` must be `iso` or `us`",
                 );
                 WeekNumbering::Iso
-            }),
+            }
         };
-        let lookup_inline_max_rows = match m.get("lookup_inline_max_rows") {
+        let lookup_inline_max_rows = match pf.lookup_inline_max_rows {
             None => DEFAULT_INLINE_MAX_ROWS,
-            Some(v) => match v.as_u64() {
-                Some(n) => n,
-                _ => {
-                    self.diags.error(
-                        "invalid-field",
-                        file.clone(),
-                        yf.line_of("lookup_inline_max_rows", None),
-                        "`lookup_inline_max_rows` must be a whole number",
-                    );
-                    DEFAULT_INLINE_MAX_ROWS
-                }
-            },
+            Some(de::Located {
+                value: Loose::Ok(n), ..
+            }) => n,
+            Some(v) => {
+                self.diags.error(
+                    "invalid-field",
+                    file.clone(),
+                    v.line(),
+                    "`lookup_inline_max_rows` must be a whole number",
+                );
+                DEFAULT_INLINE_MAX_ROWS
+            }
         };
         Some(Project {
             name: name?,
@@ -1159,7 +1207,7 @@ impl Loader {
             target_source: self.target.source,
             target_name: run_target.name,
             target_from: run_target.from,
-            default_profile_line: yf.line_of("default_profile", None),
+            default_profile_line,
             default_profile,
             default_set,
             vars,
@@ -1196,9 +1244,43 @@ impl Loader {
         })
     }
 
+    /// An optional string key of a typed file: its value, else an error.
+    fn typed_string(
+        &mut self,
+        file: &Path,
+        v: Option<de::Located<Loose<String>>>,
+        key: &str,
+    ) -> Option<String> {
+        match v? {
+            de::Located {
+                value: Loose::Ok(s), ..
+            } => Some(s),
+            v => {
+                self.diags.error(
+                    "invalid-field",
+                    Some(file.to_path_buf()),
+                    v.line(),
+                    format!("`{key}` must be a string"),
+                );
+                None
+            }
+        }
+    }
+
     /// A `timezone:` value: an IANA name, else an error at `line`.
     fn timezone_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
-        let msg = match v.as_str() {
+        self.timezone_str(v.as_str(), file, line, what)
+    }
+
+    /// A `timezone:` value that is `None` when it isn't a string.
+    fn timezone_str(
+        &mut self,
+        v: Option<&str>,
+        file: &Path,
+        line: Option<usize>,
+        what: &str,
+    ) -> Option<String> {
+        let msg = match v {
             Some(s) => match crate::dates::parse_tz(s) {
                 Ok(_) => return Some(s.to_string()),
                 Err(e) => format!("{what}: {e}"),
@@ -1212,7 +1294,18 @@ impl Loader {
 
     /// A `locale:` value: a tag the number filters know (`de-DE`), else an error at `line`.
     fn locale_value(&mut self, v: &Value, file: &Path, line: Option<usize>, what: &str) -> Option<String> {
-        let msg = match v.as_str() {
+        self.locale_str(v.as_str(), file, line, what)
+    }
+
+    /// A `locale:` value that is `None` when it isn't a string.
+    fn locale_str(
+        &mut self,
+        v: Option<&str>,
+        file: &Path,
+        line: Option<usize>,
+        what: &str,
+    ) -> Option<String> {
+        let msg = match v {
             Some(s) => match crate::numbers::Locale::parse(s) {
                 Ok(_) => return Some(s.to_string()),
                 Err(e) => format!("{what}: {e}"),
@@ -1224,48 +1317,38 @@ impl Loader {
         None
     }
 
-    fn opt_string(&mut self, yf: &YamlFile, m: &Mapping, key: &str) -> Option<String> {
-        match m.get(key)? {
-            Value::String(s) => Some(s.clone()),
-            _ => {
-                self.diags.error(
-                    "invalid-field",
-                    Some(yf.display.clone()),
-                    yf.line_of(key, None),
-                    format!("`{key}` must be a string"),
-                );
-                None
-            }
-        }
-    }
-
     /// `dispatch: [{macro_namespace: dre_utils, search_order: [my_project, dre_utils]}]`.
-    fn parse_dispatch(&mut self, yf: &YamlFile, v: Option<&Value>) -> DispatchOrder {
+    fn parse_dispatch(&mut self, file: &Path, v: Option<config::project::DispatchList>) -> DispatchOrder {
         let mut out = DispatchOrder::new();
         let Some(v) = v else { return out };
-        let line = yf.line_of("dispatch", None);
-        let Some(list) = v.as_sequence() else {
+        let line = v.line();
+        let Loose::Ok(list) = v.value else {
             self.diags.error(
                 "invalid-field",
-                Some(yf.display.clone()),
+                Some(file.to_path_buf()),
                 line,
                 "`dispatch` must be a list of `{macro_namespace, search_order}`",
             );
             return out;
         };
         for e in list {
-            let ns = e.get("macro_namespace").and_then(Value::as_str);
-            let order: Option<Vec<String>> = e
-                .get("search_order")
-                .and_then(Value::as_sequence)
-                .map(|s| s.iter().filter_map(|x| x.as_str().map(str::to_string)).collect());
+            let (ns, order) = match e {
+                Loose::Ok(e) => {
+                    let ns = e.macro_namespace.and_then(|n| n.ok().cloned());
+                    let order: Option<Vec<String>> = e
+                        .search_order
+                        .and_then(|s| s.ok().map(|s| s.iter().filter_map(|x| x.ok().cloned()).collect()));
+                    (ns, order)
+                }
+                Loose::Bad(_) => (None, None),
+            };
             match (ns, order) {
                 (Some(ns), Some(order)) if !order.is_empty() => {
-                    out.insert(ns.to_string(), order);
+                    out.insert(ns, order);
                 }
                 _ => self.diags.error(
                     "invalid-field",
-                    Some(yf.display.clone()),
+                    Some(file.to_path_buf()),
                     line,
                     "each `dispatch` entry needs `macro_namespace` and a non-empty `search_order` list",
                 ),
@@ -1319,108 +1402,100 @@ impl Loader {
         }
     }
 
-    fn opt_vars(&mut self, yf: &YamlFile, v: Option<&Value>, key: &str) -> JsonMap<String, Json> {
-        match v {
-            None | Some(Value::Null) => JsonMap::new(),
-            Some(Value::Mapping(m)) => yaml_map_to_json(m),
-            Some(_) => {
-                self.diags.error(
-                    "invalid-field",
-                    Some(yf.display.clone()),
-                    yf.line_of(key, None),
-                    format!("`{key}` must be a map"),
-                );
-                JsonMap::new()
-            }
-        }
-    }
-
     fn parse_folder_config(
         &mut self,
-        yf: &Rc<YamlFile>,
+        file: &Path,
+        tree: Option<de::Located<Loose<config::project::Folder>>>,
         folders: &[Vec<String>],
     ) -> BTreeMap<Vec<String>, FolderCfg> {
         let mut out = BTreeMap::new();
-        let Some(tree) = yf.value.get("reports") else {
+        let Some(tree) = tree else {
             return out;
         };
-        let mut stack = vec![(Vec::<String>::new(), tree.clone(), yf.line_of("reports", None))];
-        while let Some((path, node, line)) = stack.pop() {
-            let Some(m) = node.as_mapping() else {
+        let display = Some(file.to_path_buf());
+        let mut stack = vec![(Vec::<String>::new(), tree)];
+        while let Some((path, node)) = stack.pop() {
+            let line = node.line();
+            let Loose::Ok(f) = node.value else {
                 self.diags.error(
                     "invalid-folder-config",
-                    Some(yf.display.clone()),
+                    display.clone(),
                     line,
                     format!("folder config for `{}` must be a map", dotted(&path)),
                 );
                 continue;
             };
+            let any = f.sets_anything();
             let mut cfg = FolderCfg::default();
-            let mut any = false;
-            for (k, v) in m {
-                let Some(k) = k.as_str() else { continue };
-                let kline = yf.line_of(k, line);
-                if let Some(key) = k.strip_prefix('+') {
-                    any = true;
-                    if !FOLDER_CONFIG_KEYS.contains(&k) {
-                        self.diags.error(
-                            "unknown-key",
-                            Some(yf.display.clone()),
-                            kline,
-                            format!(
-                                "unknown folder config `{k}`; folder config keys are {}",
-                                FOLDER_CONFIG_KEYS.join(", ")
-                            ),
-                        );
-                        continue;
-                    }
-                    let bad = |s: &mut Self, what: &str| {
-                        s.diags.error(
-                            "invalid-field",
-                            Some(yf.display.clone()),
-                            kline,
-                            format!("`{k}` must be {what}"),
-                        )
-                    };
-                    match key {
-                        "tags" => match string_list(v) {
-                            Some(t) => cfg.tags = t,
-                            None => bad(self, "a list of strings"),
-                        },
-                        "output" => match v.as_mapping() {
-                            Some(o) => cfg.output = Some(o.clone()),
-                            None => bad(self, "a map"),
-                        },
-                        "profile" => match v.as_str() {
-                            Some(p) => cfg.profile = Some((p.to_string(), kline)),
-                            None => bad(self, "a string"),
-                        },
-                        "schedule" => {
-                            let ctx = format!("folder `{}`: `+schedule`", dotted(&path));
-                            self.moved_to_schedules(&yf.display, kline, &ctx);
-                        }
-                        "timezone" => {
-                            cfg.timezone = self.timezone_value(v, &yf.display, kline, "`+timezone`");
-                        }
-                        "locale" => {
-                            cfg.locale = self.locale_value(v, &yf.display, kline, "`+locale`");
-                        }
-                        _ => match v.as_mapping() {
-                            Some(s) => cfg.vars = Some(s.clone()),
-                            None => bad(self, "a map"),
-                        },
-                    }
+            let bad = |s: &mut Self, k: &str, kline: Option<usize>, what: &str| {
+                s.diags.error(
+                    "invalid-field",
+                    display.clone(),
+                    kline,
+                    format!("`{k}` must be {what}"),
+                )
+            };
+            if let Some(v) = f.tags {
+                match v.value {
+                    Loose::Ok(t) => cfg.tags = t,
+                    Loose::Bad(_) => bad(self, "+tags", v.line(), "a list of strings"),
+                }
+            }
+            if let Some(v) = f.output {
+                match v.value {
+                    Loose::Ok(o) => cfg.output = Some(json_to_yaml(o)),
+                    Loose::Bad(_) => bad(self, "+output", v.line(), "a map"),
+                }
+            }
+            if let Some(v) = f.profile {
+                let kline = v.line();
+                match v.value {
+                    Loose::Ok(p) => cfg.profile = Some((p, kline)),
+                    Loose::Bad(_) => bad(self, "+profile", kline, "a string"),
+                }
+            }
+            if let Some(v) = f.schedule {
+                let ctx = format!("folder `{}`: `+schedule`", dotted(&path));
+                self.moved_to_schedules(file, v.line(), &ctx);
+            }
+            if let Some(v) = f.timezone {
+                let kline = v.line();
+                cfg.timezone =
+                    self.timezone_str(v.value.ok().map(String::as_str), file, kline, "`+timezone`");
+            }
+            if let Some(v) = f.locale {
+                let kline = v.line();
+                cfg.locale = self.locale_str(v.value.ok().map(String::as_str), file, kline, "`+locale`");
+            }
+            if let Some(v) = f.vars {
+                match v.value {
+                    Loose::Ok(s) => cfg.vars = Some(json_to_yaml(s)),
+                    Loose::Bad(_) => bad(self, "+vars", v.line(), "a map"),
+                }
+            }
+            for (k, v) in f.rest.0 {
+                if k.value.starts_with('+') {
+                    self.diags.error(
+                        "unknown-key",
+                        display.clone(),
+                        k.line(),
+                        format!(
+                            "unknown folder config `{}`; folder config keys are {}",
+                            k.value,
+                            FOLDER_CONFIG_KEYS.join(", ")
+                        ),
+                    );
                 } else {
                     let mut p = path.clone();
-                    p.push(k.to_string());
-                    stack.push((p, v.clone(), kline));
+                    p.push(k.value);
+                    stack.push((p, v));
                 }
             }
             if any && !path.is_empty() {
                 if !folders.contains(&path) {
                     self.diags.warning(
                         "unknown-folder",
-                        Some(yf.display.clone()),
+                        display.clone(),
                         line,
                         format!(
                             "folder config for `{}` matches no folder under reports/",
@@ -5306,6 +5381,14 @@ fn nth_item_line(text: &str, n: usize) -> Option<usize> {
         .filter(|(_, l)| l.starts_with("- ") || l.trim() == "-")
         .nth(n)
         .map(|(i, _)| i + 1)
+}
+
+/// A JSON map as a YAML mapping, for the output and vars merging that still works on YAML.
+fn json_to_yaml(m: JsonMap<String, Json>) -> Mapping {
+    match serde_yaml_ng::to_value(Json::Object(m)) {
+        Ok(Value::Mapping(m)) => m,
+        _ => Mapping::new(),
+    }
 }
 
 pub fn yaml_to_json(v: &Value) -> Json {

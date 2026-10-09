@@ -23,7 +23,9 @@ use minijinja::value::{Kwargs, Object, ObjectRepr, Value};
 use minijinja::{Environment, Error, ErrorKind, State};
 
 /// The first day of a week.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
 pub enum WeekStart {
     Monday,
     Sunday,
@@ -47,7 +49,9 @@ impl WeekStart {
 
 /// How weeks are numbered: `iso` (week 1 holds the year's first Thursday) or `us` (week 1
 /// holds 1 January).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
 pub enum WeekNumbering {
     Iso,
     Us,

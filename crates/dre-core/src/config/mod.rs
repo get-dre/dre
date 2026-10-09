@@ -6,6 +6,7 @@
 
 pub mod de;
 pub mod node;
+pub mod project;
 
 /// The JSON Schema of a config file type, as committed in `docs/schemas/<name>.schema.json`.
 ///
@@ -81,6 +82,16 @@ fn without_null(v: &mut serde_json::Value) {
                     m.insert("type".into(), only);
                 }
             }
+            if let Some(Value::Array(values)) = m.get_mut("enum") {
+                values.retain(|v| !v.is_null());
+            }
+            // Rust's integer widths aren't part of what a YAML file may hold.
+            if m.get("format")
+                .and_then(Value::as_str)
+                .is_some_and(|f| f.starts_with("int") || f.starts_with("uint"))
+            {
+                m.remove("format");
+            }
             if let Some(Value::Array(any)) = m.get("anyOf") {
                 let rest: Vec<Value> = any
                     .iter()
@@ -105,5 +116,8 @@ fn without_null(v: &mut serde_json::Value) {
 
 /// Every generated schema, by file name (`profiles` for `profiles.schema.json`).
 pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
-    vec![("profiles", schema::<crate::profiles::ProfilesFile>(version))]
+    vec![
+        ("project", schema::<project::ProjectFile>(version)),
+        ("profiles", schema::<crate::profiles::ProfilesFile>(version)),
+    ]
 }
