@@ -42,6 +42,9 @@ class Unpinned(unittest.TestCase):
         args = "-d --name x --network n -p 1:1 -e A=b --entrypoint sh alpine:3 -c true".split()
         self.assertEqual(idg.run_image(args), "alpine:3")
 
+    def test_comments_are_skipped(self):
+        self.assertEqual(idg.unpinned("# the images started with `docker run`, image: x\n"), [])
+
     def test_everything_pinned(self):
         self.assertEqual(idg.unpinned(f"image: a:1@{A}\ndocker run -d b:2@{B} cmd\n"), [])
 

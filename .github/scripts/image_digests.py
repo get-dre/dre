@@ -32,7 +32,9 @@ def pinned(text):
 
 
 def unpinned(text):
-    """Image references with no digest: in `image:` keys, and the image of each `docker run`."""
+    """Image references with no digest: in `image:` keys, and the image of each `docker run`
+    (comments aside)."""
+    text = re.sub(r"^\s*#.*$", "", text, flags=re.M)
     out = [m["image"] for m in IMAGE_KEY.finditer(text) if "@sha256:" not in m["image"]]
     for m in DOCKER_RUN.finditer(text):
         image = run_image(m["args"].replace("\\\n", " ").split())
