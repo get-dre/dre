@@ -48,12 +48,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: |
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D release
           python3 .github/scripts/package_managers.py "${TAG#v}" release/SHA256SUMS packages
           cat packages/dre.rb packages/dre.json
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
           path: packages/*
@@ -70,7 +72,7 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages
@@ -97,7 +99,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages
@@ -124,7 +126,7 @@ jobs:
       PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: packages

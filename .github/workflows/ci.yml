@@ -32,36 +32,46 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
+# Read-only by default; a job that publishes asks for more itself.
+permissions:
+  contents: read
+
 jobs:
   plugin-versions:
     # A warning, never a failure, for a plugin whose code changed without a version bump.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - run: python3 .github/scripts/plugin_versions.py "origin/${{ github.base_ref }}"
+      - run: python3 .github/scripts/plugin_versions.py "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
 
   schema-docs:
     # The YAML reference pages are generated from the JSON Schemas in docs/schemas/.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: python3 .github/scripts/schema_docs.py check
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          components: rustfmt, clippy
+          persist-credentials: false
+      # The runner's rustup, not a third-party action: the newest stable Rust.
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
       # Every Rust cache is saved only from master, so PRs can't evict master's caches or each
       # other's, and every run (PRs included) restores master's. The key follows Cargo.lock, the
       # toolchain and CARGO_* variables, not Cargo.toml's [profile] settings: after changing those,
       # bump prefix-key here and in skills.yml, or master keeps its stale cache.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -69,7 +79,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The Go plugin packages (databricks, bigquery, snowflake) and their shared protocol module,
       # each its own Go module.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
@@ -82,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
         env:
           POSTGRES_USER: dre
           POSTGRES_PASSWORD: dre
@@ -90,10 +100,10 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U dre" --health-interval 5s --health-retries 20
       s3:
-        image: adobe/s3mock
+        image: adobe/s3mock:latest@sha256:ab01a6946750f451ca215a47e91030695b260e4003b8a5a6201d25029b8fca92
         ports: ["9090:9090"]
       mailpit:
-        image: axllent/mailpit
+        image: axllent/mailpit:latest@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
         env:
           MP_SMTP_AUTH_ACCEPT_ANY: "1"
           MP_SMTP_AUTH_ALLOW_INSECURE: "1"
@@ -110,18 +120,20 @@ jobs:
       DRE_TEST_MAILPIT_API: http://localhost:8025
       DRE_TEST_BIGQUERY_EMULATOR: http://localhost:9050
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Start emulators that need arguments
         run: |
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/id_test"
           echo "DRE_TEST_SFTP_KEY=$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
-          docker run -d -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443 \
+          docker run -d -p 4443:4443 fsouza/fake-gcs-server:latest@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef -scheme http -port 4443 \
             -public-host localhost:4443 -external-url http://localhost:4443
           docker run -d -p 2222:22 -v "$RUNNER_TEMP/id_test.pub:/home/dre/.ssh/keys/id_test.pub:ro" \
-            atmoz/sftp dre:dre-pass:1001::upload
-          docker run -d -p 10000:10000 mcr.microsoft.com/azure-storage/azurite \
+            atmoz/sftp:latest@sha256:0960390462a4441dbb63698d7c185b76a41ffcee7b78ff4adf275f3e66f9c475 dre:dre-pass:1001::upload
+          docker run -d -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:latest@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
             azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
-          docker run -d -p 9050:9050 ghcr.io/goccy/bigquery-emulator --project=dre-test --dataset=shop
+          docker run -d -p 9050:9050 ghcr.io/goccy/bigquery-emulator:latest@sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393 --project=dre-test --dataset=shop
           # The image's own start runs vsftpd in the background and keeps the container alive only
           # while the pid it records exists. If the readiness check below connects as vsftpd
           # starts, that pid can be the check's session process, and the container exits when the
@@ -129,7 +141,7 @@ jobs:
           # in the foreground (`-obackground=NO` must follow the config file to override it).
           vsftpd="vsftpd /etc/vsftpd/vsftpd.conf -obackground=NO -opasv_address=127.0.0.1"
           docker run -d -p 2121:21 -p 30000-30009:30000-30009 -e USERS="dre|dre-pass" \
-            delfer/alpine-ftp-server $vsftpd -opasv_min_port=30000 -opasv_max_port=30009
+            delfer/alpine-ftp-server:latest@sha256:60bb774d8408d9d4d5c74d05d1c086a34ce192c6c1a142ffac268cac0dbc6fac $vsftpd -opasv_min_port=30000 -opasv_max_port=30009
           # Explicit FTPS with vsftpd's defaults, which require TLS session reuse on data
           # connections, and a self-signed certificate.
           mkdir -p "$RUNNER_TEMP/ftps"
@@ -137,7 +149,7 @@ jobs:
             -keyout "$RUNNER_TEMP/ftps/server.key" -out "$RUNNER_TEMP/ftps/server.crt" 2>/dev/null
           chmod 644 "$RUNNER_TEMP/ftps/server.key"
           docker run -d -p 2990:21 -p 30010-30019:30010-30019 -e USERS="dre|dre-pass" \
-            -v "$RUNNER_TEMP/ftps:/certs:ro" delfer/alpine-ftp-server \
+            -v "$RUNNER_TEMP/ftps:/certs:ro" delfer/alpine-ftp-server:latest@sha256:60bb774d8408d9d4d5c74d05d1c086a34ce192c6c1a142ffac268cac0dbc6fac \
             $vsftpd -opasv_min_port=30010 -opasv_max_port=30019 \
             -orsa_cert_file=/certs/server.crt -orsa_private_key_file=/certs/server.key \
             -ossl_enable=YES -oallow_anon_ssl=NO -oforce_local_data_ssl=YES \
@@ -167,7 +179,7 @@ jobs:
           done
       # Postgres with TLS behind an SSH bastion, for the postgres plugin's tunnel tests.
       # The bigquery plugin against the BigQuery emulator.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/bigquery/go.mod
           cache-dependency-path: go/*/go.sum
@@ -175,12 +187,15 @@ jobs:
         working-directory: go/bigquery
       - name: Start the SSH bastion
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      # The runner's rustup, not a third-party action: the newest stable Rust.
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: nextest
       - run: >
           cargo nextest run --no-fail-fast -p dre-plugin-postgres -p dre-plugin-object_store
           -p dre-plugin-sftp -p dre-plugin-ftp -p dre-plugin-email
@@ -199,13 +214,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The runner's rustup, not a third-party action: the newest stable Rust.
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
@@ -227,7 +245,9 @@ jobs:
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
       # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
       # test even after a failure, so one failure can't hide others.
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: nextest
       - run: cargo nextest run --workspace --no-fail-fast
         env:
           DRE_TEST_PREBUILT_BINS: "1"

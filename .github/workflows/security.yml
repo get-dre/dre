@@ -1,6 +1,7 @@
 name: Security scan
 
-# Known vulnerabilities and licences of every dependency, Rust and Go: on every pull request and
+# Known vulnerabilities and licences of every dependency, Rust and Go, and the workflows' own
+# security (zizmor: actions pinned by SHA, images by digest, minimal permissions): on every pull request and
 # push to master, before every release (release.yml calls this workflow), and weekly, so a new
 # advisory against unchanged lockfiles shows up as a red run. What to do when it fails:
 # CONTRIBUTING.md, "When the security scan fails". The script is .github/scripts/security_scan.py;
@@ -23,11 +24,15 @@ jobs:
     name: Rust (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: python3 .github/scripts/test_security_scan.py
-      - uses: taiki-e/install-action@cargo-deny
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-deny
       - run: python3 .github/scripts/security_scan.py rust --report-dir security-report
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: security-report-rust
@@ -38,10 +43,12 @@ jobs:
     name: Go (govulncheck, go-licenses)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The newest Go patch release: govulncheck reports standard-library advisories for the Go
       # it runs with, and the release builds use the newest patch too.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
           check-latest: true
@@ -50,9 +57,26 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           go install github.com/google/go-licenses/v2@v2.0.1
       - run: python3 .github/scripts/security_scan.py go --report-dir security-report
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: security-report-go
           path: security-report/
           if-no-files-found: ignore
+
+  workflows:
+    name: Workflows (zizmor, image digests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Every third-party action pinned by commit SHA, images by digest, permissions explicit and
+      # minimal, no template injection. Accepted findings: .github/zizmor.yml.
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run zizmor==1.30.1 --format github .github/workflows
+      # The images started with `docker run`, which zizmor doesn't see.
+      - run: python3 .github/scripts/test_image_digests.py
+      - run: python3 .github/scripts/image_digests.py check

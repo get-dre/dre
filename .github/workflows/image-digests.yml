@@ -1,0 +1,54 @@
+name: Image digests
+
+# CI's container images are pinned by digest (`name:tag@sha256:…`), and Dependabot doesn't read
+# images in workflow files. Weekly, this re-resolves every pinned tag
+# (.github/scripts/image_digests.py update) and, when a digest moved, pushes the change to the
+# `ci/image-digests` branch and opens a pull request for review.
+#
+# GitHub starts no workflows for a pull request opened with this workflow's token: close and
+# reopen it to run CI. Opening it needs "Allow GitHub Actions to create and approve pull
+# requests" in the repository's Actions settings; without it the run fails with a link to open
+# the pull request by hand.
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"  # Mondays, 06:41 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency: image-digests
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: ci/image-digests
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/image_digests.py update
+      - name: Propose the update
+        run: |
+          if git diff --quiet; then
+            echo "Every image digest is current."
+            exit 0
+          fi
+          git diff
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git switch -c "$BRANCH"
+          git commit -qam "Update CI image digests"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            echo "The open pull request for $BRANCH now has the newest digests."
+          elif ! gh pr create --head "$BRANCH" --title "Update CI image digests" \
+              --body "The weekly image digest check (image-digests.yml) found newer images for the pinned tags. Close and reopen this pull request to run CI on it."; then
+            echo "::error::Couldn't open the pull request. Open it by hand: https://github.com/${GITHUB_REPOSITORY}/compare/${BRANCH}?expand=1"
+            exit 1
+          fi
