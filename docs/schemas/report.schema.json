@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "x-dre-schema-version": "0.3",
   "title": "DRE report",
-  "description": "A report: SQL queries plus an output, in a YAML file under `reports/`.",
   "type": "object",
+  "description": "A report: SQL queries plus an output, in a YAML file under `reports/`.",
   "properties": {
     "name": {
       "type": "string",
@@ -84,6 +84,7 @@
     },
     "plugins": {
       "description": "The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.",
+      "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)",
       "oneOf": [
         {
           "type": "array",
@@ -142,12 +143,11 @@
         {
           "type": "null"
         }
-      ],
-      "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)"
+      ]
     },
     "sources": {
-      "$ref": "sources.schema.json#/properties/sources",
-      "description": "dbt-style source declarations (see the sources schema). May be written in any project YAML file."
+      "description": "dbt-style source declarations (see the sources schema). May be written in any project YAML file.",
+      "$ref": "sources.schema.json#/properties/sources"
     }
   },
   "additionalProperties": false,
@@ -214,104 +214,14 @@
       ],
       "additionalProperties": false
     },
-    "setEntry": {
-      "type": "object",
-      "description": "A Set declared in the report: a named variant of it.",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "The Set's name. A report can also name Sets declared in `sets.yml`."
-        },
-        "profile": {
-          "type": "string",
-          "description": "The connection this Set runs on. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`."
-        },
-        "vars": {
-          "type": "object",
-          "description": "Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.",
-          "additionalProperties": true
-        },
-        "exclude": {
-          "type": "array",
-          "description": "Queries to leave out of this Set, by name.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "queries": {
-          "type": "array",
-          "description": "Replaces the report's queries for this Set.",
-          "items": {
-            "description": "A query of this Set, by name, or with its own settings.",
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "object",
-                "description": "A query with settings.",
-                "properties": {
-                  "query": {
-                    "type": "string",
-                    "description": "The query's name."
-                  },
-                  "tab": {
-                    "type": "boolean",
-                    "description": "Whether the query makes a tab."
-                  },
-                  "tab_name": {
-                    "type": "string",
-                    "description": "The tab name."
-                  }
-                },
-                "required": [
-                  "query"
-                ],
-                "additionalProperties": true
-              }
-            ]
-          }
-        },
-        "tab_names": {
-          "type": "object",
-          "description": "Renames tabs for this Set: query name to tab name.",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "output": {
-          "description": "Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all.",
-          "oneOf": [
-            {
-              "$ref": "#/$defs/output"
-            },
-            {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/output"
-              }
-            }
-          ]
-        },
-        "locale": {
-          "type": "string",
-          "description": "The locale for this Set's number filters (`fr-FR`), above the report's."
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "additionalProperties": false
-    },
     "output": {
       "type": "object",
       "description": "How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`, `text` for `message`); they are documented with the formats.",
       "properties": {
         "name": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-          "description": "Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report."
+          "description": "Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report.",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
         },
         "format": {
           "type": "string",
@@ -319,11 +229,11 @@
         },
         "queries": {
           "type": "array",
+          "description": "Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs.",
           "items": {
             "type": "string"
           },
-          "minItems": 1,
-          "description": "Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs."
+          "minItems": 1
         },
         "when": {
           "type": [
@@ -351,12 +261,12 @@
           "$ref": "#/$defs/template"
         },
         "extension": {
-          "description": "File extension for text formats (e.g. `aba`), instead of the format's own. `\"\"` or `false` means none. Not for xlsx.",
           "type": [
             "string",
             "boolean",
             "null"
-          ]
+          ],
+          "description": "File extension for text formats (e.g. `aba`), instead of the format's own. `\"\"` or `false` means none. Not for xlsx."
         }
       },
       "additionalProperties": true
@@ -461,6 +371,96 @@
       },
       "required": [
         "file"
+      ],
+      "additionalProperties": false
+    },
+    "setEntry": {
+      "type": "object",
+      "description": "A Set declared in the report: a named variant of it.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The Set's name. A report can also name Sets declared in `sets.yml`."
+        },
+        "profile": {
+          "type": "string",
+          "description": "The connection this Set runs on. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`."
+        },
+        "vars": {
+          "type": "object",
+          "description": "Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.",
+          "additionalProperties": true
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Queries to leave out of this Set, by name.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "queries": {
+          "type": "array",
+          "description": "Replaces the report's queries for this Set.",
+          "items": {
+            "description": "A query of this Set, by name, or with its own settings.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "description": "A query with settings.",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The query's name."
+                  },
+                  "tab": {
+                    "type": "boolean",
+                    "description": "Whether the query makes a tab."
+                  },
+                  "tab_name": {
+                    "type": "string",
+                    "description": "The tab name."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "tab_names": {
+          "type": "object",
+          "description": "Renames tabs for this Set: query name to tab name.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "description": "Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/output"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/output"
+              }
+            }
+          ]
+        },
+        "locale": {
+          "type": "string",
+          "description": "The locale for this Set's number filters (`fr-FR`), above the report's."
+        }
+      },
+      "required": [
+        "name"
       ],
       "additionalProperties": false
     }

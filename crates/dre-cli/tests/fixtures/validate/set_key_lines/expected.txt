@@ -1,0 +1,8 @@
+exit: 1
+error[undeclared-plugin]: reports/sales/sales.yml: format `csv` is used by report `sales`, Set `eu` (csv is the built-in default output), but no plugin package the project declares provides it — add the package with the `csv` format under `plugins:` in dependencies.yml, then run `dre deps`
+error[unknown-key]: reports/sales/sales.yml:6: report `sales`, Set `us`: unknown key `colour`
+error[unknown-query]: reports/sales/sales.yml:7: report `sales`, Set `us`: `exclude` names `nope`, which isn't in the report's `queries:`
+error[duplicate-set]: reports/sales/sales.yml:8: report `sales` lists Set `us` more than once
+  Profiles  $CASE/no-profiles/profiles.yml (from --profiles-dir, not found)
+    Target  dev (default)
+Validation failed: 4 errors, 0 warnings

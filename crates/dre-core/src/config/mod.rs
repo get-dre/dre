@@ -76,7 +76,14 @@ fn without_null(v: &mut serde_json::Value) {
     use serde_json::Value;
     match v {
         Value::Object(m) => {
-            if let Some(Value::Array(types)) = m.get_mut("type") {
+            // A schema that allows `null` on purpose says so.
+            let keep_null = m.remove("x-dre-null").is_some();
+            if m.get("default") == Some(&Value::Null) {
+                m.remove("default");
+            }
+            if let Some(Value::Array(types)) = m.get_mut("type")
+                && !keep_null
+            {
                 types.retain(|t| t != "null");
                 if types.len() == 1 {
                     let only = types.remove(0);
@@ -119,6 +126,7 @@ fn without_null(v: &mut serde_json::Value) {
 pub fn schemas(version: &str) -> Vec<(&'static str, serde_json::Value)> {
     vec![
         ("project", schema::<project::ProjectFile>(version)),
+        ("report", schema::<report::ReportFile>(version)),
         ("profiles", schema::<crate::profiles::ProfilesFile>(version)),
     ]
 }
