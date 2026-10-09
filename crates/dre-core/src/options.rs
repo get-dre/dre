@@ -11,6 +11,7 @@ use dre_protocol::host::LogSink;
 use serde_json::{Map, Value};
 
 use crate::Diagnostics;
+use crate::codes::Code;
 use crate::profiles::{LOCAL_TYPE, Role};
 use crate::project::{PluginKind, Project};
 use crate::run::find_plugin;
@@ -117,10 +118,10 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
         let report = |diags: &mut Diagnostics, u: &Use, e: &str| {
             let (code, msg) = match &u.profile {
                 Some(p) => (
-                    "invalid-destination-option",
+                    Code::InvalidDestinationOption,
                     format!("{}: destination `{p}`: {e}", u.ctx),
                 ),
-                None => ("invalid-output-option", format!("{}: {e}", u.ctx)),
+                None => (Code::InvalidOutputOption, format!("{}: {e}", u.ctx)),
             };
             diags.error(code, Some(u.file.clone()), None, msg);
         };
@@ -158,14 +159,14 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 let at = first.map(|u| format!("{}: ", u.ctx)).unwrap_or_default();
                 if offline {
                     diags.warning(
-                        "options-unchecked",
+                        Code::OptionsUnchecked,
                         file,
                         None,
                         format!("{at}{kind} `{name}`'s options weren't checked: {e}"),
                     );
                 } else {
                     diags.error(
-                        "plugin-not-found",
+                        Code::PluginNotFound,
                         file,
                         None,
                         format!("{at}{kind} `{name}` has no plugin to check it against: {e}"),
@@ -178,7 +179,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             Ok(p) => p,
             Err(e) => {
                 diags.warning(
-                    "options-unchecked",
+                    Code::OptionsUnchecked,
                     None,
                     None,
                     format!("can't check the options of {kind} `{name}`: {e}"),
@@ -213,7 +214,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
         if !p.has(dre_protocol::CAP_VALIDATE) {
             if blocks.values().any(|(o, _)| !o.is_empty()) {
                 diags.warning(
-                    "options-unchecked",
+                    Code::OptionsUnchecked,
                     None,
                     None,
                     format!(
@@ -236,7 +237,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 }
                 Err(e) => {
                     diags.warning(
-                        "options-unchecked",
+                        Code::OptionsUnchecked,
                         None,
                         None,
                         format!("{kind} `{name}` failed to check its options: {e}"),

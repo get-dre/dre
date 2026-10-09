@@ -18,6 +18,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::codes::Code;
 use crate::config::de::Loose;
 use crate::config::dependencies::DependenciesFile;
 use crate::diag::Diagnostics;
@@ -80,7 +81,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
         let line = packages.line();
         let Loose::Ok(list) = packages.value else {
             diags.error(
-                "invalid-packages",
+                Code::InvalidPackages,
                 Some(yf.display.clone()),
                 line,
                 "`packages` must be a list",
@@ -101,7 +102,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
                     Some(revision) => Source::Git { url, revision },
                     None => {
                         diags.error(
-                            "invalid-packages",
+                            Code::InvalidPackages,
                             Some(yf.display.clone()),
                             line,
                             format!("git package `{url}` needs a `revision` (a tag, branch or commit)"),
@@ -112,7 +113,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
                 (None, Some(path), None) => Source::Local { path },
                 (None, None, Some(name)) => {
                     diags.error(
-                        "invalid-packages",
+                        Code::InvalidPackages,
                         Some(yf.display.clone()),
                         line,
                         format!("`package: {name}`: registry packages aren't available yet; use `git:` or `local:`"),
@@ -121,7 +122,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
                 }
                 _ => {
                     diags.error(
-                        "invalid-packages",
+                        Code::InvalidPackages,
                         Some(yf.display.clone()),
                         line,
                         "each package needs exactly one of `git:` (with `revision:`) or `local:`",
@@ -137,7 +138,7 @@ pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
             match out.iter().find(|d| same_place(&d.source, &source)) {
                 Some(d) if d.source == source => {}
                 Some(d) => diags.error(
-                    "conflicting-packages",
+                    Code::ConflictingPackages,
                     Some(yf.display.clone()),
                     line,
                     format!(
@@ -362,7 +363,7 @@ pub fn resolve(root: &Path, decls: &[Declared], diags: &mut Diagnostics) -> Vec<
                 let p = root.join(path);
                 if !p.is_dir() {
                     diags.error(
-                        "package-missing",
+                        Code::PackageMissing,
                         Some(d.file.clone()),
                         None,
                         format!("local package `{path}` doesn't exist"),
@@ -375,7 +376,7 @@ pub fn resolve(root: &Path, decls: &[Declared], diags: &mut Diagnostics) -> Vec<
                 Some((name, _)) if installed_dir(root, name).is_dir() => installed_dir(root, name),
                 _ => {
                     diags.error(
-                        "package-missing",
+                        Code::PackageMissing,
                         Some(d.file.clone()),
                         None,
                         format!("the package from {url} isn't installed; run `dre deps`"),
@@ -387,13 +388,13 @@ pub fn resolve(root: &Path, decls: &[Declared], diags: &mut Diagnostics) -> Vec<
         let name = match manifest_name(&dir) {
             Ok(n) => n,
             Err(e) => {
-                diags.error("invalid-package", Some(d.file.clone()), None, e);
+                diags.error(Code::InvalidPackage, Some(d.file.clone()), None, e);
                 continue;
             }
         };
         if let Some(other) = out.iter().find(|p| p.name == name) {
             diags.error(
-                "duplicate-package",
+                Code::DuplicatePackage,
                 Some(d.file.clone()),
                 None,
                 format!(

@@ -18,12 +18,13 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::{Map as JsonMap, Value as Json};
 
+use crate::codes::Code;
 use crate::dates::Calendar;
 use crate::project::{Binding, Project, Report};
 use crate::render::{Limited, Mode, Renderer, RendererConfig, ResolvedSource, RunContext, SourceResolver};
 
 /// The code of a template the parse pass couldn't render.
-pub const PARSE_FAILED: &str = "parse-failed";
+pub const PARSE_FAILED: Code = Code::ParseFailed;
 
 /// What the parse pass renders `run.*`, `var()` and `target.name` with: the run's inputs.
 #[derive(Debug, Clone, Default)]
@@ -46,7 +47,7 @@ pub struct Inputs {
 /// A problem found by the parse pass, at a file and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem {
-    pub code: &'static str,
+    pub code: Code,
     pub file: PathBuf,
     pub line: Option<usize>,
     pub message: String,
@@ -249,15 +250,14 @@ pub fn binding(
         inputs.cli_vars.clone(),
     ));
     let mut out = ParsedBinding::default();
-    let error =
-        |out: &mut ParsedBinding, code: &'static str, file: PathBuf, line: Option<usize>, msg: String| {
-            out.errors.push(Problem {
-                code,
-                file,
-                line,
-                message: msg,
-            })
-        };
+    let error = |out: &mut ParsedBinding, code: Code, file: PathBuf, line: Option<usize>, msg: String| {
+        out.errors.push(Problem {
+            code,
+            file,
+            line,
+            message: msg,
+        })
+    };
     // `ctx` is `None` for a value written once for many Bindings (an inherited profile): the same
     // message at its own file and line is then reported once.
     let render_profile = |out: &mut ParsedBinding,
@@ -272,7 +272,7 @@ pub fn binding(
             Err(e) => e,
         };
         out.errors.push(Problem {
-            code: "invalid-profile-value",
+            code: Code::InvalidProfileValue,
             file: at.0.clone(),
             line: at.1,
             message: match ctx {
@@ -398,7 +398,7 @@ pub fn binding(
                 if let Some((why, _)) = rest.iter().find(|(_, p)| p != first) {
                     error(
                         &mut out,
-                        "connection-conflict",
+                        Code::ConnectionConflict,
                         q.path.clone(),
                         None,
                         format!(
@@ -418,7 +418,7 @@ pub fn binding(
         if pq.connection.is_none() && !failed && !conflicted {
             error(
                 &mut out,
-                "no-connection",
+                Code::NoConnection,
                 report.file.clone(),
                 None,
                 format!(
@@ -464,7 +464,7 @@ fn setup_warnings(report: &Report, b: &Binding, out: &mut ParsedBinding) {
         }
         let (other, oc) = &later[0];
         warnings.push(Problem {
-            code: "setup-on-other-connection",
+            code: Code::SetupOnOtherConnection,
             file: report.file.clone(),
             line: None,
             message: format!(

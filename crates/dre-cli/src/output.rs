@@ -600,7 +600,8 @@ impl Ui for Printer {
         if i.format == LogFormat::Json {
             i.json(json!({
                 "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
-                "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error, "summary": o.summary,
+                "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
+                "error_code": o.error_code, "error_kind": o.error_code.map(|c| c.kind()), "summary": o.summary,
                 "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
                 "timezone": o.timezone,
             }));

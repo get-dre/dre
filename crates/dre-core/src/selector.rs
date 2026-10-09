@@ -5,6 +5,7 @@
 //! `source:sales` picks every report a query of which reads a table of source `sales`, and
 //! `source:sales.orders` those reading that table (as the parse pass found them).
 
+use crate::codes::Code;
 use std::fmt;
 
 use crate::project::{Project, REPORTS_DIR, Report, dotted};
@@ -26,11 +27,11 @@ pub enum SelectorError {
 }
 
 impl SelectorError {
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> Code {
         match self {
-            SelectorError::Ambiguous { .. } => "ambiguous-selector",
-            SelectorError::NoMatch { .. } => "selector-matches-nothing",
-            SelectorError::UnknownSource { .. } => "unknown-source",
+            SelectorError::Ambiguous { .. } => Code::AmbiguousSelector,
+            SelectorError::NoMatch { .. } => Code::SelectorMatchesNothing,
+            SelectorError::UnknownSource { .. } => Code::UnknownSource,
         }
     }
 }

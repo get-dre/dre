@@ -22,6 +22,7 @@ use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE, CAP_
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
+use crate::codes::Code;
 use crate::dates::Calendar;
 use crate::lookups::Table;
 use crate::message::QueryResult;
@@ -161,6 +162,9 @@ pub struct BindingOutcome {
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// `error`'s code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<Code>,
     pub files: Vec<PathBuf>,
     /// One line describing what the Binding produced (result sets, rows, outputs, delivery).
     pub summary: String,
@@ -244,6 +248,26 @@ impl RunSummary {
     pub fn failed(&self) -> bool {
         self.error.is_some() || self.outcomes.iter().any(|o| o.status == Status::Error)
     }
+
+    /// The code of what failed first: why nothing ran, else the first failed Binding's.
+    pub fn error_code(&self) -> Option<Code> {
+        if self.error.is_some() {
+            return Some(if self.missing_entry {
+                Code::MissingTargetEntry
+            } else {
+                Code::InvalidSelector
+            });
+        }
+        self.outcomes
+            .iter()
+            .find(|o| o.status == Status::Error)
+            .map(|o| o.error_code.unwrap_or(Code::RunFailed))
+    }
+
+    /// The exit code: 0, else the one the failure's kind has.
+    pub fn exit_code(&self) -> u8 {
+        self.error_code().map_or(0, |c| c.kind().exit_code())
+    }
 }
 
 pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary {
@@ -298,6 +322,7 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
                             binding: "-".into(),
                             status: Status::Error,
                             error: Some(e),
+                            error_code: Some(Code::InvalidSelector),
                             files: Vec::new(),
                             summary: String::new(),
                             schedule: opts.schedule.clone(),
@@ -729,7 +754,47 @@ struct RenderedDest {
     attach: Vec<String>,
 }
 
-type Fail = String;
+/// Why a Binding (or one of its steps) failed: a registered code and the message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fail {
+    code: Code,
+    message: String,
+}
+
+impl Fail {
+    fn new(code: Code, message: impl Into<String>) -> Fail {
+        Fail {
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// The step's own code, unless a more specific one is already set.
+    fn or(mut self, code: Code) -> Fail {
+        if self.code == Code::RunFailed {
+            self.code = code;
+        }
+        self
+    }
+}
+
+impl From<String> for Fail {
+    fn from(message: String) -> Fail {
+        Fail::new(Code::RunFailed, message)
+    }
+}
+
+impl From<&str> for Fail {
+    fn from(message: &str) -> Fail {
+        Fail::new(Code::RunFailed, message)
+    }
+}
+
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 fn masked_source_error(error: &HostError, sensitive: bool) -> String {
     let error = error.to_string();
@@ -896,16 +961,17 @@ impl<'a> BindingRun<'a> {
         self.parsed
             .query(query)
             .and_then(|q| q.connection.clone())
-            .ok_or_else(|| format!("query `{query}` has no connection"))
+            .ok_or_else(|| format!("query `{query}` has no connection").into())
     }
 
-    fn outcome(&self, status: Status, error: Option<String>) -> BindingOutcome {
+    fn outcome(&self, status: Status, error: Option<Fail>) -> BindingOutcome {
         BindingOutcome {
             report: self.report.name.clone(),
             set: self.b.set.clone(),
             binding: self.b.dir_name().to_string(),
             status,
-            error,
+            error_code: error.as_ref().map(|e| e.code),
+            error: error.map(|e| e.message),
             files: self.files().map(|(p, _)| p.clone()).collect(),
             summary: self.summary_line(),
             schedule: self.opts.schedule.clone(),
@@ -929,7 +995,7 @@ impl<'a> BindingRun<'a> {
             (Ok(()), false, _) => Status::Success,
         };
         let err = result.err();
-        if !dry && let Err(e) = self.write_results(&status, err.as_deref()) {
+        if !dry && let Err(e) = self.write_results(&status, err.as_ref()) {
             self.ui.warn(&format!("can't write run_results.json: {e}"));
         }
         // Spools are scratch space.
@@ -950,7 +1016,7 @@ impl<'a> BindingRun<'a> {
                     None => format!("{}: {}", p.file.display(), p.message),
                 })
                 .collect();
-            return Err(msgs.join("\n    "));
+            return Err(Fail::new(Code::ParseFailed, msgs.join("\n    ")));
         }
         // Sessions are opened only when something needs the database, so compiling a report
         // whose templates don't query it works without the plugin or credentials.
@@ -985,7 +1051,7 @@ impl<'a> BindingRun<'a> {
         // Reported after the unmanaged-report check, which matters more.
         let mut two_tabs: Option<String> = None;
         if interleave {
-            self.render_destinations()?;
+            self.render_destinations().map_err(|e| e.or(Code::RenderFailed))?;
             let mut checked: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for (c, n) in &per_connection {
                 if *n > 1 {
@@ -1004,7 +1070,7 @@ impl<'a> BindingRun<'a> {
                     self.ui.warn(&w);
                 }
                 if let Some(e) = two_tabs.take() {
-                    return Err(e);
+                    return Err(e.into());
                 }
                 if sts.len() > 1 && checked.insert(conn.clone()) {
                     self.check_sessions(&pool, &conn, sts.len())?;
@@ -1022,7 +1088,7 @@ impl<'a> BindingRun<'a> {
                 let renderer = self.renderer(Some(&conn))?;
                 statements.extend(self.render_query(&renderer, q, &conn, &mut two_tabs)?);
             }
-            self.render_destinations()?;
+            self.render_destinations().map_err(|e| e.or(Code::RenderFailed))?;
             for r in self.renderers.values() {
                 for w in r.take_warnings() {
                     self.ui.warn(&w);
@@ -1038,7 +1104,7 @@ impl<'a> BindingRun<'a> {
                         bad.line,
                         self.report.name,
                         masked_sql_summary(&bad.text, 60, bad.sensitive)
-                    ));
+                    ).into());
                 }
                 for conn in per_connection.keys() {
                     let session = pool.session(conn)?;
@@ -1050,7 +1116,7 @@ impl<'a> BindingRun<'a> {
                 }
             }
             if let Some(e) = two_tabs {
-                return Err(e);
+                return Err(e.into());
             }
 
             if self.opts.dry_run {
@@ -1090,7 +1156,7 @@ impl<'a> BindingRun<'a> {
                 continue;
             }
             let filename = self.file_names(oi);
-            self.format(oi, &filename)?;
+            self.format(oi, &filename).map_err(|e| e.or(Code::FormatFailed))?;
         }
 
         // Schema drift, before delivery.
@@ -1107,7 +1173,7 @@ impl<'a> BindingRun<'a> {
                         "schema drift since the last successful run: {}; the output is in {} but was not delivered — pass --accept-schema-change to deliver it and accept the new schema",
                         self.drift.join("; "),
                         rel(&self.project.root, &self.run_dir).display()
-                    ));
+                    ).into());
                 }
             }
         }
@@ -1125,9 +1191,10 @@ impl<'a> BindingRun<'a> {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(e) => {
-                        let e = format!("{}: {e}", self.b.outputs[oi].label(oi));
+                        let e = e.or(Code::RenderFailed);
+                        let e = Fail::new(e.code, format!("{}: {e}", self.b.outputs[oi].label(oi)));
                         self.outs[oi].status = Some(OutputStatus::Failed);
-                        self.outs[oi].error = Some(e.clone());
+                        self.outs[oi].error = Some(e.message.clone());
                         failures.push(e);
                         continue;
                     }
@@ -1137,7 +1204,7 @@ impl<'a> BindingRun<'a> {
                 self.outs[oi].delivery_note = Some("preview: not delivered".into());
                 self.outs[oi].status = Some(OutputStatus::Kept);
             } else if let Err(e) = self.deliver(oi) {
-                failures.push(e);
+                failures.push(e.or(Code::DeliveryFailed));
             }
         }
         if preview {
@@ -1149,8 +1216,9 @@ impl<'a> BindingRun<'a> {
                 None,
             );
         }
-        if !failures.is_empty() {
-            return Err(failures.join("; "));
+        if let Some(first) = failures.first() {
+            let messages: Vec<&str> = failures.iter().map(|f| f.message.as_str()).collect();
+            return Err(Fail::new(first.code, messages.join("; ")));
         }
 
         // 7. Snapshot the schema for the next drift check.
@@ -1312,7 +1380,8 @@ impl<'a> BindingRun<'a> {
             return Err(format!(
                 "it writes {name}, as {} does; give them different `name:`s",
                 self.b.outputs[prev].label(prev)
-            ));
+            )
+            .into());
         }
         std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
         std::fs::write(&path, crate::message::file_body(&title, &text)).map_err(|e| e.to_string())?;
@@ -1425,7 +1494,7 @@ impl<'a> BindingRun<'a> {
                 "{}: `source('{s}', '{t}')` was reached while rendering `{}`, but the parse pass didn't find it. The parse pass renders without data (`run_query()` returns no rows, `connection.*` nothing), so it can't see a `source()` that depends on them; call it where it's reached either way",
                 q.path.display(),
                 q.query
-            ));
+            ).into());
         }
         let sensitive = crate::secrets::contains_secret(&sql);
         std::fs::write(
@@ -1443,7 +1512,7 @@ impl<'a> BindingRun<'a> {
                 "{}: `{}` makes a tab but has no statements; add a query, or `tab: false` if it's meant to be empty",
                 q.path.display(),
                 q.query
-            ));
+            ).into());
         }
         let n = parts.len();
         for (i, st) in parts.into_iter().enumerate() {
@@ -1476,11 +1545,15 @@ impl<'a> BindingRun<'a> {
     fn check_sessions(&self, pool: &Pool, connection: &str, n: usize) -> Result<(), Fail> {
         let session = pool.session(connection)?;
         let mut s = session.lock().unwrap();
-        if !s.get()?.has(CAP_SESSIONS) {
+        if !s
+            .get()
+            .map_err(|e| Fail::new(Code::ConnectionFailed, e))?
+            .has(CAP_SESSIONS)
+        {
             let kind = pool.kind(connection).unwrap_or_default();
             return Err(format!(
                 "this Binding runs {n} statements on connection `{connection}`, but the `{kind}` source plugin can't hold one session across them; nothing was run"
-            ));
+            ).into());
         }
         Ok(())
     }
@@ -1502,7 +1575,9 @@ impl<'a> BindingRun<'a> {
         let t = Instant::now();
         let exec = {
             let mut s = session.lock().unwrap();
-            let (p, _log_scope) = s.statement(st.sensitive)?;
+            let (p, _log_scope) = s
+                .statement(st.sensitive)
+                .map_err(|e| Fail::new(Code::ConnectionFailed, e))?;
             p.execute(&st.text, self.opts.preview, |schema, batch| {
                 if writer.is_none() {
                     let f = File::create(&spool_path).map_err(|e| e.to_string())?;
@@ -1511,11 +1586,14 @@ impl<'a> BindingRun<'a> {
                 writer.as_mut().unwrap().write(&batch).map_err(|e| e.to_string())
             })
             .map_err(|e| {
-                format!(
-                    "{}:{}: {}",
-                    st.file.display(),
-                    st.line,
-                    masked_source_error(&e, st.sensitive)
+                Fail::new(
+                    Code::QueryFailed,
+                    format!(
+                        "{}:{}: {}",
+                        st.file.display(),
+                        st.line,
+                        masked_source_error(&e, st.sensitive)
+                    ),
                 )
             })?
         };
@@ -1540,9 +1618,12 @@ impl<'a> BindingRun<'a> {
         let (schema, rows) = match (st.tab, exec) {
             (true, Execution::Result { schema, rows }) => (schema, rows),
             (true, Execution::NoResult { .. }) => {
-                return Err(format!(
-                    "{at}: `{}` makes a tab, but its last statement returned no result set; if the query only prepares data (a temp view, a SET), add `tab: false` to it in the YAML",
-                    st.query
+                return Err(Fail::new(
+                    Code::NoResultSet,
+                    format!(
+                        "{at}: `{}` makes a tab, but its last statement returned no result set; if the query only prepares data (a temp view, a SET), add `tab: false` to it in the YAML",
+                        st.query
+                    ),
                 ));
             }
             (false, _) => {
@@ -1660,7 +1741,7 @@ impl<'a> BindingRun<'a> {
                     return Err(format!(
                         "sheet name `{}` is used twice (by `{prev}` and `{}`); Excel sheet names must be unique",
                         p.name, p.query
-                    ));
+                    ).into());
                 }
             }
         }
@@ -1804,7 +1885,7 @@ impl<'a> BindingRun<'a> {
             for i in mine {
                 let r = &self.produced[i];
                 if r.name.contains(['/', '\\']) {
-                    return Err(format!("`{}` can't be used in a file name", r.name));
+                    return Err(format!("`{}` can't be used in a file name", r.name).into());
                 }
                 g.push((format!("{stem}_{}{ext}", r.name), vec![i]));
             }
@@ -1818,10 +1899,12 @@ impl<'a> BindingRun<'a> {
                     "{} and {} both write {name}; give them different `name:`s or destination paths",
                     self.b.outputs[prev].label(prev),
                     out.label(oi)
-                ));
+                )
+                .into());
             }
         }
-        let plugin = find_plugin(self.project, PluginKind::Format, &out.format)?;
+        let plugin = find_plugin(self.project, PluginKind::Format, &out.format)
+            .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
         let mut p = plugin
             .start(self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
@@ -1923,7 +2006,7 @@ impl<'a> BindingRun<'a> {
             Ok(()) if o.deliveries.iter().any(|d| d["status"] == "delivered") => OutputStatus::Delivered,
             Ok(()) => OutputStatus::Kept,
         });
-        o.error = result.as_ref().err().cloned();
+        o.error = result.as_ref().err().map(|f| f.message.clone());
         result
     }
 
@@ -1952,23 +2035,25 @@ impl<'a> BindingRun<'a> {
             let kind = profiles
                 .target(Role::Destination, &d.profile)
                 .map(|o| o.kind.clone());
-            let (status, location, error) = match self.deliver_one(oi, d) {
-                Ok(Some(loc)) => ("delivered", Some(loc), None),
-                Ok(None) => {
-                    nowhere.push(nowhere_note(&d.profile, &target));
-                    ("not_delivered", None, None)
-                }
-                Err(e) => {
-                    failures.push(e.clone());
-                    ("failed", None, Some(e))
-                }
-            };
+            let (status, location, error) =
+                match self.deliver_one(oi, d).map_err(|e| e.or(Code::DeliveryFailed)) {
+                    Ok(Some(loc)) => ("delivered", Some(loc), None),
+                    Ok(None) => {
+                        nowhere.push(nowhere_note(&d.profile, &target));
+                        ("not_delivered", None, None)
+                    }
+                    Err(e) => {
+                        failures.push(e.clone());
+                        ("failed", None, Some(e))
+                    }
+                };
             let mut record = json!({"profile": d.profile, "type": kind, "target": target, "status": status});
             if let Some(l) = location {
                 record["location"] = json!(l);
             }
             if let Some(e) = error {
-                record["error"] = json!(e);
+                record["error"] = json!(e.message);
+                record["error_code"] = json!(e.code);
             }
             self.outs[oi].deliveries.push(record);
         }
@@ -1980,10 +2065,17 @@ impl<'a> BindingRun<'a> {
         match failures.len() {
             0 => Ok(()),
             1 if o.dests.len() == 1 => Err(failures.remove(0)),
-            n => Err(format!(
-                "{n} of {} destinations failed: {}",
-                o.dests.len(),
-                failures.join("; ")
+            n => Err(Fail::new(
+                failures[0].code,
+                format!(
+                    "{n} of {} destinations failed: {}",
+                    o.dests.len(),
+                    failures
+                        .iter()
+                        .map(|f| f.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
             )),
         }
     }
@@ -2000,12 +2092,14 @@ impl<'a> BindingRun<'a> {
                 return Ok(None);
             }
             // Both are checked before the run starts.
-            Entry::Missing => return Err(profiles.missing_entry(Role::Destination, &d.profile)),
-            Entry::Unknown => {
-                return Err(format!(
-                    "destination profile `{}` isn't in profiles.yml",
-                    d.profile
+            Entry::Missing => {
+                return Err(Fail::new(
+                    Code::MissingTargetEntry,
+                    profiles.missing_entry(Role::Destination, &d.profile),
                 ));
+            }
+            Entry::Unknown => {
+                return Err(format!("destination profile `{}` isn't in profiles.yml", d.profile).into());
             }
         };
         let kind = out.kind.clone();
@@ -2037,7 +2131,8 @@ impl<'a> BindingRun<'a> {
                 return Err(format!(
                     "the local destination takes no options, but `{}` has `{k}`; check the key's spelling",
                     d.profile
-                ));
+                )
+                .into());
             }
             for (i, f) in targets.iter().enumerate() {
                 let t = Instant::now();
@@ -2066,7 +2161,8 @@ impl<'a> BindingRun<'a> {
         let failed = |e: dre_protocol::host::HostError| {
             format!("delivery through `{kind}` failed: {e}; the output is still in target/")
         };
-        let plugin = find_plugin(self.project, PluginKind::Destination, &kind)?;
+        let plugin = find_plugin(self.project, PluginKind::Destination, &kind)
+            .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
         let mut p = plugin
             .start(self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
@@ -2112,7 +2208,7 @@ impl<'a> BindingRun<'a> {
             return Err(format!(
                 "`{kind}` only takes messages, but this output is `{}`; deliver the file elsewhere and link it from a message",
                 self.b.outputs[oi].format
-            ));
+            ).into());
         }
         let batches: Vec<Vec<usize>> = if targets.len() > 1 && p.has(CAP_MULTI_FILE) {
             vec![(0..targets.len()).collect()]
@@ -2200,7 +2296,7 @@ impl<'a> BindingRun<'a> {
         )
     }
 
-    fn write_results(&self, status: &Status, error: Option<&str>) -> std::io::Result<()> {
+    fn write_results(&self, status: &Status, error: Option<&Fail>) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.run_dir)?;
         // `outputs` lists every file (as before 0.3); `output_results` has one entry per output.
         let mut outputs: Vec<Json> = Vec::new();
@@ -2280,7 +2376,9 @@ impl<'a> BindingRun<'a> {
             "timezone": self.calendar.tz.name(),
             "params": self.opts.params(self.date),
             "status": status,
-            "error": error,
+            "error": error.map(|e| &e.message),
+            "error_code": error.map(|e| e.code),
+            "error_kind": error.map(|e| e.code.kind()),
             "preview": self.opts.preview.is_some(),
             "row_limit": self.opts.preview,
             "started_at": self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -2381,7 +2479,7 @@ impl<'a> BindingRun<'a> {
         if failures.is_empty() {
             Ok(())
         } else {
-            Err(failures.join("\n    "))
+            Err(Fail::new(Code::QueryFailed, failures.join("\n    ")))
         }
     }
 

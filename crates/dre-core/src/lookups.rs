@@ -28,6 +28,7 @@ use chrono::NaiveDate;
 use regex::Regex;
 use serde_json::Value as Json;
 
+use crate::codes::Code;
 use crate::config::de::{self, Loose};
 use crate::config::lookup::{ColumnType, LoadName, LookupFile};
 use crate::diag::Diagnostics;
@@ -117,7 +118,7 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
         }
         if data.len() > 1 || config.len() > 1 {
             diags.error(
-                "duplicate-lookup",
+                Code::DuplicateLookup,
                 Some((*paths[1]).clone()),
                 None,
                 format!(
@@ -133,7 +134,7 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
         }
         if !IDENT.is_match(&name) {
             diags.error(
-                "invalid-lookup",
+                Code::InvalidLookup,
                 Some((*paths[0]).clone()),
                 None,
                 format!("lookup name `{name}` must be letters, digits and `_`, not starting with a digit"),
@@ -179,7 +180,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
         Ok(Loose::Bad(f)) if is_data && f.kind == "a list" => return true,
         _ => {
             diags.error(
-                "invalid-lookup",
+                Code::InvalidLookup,
                 file,
                 None,
                 if is_data {
@@ -207,7 +208,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
     unknown.sort_by_key(|(_, line)| *line);
     for (k, line) in unknown {
         diags.error(
-            "invalid-lookup",
+            Code::InvalidLookup,
             file.clone(),
             line,
             format!(
@@ -233,7 +234,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
                                 .and_then(|n| n.as_str())
                                 .unwrap_or_default();
                             diags.error(
-                                "invalid-lookup",
+                                Code::InvalidLookup,
                                 file.clone(),
                                 c.line(),
                                 format!("column `{}` has type `{t}`; use string, integer, number, boolean or date", c.value),
@@ -247,7 +248,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
             }
             Loose::Bad(_) => {
                 diags.error(
-                    "invalid-lookup",
+                    Code::InvalidLookup,
                     file.clone(),
                     cols.line(),
                     "`columns` must map column names to types",
@@ -264,7 +265,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
             Loose::Ok(LoadName::TempTable) => Load::TempTable,
             Loose::Bad(_) => {
                 diags.error(
-                    "invalid-lookup",
+                    Code::InvalidLookup,
                     file.clone(),
                     v.line(),
                     "`load` must be auto, inline or temp_table",
@@ -279,7 +280,7 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
             Some(rows) => l.inline_rows = Some(rows.value),
             None => {
                 diags.error(
-                    "invalid-lookup",
+                    Code::InvalidLookup,
                     file,
                     None,
                     "a .yml lookup written as a map needs `rows:`",
