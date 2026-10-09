@@ -195,7 +195,7 @@ pub fn inside(root: &Path, dir: &Path) -> Option<PathBuf> {
 /// the project). A missing or unreadable file, or no key, is `None`.
 pub fn project_value(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(root.join(PROJECT_FILE)).ok()?;
-    let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).ok()?;
+    let v = crate::config::node::parse(&text).ok()?;
     v.get(KEY)?.as_str().map(str::to_string)
 }
 

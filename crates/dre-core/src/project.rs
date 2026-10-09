@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use serde::Serialize;
+use serde_json::Value;
 use serde_json::{Map as JsonMap, Value as Json};
-use serde_yaml_ng::{Mapping, Value};
+
+/// A map as read from YAML (or merged from several files).
+type Mapping = JsonMap<String, Json>;
 
 use crate::dates::{WeekNumbering, WeekStart};
 use crate::diag::Diagnostics;
@@ -968,7 +971,7 @@ impl Loader {
         // Queries resolve by bare basename; whatever no report YAML references is unmanaged.
         let mut referenced: BTreeSet<String> = fragments
             .iter()
-            .filter_map(|f| f.map.get("queries").and_then(Value::as_sequence))
+            .filter_map(|f| f.map.get("queries").and_then(Value::as_array))
             .flatten()
             .filter_map(entry_name)
             .collect();
@@ -1135,7 +1138,7 @@ impl Loader {
                     .0
                     .into_iter()
                     .filter_map(|(k, v)| match v {
-                        Loose::Ok(m) => Some((Value::String(k.value), Value::Mapping(json_to_yaml(m)))),
+                        Loose::Ok(m) => Some((k.value, Value::Object(m))),
                         Loose::Bad(_) => None,
                     })
                     .collect();
@@ -1248,7 +1251,7 @@ impl Loader {
             format_options: self
                 .format_options
                 .iter()
-                .filter_map(|(k, v)| Some((k.as_str()?.to_string(), yaml_map_to_json(v.as_mapping()?))))
+                .filter_map(|(k, v)| Some((k.clone(), v.as_object()?.clone())))
                 .collect(),
             folders: Vec::new(),
             files: Vec::new(),
@@ -1501,7 +1504,7 @@ impl Loader {
             }
             if let Some(v) = f.output {
                 match v.value {
-                    Loose::Ok(o) => cfg.output = Some(json_to_yaml(o)),
+                    Loose::Ok(o) => cfg.output = Some(o),
                     Loose::Bad(_) => bad(self, "+output", v.line(), "a map"),
                 }
             }
@@ -1527,7 +1530,7 @@ impl Loader {
             }
             if let Some(v) = f.vars {
                 match v.value {
-                    Loose::Ok(s) => cfg.vars = Some(json_to_yaml(s)),
+                    Loose::Ok(s) => cfg.vars = Some(s),
                     Loose::Bad(_) => bad(self, "+vars", v.line(), "a map"),
                 }
             }
@@ -1641,7 +1644,7 @@ impl Loader {
         let timings_file = yf.display.file_name() == Some(std::ffi::OsStr::new(TIMINGS_FILE));
         match &yf.value {
             Value::Null => {}
-            Value::Sequence(items)
+            Value::Array(items)
                 if !items.is_empty()
                     && items
                         .iter()
@@ -1649,7 +1652,7 @@ impl Loader {
             {
                 schedules.push(yf.clone());
             }
-            Value::Mapping(m) => {
+            Value::Object(m) => {
                 let pl = pick(&yf.value, PLUGIN_KEYS);
                 if !pl.is_empty() {
                     plugins.push((yf.clone(), pl));
@@ -1667,7 +1670,7 @@ impl Loader {
                     );
                 }
                 if dependency_file {
-                    for k in m.keys().filter_map(Value::as_str) {
+                    for k in m.keys().map(String::as_str) {
                         if OLD_PLUGIN_KEYS.contains(&k) {
                             self.old_plugin_key(&yf, k);
                         }
@@ -1676,10 +1679,10 @@ impl Loader {
                 let has_sources = m.contains_key(SOURCES_KEY);
                 let rest: Mapping = m
                     .iter()
-                    .filter(|(k, _)| !is_one_of(k, PLUGIN_KEYS) && k.as_str() != Some("packages"))
-                    .filter(|(k, _)| k.as_str() != Some(SOURCES_KEY))
+                    .filter(|(k, _)| !is_one_of(k, PLUGIN_KEYS) && k.as_str() != "packages")
+                    .filter(|(k, _)| k.as_str() != SOURCES_KEY)
                     // dbt's `version: 2` at the top of a sources file.
-                    .filter(|(k, _)| !(has_sources && k.as_str() == Some("version")))
+                    .filter(|(k, _)| !(has_sources && k.as_str() == "version"))
                     .filter(|(k, _)| !(dependency_file && is_one_of(k, OLD_PLUGIN_KEYS)))
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
@@ -1712,7 +1715,7 @@ impl Loader {
     }
 
     fn report_fragment(&mut self, yf: Rc<YamlFile>, map: Mapping, out: &mut Vec<Fragment>) {
-        for k in map.keys().filter_map(Value::as_str) {
+        for k in map.keys().map(String::as_str) {
             if !REPORT_KEYS.contains(&k) {
                 self.diags.error(
                     "unknown-key",
@@ -2529,7 +2532,7 @@ impl Loader {
             let mut lines: BTreeMap<String, Option<usize>> = BTreeMap::new();
             for (i, f) in frags.iter().enumerate() {
                 for (k, v) in &f.map {
-                    let Some(k) = k.as_str() else { continue };
+                    let k = k.as_str();
                     if k == "name" || !REPORT_KEYS.contains(&k) {
                         continue;
                     }
@@ -2942,7 +2945,7 @@ impl Loader {
         let mut vars = project.vars.clone();
         for l in &layers {
             if let Some(v) = &l.vars {
-                vars.extend(yaml_map_to_json(v));
+                vars.extend(v.clone());
             }
         }
         if let Some(v) = &typed.vars {
@@ -3189,8 +3192,7 @@ impl Loader {
                     ),
                 }
                 if let Some(o) = &m.output {
-                    let o = json_to_yaml_value(o);
-                    for p in layer_outputs(&mut b.outputs, &o) {
+                    for p in layer_outputs(&mut b.outputs, o) {
                         self.diags
                             .error("invalid-field", file.clone(), line, format!("{ctx}: {p}"));
                     }
@@ -3292,7 +3294,7 @@ impl Loader {
                 }
                 tab_names = match &m.tab_names {
                     None => None,
-                    Some(Loose::Ok(t)) => Some(json_to_yaml(t.clone())),
+                    Some(Loose::Ok(t)) => Some(t.clone()),
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
                             "invalid-field",
@@ -3358,7 +3360,7 @@ impl Loader {
         };
         if let Some(t) = tab_names {
             for (k, v) in t {
-                let Some(q) = k.as_str() else { continue };
+                let q = k.as_str();
                 match queries.iter_mut().find(|e| e.query == q) {
                     Some(e) => match v {
                         Value::String(s) => e.tab_name = Some(s.clone()),
@@ -3670,7 +3672,7 @@ impl Loader {
     ) -> Output {
         let file_path = file.to_path_buf();
         let file = Some(file_path.clone());
-        let node = crate::yaml::to_node(&Value::Mapping(m.clone()));
+        let node = crate::yaml::to_node(&Value::Object(m.clone()));
         let o: OutputConfig = match de::from_node(&node) {
             Ok(o) => o,
             // Every key is `Loose`, so a map always reads.
@@ -3688,12 +3690,10 @@ impl Loader {
         }
         let mut opts: JsonMap<String, Json> = o.options.0.into_iter().map(|(k, v)| (k.value, v)).collect();
         // The project's defaults for this format sit under whatever the layers set.
-        if let Some(Value::Mapping(d)) = self.format_options.get(format.as_str()) {
+        if let Some(Value::Object(d)) = self.format_options.get(format.as_str()) {
             for (k, v) in d {
-                if let Some(k) = k.as_str()
-                    && !OUTPUT_SHARED_KEYS.contains(&k)
-                {
-                    opts.entry(k.to_string()).or_insert_with(|| yaml_to_json(v));
+                if !OUTPUT_SHARED_KEYS.contains(&k.as_str()) {
+                    opts.entry(k.clone()).or_insert_with(|| v.clone());
                 }
             }
         }
@@ -4036,7 +4036,7 @@ impl Loader {
         let mut vars = project.vars.clone();
         for l in &layers {
             if let Some(v) = &l.vars {
-                vars.extend(yaml_map_to_json(v));
+                vars.extend(v.clone());
             }
         }
         let mut output = builtin_output();
@@ -4218,11 +4218,7 @@ impl Loader {
                     ok = false;
                 }
                 let block = t.block();
-                let shape = schedule::validate_block(
-                    &json_to_yaml(block.clone()),
-                    "a timing",
-                    "`cron`, `every` or `rrule`",
-                );
+                let shape = schedule::validate_block(&block, "a timing", "`cron`, `every` or `rrule`");
                 for e in &shape {
                     self.diags.error(
                         "invalid-timing",
@@ -4413,11 +4409,7 @@ impl Loader {
                     }
                     errs
                 } else {
-                    schedule::validate_block(
-                        &json_to_yaml(sched.clone()),
-                        "a schedule",
-                        "`timing`, `cron`, `every` or `rrule`",
-                    )
+                    schedule::validate_block(&sched, "a schedule", "`timing`, `cron`, `every` or `rrule`")
                 };
                 if shape.is_empty() && timing.is_none() {
                     let block = &sched;
@@ -4819,7 +4811,7 @@ impl Loader {
                 return None;
             }
         };
-        Some((name, m.version.as_ref().map(json_to_yaml_value), source))
+        Some((name, m.version.clone(), source))
     }
 
     /// The `plugins:` declarations, merged across files; and every plugin the project uses, for
@@ -4852,7 +4844,7 @@ impl Loader {
                                     .map(|(n, c, s)| (n, c, s, iline)),
                                 Loose::Ok(de::OneOf::B(de::OneOf::A(pin))) => Some((
                                     pin.name.value,
-                                    Some(json_to_yaml_value(&pin.version)),
+                                    Some(pin.version.clone()),
                                     PluginSource::Default,
                                     iline,
                                 )),
@@ -4873,7 +4865,7 @@ impl Loader {
                         .into_iter()
                         .map(|(k, v)| {
                             let kline = k.line();
-                            (k.value, Some(json_to_yaml_value(&v)), PluginSource::Default, kline)
+                            (k.value, Some(v), PluginSource::Default, kline)
                         })
                         .collect(),
                     Loose::Bad(f) if f.kind == "nothing" => Vec::new(),
@@ -5349,7 +5341,7 @@ impl Usage {
 
 fn builtin_output() -> Mapping {
     let mut m = Mapping::new();
-    m.insert(Value::String("format".into()), Value::String("csv".into()));
+    m.insert("format".into(), Value::String("csv".into()));
     m
 }
 
@@ -5359,10 +5351,7 @@ fn project_default_output(p: &Project) -> Option<Mapping> {
         PathBuf::from(PROJECT_FILE),
         &mut Diagnostics::default(),
     )?;
-    yf.value
-        .get("default_output")
-        .and_then(Value::as_mapping)
-        .cloned()
+    yf.value.get("default_output").and_then(Value::as_object).cloned()
 }
 
 /// Apply one report or Set `output:` layer over the inherited outputs; returns the problems.
@@ -5374,14 +5363,14 @@ fn project_default_output(p: &Project) -> Option<Mapping> {
 pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
     let mut problems = Vec::new();
     match over {
-        Value::Sequence(list) if list.is_empty() => problems.push(
+        Value::Array(list) if list.is_empty() => problems.push(
             "`output` is an empty list; give at least one output, or remove it to use the inherited one"
                 .into(),
         ),
-        Value::Sequence(list) => {
+        Value::Array(list) => {
             let mut outs = Vec::new();
             for (i, entry) in list.iter().enumerate() {
-                match entry.as_mapping() {
+                match entry.as_object() {
                     Some(m) => {
                         let mut o = builtin_output();
                         problems.extend(merge_output(&mut o, m));
@@ -5394,7 +5383,7 @@ pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
                 *base = outs;
             }
         }
-        Value::Mapping(m) => {
+        Value::Object(m) => {
             let name_of = |o: &Mapping| o.get("name").and_then(Value::as_str).map(str::to_string);
             let target = match m.get("name").and_then(Value::as_str) {
                 Some(n) => match base.iter().position(|o| name_of(o).as_deref() == Some(n)) {
@@ -5446,38 +5435,37 @@ pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
 ///   destination, so a Binding can override just `path`. With several inherited destinations
 ///   that's ambiguous: the layer's destination is ignored and the returned message says why.
 pub fn merge_output(base: &mut Mapping, over: &Mapping) -> Option<String> {
-    let fmt_key = Value::String("format".into());
-    if let Some(f) = over.get(&fmt_key)
-        && base.get(&fmt_key) != Some(f)
+    if let Some(f) = over.get("format")
+        && base.get("format") != Some(f)
     {
         base.retain(|k, _| is_one_of(k, FORMAT_INDEPENDENT_KEYS));
     }
     let mut problem = None;
     for (k, v) in over {
-        if k.as_str() == Some("destination")
-            && let Value::Mapping(o) = v
+        if k.as_str() == "destination"
+            && let Value::Object(o) = v
         {
             let profile = |m: &Mapping| m.get("profile").cloned();
             match base.get_mut(k) {
-                Some(Value::Sequence(list)) if o.get("profile").is_none() && list.len() > 1 => {
+                Some(Value::Array(list)) if o.get("profile").is_none() && list.len() > 1 => {
                     problem = Some(format!(
                         "this overrides `destination` with no `profile:`, but it inherits {} destinations, so it's unclear which one to change; override the full list instead",
                         list.len()
                     ));
                     continue;
                 }
-                Some(Value::Sequence(list))
+                Some(Value::Array(list))
                     if list.len() == 1
                         && list[0]
-                            .as_mapping()
+                            .as_object()
                             .is_some_and(|b| o.get("profile").is_none() || profile(b) == profile(o)) =>
                 {
-                    let mut b = list[0].as_mapping().cloned().unwrap_or_default();
+                    let mut b = list[0].as_object().cloned().unwrap_or_default();
                     b.extend(o.clone());
-                    base.insert(k.clone(), Value::Mapping(b));
+                    base.insert(k.clone(), Value::Object(b));
                     continue;
                 }
-                Some(Value::Mapping(b)) if o.get("profile").is_none() || profile(b) == profile(o) => {
+                Some(Value::Object(b)) if o.get("profile").is_none() || profile(b) == profile(o) => {
                     b.extend(o.clone());
                     continue;
                 }
@@ -5524,7 +5512,7 @@ pub fn dotted(path: &[String]) -> String {
 }
 
 fn pick(v: &Value, keys: &[&str]) -> Mapping {
-    v.as_mapping()
+    v.as_object()
         .map(|m| {
             m.iter()
                 .filter(|(k, _)| is_one_of(k, keys))
@@ -5544,15 +5532,15 @@ fn json_strings(v: &Json) -> Vec<String> {
     }
 }
 
-fn is_one_of(k: &Value, keys: &[&str]) -> bool {
-    k.as_str().is_some_and(|k| keys.contains(&k))
+fn is_one_of(k: &str, keys: &[&str]) -> bool {
+    keys.contains(&k)
 }
 
 /// A map of names to timings: every value holds `cron`, `every` or `rrule`.
 fn is_timing_registry(m: &Mapping) -> bool {
     !m.is_empty()
         && m.values().all(|v| {
-            v.as_mapping()
+            v.as_object()
                 .is_some_and(|t| ["cron", "every", "rrule"].iter().any(|k| t.contains_key(*k)))
         })
 }
@@ -5560,16 +5548,16 @@ fn is_timing_registry(m: &Mapping) -> bool {
 /// Every entry is a Set: a map of `profile`/`vars`, which may be empty (`plain: {}`, the
 /// report's defaults) or left blank.
 fn is_set_registry(m: &Mapping) -> bool {
-    m.values().any(Value::is_mapping)
+    m.values().any(Value::is_object)
         && m.values().all(|v| {
             v.is_null()
-                || v.as_mapping()
+                || v.as_object()
                     .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars", "locale"])))
         })
 }
 
 fn string_list(v: &Value) -> Option<Vec<String>> {
-    v.as_sequence()?
+    v.as_array()?
         .iter()
         .map(|i| i.as_str().map(str::to_string))
         .collect()
@@ -5587,7 +5575,7 @@ fn query_item_name(item: &QueryItem) -> Option<&str> {
 fn entry_name(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
-        Value::Mapping(m) => m.get("query").and_then(Value::as_str).map(str::to_string),
+        Value::Object(m) => m.get("query").and_then(Value::as_str).map(str::to_string),
         _ => None,
     }
 }
@@ -5595,30 +5583,6 @@ fn entry_name(v: &Value) -> Option<String> {
 fn dedup(v: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     v.retain(|t| seen.insert(t.clone()));
-}
-
-/// A JSON value as YAML, for the output merging that still works on YAML.
-fn json_to_yaml_value(v: &Json) -> Value {
-    serde_yaml_ng::to_value(v).unwrap_or(Value::Null)
-}
-
-/// A JSON map as a YAML mapping, for the output and vars merging that still works on YAML.
-fn json_to_yaml(m: JsonMap<String, Json>) -> Mapping {
-    match serde_yaml_ng::to_value(Json::Object(m)) {
-        Ok(Value::Mapping(m)) => m,
-        _ => Mapping::new(),
-    }
-}
-
-pub fn yaml_to_json(v: &Value) -> Json {
-    serde_json::to_value(v).unwrap_or(Json::Null)
-}
-
-pub fn yaml_map_to_json(m: &Mapping) -> JsonMap<String, Json> {
-    match yaml_to_json(&Value::Mapping(m.clone())) {
-        Json::Object(o) => o,
-        _ => JsonMap::new(),
-    }
 }
 
 /// Letters, digits and `_`, not starting with a digit.

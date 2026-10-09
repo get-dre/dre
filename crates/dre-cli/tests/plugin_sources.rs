@@ -207,7 +207,7 @@ fn github_releases_install_the_newest_match_and_pin_it() {
     let lock = e.lock();
     assert!(
         lock.contains(&format!(
-            "plugins:\n  fixture:\n    version: 1.1.0\n    sha256:\n      {}: {}\n    from: github:acme/dre-source-fixture\n",
+            "plugins:\n  fixture:\n    version: \"1.1.0\"\n    sha256:\n      {}: {}\n    from: github:acme/dre-source-fixture\n",
             platform(),
             sha(&bin)
         )),

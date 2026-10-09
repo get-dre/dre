@@ -1,10 +1,15 @@
 //! How output layers merge their `destination`.
 
 use dre_core::project::merge_output;
-use serde_yaml_ng::{Mapping, Value};
+use serde_json::Value;
+
+type Mapping = serde_json::Map<String, Value>;
 
 fn map(s: &str) -> Mapping {
-    serde_yaml_ng::from_str(s).unwrap()
+    match dre_core::config::node::parse(s).unwrap().to_json() {
+        Value::Object(m) => m,
+        other => panic!("not a map: {other}"),
+    }
 }
 
 fn dest(m: &Mapping) -> Value {
@@ -15,14 +20,14 @@ fn dest(m: &Mapping) -> Value {
 fn a_path_only_override_keeps_the_inherited_profile() {
     let mut base = map("destination: {profile: s3, path: a.csv}");
     assert_eq!(merge_output(&mut base, &map("destination: {path: b.csv}")), None);
-    assert_eq!(dest(&base), Value::Mapping(map("{profile: s3, path: b.csv}")));
+    assert_eq!(dest(&base), Value::Object(map("{profile: s3, path: b.csv}")));
 }
 
 #[test]
 fn a_different_profile_replaces_the_destination_instead_of_merging_options() {
     let mut base = map("destination: {profile: mail, to: a@example.com, subject: Hi}");
     merge_output(&mut base, &map("destination: {profile: slack, channel: C1}"));
-    assert_eq!(dest(&base), Value::Mapping(map("{profile: slack, channel: C1}")));
+    assert_eq!(dest(&base), Value::Object(map("{profile: slack, channel: C1}")));
 }
 
 #[test]
@@ -32,14 +37,14 @@ fn a_list_replaces_whatever_was_inherited() {
         &mut base,
         &map("destination: [{profile: s3, path: b.csv}, {profile: mail, to: x@example.com}]"),
     );
-    assert_eq!(dest(&base).as_sequence().unwrap().len(), 2);
+    assert_eq!(dest(&base).as_array().unwrap().len(), 2);
 }
 
 #[test]
 fn a_path_only_override_of_a_one_entry_list_merges_into_that_entry() {
     let mut base = map("destination: [{profile: s3, path: a.csv}]");
     assert_eq!(merge_output(&mut base, &map("destination: {path: b.csv}")), None);
-    assert_eq!(dest(&base), Value::Mapping(map("{profile: s3, path: b.csv}")));
+    assert_eq!(dest(&base), Value::Object(map("{profile: s3, path: b.csv}")));
 }
 
 #[test]

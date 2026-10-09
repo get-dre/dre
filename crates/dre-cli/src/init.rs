@@ -9,7 +9,10 @@ use dre_core::profiles::Role;
 use dre_core::project::{PluginId, PluginKind};
 use dre_protocol::host::PluginProcess;
 use dre_protocol::msg::ConnectionField;
-use serde_yaml_ng::{Mapping, Value};
+use serde_json::Value;
+
+/// A profile's settings, in the order they're written.
+type Mapping = serde_json::Map<String, Value>;
 
 use crate::output::{Printer, Tone};
 
@@ -353,7 +356,7 @@ fn connection<R: BufRead>(
                 continue;
             }
             if !v.is_empty() {
-                m.insert(Value::String(f.name.clone()), Value::String(v));
+                m.insert(f.name.clone(), Value::String(v));
             }
             break;
         }
@@ -403,7 +406,7 @@ fn add_profile(
     fields: Mapping,
 ) -> Result<(), String> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
-    let parsed = serde_yaml_ng::from_str::<Value>(&existing).ok();
+    let parsed = dre_core::config::node::parse(&existing).ok().map(|n| n.to_json());
     // A DRE 0.1 file keeps its connections under `sources:`; add to that rather than start a
     // second section.
     let section = match &parsed {
@@ -429,16 +432,16 @@ fn add_profile(
     settings.insert("type".into(), Value::String(kind.into()));
     settings.extend(fields);
     let mut targets = Mapping::new();
-    targets.insert(Value::String(target.into()), Value::Mapping(settings));
+    targets.insert(target.into(), Value::Object(settings));
     let mut profile = Mapping::new();
     // Each profile's entry defaults to `dev`; any other name becomes this profile's default.
     if target != dre_core::profiles::DEFAULT_TARGET {
         profile.insert("target".into(), Value::String(target.into()));
     }
-    profile.insert("targets".into(), Value::Mapping(targets));
+    profile.insert("targets".into(), Value::Object(targets));
     let mut root = Mapping::new();
-    root.insert(Value::String(name.into()), Value::Mapping(profile));
-    let block: String = serde_yaml_ng::to_string(&root)
+    root.insert(name.into(), Value::Object(profile));
+    let block: String = dre_core::config::to_yaml(&root)
         .map_err(|e| e.to_string())?
         .lines()
         .map(|l| format!("  {l}\n"))
