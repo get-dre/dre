@@ -1,0 +1,58 @@
+name: Security scan
+
+# Known vulnerabilities and licences of every dependency, Rust and Go: on every pull request and
+# push to master, before every release (release.yml calls this workflow), and weekly, so a new
+# advisory against unchanged lockfiles shows up as a red run. What to do when it fails:
+# CONTRIBUTING.md, "When the security scan fails". The script is .github/scripts/security_scan.py;
+# the accepted advisories are in .github/vulnerability-exceptions.toml.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "17 6 * * 1"  # Mondays, 06:17 UTC
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 .github/scripts/test_security_scan.py
+      - uses: taiki-e/install-action@cargo-deny
+      - run: python3 .github/scripts/security_scan.py rust --report-dir security-report
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: security-report-rust
+          path: security-report/
+          if-no-files-found: ignore
+
+  go:
+    name: Go (govulncheck, go-licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The newest Go patch release: govulncheck reports standard-library advisories for the Go
+      # it runs with, and the release builds use the newest patch too.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/plugin/go.mod
+          check-latest: true
+          cache-dependency-path: go/*/go.sum
+      - run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          go install github.com/google/go-licenses/v2@v2.0.1
+      - run: python3 .github/scripts/security_scan.py go --report-dir security-report
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: security-report-go
+          path: security-report/
+          if-no-files-found: ignore

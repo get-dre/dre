@@ -1,0 +1,48 @@
+# cargo-deny: known vulnerabilities and licences of every crate in the workspace.
+#
+# Run it through `.github/scripts/security_scan.py rust`, as CI does: the advisory ignore list is
+# generated from .github/vulnerability-exceptions.toml, so it isn't written here. A plain
+# `cargo deny check` works too, without those exceptions.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# Vulnerabilities, unsound code and yanked crates fail. Unmaintained crates only warn: the script
+# passes `--warn unmaintained`.
+yanked = "deny"
+
+[licenses]
+version = 2
+# Licences compatible with DRE's GPL-3.0-only. The Go licence check (security_scan.py go) uses the
+# same list. A crate whose licence isn't here is either replaced, or listed under `exceptions`
+# with the reason it's acceptable.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "GPL-3.0-only",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "NCSA",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+unused-allowed-license = "allow"
+confidence-threshold = 0.9
+
+exceptions = [
+  # Mozilla's root CA certificates as data, under the permissive CDLA (no conditions on the code
+  # that uses them).
+  { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+  { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
+

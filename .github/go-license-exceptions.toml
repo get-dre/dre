@@ -1,0 +1,21 @@
+# Go modules whose licence check (`security_scan.py go`, with go-licenses) is skipped, each with
+# the reason its licence is acceptable. The allowed licences are deny.toml's `licenses.allow`.
+#
+#   module  the module path (a prefix: its packages are skipped too)
+#   reason  why its licence is fine for DRE's GPL-3.0-only
+
+[[exception]]
+module = "github.com/apache/arrow/go/v12"
+reason = """\
+Apache-2.0. Arrow's LICENSE.txt also carries the notices of components bundled with the C++ \
+library (OpenSSL, c-ares, Boost, LLVM), which the Go module doesn't contain."""
+
+[[exception]]
+module = "github.com/apache/arrow/go/v15"
+reason = "Apache-2.0, as github.com/apache/arrow/go/v12 above."
+
+[[exception]]
+module = "github.com/apache/thrift"
+reason = """\
+Apache-2.0. Its LICENSE also has the GNU all-permissive notice of the autotools build files, which \
+aren't part of the Go library."""

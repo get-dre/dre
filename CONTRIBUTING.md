@@ -66,6 +66,44 @@ emulators, and each one skips itself when its service isn't configured. See the 
 job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the services and environment
 variables they use.
 
+## Security scans
+
+The `Security scan` workflow ([`.github/workflows/security.yml`](.github/workflows/security.yml))
+checks every Rust crate and Go module DRE depends on for known vulnerabilities and for licences
+that aren't compatible with DRE's GPL-3.0-only. It runs on every pull request, before every release
+and weekly. To run it locally (Python 3.11 or later):
+
+```sh
+cargo install --locked cargo-deny
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install github.com/google/go-licenses/v2@latest
+python3 .github/scripts/security_scan.py rust
+python3 .github/scripts/security_scan.py go
+```
+
+`rust` runs `cargo deny` with [`deny.toml`](deny.toml); `go` runs `govulncheck` and `go-licenses`
+in each module under `go/`. In CI, the JSON reports are kept as the run's `security-report-*`
+artifacts.
+
+### When the security scan fails
+
+- **A vulnerability** (RUSTSEC-… or GO-…): update the dependency to a fixed version
+  (`cargo update -p <crate>`, or `go get <module>@<version>` and `go mod tidy`), and bump the
+  version of every plugin whose dependencies changed. A Go standard-library advisory is fixed by
+  the newest Go patch release, which CI and the release builds use.
+- **No fix exists yet**, and DRE isn't exposed or the risk is acceptable for now: add an entry to
+  [`.github/vulnerability-exceptions.toml`](.github/vulnerability-exceptions.toml) with the exact
+  advisory id, why it's acceptable, an owner and an expiry date (a few months out, never open
+  ended). Never exempt a whole crate, module or severity.
+- **An exception expired:** check the advisory again. Remove the entry once a fix is in, or renew
+  it with an up-to-date reason and a new date.
+- **A yanked crate:** `cargo update -p <crate>`.
+- **An unmaintained crate** only warns. Plan to replace it.
+- **A licence that isn't allowed:** use another dependency. If its licence is in fact compatible
+  with GPL-3.0-only, add it to `licenses.allow` in `deny.toml` (both languages use that list), or,
+  for a single crate or module, add an exception (`licenses.exceptions` in `deny.toml`, or
+  [`.github/go-license-exceptions.toml`](.github/go-license-exceptions.toml)) with the reason.
+
 ## Guidelines
 
 - **Keep pull requests focused:** one change per pull request.
