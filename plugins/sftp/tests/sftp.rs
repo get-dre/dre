@@ -35,13 +35,14 @@ fn deliver(remote: &str, conn: Value, bytes: &[u8]) -> Result<String, String> {
 fn known_hosts(dir: &Path, host: &str, port: u16) -> String {
     static SCAN: OnceLock<Vec<u8>> = OnceLock::new();
     // ssh-keyscan can miss a key type when the server is busy (the tests run in parallel), and
-    // the host key the client negotiates may be the one it missed: scan until it has them all.
+    // the host key the client negotiates may be the one it missed: scan until it has both of
+    // the emulator's (ed25519 and rsa).
     let keys = SCAN.get_or_init(|| {
-        let types = ["ssh-rsa", "ecdsa-sha2-nistp256", "ssh-ed25519"];
+        let types = ["ssh-rsa", "ssh-ed25519"];
         let mut out = Vec::new();
         for _ in 0..20 {
             out = std::process::Command::new("ssh-keyscan")
-                .args(["-t", "rsa,ecdsa,ed25519", "-p", &port.to_string(), host])
+                .args(["-t", "rsa,ed25519", "-p", &port.to_string(), host])
                 .output()
                 .unwrap()
                 .stdout;
