@@ -35,6 +35,8 @@ import subprocess
 import sys
 import tempfile
 
+from docs_sections import strip_nav
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PACKAGES = json.loads((ROOT / ".github/scripts/packages.json").read_text())
 PLUGIN_DOCS = "docs/plugins.md"
@@ -549,7 +551,8 @@ def sync(root):
     """Inline the shared snippets and copy the practices file, under `root` (a checkout)."""
     skills_root = root / "skills"
     snippets = {p.name: p.read_text() for p in (skills_root / "shared").glob("*.md")}
-    practices = (root / PRACTICES).read_text()
+    # Without its previous/next links: the pages they point to aren't copied.
+    practices = strip_nav((root / PRACTICES).read_text()).rstrip("\n") + "\n"
     for skill in skill_dirs(skills_root):
         path = skills_root / skill / "SKILL.md"
         path.write_text(inline_shared(path.read_text(), snippets))
@@ -564,7 +567,7 @@ def sync(root):
 def generate(root, replies):
     """Write every plugin reference into each skill that takes them, under `root`."""
     skills_root = root / "skills"
-    docs_md = (root / PLUGIN_DOCS).read_text()
+    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
     files = {}
     for package, plugin in plugins():
         notes_path = skills_root / "shared" / "guide-notes" / reference_name(plugin)
@@ -655,7 +658,7 @@ def check(root, dre, replies):
         problems += command_problems(cli, path.relative_to(root).as_posix(), path.read_text())
 
     # Every declared field and option documented.
-    docs_md = (root / PLUGIN_DOCS).read_text()
+    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
     for _, plugin in plugins():
         text = "".join(doc_section(docs_md, h2, h3) for h2, h3 in DOC_SECTIONS[plugin])
         fields = (replies[plugin].get("connection_fields") or []) + (replies[plugin].get("option_fields") or [])

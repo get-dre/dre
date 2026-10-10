@@ -10,30 +10,33 @@ import json
 import sys
 from pathlib import Path
 
+from docs_sections import strip_nav
+
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "docs" / "schemas"
 DOCS = ROOT / "docs"
 URL = "https://getdre.com/schemas"
 
-# schema file -> page slug, title, the file as users know it, sidebar order
+# schema file -> page slug, title, the file as users know it, position in the Reference section
+# (docs/sections.json)
 PAGES = [
-    ("project", "reference-project", "dre_project.yml", "dre_project.yml", 22,
+    ("project", "reference-project", "dre_project.yml", "dre_project.yml", 3,
      "Every key of dre_project.yml, the project file."),
-    ("report", "reference-report", "Report YAML", "a `.yml` file under `reports/`", 23,
+    ("report", "reference-report", "Report YAML", "a `.yml` file under `reports/`", 4,
      "Every key of a report YAML file: queries, output, destinations, Sets and templates."),
-    ("sets", "reference-sets", "sets.yml", "`sets.yml`, or any YAML file of Sets", 24,
+    ("sets", "reference-sets", "sets.yml", "`sets.yml`, or any YAML file of Sets", 5,
      "Every key of a Sets file."),
-    ("schedules", "reference-schedules", "schedules.yml", "`schedules.yml`", 25,
+    ("schedules", "reference-schedules", "schedules.yml", "`schedules.yml`", 6,
      "Every key of the schedules file."),
-    ("timings", "reference-timings", "timings.yml", "`timings.yml`", 26,
+    ("timings", "reference-timings", "timings.yml", "`timings.yml`", 7,
      "Every key of the timings file: named timings schedules share."),
-    ("profiles", "reference-profiles", "profiles.yml", "`profiles.yml`", 27,
+    ("profiles", "reference-profiles", "profiles.yml", "`profiles.yml`", 8,
      "Every key of profiles.yml: connections, destinations and their targets."),
-    ("sources", "reference-sources", "Sources", "any project YAML file with a top-level `sources:` key, e.g. `sources/<name>.yml`", 27.5,
+    ("sources", "reference-sources", "Sources", "any project YAML file with a top-level `sources:` key, e.g. `sources/<name>.yml`", 9,
      "Every key of a sources declaration: sources, tables and columns, as in dbt."),
-    ("dependencies", "reference-dependencies", "dependencies.yml", "`dependencies.yml` or `packages.yml`", 28,
+    ("dependencies", "reference-dependencies", "dependencies.yml", "`dependencies.yml` or `packages.yml`", 10,
      "Every key of dependencies.yml: plugin packages and macro packages."),
-    ("lookup", "reference-lookups", "Lookup config", "`lookups/<name>.yml`, next to the lookup's data file", 29,
+    ("lookup", "reference-lookups", "Lookup config", "`lookups/<name>.yml`, next to the lookup's data file", 11,
      "Every key of a lookup's config file."),
 ]
 
@@ -172,8 +175,8 @@ def generate_page(name, slug, title, where, order, description):
         "---",
         f"title: {json.dumps(title + ' reference' if name != 'project' else 'dre_project.yml reference')}",
         f"description: {json.dumps(description)}",
-        "sidebar:",
-        f"  order: {order}",
+        "section: reference",
+        f"position: {order}",
         "---",
         "",
         f"# {title if name == 'project' else title} reference",
@@ -222,10 +225,16 @@ def main():
     out = pages()
     if cmd == "generate":
         for f, text in out.items():
-            (DOCS / f).write_text(text)
+            # Keep the page's previous/next links (docs_sections.py writes them).
+            old = (DOCS / f).read_text() if (DOCS / f).is_file() else ""
+            nav = old[len(strip_nav(old)):]
+            (DOCS / f).write_text(text + ("\n" + nav if nav else ""))
         print(f"wrote {len(out)} pages")
         return 0
-    stale = [f for f, text in out.items() if not (DOCS / f).is_file() or (DOCS / f).read_text() != text]
+    stale = [
+        f for f, text in out.items()
+        if not (DOCS / f).is_file() or strip_nav((DOCS / f).read_text()).rstrip("\n") + "\n" != text
+    ]
     if stale:
         print("these pages are out of date; run `python3 .github/scripts/schema_docs.py generate`:", *stale, sep="\n  ")
         return 1

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod cli_reference;
 mod init;
 mod ls;
 mod output;
@@ -953,5 +955,38 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(test)]
+mod cli_reference_tests {
+    use clap::CommandFactory;
+
+    /// `docs/cli-reference.md` is generated from the CLI definitions. After changing a command
+    /// or flag, `DRE_UPDATE_DOCS=1 cargo test -p dre-cli --bin dre cli_reference` rewrites it.
+    #[test]
+    fn the_cli_reference_page_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cli-reference.md");
+        let page = crate::cli_reference::page(super::Cli::command());
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
+        // The page's previous/next links are .github/scripts/docs_sections.py's; keep them.
+        let (body, nav) = match old.find("\n<!-- docs-nav") {
+            Some(i) => (&old[..=i], &old[i + 1..]),
+            None => (old.as_str(), ""),
+        };
+        if std::env::var_os("DRE_UPDATE_DOCS").is_some() {
+            let nav = if nav.is_empty() {
+                String::new()
+            } else {
+                format!("\n{nav}")
+            };
+            std::fs::write(&path, format!("{page}{nav}")).unwrap();
+        } else {
+            assert_eq!(
+                format!("{}\n", body.trim_end()),
+                page,
+                "docs/cli-reference.md is stale: run `DRE_UPDATE_DOCS=1 cargo test -p dre-cli --bin dre cli_reference`"
+            );
+        }
     }
 }

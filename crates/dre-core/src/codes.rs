@@ -541,7 +541,7 @@ pub const REFERENCE_URL: &str = "https://getdre.com/docs/reference-error-codes/"
 /// summary and explanation. Generated; a test fails when the committed page is stale.
 pub fn reference_page() -> String {
     let mut out = String::from(
-        "---\ntitle: \"Error codes reference\"\ndescription: \"Every code DRE reports, what it means and how to fix it.\"\nsidebar:\n  order: 30\n---\n\n\
+        "---\ntitle: \"Error codes reference\"\ndescription: \"Every code DRE reports, what it means and how to fix it.\"\nsection: reference\nposition: 12\n---\n\n\
          # Error codes reference\n\n\
          <!-- Generated from crates/dre-core/src/codes.rs. Edit the registry, not this page. -->\n\n\
          Every problem DRE reports has a code: `error[unknown-key]: ...` in the console, `code` in \

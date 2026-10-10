@@ -51,13 +51,16 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
 
   schema-docs:
-    # The YAML reference pages are generated from the JSON Schemas in docs/schemas/.
+    # The YAML reference pages are generated from the JSON Schemas in docs/schemas/; every page
+    # has a section (docs/sections.json), and docs/README.md and the previous/next links match.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: python3 .github/scripts/schema_docs.py check
+      - run: python3 .github/scripts/test_docs_sections.py
+      - run: python3 .github/scripts/docs_sections.py check
 
   lint:
     runs-on: ubuntu-latest
