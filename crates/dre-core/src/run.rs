@@ -2154,18 +2154,18 @@ impl<'a> BindingRun<'a> {
                     .remote_path
                     .as_ref()
                     .ok_or("the local destination needs `output.destination.path`")?;
-                let dst = self.project.root.join(r);
-                if let Some(parent) = dst.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("can't create {}: {e}", parent.display()))?;
-                }
-                std::fs::copy(&f.local_path, &dst).map_err(|e| {
-                    format!(
-                        "delivery to {} failed: {e}; the output is still in target/",
-                        dst.display()
-                    )
-                })?;
-                let loc = dst.to_string_lossy().to_string();
+                let dst = self.project.root.join(r).to_string_lossy().to_string();
+                // The shared delivery rules, as they stand today (replace, straight to the
+                // final name).
+                let rules = dre_protocol::delivery::Rules::legacy();
+                let delivered = dre_protocol::delivery::deliver(
+                    &mut dre_protocol::delivery::LocalStore,
+                    Path::new(&f.local_path),
+                    &dst,
+                    &rules,
+                )
+                .map_err(|e| format!("delivery to {dst} failed: {e}; the output is still in target/"))?;
+                let loc = delivered.path;
                 self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
                 self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
                 locations.push(loc);

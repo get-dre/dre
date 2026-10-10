@@ -13,12 +13,14 @@
 //! - [`conformance`]: checks any plugin binary against the protocol.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
 //! - [`markdown`]: the portable Markdown subset of messages, and its translations.
+//! - [`delivery`]: the delivery and network rules every file destination shares.
 
 /// The `log` crate, re-exported: plugins log with `dre_protocol::log::info!` and friends, which
 /// the SDK sends to core as `log` messages.
 pub use log;
 
 pub mod conformance;
+pub mod delivery;
 pub mod frame;
 pub mod host;
 pub mod markdown;
