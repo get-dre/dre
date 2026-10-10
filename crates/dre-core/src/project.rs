@@ -130,7 +130,7 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
-    "query", "profile", "tab", "tab_name", "anchor", "header", "columns",
+    "query", "profile", "tab", "tab_name", "anchor", "header", "columns", "autofit", "style",
 ];
 /// The shared output keys that don't belong to one format: they survive a layer changing `format`.
 const FORMAT_INDEPENDENT_KEYS: &[&str] = &["name", "queries", "when", "destination", "template"];
@@ -335,6 +335,12 @@ pub struct QueryEntry {
     /// xlsx: per result column, how to show it (`{format: "#,##0.00"}`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub columns: BTreeMap<String, ColumnOptions>,
+    /// xlsx: size this tab's columns from their content, over the output's `autofit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autofit: Option<bool>,
+    /// xlsx: how this tab looks, over the output's `style`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<dre_protocol::style::SheetStyle>,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -2839,6 +2845,8 @@ impl Loader {
             anchor: None,
             header: None,
             columns: BTreeMap::new(),
+            autofit: None,
+            style: None,
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -2920,6 +2928,29 @@ impl Loader {
                         format!("report `{report}`: `header` of `{name}` must be true or false"),
                     ),
                 }
+            }
+            if let Some(a) = &m.autofit {
+                match a {
+                    Loose::Ok(b) => e.autofit = Some(*b),
+                    Loose::Bad(_) => self.diags.error(
+                        Code::InvalidField,
+                        file.clone(),
+                        line,
+                        format!("report `{report}`: `autofit` of `{name}` must be true or false"),
+                    ),
+                }
+            }
+            if let Some(st) = &m.style {
+                let (style, errs) = dre_protocol::style::parse_sheet(st);
+                for err in errs {
+                    self.diags.error(
+                        Code::InvalidField,
+                        file.clone(),
+                        line,
+                        format!("report `{report}`: query `{name}`: `style`: {err}"),
+                    );
+                }
+                e.style = Some(style);
             }
             if let Some(c) = &m.columns {
                 let (columns, errs) = dre_protocol::options::parse_columns(c);
@@ -4202,6 +4233,8 @@ impl Loader {
             anchor: None,
             header: None,
             columns: BTreeMap::new(),
+            autofit: None,
+            style: None,
         };
         let base = BindingBase {
             profile: profile.clone(),

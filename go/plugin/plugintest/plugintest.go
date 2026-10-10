@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 
@@ -29,10 +30,22 @@ func Start(t *testing.T, p plugin.Package, role plugin.Role) *Conversation {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	c := &Conversation{t: t, in: inW, out: bufio.NewReader(outR), Code: make(chan int, 1)}
+	done := make(chan struct{})
 	go func() {
 		c.Code <- plugin.Serve(inR, outW, p, role)
 		outW.Close()
+		close(done)
 	}()
+	// End the server with the test, so it stops being slog's default logger: a later test's
+	// logging would otherwise block on a pipe no one reads.
+	t.Cleanup(func() {
+		inW.Close()
+		go io.Copy(io.Discard, outR)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	})
 	return c
 }
 

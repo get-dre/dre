@@ -21,7 +21,7 @@ var version = "unreleased"
 var (
 	sourceRole = plugin.Role{
 		Kind: "source", Name: "snowflake", Capabilities: []string{"sessions", "check", "load", "validate"},
-		Fields: fields, IdentifierQuote: `"`,
+		Fields: fields, IdentifierQuote: `"`, Accepts: dbtOnly,
 		Open: func(conn map[string]any) (plugin.Session, error) { return open(conn) },
 	}
 	pkg = plugin.Package{Version: version, Roles: []plugin.Role{sourceRole}}
@@ -34,7 +34,7 @@ var fields = []plugin.Field{
 	{Name: "user", Description: "the user to sign in as", Required: true},
 	{Name: "authenticator", Description: "how to sign in: snowflake (password, the default), username_password_mfa, externalbrowser, oauth, jwt, programmatic_access_token, workload_identity, or an Okta URL; a private key means key-pair sign-in"},
 	{Name: "password", Description: "password (or a programmatic access token)", Secret: true},
-	{Name: "private_key_path", Description: "path to a key-pair private key (PEM), for key-pair sign-in"},
+	{Name: "private_key_path", Description: "path to a key-pair private key (PEM), for key-pair sign-in", Kind: "path"},
 	{Name: "private_key", Description: "a key-pair private key, inline (PEM, or base64 DER)", Secret: true, Manual: true},
 	{Name: "private_key_passphrase", Description: "the private key's passphrase, if it's encrypted", Secret: true},
 	{Name: "role", Description: "role to use"},
@@ -47,17 +47,18 @@ var fields = []plugin.Field{
 	{Name: "workload_identity_provider", Description: "for workload_identity: AWS, AZURE, GCP or OIDC", Manual: true},
 	{Name: "workload_identity_entra_resource", Description: "for workload_identity on Azure: the Entra resource", Manual: true},
 	{Name: "query_tag", Description: "tag for every query of the session", Manual: true},
-	{Name: "client_session_keep_alive", Description: "keep the session alive while a long report runs", Manual: true},
-	{Name: "client_request_mfa_token", Description: "cache the MFA token (username_password_mfa) in the OS keychain", Manual: true},
-	{Name: "client_store_temporary_credential", Description: "cache the SSO token (externalbrowser) in the OS keychain", Manual: true},
-	{Name: "connect_retries", Description: "how many times to retry connecting (default 1)", Manual: true},
-	{Name: "connect_timeout", Description: "how long to wait for a connection (`30s`, `2m`, or seconds)", Default: "30s", Manual: true},
+	{Name: "client_session_keep_alive", Description: "keep the session alive while a long report runs", Manual: true, Kind: "boolean"},
+	{Name: "client_request_mfa_token", Description: "cache the MFA token (username_password_mfa) in the OS keychain", Manual: true, Kind: "boolean"},
+	{Name: "client_store_temporary_credential", Description: "cache the SSO token (externalbrowser) in the OS keychain", Manual: true, Kind: "boolean"},
+	{Name: "retries", Description: "how many times to try connecting again after a temporary error (0: never)", Default: 3, Manual: true, Kind: "integer"},
+	{Name: "connect_retries", Description: "dbt's name for `retries`", Manual: true, Kind: "integer"},
+	{Name: "connect_timeout", Description: "how long to wait for a connection (`30s`, `2m`, or seconds)", Default: "30s", Manual: true, Kind: "duration"},
 	{Name: "host", Description: "Snowflake host, when not <account>.snowflakecomputing.com", Manual: true},
-	{Name: "port", Description: "port, with host", Manual: true},
+	{Name: "port", Description: "port, with host", Manual: true, Kind: "integer"},
 	{Name: "protocol", Description: "https (default) or http, with host", Manual: true},
-	{Name: "insecure_mode", Description: "skip the certificate revocation check", Manual: true},
+	{Name: "insecure_mode", Description: "skip the certificate revocation check", Manual: true, Kind: "boolean"},
 	{Name: "proxy_host", Description: "HTTP proxy host", Manual: true},
-	{Name: "proxy_port", Description: "HTTP proxy port", Manual: true},
+	{Name: "proxy_port", Description: "HTTP proxy port", Manual: true, Kind: "integer"},
 }
 
 // dbtOnly are dbt-snowflake fields that only matter for building models or that DRE handles

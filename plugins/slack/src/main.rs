@@ -16,9 +16,7 @@
 //! limit, it's one upload post instead: the files (plus the full `.md` when the text was cut short)
 //! with the text as its comment.
 
-use std::time::Duration;
-
-use dre_protocol::delivery::{Rules, timeout_fields};
+use dre_protocol::delivery::{self, Retry, Rules, retry};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::options::{OptionField, OptionType};
@@ -44,9 +42,10 @@ impl Destination for Slack {
                 .required()
                 .secret(),
             ConnectionField::new("channel", "default channel ID (C0123) or #name"),
+            ConnectionField::new("api_url", "Slack's API URL, for a proxy").manual(),
         ]
         .into_iter()
-        .chain(timeout_fields())
+        .chain(delivery::connection_fields())
         .collect()
     }
 
@@ -234,6 +233,8 @@ struct Api {
     base: String,
     token: String,
     agent: ureq::Agent,
+    /// `retries`: how many times to try again a call Slack certainly didn't act on.
+    retries: u32,
 }
 
 impl Api {
@@ -251,7 +252,12 @@ impl Api {
             .timeout_recv_response(Some(rules.timeout))
             .build()
             .into();
-        Ok(Api { base, token, agent })
+        Ok(Api {
+            base,
+            token,
+            agent,
+            retries: rules.retries,
+        })
     }
 
     /// Call a Web API method with form parameters; an `ok: false` reply is an error.
@@ -264,43 +270,52 @@ impl Api {
         }
     }
 
-    /// Call a Web API method and return its JSON reply, `ok: false` included. A rate-limited call
-    /// is retried once, after Slack's `Retry-After`.
+    /// Call a Web API method and return its JSON reply, `ok: false` included. Tried again
+    /// (`retries`) only when Slack certainly didn't act on it: a 429 or 503 (after its
+    /// `Retry-After`), or no connection made.
     fn send(&self, method: &str, form: &[(&str, String)]) -> Result<Value> {
         let url = format!("{}/{method}", self.base);
-        for attempt in 0..2 {
+        let done = retry(self.retries, &format!("Slack {method}"), || {
             let mut resp = self
                 .agent
                 .post(&url)
                 .header("Authorization", &format!("Bearer {}", self.token))
                 .send_form(form.iter().map(|(k, v)| (*k, v.as_str())))
-                .map_err(|e| format!("can't reach Slack ({method}): {e}"))?;
+                .map_err(|e| {
+                    let m = format!("can't reach Slack ({method}): {e}");
+                    if never_sent(&e) {
+                        Retry::Temporary(m, None)
+                    } else {
+                        Retry::Fail(m)
+                    }
+                })?;
             let status = resp.status().as_u16();
-            if status == 429 {
-                let wait = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.trim().parse::<u64>().ok())
-                    .unwrap_or(1);
-                if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    dre_protocol::log::debug!("Slack rate-limited {method}; retrying in {wait}s");
-                    std::thread::sleep(Duration::from_secs(wait));
-                    continue;
+            let wait = delivery::retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+            match status {
+                429 | 503 if wait.is_none_or(|w| w.as_secs() <= MAX_RETRY_WAIT) => {
+                    let m = if status == 429 {
+                        format!("Slack is rate-limiting {method}; try again later")
+                    } else {
+                        format!("Slack {method} returned HTTP {status}")
+                    };
+                    return Err(Retry::Temporary(m, wait));
                 }
-                return Err(format!(
-                    "Slack is rate-limiting {method} (retry after {wait}s); try again later"
-                )
-                .into());
+                429 => {
+                    return Err(Retry::Fail(format!(
+                        "Slack is rate-limiting {method} (retry after {}s); try again later",
+                        wait.map_or(0, |w| w.as_secs())
+                    )));
+                }
+                _ => {}
             }
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             if !(200..300).contains(&status) {
-                return Err(format!("Slack {method} returned HTTP {status}").into());
+                return Err(Retry::Fail(format!("Slack {method} returned HTTP {status}")));
             }
-            return serde_json::from_str(&body)
-                .map_err(|e| format!("Slack {method} returned something that isn't JSON: {e}").into());
-        }
-        unreachable!("the loop returns on its second attempt")
+            serde_json::from_str(&body)
+                .map_err(|e| Retry::Fail(format!("Slack {method} returned something that isn't JSON: {e}")))
+        });
+        done.map_err(Into::into)
     }
 
     fn upload(&self, url: &str, bytes: Vec<u8>) -> std::result::Result<(), String> {
@@ -395,6 +410,16 @@ fn explain(method: &str, v: &Value, target: &Target) -> String {
         ),
         _ => format!("Slack {method} failed for {to}: {error}"),
     }
+}
+/// Whether a request certainly never reached the server (no connection was made), so trying
+/// again can't post twice.
+fn never_sent(e: &ureq::Error) -> bool {
+    matches!(
+        e,
+        ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
+    ) || matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused)
 }
 
 fn main() {

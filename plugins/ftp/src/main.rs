@@ -10,14 +10,15 @@
 use std::net::ToSocketAddrs;
 use std::path::Path;
 
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{
-    About, Destination, Result, conn_bool, conn_required, conn_str, serve_destination,
+    About, Delivery, Destination, PluginError, Result, conn_bool, conn_required, conn_str, serve_destination,
 };
 use serde_json::{Map, Value};
 use std::sync::Arc;
 
-use dre_protocol::delivery::Rules;
+use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver};
+use dre_protocol::options::OptionField;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
@@ -119,7 +120,12 @@ impl ServerCertVerifier for AcceptAny {
     }
 }
 
-fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> {
+fn upload(
+    local: &Path,
+    remote: &str,
+    c: &Map<String, Value>,
+    options: &Map<String, Value>,
+) -> Result<String> {
     let host = conn_required(c, "host")?;
     let port: u16 = match c.get("port") {
         Some(Value::Number(n)) => n.as_u64().unwrap_or(21) as u16,
@@ -127,82 +133,213 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> 
         _ => 21,
     };
     let user = conn_required(c, "username")?;
-    let password = conn_str(c, "password").unwrap_or("");
-    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
-    let mut ftp = connect(host, port, &rules)?;
-    match conn_str(c, "tls").unwrap_or("none") {
-        "none" => {}
-        "explicit" => {
+    let tls = conn_str(c, "tls").unwrap_or("none");
+    if !matches!(tls, "none" | "explicit") {
+        return Err(format!("unknown `tls` `{tls}` (none or explicit)").into());
+    }
+    let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
+    let mut store = FtpStore {
+        c,
+        host,
+        port,
+        user,
+        rules: &rules,
+        ftp: None,
+    };
+    let delivered = deliver(&mut store, local, remote, &rules).map_err(PluginError::from)?;
+    if let Some(mut ftp) = store.ftp.take() {
+        let _ = ftp.quit();
+    }
+    Ok(format!(
+        "ftp://{user}@{host}:{port}/{}",
+        delivered.path.trim_start_matches('/')
+    ))
+}
+
+/// The FTP server, as the shared delivery rules' store. It connects on first use, and again after
+/// a temporary error (`reset`). FTP can't create a file only if it's missing, nor rename without
+/// replacing, so the rules look first.
+struct FtpStore<'a> {
+    c: &'a Map<String, Value>,
+    host: &'a str,
+    port: u16,
+    user: &'a str,
+    rules: &'a Rules,
+    ftp: Option<RustlsFtpStream>,
+}
+
+fn failed(what: &str, path: &str, e: impl std::fmt::Display) -> StoreError {
+    StoreError::Failed(format!("can't {what} {path}: {e}"))
+}
+
+/// A failed command: a dropped connection or a 4xx reply (the server says try later) may work
+/// on a new connection.
+fn ftp_failed(what: &str, path: &str, e: suppaftp::FtpError) -> StoreError {
+    let m = format!("can't {what} {path}: {e}");
+    match &e {
+        suppaftp::FtpError::ConnectionError(io) if delivery::is_connection_error(io) => {
+            StoreError::temporary(m)
+        }
+        suppaftp::FtpError::UnexpectedResponse(r) if (400..500).contains(&r.status.code()) => {
+            StoreError::temporary(m)
+        }
+        _ => StoreError::Failed(m),
+    }
+}
+
+impl FtpStore<'_> {
+    /// The control connection, connecting and signing in first if there's none.
+    fn ftp(&mut self) -> std::result::Result<&mut RustlsFtpStream, StoreError> {
+        if self.ftp.is_none() {
+            self.ftp = Some(self.connect()?);
+        }
+        Ok(self.ftp.as_mut().expect("connected"))
+    }
+
+    fn connect(&self) -> std::result::Result<RustlsFtpStream, StoreError> {
+        let (c, host, port, user) = (self.c, self.host, self.port, self.user);
+        let rules = self.rules;
+        let mut ftp = connect(host, port, rules).map_err(StoreError::temporary)?;
+        if conn_str(c, "tls") == Some("explicit") {
             let accept_invalid = conn_bool(c, "tls_accept_invalid_certs").unwrap_or(false);
-            ftp = match ftp.into_secure(RustlsConnector::from(tls_config(accept_invalid, false)?), host) {
+            let config = |tls13| tls_config(accept_invalid, tls13).map_err(StoreError::Failed);
+            ftp = match ftp.into_secure(RustlsConnector::from(config(false)?), host) {
                 Ok(f) => f,
                 Err(e12) => {
                     // Maybe a TLS 1.3-only server: once more, on a new connection.
-                    let again = connect(host, port, &rules)?;
+                    let again = connect(host, port, rules).map_err(StoreError::temporary)?;
                     again
-                        .into_secure(RustlsConnector::from(tls_config(accept_invalid, true)?), host)
-                        .map_err(|_| format!("{host}:{port} didn't accept explicit FTPS (AUTH TLS): {e12}"))?
+                        .into_secure(RustlsConnector::from(config(true)?), host)
+                        .map_err(|_| {
+                            StoreError::Failed(format!(
+                                "{host}:{port} didn't accept explicit FTPS (AUTH TLS): {e12}"
+                            ))
+                        })?
                 }
             };
         }
-        t => return Err(format!("unknown `tls` `{t}` (none or explicit)").into()),
+        let password = conn_str(c, "password").unwrap_or("");
+        ftp.login(user, password).map_err(|e| match e {
+            suppaftp::FtpError::UnexpectedResponse(_) => {
+                StoreError::Failed(format!("{host}:{port} refused the credentials for `{user}`: {e}"))
+            }
+            e => ftp_failed("sign in to", host, e),
+        })?;
+        ftp.set_mode(if conn_bool(c, "passive").unwrap_or(true) {
+            Mode::Passive
+        } else {
+            Mode::Active
+        });
+        ftp.transfer_type(suppaftp::types::FileType::Binary)
+            .map_err(|e| ftp_failed("set binary mode on", host, e))?;
+        Ok(ftp)
     }
-    ftp.login(user, password)
-        .map_err(|e| format!("{host}:{port} refused the credentials for `{user}`: {e}"))?;
-    ftp.set_mode(if conn_bool(c, "passive").unwrap_or(true) {
-        Mode::Passive
-    } else {
-        Mode::Active
-    });
-    ftp.transfer_type(suppaftp::types::FileType::Binary)?;
 
-    // Walk (and create) the directories, then upload the file there.
-    let (dir, name) = match remote.rsplit_once('/') {
-        Some((d, n)) => (d, n),
-        None => ("", remote),
-    };
-    if remote.starts_with('/') {
-        ftp.cwd("/")?;
+    /// Create `path`'s missing parent folders (each prefix in turn; ones that exist fail
+    /// harmlessly).
+    fn make_parents(&mut self, path: &str) -> std::result::Result<(), StoreError> {
+        let Some((dir, _)) = path.rsplit_once('/') else {
+            return Ok(());
+        };
+        let ftp = self.ftp()?;
+        let mut prefix = String::new();
+        if dir.starts_with('/') {
+            prefix.push('/');
+        }
+        for part in dir.split('/').filter(|p| !p.is_empty()) {
+            if !prefix.is_empty() && !prefix.ends_with('/') {
+                prefix.push('/');
+            }
+            prefix.push_str(part);
+            let _ = ftp.mkdir(&prefix);
+        }
+        Ok(())
     }
-    for part in dir.split('/').filter(|p| !p.is_empty()) {
-        if ftp.cwd(part).is_err() {
-            ftp.mkdir(part)
-                .map_err(|e| format!("can't create directory `{part}`: {e}"))?;
-            ftp.cwd(part)?;
+}
+
+impl Store for FtpStore<'_> {
+    fn caps(&self) -> Caps {
+        Caps::default()
+    }
+
+    fn write(&mut self, local: &Path, remote: &str, _exclusive: bool) -> std::result::Result<(), StoreError> {
+        self.make_parents(remote)?;
+        let mut f = std::fs::File::open(local)
+            .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
+        self.ftp()?
+            .put_file(remote, &mut f)
+            .map(|_| ())
+            .map_err(|e| ftp_failed("upload to", remote, e))
+    }
+
+    fn rename(&mut self, from: &str, to: &str, replace: bool) -> std::result::Result<(), StoreError> {
+        self.make_parents(to)?;
+        let ftp = self.ftp()?;
+        match ftp.rename(from, to) {
+            Ok(()) => Ok(()),
+            // A server whose rename won't replace a file: remove it, then rename.
+            Err(_) if replace && ftp.size(to).is_ok() => {
+                ftp.rm(to).map_err(|e| failed("replace", to, e))?;
+                ftp.rename(from, to).map_err(|e| ftp_failed("rename to", to, e))
+            }
+            Err(e) => Err(ftp_failed("rename to", to, e)),
         }
     }
-    let mut f = std::fs::File::open(local).map_err(|e| format!("can't read {}: {e}", local.display()))?;
-    if let Err(e) = ftp.put_file(name, &mut f) {
-        // Don't leave a partial (often empty) file behind.
-        let cleanup = match ftp.rm(name) {
-            Ok(()) => "the partial remote file was removed",
-            Err(_) => "the partial remote file may be left on the server",
-        };
-        return Err(format!("upload to {remote} failed: {e} ({cleanup})").into());
+
+    fn exists(&mut self, remote: &str) -> std::result::Result<bool, StoreError> {
+        Ok(self.ftp()?.size(remote).is_ok())
     }
-    let _ = ftp.quit();
-    Ok(format!(
-        "ftp://{user}@{host}:{port}/{}",
-        remote.trim_start_matches('/')
-    ))
+
+    fn delete(&mut self, remote: &str) -> std::result::Result<(), StoreError> {
+        if let Some(ftp) = self.ftp.as_mut() {
+            let _ = ftp.rm(remote);
+        }
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.ftp = None;
+    }
 }
 
 impl Destination for Ftp {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "FTP server").required(),
-            ConnectionField::new("port", "port").default(21),
+            ConnectionField::new("port", "port")
+                .default(21)
+                .kind(FieldKind::Integer),
             ConnectionField::new("username", "user name").required(),
             ConnectionField::new("password", "password").secret(),
-            ConnectionField::new("tls", "none or explicit (FTPS)").default("none"),
+            ConnectionField::new("tls", "none or explicit (FTPS)")
+                .default("none")
+                .choices(&["none", "explicit"]),
+            ConnectionField::new("passive", "passive mode (default true)")
+                .kind(FieldKind::Boolean)
+                .manual(),
+            ConnectionField::new(
+                "tls_accept_invalid_certs",
+                "accept a self-signed server certificate",
+            )
+            .kind(FieldKind::Boolean)
+            .manual(),
         ]
         .into_iter()
-        .chain(dre_protocol::delivery::timeout_fields())
+        .chain(delivery::connection_fields())
         .collect()
     }
 
-    fn deliver(&mut self, local: &Path, remote: Option<&str>, c: &Map<String, Value>) -> Result<String> {
-        upload(local, remote.ok_or("ftp needs `output.destination.path`")?, c)
+    /// `if_exists`, `atomic` and `temp_dir` (the shared delivery rules).
+    fn options(&self) -> Vec<OptionField> {
+        delivery::option_fields()
+    }
+
+    fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
+        let [f] = d.files.as_slice() else {
+            return Err("ftp takes one file per delivery".into());
+        };
+        let remote = f.remote.as_deref().ok_or("ftp needs `output.destination.path`")?;
+        upload(&f.local, remote, &d.connection, &d.options)
     }
 }
 

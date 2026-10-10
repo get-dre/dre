@@ -30,6 +30,14 @@ pub fn validate(options: &Map<String, Value>) -> Vec<String> {
     if let Some(v) = options.get("columns").filter(|v| !v.is_null()) {
         errs.extend(parse_columns(v).1.into_iter().map(|e| format!("`columns`: {e}")));
     }
+    if let Some(v) = options.get("style").filter(|v| !v.is_null()) {
+        errs.extend(
+            dre_protocol::style::parse_sheet(v)
+                .1
+                .into_iter()
+                .map(|e| format!("`style`: {e}")),
+        );
+    }
     for (key, _) in TYPE_DEFAULTS {
         if let Some(code) = options.get(key).and_then(Value::as_str) {
             match check_num_format(code) {

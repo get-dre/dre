@@ -111,7 +111,7 @@ fn send(files: &[DeliveryFile], conn: Value, options: Value) -> Result<String, S
 }
 
 fn local(port: u16) -> Value {
-    json!({"host": "127.0.0.1", "port": port, "tls": "none", "from": "DRE Reports <reports@example.com>"})
+    json!({"host": "127.0.0.1", "port": port, "tls": "none", "from": "DRE Reports <reports@example.com>", "retries": 0})
 }
 
 fn received(rx: &Receiver<Captured>) -> Captured {
@@ -467,4 +467,92 @@ fn attached_files_go_with_the_message_within_the_size_limit() {
     .unwrap_err();
     assert!(err.contains("over the 0.000001 MB limit"), "{err}");
     assert!(rx.try_recv().is_err(), "nothing should be sent");
+}
+
+/// How a scripted server ends a session's DATA.
+#[derive(Clone, Copy)]
+enum End {
+    Accept,
+    /// `451`: not accepted, try later.
+    TryLater,
+    /// Read the message, then drop the connection without answering.
+    Drop,
+}
+
+/// A plain-SMTP server ending each session's DATA as `script` says (the last entry repeats);
+/// returns the port and the number of sessions so far.
+fn scripted_smtp(script: Vec<End>) -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let sessions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = sessions.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut w) = stream else { return };
+            let n = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let end = script[n.min(script.len() - 1)];
+            let mut r = BufReader::new(w.try_clone().unwrap());
+            let _ = w.write_all(b"220 fake ESMTP\r\n");
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if r.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let cmd = line.trim_end().to_ascii_uppercase();
+                if cmd.starts_with("EHLO") {
+                    let _ = w.write_all(b"250-fake\r\n250 8BITMIME\r\n");
+                } else if cmd == "DATA" {
+                    let _ = w.write_all(b"354 go\r\n");
+                    loop {
+                        let mut l = Vec::new();
+                        if r.read_until(b'\n', &mut l).unwrap_or(0) == 0 || l == b".\r\n" {
+                            break;
+                        }
+                    }
+                    match end {
+                        End::Accept => drop(w.write_all(b"250 queued\r\n")),
+                        End::TryLater => drop(w.write_all(b"451 try later\r\n")),
+                        End::Drop => break,
+                    }
+                } else if cmd == "QUIT" {
+                    let _ = w.write_all(b"221 bye\r\n");
+                    break;
+                } else {
+                    let _ = w.write_all(b"250 ok\r\n");
+                }
+            }
+        }
+    });
+    (port, sessions)
+}
+
+#[test]
+fn a_message_the_server_refused_for_now_is_sent_again() {
+    let f = Files::new();
+    let (port, sessions) = scripted_smtp(vec![End::TryLater, End::Accept]);
+    let mut conn = local(port);
+    conn["retries"] = json!(2);
+    send(&[f.file("a.csv", b"1")], conn, json!({"to": "x@example.com"})).unwrap();
+    assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_message_the_server_may_have_accepted_is_never_sent_twice() {
+    let f = Files::new();
+    let (port, sessions) = scripted_smtp(vec![End::Drop, End::Accept]);
+    let mut conn = local(port);
+    conn["retries"] = json!(3);
+    let err = send(&[f.file("a.csv", b"1")], conn, json!({"to": "x@example.com"})).unwrap_err();
+    assert!(!err.contains("tries"), "{err}");
+    assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_refused_connection_is_tried_again() {
+    let f = Files::new();
+    let mut conn = local(dead_port());
+    conn["retries"] = json!(1);
+    let err = send(&[f.file("a.csv", b"1")], conn, json!({"to": "x@example.com"})).unwrap_err();
+    assert!(err.contains("Connection error"), "{err}");
 }

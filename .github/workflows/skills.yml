@@ -15,11 +15,8 @@ on:
       - ".claude-plugin/**"
       - "README.md"
       - "docs/**"
-      - "crates/**"
-      - "plugins/**"
-      - "go/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
+      - "plugins/*/describe.json"
+      - "go/*/describe.json"
       - ".github/scripts/skills.py"
       - ".github/scripts/test_skills.py"
       - ".github/scripts/packages.json"
@@ -30,11 +27,8 @@ on:
       - ".claude-plugin/**"
       - "README.md"
       - "docs/**"
-      - "crates/**"
-      - "plugins/**"
-      - "go/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
+      - "plugins/*/describe.json"
+      - "go/*/describe.json"
       - ".github/scripts/skills.py"
       - ".github/scripts/test_skills.py"
       - ".github/scripts/packages.json"
@@ -61,25 +55,7 @@ jobs:
           persist-credentials: false
       - name: Test the checker
         run: python3 .github/scripts/test_skills.py
-      # The runner's rustup, not a third-party action: the newest stable Rust.
-      - run: rustup toolchain install stable --profile minimal && rustup default stable
-      # The same build as CI's Linux test job (`cargo build --workspace --bins`, same CARGO_*
-      # variables), so restore that job's cache (its key is named after the job, `test`) and save
-      # none of our own: the repo's caches have to fit in 10 GB.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v2-rust
-          shared-key: test
-          save-if: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go/plugin/go.mod
-          cache-dependency-path: go/*/go.sum
-      - name: Build dre and every plugin package
-        run: |
-          cargo build --locked --workspace --bins
-          for p in databricks bigquery snowflake; do
-            (cd "go/$p" && go build -o "../../target/debug/dre-plugin-$p" .) || exit 1
-          done
+      # Plugin metadata comes from each package's describe.json and the CLI's from
+      # docs/cli-reference.md, both checked against the built programs in CI, so nothing is built.
       - name: Check the skills
-        run: python3 .github/scripts/skills.py check --dre target/debug/dre --plugins-dir target/debug
+        run: python3 .github/scripts/skills.py check

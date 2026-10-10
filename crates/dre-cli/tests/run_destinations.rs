@@ -13,6 +13,7 @@ fn profiles(rec: &str) -> String {
          \x20 inbox:\n    targets:\n      dev: {{type: local}}\n\
          \x20 rec:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\"}}\n\
          \x20 broken:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\", fail: true}}\n\
+         \x20 flaky:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\", temporary_failures: 2}}\n\
          \x20 mail:\n    targets:\n      dev: {{deliver: false}}\n      prod: {{type: fixture, dir: \"{rec}\"}}\n"
     )
 }
@@ -245,14 +246,15 @@ fn a_misspelt_key_on_a_destination_without_options_is_an_error_not_ignored() {
     // Refused before anything runs.
     p.dre("run", &["daily"])
         .failed()
-        .says("destination `inbox`: the local destination takes no options, but got `pth`")
+        .says("destination `inbox`")
+        .says("`pth`")
         .says("fix them before running");
     assert!(!p.dir.path().join("target/run").exists());
-    p.dre("validate", &[]).failed().says("but got `pth`");
+    p.dre("validate", &[]).failed().says("`pth`");
 }
 
 #[test]
-fn a_plugin_without_options_refuses_them() {
+fn a_plugin_refuses_options_it_doesnt_declare() {
     // The SFTP plugin declares no options, so the SDK refuses any before connecting.
     let (p, _rec) = project(
         "queries: [q]\noutput:\n  destination: {profile: box, path: /in/daily.csv, pasth: x}\n",
@@ -266,7 +268,7 @@ fn a_plugin_without_options_refuses_them() {
     p.write("dependencies.yml", "plugins: [duckdb, csv, fixture, sftp]\n");
     p.dre("run", &["daily"])
         .failed()
-        .says("destination `box`: the `sftp` destination takes no options, but got `pasth`");
+        .says("destination `box`: unknown option `pasth` for destination `sftp`");
 }
 
 #[test]
@@ -281,4 +283,82 @@ fn a_not_delivered_entry_records_its_target_and_no_type() {
     assert_eq!(d["target"], "dev");
     assert!(d["type"].is_null(), "{d}");
     assert!(d.get("location").is_none() && d.get("error").is_none(), "{d}");
+}
+
+#[test]
+fn the_local_destination_writes_under_a_temporary_name_then_renames() {
+    let (p, _rec) = project(
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    p.dre("run", &["daily"]).ok();
+    let names: Vec<String> = std::fs::read_dir(p.path("out"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(names, ["daily.csv"], "no temporary file left");
+    // temp_dir, and atomic: false.
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, temp_dir: ../staging}\n",
+    );
+    p.dre("run", &["daily"]).ok();
+    assert!(p.path("out/daily.csv").is_file());
+    assert_eq!(
+        std::fs::read_dir(p.path("staging")).unwrap().count(),
+        0,
+        "the temporary file moved in"
+    );
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, atomic: false}\n",
+    );
+    p.dre("run", &["daily"]).ok();
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, atomic: maybe}\n",
+    );
+    p.dre("validate", &[]).failed().says("`atomic`");
+}
+
+#[test]
+fn if_exists_on_the_local_destination_refuses_or_numbers_a_name_already_taken() {
+    let (p, _rec) = project(
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: number}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    p.dre("run", &["daily"]).ok().says("daily_2.csv");
+    let r = results(&p);
+    let loc = r["deliveries"][0]["location"].as_str().unwrap();
+    assert!(loc.ends_with("out/daily_2.csv"), "{loc}");
+    assert!(p.path("out/daily_2.csv").is_file());
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: error}\n",
+    );
+    p.dre("run", &["daily"]).failed().says("already exists");
+    let r = results(&p);
+    assert_eq!(r["deliveries"][0]["status"], "failed");
+    assert_eq!(r["deliveries"][0]["error_code"], "local/file-exists");
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: keep}\n",
+    );
+    p.dre("validate", &[]).failed().says("`if_exists`");
+}
+
+#[test]
+fn a_delivery_that_took_several_tries_says_so_in_run_results() {
+    let (p, rec) = project(
+        "queries: [q]\noutput:\n  destination:\n    - {profile: flaky, path: a.csv}\n    - {profile: rec, path: b.csv}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    assert_eq!(deliveries(&rec).len(), 2);
+    let r = results(&p);
+    assert_eq!(r["deliveries"][0]["attempts"], 3);
+    assert!(r["deliveries"][1].get("attempts").is_none(), "{r}");
+    assert!(p.run_logs().contains("trying again"), "{}", p.run_logs());
 }

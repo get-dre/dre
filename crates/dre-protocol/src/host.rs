@@ -279,6 +279,8 @@ pub struct PluginProcess {
     info: Option<PluginInfo>,
     /// A reply that arrived while core was still sending (a format failing mid-stream).
     early: Option<std::result::Result<Frame, FrameError>>,
+    /// How many tries the last delivery took (1 without a retry).
+    last_attempts: u32,
     /// The plugin asked for in the handshake. By default the one a `dre-<kind>-<name>` file name
     /// names; none for a package executable, which then serves its first plugin.
     serve: Option<PluginId>,
@@ -438,6 +440,7 @@ impl PluginProcess {
             stderr_thread: Some(stderr_thread),
             info: None,
             early: None,
+            last_attempts: 1,
             serve,
         })
     }
@@ -791,11 +794,31 @@ impl PluginProcess {
         }
     }
 
+    /// Check a profile entry's connection settings without connecting (protocol 1): the errors
+    /// and the warnings. `unresolved` keys (an unset `env_var()`) are sent as `null`.
+    pub fn validate_connection(
+        &mut self,
+        mut connection: Map<String, Value>,
+        unresolved: Vec<String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        for k in &unresolved {
+            connection.insert(k.clone(), Value::Null);
+        }
+        self.send(&Request::ValidateConnection {
+            connection,
+            unresolved,
+        })?;
+        match self.recv_json("a validated reply")? {
+            Response::Validated { errors, warnings } => Ok((errors, warnings)),
+            other => Err(self.unexpected("a validated reply", &Incoming::Json(other))),
+        }
+    }
+
     /// Check a config block of options (needs `validate`); returns every problem found.
     pub fn validate(&mut self, options: Map<String, Value>) -> Result<Vec<String>> {
         self.send(&Request::Validate { options })?;
         match self.recv_json("a validate reply")? {
-            Response::Validated { errors } => Ok(errors),
+            Response::Validated { errors, .. } => Ok(errors),
             other => Err(self.unexpected("a validate reply", &Incoming::Json(other))),
         }
     }
@@ -1000,7 +1023,10 @@ impl PluginProcess {
         };
         self.send(&req)?;
         match self.recv_json("a delivered reply")? {
-            Response::Delivered { location } => Ok(location),
+            Response::Delivered { location, attempts } => {
+                self.last_attempts = attempts.unwrap_or(1);
+                Ok(location)
+            }
             other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),
         }
     }
@@ -1028,9 +1054,18 @@ impl PluginProcess {
             message: Some(message.clone()),
         })?;
         match self.recv_json("a delivered reply")? {
-            Response::Delivered { location } => Ok(location),
+            Response::Delivered { location, attempts } => {
+                self.last_attempts = attempts.unwrap_or(1);
+                Ok(location)
+            }
             other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),
         }
+    }
+
+    /// How many tries the last delivery took: 1, or more when the plugin retried a temporary
+    /// error.
+    pub fn last_attempts(&self) -> u32 {
+        self.last_attempts
     }
 
     /// Ask the plugin to exit, and wait for it.

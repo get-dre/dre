@@ -755,6 +755,8 @@ struct Produced {
     anchor: Option<String>,
     header: Option<bool>,
     columns: BTreeMap<String, ColumnOptions>,
+    autofit: Option<bool>,
+    style: Option<dre_protocol::style::SheetStyle>,
 }
 
 struct Statement {
@@ -811,6 +813,8 @@ struct BindingRun<'a> {
     produced: Vec<Produced>,
     /// Each of the Binding's outputs, in order.
     outs: Vec<OutputRun>,
+    /// How many tries the delivery being made took (a plugin retrying a temporary error).
+    attempts: u32,
     drift: Vec<String>,
     /// The current schema with stable identities and any protection carried from the baseline.
     protected_snapshot: Option<Json>,
@@ -959,6 +963,7 @@ impl<'a> BindingRun<'a> {
             started_at,
             produced: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
+            attempts: 1,
             drift: Vec::new(),
             protected_snapshot: None,
         }
@@ -1867,6 +1872,8 @@ impl<'a> BindingRun<'a> {
                 anchor: None,
                 header: None,
                 columns: Default::default(),
+                autofit: None,
+                style: None,
             });
         }
         Ok(())
@@ -1950,6 +1957,8 @@ impl<'a> BindingRun<'a> {
             p.anchor = q.anchor.clone();
             p.header = q.header;
             p.columns = q.columns.clone();
+            p.autofit = q.autofit;
+            p.style = q.style.clone();
         }
         for o in self.b.outputs.iter().filter(|o| o.format == "xlsx") {
             let mut seen: BTreeMap<String, String> = BTreeMap::new();
@@ -2145,6 +2154,8 @@ impl<'a> BindingRun<'a> {
                         anchor: r.anchor.clone(),
                         header: r.header,
                         columns: r.columns.clone(),
+                        autofit: r.autofit,
+                        style: r.style.clone(),
                     }
                 })
                 .collect();
@@ -2254,6 +2265,7 @@ impl<'a> BindingRun<'a> {
             let kind = profiles
                 .target(Role::Destination, &d.profile)
                 .map(|o| o.kind.clone());
+            self.attempts = 1;
             let (status, location, error) =
                 match self.deliver_one(oi, d).map_err(|e| e.or(Code::DeliveryFailed)) {
                     Ok(Some(loc)) => ("delivered", Some(loc), None),
@@ -2272,6 +2284,7 @@ impl<'a> BindingRun<'a> {
                 target,
                 status,
                 location,
+                attempts: Some(self.attempts).filter(|n| *n > 1),
                 error_code: error.as_ref().map(|e| e.code.clone()),
                 error: error.map(|e| e.message),
             };
@@ -2349,13 +2362,21 @@ impl<'a> BindingRun<'a> {
             .collect();
         let mut locations = Vec::new();
         if kind == LOCAL_TYPE {
-            if let Some(k) = d.options.keys().next() {
-                return Err(format!(
-                    "the local destination takes no options, but `{}` has `{k}`; check the key's spelling",
-                    d.profile
-                )
-                .into());
+            let errors = crate::options::local_option_errors(&d.options);
+            if !errors.is_empty() {
+                return Err(format!("destination `{}`: {}", d.profile, errors.join("; ")).into());
             }
+            // `if_exists`, `atomic` (default true: written as `.<name>.dre-part`, then renamed)
+            // and `temp_dir`.
+            let (rules, _) = dre_protocol::delivery::Rules::from_settings(
+                dre_protocol::delivery::Rules {
+                    retries: 0,
+                    ..Default::default()
+                },
+                &JsonMap::new(),
+                &d.options,
+                &[],
+            )?;
             for (i, f) in targets.iter().enumerate() {
                 let t = Instant::now();
                 let r = f
@@ -2363,16 +2384,25 @@ impl<'a> BindingRun<'a> {
                     .as_ref()
                     .ok_or("the local destination needs `output.destination.path`")?;
                 let dst = self.project.root.join(r).to_string_lossy().to_string();
-                // The shared delivery rules, as they stand today (replace, straight to the
-                // final name).
-                let rules = dre_protocol::delivery::Rules::legacy();
                 let delivered = dre_protocol::delivery::deliver(
                     &mut dre_protocol::delivery::LocalStore,
                     Path::new(&f.local_path),
                     &dst,
                     &rules,
                 )
-                .map_err(|e| format!("delivery to {dst} failed: {e}; the output is still in target/"))?;
+                .map_err(|e| {
+                    let message = format!("delivery to {dst} failed: {e}; the output is still in target/");
+                    if e.exists {
+                        // `if_exists: error`, coded as a plugin's would be.
+                        let code = crate::codes::ErrorCode::Plugin {
+                            code: "local/file-exists".into(),
+                            kind: crate::codes::Kind::Delivery,
+                        };
+                        Fail::new(code, message)
+                    } else {
+                        Fail::new(Code::DeliveryFailed, message)
+                    }
+                })?;
                 let loc = delivered.path;
                 self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
                 self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
@@ -2423,6 +2453,7 @@ impl<'a> BindingRun<'a> {
             let loc = p
                 .deliver_message(&message, &attach, connection, d.options.clone())
                 .map_err(failed)?;
+            self.attempts = p.last_attempts();
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             self.outs[oi].files[0].1.get_or_insert_with(|| loc.clone());
             let _ = p.close();
@@ -2446,6 +2477,7 @@ impl<'a> BindingRun<'a> {
             let loc = p
                 .deliver_files(&files, connection.clone(), d.options.clone())
                 .map_err(failed)?;
+            self.attempts = self.attempts.max(p.last_attempts());
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             for i in batch {
                 self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
@@ -3111,7 +3143,7 @@ fn render_json(renderer: &Renderer, file: &Path, v: &Json) -> Result<Json, Rende
 }
 
 /// Render `env_var()` (and only that) inside a profile output's string fields.
-fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String, Json>, String> {
+pub(crate) fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String, Json>, String> {
     let mut env = minijinja::Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
     env.add_function("env_var", |name: String, default: Option<String>| -> Result<String, minijinja::Error> {

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BooleanArray, Date32Array, Decimal128Array, Int64Array, RecordBatch, StringArray,
+    ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float64Array, Int64Array, RecordBatch, StringArray,
     TimestampMicrosecondArray,
 };
 use calamine::{Data, Reader, Xlsx, open_workbook};
@@ -23,6 +23,8 @@ fn meta(name: &str, anchor: Option<&str>, header: Option<bool>) -> ResultSetMeta
         anchor: anchor.map(Into::into),
         header,
         columns: Default::default(),
+        autofit: None,
+        style: None,
     }
 }
 
@@ -279,4 +281,172 @@ fn text_longer_than_an_excel_cell_fails_naming_the_sheet_and_cell() {
             && err.contains("text format such as csv"),
         "{err}"
     );
+}
+
+/// Each column's width on a sheet as Excel shows it (the file stores a little padding on top),
+/// `None` where none is set (Excel's default).
+fn widths(path: &Path, name: &str, cols: u32) -> Vec<Option<f64>> {
+    let book = umya_spreadsheet::reader::xlsx::read(path).unwrap();
+    let ws = book.sheet_by_name(name).unwrap();
+    (1..=cols)
+        .map(|c| {
+            ws.column_dimension_by_number(c)
+                .map(|d| d.width().floor())
+                .filter(|w| *w > 0.0)
+        })
+        .collect()
+}
+
+fn region_sales() -> RecordBatch {
+    RecordBatch::try_from_iter([
+        (
+            "region",
+            Arc::new(StringArray::from(vec!["Europe, Middle East & Africa", "Asia"])) as ArrayRef,
+        ),
+        (
+            "net",
+            Arc::new(Float64Array::from(vec![100630.38, 52000.0])) as ArrayRef,
+        ),
+        (
+            "note",
+            Arc::new(StringArray::from(vec!["x".repeat(200), "y".into()])) as ArrayRef,
+        ),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn columns_are_sized_from_their_formatted_content_by_default() {
+    let mut m = meta("By region", None, None);
+    m.columns.insert(
+        "net".into(),
+        serde_json::from_value(json!({"format": "#,##0.00", "total": "sum"})).unwrap(),
+    );
+    let (_d, path) = write(json!({}), vec![(m, vec![region_sales()])]);
+    let w = widths(&path, "By region", 3);
+    // The longest region, plus room; the totals row's `152,630.38` fits; long text stops at 60.
+    assert_eq!(w[0], Some(30.0));
+    assert!(w[1].unwrap() >= "152,630.38".len() as f64 + 2.0, "{w:?}");
+    assert_eq!(w[2], Some(60.0));
+}
+
+#[test]
+fn a_column_width_beats_the_tab_which_beats_the_output() {
+    let mut off = meta("Off", None, None);
+    off.autofit = Some(false);
+    off.columns.insert(
+        "net".into(),
+        serde_json::from_value(json!({"width": 14})).unwrap(),
+    );
+    let mut on = meta("On", None, None);
+    on.autofit = Some(true);
+    let plain = meta("Plain", None, None);
+    let (_d, path) = write(
+        json!({"autofit": false, "columns": {"region": {"width": "auto"}}}),
+        vec![
+            (off, vec![region_sales()]),
+            (on, vec![region_sales()]),
+            (plain, vec![region_sales()]),
+        ],
+    );
+    assert_eq!(widths(&path, "Off", 3), [Some(30.0), Some(14.0), None]);
+    assert_eq!(widths(&path, "On", 3), [Some(30.0), Some(11.0), Some(60.0)]);
+    assert_eq!(widths(&path, "Plain", 3), [Some(30.0), None, None]);
+}
+
+/// What a cell looks like, read back: (bold, font colour, fill, left border, horizontal align).
+fn look(path: &Path, sheet: &str, cell: &str) -> (bool, String, String, String, String) {
+    let book = umya_spreadsheet::reader::xlsx::read(path).unwrap();
+    let ws = book.sheet_by_name(sheet).unwrap();
+    let Some(c) = ws.cell(cell) else {
+        return (false, String::new(), String::new(), String::new(), String::new());
+    };
+    let st = c.style();
+    let bold = st.font().is_some_and(|f| f.bold());
+    let color = st.font().map(|f| f.color().argb_str()).unwrap_or_default();
+    let fill = st.background_color().map(|c| c.argb_str()).unwrap_or_default();
+    let border = st
+        .borders()
+        .map(|b| b.left().border_style().to_string())
+        .unwrap_or_default();
+    let align = st
+        .alignment()
+        .map(|a| format!("{:?}", a.horizontal()))
+        .unwrap_or_default();
+    (bold, color, fill, border, align)
+}
+
+#[test]
+fn styles_layer_from_output_to_tab_to_column() {
+    let rows = RecordBatch::try_from_iter([
+        (
+            "region",
+            Arc::new(StringArray::from(vec!["A", "B", "C"])) as ArrayRef,
+        ),
+        (
+            "net",
+            Arc::new(Float64Array::from(vec![Some(1.0), None, Some(3.0)])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let mut styled = meta("Styled", None, None);
+    // As core passes a query entry's settings: parsed.
+    styled.columns = dre_protocol::options::parse_columns(
+        &json!({"net": {"total": "sum", "style": {"bold": true, "font_color": "#C00000", "align": "right"}}}),
+    )
+    .0;
+    let mut plain = meta("Plain", None, None);
+    plain.style = Some(dre_protocol::style::parse_sheet(&json!({"banded_rows": false})).0);
+    let (_d, path) = write(
+        json!({"style": {
+            "header": {"fill": "#1F4E78", "font_color": "#FFFFFF"},
+            "banded_rows": "#F2F2F2",
+            "borders": "thin",
+            "totals": {"fill": "#DDEBF7"}
+        }}),
+        vec![(styled, vec![rows.clone()]), (plain, vec![rows])],
+    );
+    // Header: bold by default, plus the output's fill and colour, and the table's borders.
+    assert_eq!(
+        look(&path, "Styled", "A1"),
+        (
+            true,
+            "FFFFFFFF".into(),
+            "FF1F4E78".into(),
+            "thin".into(),
+            String::new()
+        )
+    );
+    // Banding on every other data row; a column's own style on its cells, empty ones too.
+    assert_eq!(look(&path, "Styled", "A2").2, "");
+    assert_eq!(look(&path, "Styled", "A3").2, "FFF2F2F2");
+    assert_eq!(
+        look(&path, "Styled", "B3"),
+        (
+            true,
+            "FFC00000".into(),
+            "FFF2F2F2".into(),
+            "thin".into(),
+            "Right".into()
+        )
+    );
+    // Totals: bold with the output's fill.
+    let t = look(&path, "Styled", "B5");
+    assert!(t.0 && t.2 == "FFDDEBF7", "{t:?}");
+    // The tab turned banding off; the rest is inherited.
+    assert_eq!(look(&path, "Plain", "A3").2, "");
+    assert_eq!(look(&path, "Plain", "A3").3, "thin");
+}
+
+#[test]
+fn bad_styles_are_refused_by_validate() {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let errs = p
+        .validate(json!({"style": {"banded_rows": "grey", "header": {"bold": "yes"}}, "columns": {"net": {"style": {"fill": "red"}}}})
+            .as_object()
+            .unwrap()
+            .clone())
+        .unwrap();
+    assert_eq!(errs.len(), 3, "{errs:?}");
 }

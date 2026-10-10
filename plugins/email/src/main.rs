@@ -13,8 +13,9 @@
 use std::path::Path;
 use std::str::FromStr;
 
+use dre_protocol::delivery::{Retry, retry};
 use dre_protocol::markdown;
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::options::{OptionField, OptionType, is_template};
 use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_bool, conn_required, conn_str, serve_destination,
@@ -35,8 +36,11 @@ impl Destination for Email {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "SMTP server host").required(),
-            ConnectionField::new("port", "SMTP port (587 for starttls, 465 for implicit TLS)"),
-            ConnectionField::new("tls", "starttls, implicit or none").default("starttls"),
+            ConnectionField::new("port", "SMTP port (587 for starttls, 465 for implicit TLS)")
+                .kind(FieldKind::Integer),
+            ConnectionField::new("tls", "starttls, implicit or none")
+                .default("starttls")
+                .choices(&["starttls", "implicit", "none"]),
             ConnectionField::new("username", "SMTP username"),
             ConnectionField::new("password", "SMTP password").secret(),
             ConnectionField::new("from", "sender address, e.g. \"Reports <reports@example.com>\"").required(),
@@ -51,7 +55,7 @@ impl Destination for Email {
             .default(false),
         ]
         .into_iter()
-        .chain(dre_protocol::delivery::timeout_fields())
+        .chain(dre_protocol::delivery::connection_fields())
         .collect()
     }
 
@@ -92,6 +96,14 @@ impl Destination for Email {
                 addresses(v, k).err().map(|e| e.to_string())
             })
             .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        match (c.contains_key("username"), c.contains_key("password")) {
+            (true, false) => vec!["`username` is set but `password` isn't".into()],
+            (false, true) => vec!["`password` is set but `username` isn't".into()],
+            _ => Vec::new(),
+        }
     }
 
     fn deliver_message(&mut self, d: &Delivery, m: &dre_protocol::msg::Message) -> Result<String> {
@@ -284,6 +296,8 @@ struct Smtp {
     accept_invalid_certs: bool,
     /// `timeout`: how long connecting, or any read or write, may take.
     timeout: std::time::Duration,
+    /// `retries`: how many times to try again when the message certainly wasn't accepted.
+    retries: u32,
 }
 
 impl Smtp {
@@ -327,6 +341,7 @@ impl Smtp {
             credentials,
             accept_invalid_certs: conn_bool(c, "tls_accept_invalid_certs") == Some(true),
             timeout: rules.timeout,
+            retries: rules.retries,
         })
     }
 
@@ -350,9 +365,21 @@ impl Smtp {
         if let Some(c) = &self.credentials {
             b = b.credentials(c.clone());
         }
-        b.build()
-            .send(message)
-            .map_err(|e| format!("sending through SMTP server {at} failed: {e}"))?;
+        let transport = b.build();
+        // Tried again only when the message certainly wasn't accepted: the connection failed
+        // before the session started, or the server answered 4xx (try later). A connection
+        // dropped mid-session isn't, as the server may already have accepted the message.
+        let what = format!("SMTP server {at}");
+        retry(self.retries, &what, || {
+            transport.send(message).map(|_| ()).map_err(|e| {
+                let m = format!("sending through SMTP server {at} failed: {e}");
+                if e.is_transient() || e.to_string().starts_with("Connection error") {
+                    Retry::Temporary(m, None)
+                } else {
+                    Retry::Fail(m)
+                }
+            })
+        })?;
         Ok(())
     }
 }

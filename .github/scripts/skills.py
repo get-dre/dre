@@ -2,8 +2,8 @@
 """Build and check the agent skills in skills/.
 
     skills.py sync                                  inline the shared snippets, copy the practices
-    skills.py generate --plugins-dir DIR            write the plugin references from `describe`
-    skills.py check --dre BIN --plugins-dir DIR     every CI check (changes nothing)
+    skills.py generate                              write the plugin references from describe.json
+    skills.py check                                 every CI check (changes nothing)
     skills.py release-check <tag>                   a `skills-v<version>` tag matches the skills
     skills.py release-notes <tag>                   the release's notes
     skills.py serves-latest <tag>                   exit 0 if the release moves `skills-latest`
@@ -30,7 +30,6 @@ import os
 import pathlib
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -53,33 +52,64 @@ COPIES = {
     "dre-upgrade": [],
 }
 
-# The sections of docs/plugins.md each plugin's reference includes, as (## heading, ### heading);
-# None takes the text between the ## heading and its first ###. Every field and option a plugin
-# declares must be named (in backticks) in its sections.
-_DEST = [("Destinations", None), ("Destinations", "Several destinations")]
+# What each plugin's reference includes from the docs: its own page (`("page", name)`: the
+# prose of docs/plugin-<name>.md after the generated block), and sections of docs/plugins.md the
+# plugins share, as (## heading, ### heading), None taking the text between the ## heading and its
+# first ###. Every field and option a plugin declares must be named (in backticks) in its sections.
+_DEST = [("Destinations", None), ("Destinations", "Tries again"), ("Destinations", "Several destinations")]
+_EXISTS = [("Destinations", "A file already at the path")]
+_FILES = _EXISTS + [("Destinations", "Uploads under a temporary name")]
 _FORMAT = [("Formats", None)]
+_WAREHOUSE = [("Sources", "Types from warehouses")]
 DOC_SECTIONS = {
-    "source/duckdb": [("Sources", "`duckdb`")],
-    "source/postgres": [("Sources", "`postgres`")],
-    "source/databricks": [("Sources", "`databricks`"), ("Sources", "Types from warehouses")],
-    "source/bigquery": [("Sources", "`bigquery`"), ("Sources", "Types from warehouses")],
-    "source/snowflake": [("Sources", "`snowflake`"), ("Sources", "Types from warehouses")],
-    "format/csv": _FORMAT,
-    "format/delimited": _FORMAT,
-    "format/fixed_width": _FORMAT + [("Formats", "Fixed-width columns")],
-    "format/parquet": _FORMAT,
-    "format/xlsx": _FORMAT + [("Formats", "xlsx column formats"), ("Formats", "xlsx formulas and totals rows")],
-    "destination/s3": _DEST + [("Destinations", "`s3`")],
-    "destination/gcs": _DEST + [("Destinations", "`gcs`")],
-    "destination/azure_blob": _DEST + [("Destinations", "`azure_blob`")],
-    "destination/sftp": _DEST + [("Destinations", "`sftp`")],
-    "destination/ftp": _DEST + [("Destinations", "`ftp`")],
-    "destination/databricks": _DEST + [("Destinations", "`databricks`")],
-    "destination/email": _DEST + [("Destinations", "`email`")],
-    "destination/slack": _DEST + [("Destinations", "`slack`")],
-    "destination/teams": _DEST + [("Destinations", "`teams`")],
-    "destination/google_chat": _DEST + [("Destinations", "`google_chat`")],
+    "source/duckdb": [("page", "duckdb")],
+    "source/postgres": [("page", "postgres")],
+    "source/databricks": [("page", "databricks")] + _WAREHOUSE,
+    "source/bigquery": [("page", "bigquery")] + _WAREHOUSE,
+    "source/snowflake": [("page", "snowflake")] + _WAREHOUSE,
+    "format/csv": [("page", "csv")] + _FORMAT,
+    "format/delimited": [("page", "csv")] + _FORMAT,
+    "format/fixed_width": [("page", "fixed_width")] + _FORMAT,
+    "format/parquet": [("page", "parquet")] + _FORMAT,
+    "format/xlsx": [("page", "xlsx")] + _FORMAT,
+    "destination/s3": [("page", "s3")] + _DEST + _EXISTS,
+    "destination/gcs": [("page", "gcs")] + _DEST + _EXISTS,
+    "destination/azure_blob": [("page", "azure_blob")] + _DEST + _EXISTS,
+    "destination/sftp": [("page", "sftp")] + _DEST + _FILES,
+    "destination/ftp": [("page", "ftp")] + _DEST + _FILES,
+    "destination/databricks": [("page", "databricks")] + _DEST + _EXISTS,
+    "destination/email": [("page", "email")] + _DEST,
+    "destination/slack": [("page", "slack")] + _DEST,
+    "destination/teams": [("page", "teams")] + _DEST,
+    "destination/google_chat": [("page", "google_chat")] + _DEST,
 }
+GENERATED_END = "<!-- END generated -->"
+
+
+class Docs:
+    """docs/plugins.md and the plugin pages, read once."""
+
+    def __init__(self, root):
+        self.root = root
+        self.overview = strip_nav((root / PLUGIN_DOCS).read_text())
+        self.pages = {}
+
+    def page(self, name):
+        if name not in self.pages:
+            text = strip_nav((self.root / "docs" / f"plugin-{name}.md").read_text())
+            title = re.search(r"^# (.+)$", text, re.M).group(1)
+            i = text.find(GENERATED_END)
+            self.pages[name] = (title, text[i + len(GENERATED_END):] if i >= 0 else text)
+        return self.pages[name]
+
+    def section(self, entry):
+        """(title, body, the page links in it are relative to) for one DOC_SECTIONS entry."""
+        if entry[0] == "page":
+            title, body = self.page(entry[1])
+            return title, body, f"plugin-{entry[1]}.md"
+        h2, h3 = entry
+        return (h3.strip("`") if h3 else h2), doc_section(self.overview, h2, h3), "plugins.md"
+
 
 # Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).
 PRACTICE_PREFIXES = ("SEC", "SET", "REP", "RUN")
@@ -300,11 +330,45 @@ def command_problems(cli, rel, md):
             for tokens in dre_mentions(md) for err in [cli.check(tokens)] if err]
 
 
-def built_cli(dre):
-    def help_for(path):
-        return subprocess.run([dre, *path, "--help"], capture_output=True, text=True, check=True).stdout
+class ReferenceCli(Cli):
+    """`dre`'s commands and flags, read from docs/cli-reference.md (generated from the CLI
+    definitions and checked by the `cli_reference` test), so no `dre` needs building."""
 
-    return Cli(help_for)
+    def __init__(self, md):
+        self.nodes = {}
+        commands, current, global_flags = {}, None, (set(), set())
+        for line in md.splitlines():
+            m = re.match(r"^## `dre(?: ([a-z ][a-z0-9 -]*))?`$", line)
+            if m:
+                current = tuple((m.group(1) or "").split())
+                commands[current] = (set(), set())
+                continue
+            if line.startswith("## Global options"):
+                current = "global"
+                continue
+            if line.startswith("#"):
+                current = None
+                continue
+            row = re.match(r"^\| `([^`]+)` \|", line)
+            if current is None or not row:
+                continue
+            flags, valued = global_flags if current == "global" else commands[current]
+            for part in row.group(1).split(", "):
+                name = part.split(" ")[0]
+                if name.startswith("-"):
+                    flags.add(name)
+                    if "<" in part:
+                        valued.add(name)
+        for path, (flags, valued) in commands.items():
+            subs = {c[len(path)] for c in commands if len(c) == len(path) + 1 and c[:len(path)] == path}
+            self.nodes[path] = (subs, flags | global_flags[0] | {"-h", "--help"}, valued | global_flags[1])
+        root = self.nodes.setdefault((), (set(), set(), set()))
+        root[0].update(c[0] for c in commands if len(c) == 1)
+        root[1].update(global_flags[0] | {"-h", "--help", "-V", "--version"})
+        root[2].update(global_flags[1])
+
+    def node(self, path):
+        return self.nodes.get(tuple(path), (set(), {"-h", "--help"}, set()))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -364,7 +428,7 @@ def undocumented(plugin, fields, docs_text):
         if not (f.get("description") or "").strip():
             problems.append(f"`{plugin}`: `{f['name']}` has no description in its `describe` reply")
         elif f"`{f['name']}`" not in docs_text:
-            problems.append(f"`{plugin}`: `{f['name']}` isn't in its docs ({PLUGIN_DOCS})")
+            problems.append(f"`{plugin}`: `{f['name']}` isn't in its docs ({PLUGIN_DOCS} or its plugin page)")
     return problems
 
 
@@ -378,59 +442,17 @@ def plugins():
     return [(package, p) for package, about in PACKAGES.items() for p in about["provides"]]
 
 
-def _frame(msg):
-    body = b"J" + json.dumps(msg).encode()
-    return struct.pack(">I", len(body)) + body
-
-
-def _read_frame(stream):
-    head = stream.read(4)
-    if len(head) < 4:
-        raise RuntimeError("the plugin closed its output")
-    body = stream.read(struct.unpack(">I", head)[0])
-    if body[:1] != b"J":
-        raise RuntimeError("the plugin sent a data frame to `describe`")
-    return json.loads(body[1:])
-
-
-def describe(executable, plugin):
-    """A plugin's `describe` reply, over the plugin protocol (docs/protocol.md)."""
-    log = tempfile.TemporaryFile()
-    p = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
-    try:
-        p.stdin.write(_frame({"type": "hello", "min_version": 0, "max_version": 0, "core_version": "skills",
-                              "plugin": plugin}))
-        p.stdin.flush()
-        hello = _read_frame(p.stdout)
-        if hello.get("type") != "hello":
-            raise RuntimeError(f"{executable} answered hello with {hello}")
-        p.stdin.write(_frame({"type": "describe"}))
-        p.stdin.flush()
-        reply = _read_frame(p.stdout)
-        if reply.get("type") != "describe":
-            raise RuntimeError(f"{executable} answered describe with {reply}")
-        return reply
-    except (OSError, RuntimeError) as e:
-        log.seek(0)
-        raise RuntimeError(f"{executable} ({plugin}): {e}; its log: {log.read().decode(errors='replace')[-500:]}")
-    finally:
-        try:
-            p.stdin.close()
-        except OSError:
-            pass
-        p.wait(timeout=30)
-        log.close()
-
-
-def describe_all(plugins_dir):
+def describe_files(root=ROOT):
+    """Every first-party plugin's `describe` reply, from its package's committed describe.json
+    (written from the built plugins and checked by the `describe_json` test)."""
     out = {}
-    for package, plugin in plugins():
-        exe = pathlib.Path(plugins_dir) / f"dre-plugin-{package}"
-        if not exe.exists() and pathlib.Path(str(exe) + ".exe").exists():
-            exe = pathlib.Path(str(exe) + ".exe")
-        if not exe.exists():
-            raise SystemExit(f"no {exe}: build the plugins first (cargo build --workspace --bins, and each package in go/)")
-        out[plugin] = describe(exe, plugin)
+    for package, about in PACKAGES.items():
+        path = root / about.get("go", f"plugins/{package}") / "describe.json"
+        replies = json.loads(path.read_text())
+        for plugin in about["provides"]:
+            if plugin not in replies:
+                raise SystemExit(f"{path} has no `{plugin}`: run the describe_json test with DRE_UPDATE_DESCRIBE=1")
+            out[plugin] = replies[plugin]
     return out
 
 
@@ -451,9 +473,9 @@ def _text(s):
     return (s or "").replace("|", "\\|").replace("\n", " ")
 
 
-def _relink(md):
+def _relink(md, page="plugins.md"):
     """Links relative to docs/ made absolute, so they work from inside an installed skill."""
-    md = re.sub(r"\]\(#([^)]+)\)", r"](%s#\1)" % (DOCS_URL + "plugins.md"), md)
+    md = re.sub(r"\]\(#([^)]+)\)", r"](%s#\1)" % (DOCS_URL + page), md)
     return re.sub(r"\]\((?!https?:|#)([^)]+)\)", lambda m: f"]({DOCS_URL}{m.group(1)})", md)
 
 
@@ -466,7 +488,7 @@ def _demote(md, to):
     return re.sub(r"^(#{1,6}) ", lambda m: "#" * min(6, len(m.group(1)) + shift) + " ", md, flags=re.M)
 
 
-def reference(plugin, package, reply, docs_md, notes):
+def reference(plugin, package, reply, docs, notes):
     kind, name = plugin.split("/")
     version = package_version(package)
     conn = reply.get("connection_fields") or []
@@ -520,10 +542,10 @@ def reference(plugin, package, reply, docs_md, notes):
                        f"{_cell(f.get('default'))} | {allowed} | {_text(f.get('description'))} |")
         out.append("")
     out += ["## From the plugin docs", ""]
-    for h2, h3 in DOC_SECTIONS[plugin]:
-        body = doc_section(docs_md, h2, h3).strip("\n")
-        title = h3.strip("`") if h3 else h2
-        out += [f"### {title}", "", _relink(_demote(body, 4)) if body else "", ""]
+    for entry in DOC_SECTIONS[plugin]:
+        title, body, page = docs.section(entry)
+        body = body.strip("\n")
+        out += [f"### {title}", "", _relink(_demote(body, 4), page) if body else "", ""]
     out += ["## Guide notes", "", notes.strip(), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -567,12 +589,12 @@ def sync(root):
 def generate(root, replies):
     """Write every plugin reference into each skill that takes them, under `root`."""
     skills_root = root / "skills"
-    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
+    docs = Docs(root)
     files = {}
     for package, plugin in plugins():
         notes_path = skills_root / "shared" / "guide-notes" / reference_name(plugin)
         notes = notes_path.read_text() if notes_path.exists() else "None yet."
-        files[reference_name(plugin)] = reference(plugin, package, replies[plugin], docs_md, notes)
+        files[reference_name(plugin)] = reference(plugin, package, replies[plugin], docs, notes)
     for skill in skill_dirs(skills_root):
         folder = skills_root / skill / "references" / "plugins"
         if folder.exists():
@@ -601,7 +623,7 @@ def skills_version(root):
     return json.loads((root / "skills/.claude-plugin/plugin.json").read_text())["version"]
 
 
-def check(root, dre, replies):
+def check(root, replies):
     problems = []
     skills_root = root / "skills"
     version = skills_version(root)
@@ -643,7 +665,7 @@ def check(root, dre, replies):
     practices = defined_practices((root / PRACTICES).read_text())
     # Core's own: the `local` destination and the `message` format.
     known = {p.split("/")[1] for _, p in plugins()} | {"local", "message"}
-    cli = built_cli(dre)
+    cli = ReferenceCli((root / "docs/cli-reference.md").read_text())
     for path in sorted(skills_root.rglob("*.md")):
         rel = path.relative_to(root).as_posix()
         md = path.read_text()
@@ -658,9 +680,9 @@ def check(root, dre, replies):
         problems += command_problems(cli, path.relative_to(root).as_posix(), path.read_text())
 
     # Every declared field and option documented.
-    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
+    docs = Docs(root)
     for _, plugin in plugins():
-        text = "".join(doc_section(docs_md, h2, h3) for h2, h3 in DOC_SECTIONS[plugin])
+        text = "".join(docs.section(e)[1] for e in DOC_SECTIONS[plugin])
         fields = (replies[plugin].get("connection_fields") or []) + (replies[plugin].get("option_fields") or [])
         problems += undocumented(plugin, fields, text)
         if not (skills_root / "shared" / "guide-notes" / reference_name(plugin)).exists():
@@ -671,7 +693,7 @@ def check(root, dre, replies):
         fresh = pathlib.Path(tmp)
         shutil.copytree(skills_root, fresh / "skills")
         (fresh / "docs").mkdir()
-        for doc in (PLUGIN_DOCS, PRACTICES):
+        for doc in (PLUGIN_DOCS, PRACTICES, *(f"docs/plugin-{p}.md" for p in {e[1] for es in DOC_SECTIONS.values() for e in es if e[0] == "page"})):
             shutil.copy(root / doc, fresh / doc)
         sync(fresh)
         generate(fresh, replies)
@@ -727,11 +749,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("sync")
-    g = sub.add_parser("generate")
-    g.add_argument("--plugins-dir", required=True)
-    c = sub.add_parser("check")
-    c.add_argument("--dre", required=True)
-    c.add_argument("--plugins-dir", required=True)
+    sub.add_parser("generate")
+    sub.add_parser("check")
     r = sub.add_parser("release-check")
     r.add_argument("tag")
     n = sub.add_parser("release-notes")
@@ -748,9 +767,9 @@ def main():
     elif a.cmd == "sync":
         sync(ROOT)
     elif a.cmd == "generate":
-        generate(ROOT, describe_all(a.plugins_dir))
+        generate(ROOT, describe_files())
     else:
-        problems = (check(ROOT, a.dre, describe_all(a.plugins_dir)) if a.cmd == "check"
+        problems = (check(ROOT, describe_files()) if a.cmd == "check"
                     else release_check(ROOT, a.tag))
         for p in problems:
             print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p)

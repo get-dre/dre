@@ -237,6 +237,23 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
         })(),
     );
 
+    if id.kind != crate::Kind::Format {
+        check(
+            "validate_connection is answered without connecting, and an unknown key only warns",
+            (|| {
+                let mut p = start(path).map_err(|e| e.to_string())?;
+                let key = "dre_conformance_unknown_key";
+                let (_, warnings) = p
+                    .validate_connection(json!({key: true}).as_object().unwrap().clone(), Vec::new())
+                    .map_err(|e| e.to_string())?;
+                if !warnings.iter().any(|w| w.contains(key)) {
+                    return Err(format!("an unknown key gave no warning: {warnings:?}"));
+                }
+                p.close().map_err(|e| e.to_string())
+            })(),
+        );
+    }
+
     check(
         "an unknown request gets an error reply and the plugin keeps serving",
         (|| {

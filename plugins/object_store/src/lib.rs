@@ -24,17 +24,21 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use dre_protocol::delivery::{Rules, timeout_fields};
-use dre_protocol::msg::ConnectionField;
-use dre_protocol::plugin::{About, Destination, Plugin, Result, conn_bool, conn_str, serve_package};
+use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver};
+use dre_protocol::msg::{ConnectionField, FieldKind};
+use dre_protocol::options::OptionField;
+use dre_protocol::plugin::{
+    About, Delivery, Destination, Plugin, PluginError, Result, conn_bool, conn_str, serve_package,
+};
 use dre_protocol::util::percent_encode;
-use object_store::ClientOptions;
-use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::azure::{AzureConfigKey, MicrosoftAzureBuilder};
 use object_store::buffered::BufWriter;
+use object_store::client::{HttpError, HttpErrorKind};
 use object_store::gcp::{GoogleCloudStorageBuilder, GoogleConfigKey};
 use object_store::path::Path as ObjectPath;
+use object_store::{ClientOptions, RetryConfig};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions};
 use serde_json::{Map, Value};
 use tokio::io::AsyncWriteExt;
 
@@ -108,6 +112,12 @@ fn build(
     let client = ClientOptions::new()
         .with_connect_timeout(rules.connect_timeout)
         .with_timeout(rules.timeout);
+    // object_store tries a failed request again itself (a part of a large upload, say), up to
+    // `retries` times; the shared delivery rules then try the whole upload again, and log it.
+    let no_retry = RetryConfig {
+        max_retries: rules.retries as usize,
+        ..Default::default()
+    };
     Ok(match kind {
         Kind::S3 => {
             let explicit = conn_str(c, "access_key_id").is_some();
@@ -116,7 +126,10 @@ fn build(
             } else {
                 AmazonS3Builder::from_env()
             };
-            b = b.with_client_options(client).with_bucket_name(bucket);
+            b = b
+                .with_client_options(client)
+                .with_retry(no_retry)
+                .with_bucket_name(bucket);
             if let Some(r) = conn_str(c, "region") {
                 b = b.with_region(r);
             }
@@ -155,6 +168,7 @@ fn build(
         Kind::Gcs => {
             let mut b = GoogleCloudStorageBuilder::from_env()
                 .with_client_options(client)
+                .with_retry(no_retry)
                 .with_bucket_name(bucket);
             if let Some(p) = conn_str(c, "service_account_key_path") {
                 b = b.with_service_account_path(p);
@@ -169,6 +183,7 @@ fn build(
         Kind::Azure => {
             let mut b = MicrosoftAzureBuilder::new()
                 .with_client_options(client.clone())
+                .with_retry(no_retry)
                 .with_container_name(bucket);
             let mut account = conn_str(c, "account_name").map(str::to_string);
             let mut endpoint = conn_str(c, "endpoint").map(str::to_string);
@@ -307,52 +322,207 @@ impl Destination for ObjectStoreDestination {
                 )
                 .secret(),
                 ConnectionField::new("secret_access_key", "secret access key").secret(),
+                ConnectionField::new("session_token", "temporary session token")
+                    .secret()
+                    .manual(),
+                ConnectionField::new("profile", "a profile from the AWS config files").manual(),
+                ConnectionField::new("endpoint", "an S3-compatible store's URL").manual(),
+                ConnectionField::new("allow_http", "allow a plain-HTTP endpoint")
+                    .kind(FieldKind::Boolean)
+                    .manual(),
             ],
             Kind::Gcs => vec![
                 ConnectionField::new("bucket", "default bucket (or use gs://bucket/... paths)"),
                 ConnectionField::new(
                     "service_account_key_path",
                     "service-account key file (empty: application default credentials)",
-                ),
+                )
+                .kind(FieldKind::Path),
+                ConnectionField::new("service_account_key", "the service-account key's JSON text")
+                    .secret()
+                    .manual(),
+                ConnectionField::new("endpoint", "an emulator's URL").manual(),
             ],
             Kind::Azure => vec![
-                ConnectionField::new("account_name", "storage account name").required(),
+                ConnectionField::new("account_name", "storage account name"),
                 ConnectionField::new("container", "default container (or use az://container/... paths)"),
                 ConnectionField::new(
                     "connection_string",
                     "connection string (or set sas_token / access_key)",
                 )
                 .secret(),
+                ConnectionField::new("sas_token", "a SAS token").secret().manual(),
+                ConnectionField::new("access_key", "the account's access key")
+                    .secret()
+                    .manual(),
+                ConnectionField::new(
+                    "use_managed_identity",
+                    "sign in as the machine's managed identity",
+                )
+                .kind(FieldKind::Boolean)
+                .manual(),
+                ConnectionField::new("use_azure_cli", "sign in with the `az login` session")
+                    .kind(FieldKind::Boolean)
+                    .manual(),
+                ConnectionField::new("endpoint", "an emulator's URL").manual(),
             ],
         };
-        fields.extend(timeout_fields());
+        fields.extend(delivery::connection_fields());
         fields
     }
 
-    fn deliver(&mut self, local: &Path, remote: Option<&str>, c: &Map<String, Value>) -> Result<String> {
-        let (bucket, key) = locate(self.kind, remote, c)?;
-        if self.kind == Kind::Gcs {
-            return gcs_upload(&bucket, &key, local, c);
+    /// `if_exists` (the shared delivery rules). An object only appears once its upload is
+    /// complete, so there's no temporary name.
+    fn options(&self) -> Vec<OptionField> {
+        delivery::option_fields()
+            .into_iter()
+            .filter(|f| f.name == "if_exists")
+            .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        if self.kind == Kind::Azure && !c.contains_key("account_name") && !c.contains_key("connection_string")
+        {
+            return vec!["`account_name` is required (or a `connection_string`)".into()];
         }
+        Vec::new()
+    }
+
+    fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
+        let [f] = d.files.as_slice() else {
+            return Err("this destination takes one file per delivery".into());
+        };
+        let (bucket, key) = locate(self.kind, f.remote.as_deref(), &d.connection)?;
+        let (rules, _) = Rules::from_settings(Rules::default(), &d.connection, &d.options, &[])?;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        let store = build(self.kind, &bucket, c, &rt)?;
-        let location = format!("{}://{bucket}/{key}", self.kind.scheme());
-        rt.block_on(async {
+        let store = build(self.kind, &bucket, &d.connection, &rt)?;
+        let mut s = ObjStore {
+            kind: self.kind,
+            bucket: bucket.clone(),
+            connection: &d.connection,
+            rt: &rt,
+            store,
+        };
+        let delivered = deliver(&mut s, &f.local, &key, &rules).map_err(PluginError::from)?;
+        Ok(format!("{}://{bucket}/{}", self.kind.scheme(), delivered.path))
+    }
+}
+
+/// A failed request, with `what` it was: a connection failing, a 429 or a 5xx may work if tried
+/// again; refused credentials or a missing bucket won't.
+fn store_error(what: &str, e: &(dyn std::error::Error + 'static)) -> StoreError {
+    let m = format!("{what} failed: {e}");
+    let mut source = Some(e);
+    while let Some(err) = source {
+        if let Some(h) = err.downcast_ref::<HttpError>()
+            && matches!(
+                h.kind(),
+                HttpErrorKind::Connect
+                    | HttpErrorKind::Request
+                    | HttpErrorKind::Timeout
+                    | HttpErrorKind::Interrupted
+            )
+        {
+            return StoreError::temporary(m);
+        }
+        if let Some(io) = err.downcast_ref::<std::io::Error>()
+            && delivery::is_connection_error(io)
+        {
+            return StoreError::temporary(m);
+        }
+        source = err.source();
+    }
+    // The status, as object_store words it: `status code: 503 Service Unavailable`.
+    let status = m
+        .split("status code: ")
+        .nth(1)
+        .and_then(|t| t.get(..3))
+        .and_then(|t| t.parse::<u16>().ok());
+    match status {
+        Some(code) if temporary_status(code) => StoreError::temporary(m),
+        _ => StoreError::Failed(m),
+    }
+}
+
+/// 429 and 5xx: the server says try later, or failed before storing anything.
+fn temporary_status(code: u16) -> bool {
+    code == 429 || (500..600).contains(&code)
+}
+
+/// One bucket or container, as the shared delivery rules' store.
+struct ObjStore<'a> {
+    kind: Kind,
+    bucket: String,
+    connection: &'a Map<String, Value>,
+    rt: &'a tokio::runtime::Runtime,
+    store: Arc<dyn ObjectStore>,
+}
+
+impl Store for ObjStore<'_> {
+    fn caps(&self) -> Caps {
+        Caps {
+            create_exclusive: true,
+            rename_no_replace: false,
+            visible_when_complete: true,
+        }
+    }
+
+    fn write(&mut self, local: &Path, key: &str, exclusive: bool) -> std::result::Result<(), StoreError> {
+        let location = format!("{}://{}/{key}", self.kind.scheme(), self.bucket);
+        if self.kind == Kind::Gcs {
+            return gcs_upload(&self.bucket, key, local, self.connection, exclusive).map(|_| ());
+        }
+        let path = ObjectPath::from(key);
+        self.rt.block_on(async {
+            if exclusive {
+                // A conditional upload: refused when an object has the name.
+                let bytes = tokio::fs::read(local)
+                    .await
+                    .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
+                let opts = PutOptions {
+                    mode: PutMode::Create,
+                    ..Default::default()
+                };
+                return match self.store.put_opts(&path, bytes.into(), opts).await {
+                    Ok(_) => Ok(()),
+                    Err(object_store::Error::AlreadyExists { .. })
+                    | Err(object_store::Error::Precondition { .. }) => Err(StoreError::Exists),
+                    Err(e) => Err(store_error(&format!("upload to {location}"), &e)),
+                };
+            }
             let mut file = tokio::fs::File::open(local)
                 .await
-                .map_err(|e| format!("can't read {}: {e}", local.display()))?;
-            let mut w = BufWriter::with_capacity(store, ObjectPath::from(key.as_str()), 8 * 1024 * 1024);
+                .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
+            let mut w = BufWriter::with_capacity(self.store.clone(), path, 8 * 1024 * 1024);
             if let Err(e) = tokio::io::copy(&mut file, &mut w).await {
                 let _ = w.abort().await;
-                return Err(format!("upload to {location} failed: {e}"));
+                return Err(store_error(&format!("upload to {location}"), &e));
             }
             w.shutdown()
                 .await
-                .map_err(|e| format!("upload to {location} failed: {e}"))
-        })?;
-        Ok(location)
+                .map_err(|e| store_error(&format!("upload to {location}"), &e))
+        })
+    }
+
+    fn rename(&mut self, _from: &str, to: &str, _replace: bool) -> std::result::Result<(), StoreError> {
+        Err(StoreError::Failed(format!(
+            "can't rename to {to}: object stores need no temporary name"
+        )))
+    }
+
+    fn exists(&mut self, key: &str) -> std::result::Result<bool, StoreError> {
+        match self.rt.block_on(self.store.head(&ObjectPath::from(key))) {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(e) => Err(store_error(&format!("looking for {key}"), &e)),
+        }
+    }
+
+    fn delete(&mut self, key: &str) -> std::result::Result<(), StoreError> {
+        let _ = self.rt.block_on(self.store.delete(&ObjectPath::from(key)));
+        Ok(())
     }
 }
 
@@ -360,8 +530,15 @@ const GCS_CHUNK: usize = 8 * 1024 * 1024;
 
 /// Upload to GCS with the JSON API's resumable protocol, `GCS_CHUNK` bytes at a time.
 /// Credentials (service-account key, application default credentials) come from object_store.
-fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> Result<String> {
+fn gcs_upload(
+    bucket: &str,
+    key: &str,
+    local: &Path,
+    c: &Map<String, Value>,
+    exclusive: bool,
+) -> std::result::Result<String, StoreError> {
     let location = format!("gs://{bucket}/{key}");
+    let failed = StoreError::Failed;
     let base = conn_str(c, "endpoint")
         .map(str::to_string)
         .or_else(|| {
@@ -377,20 +554,46 @@ fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> 
     } else if let Some(k) = conn_str(c, "service_account_key") {
         b = b.with_service_account_key(k);
     }
-    let store = b.build()?;
+    let store = b.build().map_err(|e| failed(e.to_string()))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .build()?;
+        .build()
+        .map_err(|e| failed(e.to_string()))?;
     let token = rt
         .block_on(async { store.credentials().get_credential().await })
-        .map_err(|e| format!("GCS credentials: {e}"))?;
+        .map_err(|e| store_error("GCS credentials", &e))?;
     let auth = (!token.bearer.is_empty()).then(|| format!("Bearer {}", token.bearer));
     let size = std::fs::metadata(local)
-        .map_err(|e| format!("can't read {}: {e}", local.display()))?
+        .map_err(|e| failed(format!("can't read {}: {e}", local.display())))?
         .len();
-    let fail = |what: &str| format!("upload to {location} failed: {what}");
+    let what = format!("upload to {location}");
+    // A request that got no reply: a connection failing may work if tried again.
+    let unsent = |e: ureq::Error| match &e {
+        ureq::Error::Io(_)
+        | ureq::Error::Timeout(_)
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::HostNotFound => StoreError::temporary(format!("{what} failed: {e}")),
+        _ => failed(format!("{what} failed: {e}")),
+    };
+    // A reply that isn't success: 429 and 5xx may work if tried again (with `Retry-After`).
+    let refused = |resp: &mut ureq::http::Response<ureq::Body>| {
+        let status = resp.status().as_u16();
+        let retry_after =
+            delivery::retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+        let body = resp.body_mut().read_to_string().unwrap_or_default();
+        let message = format!(
+            "{what} failed: HTTP {status}: {}",
+            body.chars().take(300).collect::<String>()
+        );
+        if temporary_status(status) {
+            StoreError::Temporary { message, retry_after }
+        } else {
+            StoreError::Failed(message)
+        }
+    };
     // 308 means "resume incomplete" in this protocol, not a redirect.
-    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+    let (rules, _) =
+        Rules::from_settings(Rules::default(), c, &Map::new(), &[]).map_err(|e| failed(e.to_string()))?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
@@ -399,10 +602,12 @@ fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> 
         .build()
         .into();
 
+    // `ifGenerationMatch=0`: only if no object has the name (`if_exists: error | number`).
     let start = format!(
-        "{base}/upload/storage/v1/b/{}/o?uploadType=resumable&name={}",
+        "{base}/upload/storage/v1/b/{}/o?uploadType=resumable&name={}{}",
         percent_encode(bucket, false),
-        percent_encode(key, false)
+        percent_encode(key, false),
+        if exclusive { "&ifGenerationMatch=0" } else { "" }
     );
     let mut req = agent
         .post(&start)
@@ -411,31 +616,33 @@ fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> 
     if let Some(a) = &auth {
         req = req.header("Authorization", a);
     }
-    let mut resp = req.send("{}").map_err(|e| fail(&e.to_string()))?;
+    let mut resp = req.send("{}").map_err(unsent)?;
+    if resp.status().as_u16() == 412 {
+        return Err(StoreError::Exists);
+    }
     if !resp.status().is_success() {
-        let body = resp.body_mut().read_to_string().unwrap_or_default();
-        return Err(fail(&format!(
-            "HTTP {}: {}",
-            resp.status(),
-            body.chars().take(300).collect::<String>()
-        ))
-        .into());
+        return Err(refused(&mut resp));
     }
     let session = resp
         .headers()
         .get("Location")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| fail("the server didn't start an upload session"))?
+        .ok_or_else(|| {
+            failed(format!(
+                "{what} failed: the server didn't start an upload session"
+            ))
+        })?
         .to_string();
 
     use std::io::Read;
-    let mut file = std::fs::File::open(local)?;
+    let unreadable = |e: std::io::Error| failed(format!("can't read {}: {e}", local.display()));
+    let mut file = std::fs::File::open(local).map_err(unreadable)?;
     let mut buf = vec![0u8; GCS_CHUNK];
     let mut offset = 0u64;
     loop {
         let mut n = 0;
         while n < buf.len() {
-            let r = file.read(&mut buf[n..])?;
+            let r = file.read(&mut buf[n..]).map_err(unreadable)?;
             if r == 0 {
                 break;
             }
@@ -451,19 +658,12 @@ fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> 
         if let Some(a) = &auth {
             put = put.header("Authorization", a);
         }
-        let mut resp = put.send(&buf[..n]).map_err(|e| fail(&e.to_string()))?;
-        let status = resp.status().as_u16();
-        match status {
+        let mut resp = put.send(&buf[..n]).map_err(unsent)?;
+        match resp.status().as_u16() {
             200 | 201 => break,
+            412 => return Err(StoreError::Exists),
             308 if !last => {}
-            _ => {
-                let body = resp.body_mut().read_to_string().unwrap_or_default();
-                return Err(fail(&format!(
-                    "HTTP {status}: {}",
-                    body.chars().take(300).collect::<String>()
-                ))
-                .into());
-            }
+            _ => return Err(refused(&mut resp)),
         }
         offset += n as u64;
     }

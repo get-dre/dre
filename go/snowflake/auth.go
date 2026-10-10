@@ -58,9 +58,12 @@ func config(conn map[string]any) (*sf.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	retries, err := plugin.Int(conn, "connect_retries", 1)
-	if err != nil {
-		return nil, err
+	// `retries` (the shared key); dbt's `connect_retries` also works.
+	retries := int64(rules.Retries)
+	if _, ok := conn["connect_retries"]; ok {
+		if retries, err = plugin.Int(conn, "connect_retries", 1); err != nil {
+			return nil, err
+		}
 	}
 	cfg.LoginTimeout = rules.ConnectTimeout * time.Duration(retries+1)
 	cfg.MaxRetryCount = int(retries)

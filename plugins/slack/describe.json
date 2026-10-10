@@ -1,0 +1,78 @@
+{
+  "destination/slack": {
+    "capabilities": [
+      "message",
+      "multi_file",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "token",
+        "description": "bot token (xoxb-...)",
+        "required": true,
+        "secret": true
+      },
+      {
+        "name": "channel",
+        "description": "default channel ID (C0123) or #name",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "api_url",
+        "description": "Slack's API URL, for a proxy",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "channel",
+        "type": "string",
+        "description": "a channel ID (C0123) or #name",
+        "required": false
+      },
+      {
+        "name": "user",
+        "type": "string",
+        "description": "a user ID (U0123), for a direct message",
+        "required": false
+      },
+      {
+        "name": "message",
+        "type": "string",
+        "description": "the text posted with the files",
+        "required": false
+      }
+    ],
+    "message_limit": 4000
+  }
+}

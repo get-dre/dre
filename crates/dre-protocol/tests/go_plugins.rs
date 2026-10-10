@@ -70,13 +70,16 @@ fn the_go_databricks_source_explains_a_missing_field() {
         .open(conn.as_object().unwrap().clone(), false)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("needs a `http_path` field"), "{err}");
+    assert!(err.contains("`http_path` is required"), "{err}");
     let conn = json!({"host": "h", "http_path": "/p", "auth_type": "saml"});
     let err = p
         .open(conn.as_object().unwrap().clone(), false)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("unknown `auth_type` `saml`"), "{err}");
+    assert!(
+        err.contains("`auth_type` must be one of `auto`, `pat`, `token`, `oauth`"),
+        "{err}"
+    );
 }
 
 /// A real warehouse: one session across statements, typed Arrow results, `check`, `load`.
@@ -165,7 +168,7 @@ fn the_go_warehouse_packages_conform_to_the_protocol() {
             "dre-plugin-snowflake",
             "snowflake",
             json!({"user": "u"}),
-            "needs a `account` field",
+            "`account` is required",
         ),
     ] {
         let Some(bin) = go_plugin(package) else {

@@ -1,0 +1,204 @@
+{
+  "source/bigquery": {
+    "capabilities": [
+      "check",
+      "load",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "method",
+        "description": "how to sign in: oauth (gcloud application-default credentials), service-account (a key file), service-account-json, oauth-secrets or external-oauth-wif",
+        "required": false,
+        "secret": false,
+        "default": "oauth"
+      },
+      {
+        "name": "project",
+        "description": "the Google Cloud project to read from (dbt's `database` also works); required, checked by the plugin",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "dataset",
+        "description": "default dataset for unqualified table names (dbt's `schema` also works)",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "location",
+        "description": "where jobs run, e.g. US, EU or europe-west2",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "keyfile",
+        "description": "path to a service account key file, for method service-account",
+        "required": false,
+        "secret": false,
+        "kind": "path"
+      },
+      {
+        "name": "keyfile_json",
+        "description": "a service account key's JSON, inline, for method service-account-json",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "token",
+        "description": "an OAuth access token, for method oauth-secrets",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "refresh_token",
+        "description": "an OAuth refresh token, for method oauth-secrets with client_id and client_secret",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "client_id",
+        "description": "OAuth client ID, for method oauth-secrets with a refresh token",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "client_secret",
+        "description": "OAuth client secret, for method oauth-secrets with a refresh token",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "token_uri",
+        "description": "where a refresh token is exchanged (default https://oauth2.googleapis.com/token)",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "workload_pool_provider_path",
+        "description": "the workload identity pool provider, for method external-oauth-wif",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "token_endpoint",
+        "description": "where the external identity's token comes from, for method external-oauth-wif: type, request_url, request_data",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "service_account_impersonation_url",
+        "description": "the service account to impersonate after workload identity federation",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "impersonate_service_account",
+        "description": "a service account email to run as, using the signed-in identity",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "scopes",
+        "description": "OAuth scopes (default: bigquery, cloud-platform and drive)",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "execution_project",
+        "description": "the project jobs run and are billed in, when not `project`",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "quota_project",
+        "description": "the project API quota is charged to",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "priority",
+        "description": "interactive (default) or batch",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "choices": [
+          "interactive",
+          "batch"
+        ]
+      },
+      {
+        "name": "maximum_bytes_billed",
+        "description": "a job that would bill more bytes than this fails instead of running",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "job_execution_timeout_seconds",
+        "description": "stop a query that runs longer than this",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "job_creation_timeout_seconds",
+        "description": "give up starting a query after this long",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try starting the session again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "job_retries",
+        "description": "how many times a query that fails with a transient error is run again (default 1)",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "job_retry_deadline_seconds",
+        "description": "stop retrying a query after this long",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "api_endpoint",
+        "description": "a BigQuery API endpoint other than Google's, e.g. Private Service Connect or an emulator",
+        "required": false,
+        "secret": false,
+        "manual": true
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "`"
+  }
+}

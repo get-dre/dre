@@ -1,0 +1,152 @@
+{
+  "destination/email": {
+    "capabilities": [
+      "message",
+      "multi_file",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "host",
+        "description": "SMTP server host",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "port",
+        "description": "SMTP port (587 for starttls, 465 for implicit TLS)",
+        "required": false,
+        "secret": false,
+        "kind": "integer"
+      },
+      {
+        "name": "tls",
+        "description": "starttls, implicit or none",
+        "required": false,
+        "secret": false,
+        "default": "starttls",
+        "kind": "string",
+        "choices": [
+          "starttls",
+          "implicit",
+          "none"
+        ]
+      },
+      {
+        "name": "username",
+        "description": "SMTP username",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "password",
+        "description": "SMTP password",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "from",
+        "description": "sender address, e.g. \"Reports <reports@example.com>\"",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "to",
+        "description": "default recipients when a report names none",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "cc",
+        "description": "default cc recipients",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "bcc",
+        "description": "default bcc recipients",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "max_attachment_mb",
+        "description": "largest total attachment size to send",
+        "required": false,
+        "secret": false,
+        "default": 20
+      },
+      {
+        "name": "tls_accept_invalid_certs",
+        "description": "accept a self-signed server certificate",
+        "required": false,
+        "secret": false,
+        "default": false
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "to",
+        "type": "strings",
+        "description": "recipients: an address, a comma-separated string or a list",
+        "required": false
+      },
+      {
+        "name": "cc",
+        "type": "strings",
+        "description": "cc recipients",
+        "required": false
+      },
+      {
+        "name": "bcc",
+        "type": "strings",
+        "description": "bcc recipients",
+        "required": false
+      },
+      {
+        "name": "subject",
+        "type": "string",
+        "description": "the subject line",
+        "required": false
+      },
+      {
+        "name": "body",
+        "type": "string",
+        "description": "the message text",
+        "required": false
+      },
+      {
+        "name": "attachment_name",
+        "type": "string",
+        "description": "the attachment's file name (single-file outputs)",
+        "required": false
+      }
+    ]
+  }
+}

@@ -349,15 +349,34 @@ fn connection<R: BufRead>(
         if let Some((from, _)) = inherited {
             eprintln!("    Enter keeps the value from `{from}`");
         }
+        if !f.choices.is_empty() {
+            eprintln!("    One of: {}", f.choices.join(", "));
+        }
         loop {
             let v = p.input(default.as_deref())?;
             if v.is_empty() && f.required {
                 eprintln!("    `{}` is required.", f.name);
                 continue;
             }
-            if !v.is_empty() {
-                m.insert(f.name.clone(), Value::String(v));
+            if v.is_empty() {
+                break;
             }
+            // Checked as the plugin will check it: a choice, or a whole number.
+            if !f.choices.is_empty() && !f.choices.contains(&v) && !v.contains("{{") {
+                eprintln!("    `{}` must be one of {}.", f.name, f.choices.join(", "));
+                continue;
+            }
+            let value = match f.kind {
+                Some(dre_protocol::msg::FieldKind::Integer) if !v.contains("{{") => match v.parse::<i64>() {
+                    Ok(n) => Value::Number(n.into()),
+                    Err(_) => {
+                        eprintln!("    `{}` must be a whole number.", f.name);
+                        continue;
+                    }
+                },
+                _ => Value::String(v),
+            };
+            m.insert(f.name.clone(), value);
             break;
         }
     }

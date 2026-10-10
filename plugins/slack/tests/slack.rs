@@ -426,7 +426,7 @@ fn slack_errors_become_clear_messages_without_the_token() {
 }
 
 #[test]
-fn a_rate_limited_call_is_retried_once() {
+fn a_rate_limited_call_is_tried_again() {
     let (base, calls) = fake_slack();
     let f = Files::new();
     send(

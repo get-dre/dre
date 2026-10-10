@@ -28,9 +28,6 @@ type session struct {
 }
 
 func open(conn map[string]any) (*session, error) {
-	if err := plugin.Unknown(conn, fields, dbtOnly...); err != nil {
-		return nil, err
-	}
 	cfg, err := config(conn)
 	if err != nil {
 		return nil, err

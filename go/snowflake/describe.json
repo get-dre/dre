@@ -1,0 +1,219 @@
+{
+  "source/snowflake": {
+    "capabilities": [
+      "check",
+      "load",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "account",
+        "description": "account identifier, e.g. myorg-myaccount (or a locator like xy12345.eu-west-1)",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "user",
+        "description": "the user to sign in as",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "authenticator",
+        "description": "how to sign in: snowflake (password, the default), username_password_mfa, externalbrowser, oauth, jwt, programmatic_access_token, workload_identity, or an Okta URL; a private key means key-pair sign-in",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "password",
+        "description": "password (or a programmatic access token)",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "private_key_path",
+        "description": "path to a key-pair private key (PEM), for key-pair sign-in",
+        "required": false,
+        "secret": false,
+        "kind": "path"
+      },
+      {
+        "name": "private_key",
+        "description": "a key-pair private key, inline (PEM, or base64 DER)",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "private_key_passphrase",
+        "description": "the private key's passphrase, if it's encrypted",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "role",
+        "description": "role to use",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "warehouse",
+        "description": "warehouse to run queries on",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "database",
+        "description": "default database",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "schema",
+        "description": "default schema",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "token",
+        "description": "OAuth access token, JWT, programmatic access token, or OIDC token for workload identity",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "oauth_client_id",
+        "description": "OAuth client ID, to renew `token` as a refresh token",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "oauth_client_secret",
+        "description": "OAuth client secret, to renew `token` as a refresh token",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "workload_identity_provider",
+        "description": "for workload_identity: AWS, AZURE, GCP or OIDC",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "workload_identity_entra_resource",
+        "description": "for workload_identity on Azure: the Entra resource",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "query_tag",
+        "description": "tag for every query of the session",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "client_session_keep_alive",
+        "description": "keep the session alive while a long report runs",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "client_request_mfa_token",
+        "description": "cache the MFA token (username_password_mfa) in the OS keychain",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "client_store_temporary_credential",
+        "description": "cache the SSO token (externalbrowser) in the OS keychain",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try connecting again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "connect_retries",
+        "description": "dbt's name for `retries`",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "host",
+        "description": "Snowflake host, when not <account>.snowflakecomputing.com",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "port",
+        "description": "port, with host",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "protocol",
+        "description": "https (default) or http, with host",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "insecure_mode",
+        "description": "skip the certificate revocation check",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "proxy_host",
+        "description": "HTTP proxy host",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "proxy_port",
+        "description": "HTTP proxy port",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "\""
+  }
+}

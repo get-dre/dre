@@ -1,0 +1,52 @@
+{
+  "format/fixed_width": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [],
+    "option_fields": [
+      {
+        "name": "columns",
+        "type": "list",
+        "description": "the record layout, in order: {name, width or picture, type, header, align, pad, truncate, decimals, decimal_point, sign, date_format, null_fill}",
+        "required": true
+      },
+      {
+        "name": "header",
+        "type": "boolean",
+        "description": "write a first record of column labels",
+        "required": false,
+        "default": false
+      },
+      {
+        "name": "line_ending",
+        "type": "string",
+        "description": "ends each record",
+        "required": false,
+        "default": "\r\n",
+        "choices": [
+          "\n",
+          "\r\n"
+        ]
+      },
+      {
+        "name": "encoding",
+        "type": "string",
+        "description": "text encoding, e.g. utf-8, latin1",
+        "required": false,
+        "default": "utf-8"
+      },
+      {
+        "name": "line_breaks",
+        "type": "string",
+        "description": "a value with a line break: fail, or write a space",
+        "required": false,
+        "default": "error",
+        "choices": [
+          "error",
+          "replace"
+        ]
+      }
+    ]
+  }
+}

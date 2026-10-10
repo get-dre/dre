@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/oauth2/google/externalaccount"
 
+	"github.com/get-dre/dre/go/plugin"
 	"github.com/get-dre/dre/go/plugin/plugintest"
 )
 
@@ -108,8 +109,9 @@ func TestProfilesNeedAProjectAndKnownFields(t *testing.T) {
 	if _, err := open(map[string]any{"dataset": "d"}); err == nil || !strings.Contains(err.Error(), "needs a `project` field") {
 		t.Fatalf("%v", err)
 	}
-	if _, err := open(map[string]any{"project": "p", "datset": "d"}); err == nil || !strings.Contains(err.Error(), "unknown profile field(s) `datset`") {
-		t.Fatalf("%v", err)
+	// A typo warns (the SDK checks before open); dbt's names are accepted.
+	if _, warns := plugin.CheckConnection(sourceRole, map[string]any{"project": "p", "datset": "d", "schema": "s", "threads": 4.0}, nil); len(warns) != 1 || !strings.Contains(warns[0], "`datset`") || !strings.Contains(warns[0], "did you mean `dataset`") {
+		t.Fatalf("%v", warns)
 	}
 	if _, err := open(map[string]any{"project": "p", "priority": "urgent"}); err == nil || !strings.Contains(err.Error(), "interactive or batch") {
 		t.Fatalf("%v", err)

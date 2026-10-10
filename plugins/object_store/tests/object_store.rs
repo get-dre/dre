@@ -39,6 +39,44 @@ fn deliver(kind: &str, remote: &str, conn: Value, bytes: &[u8]) -> Result<String
         .map_err(|e| e.to_string())
 }
 
+/// `deliver` with the destination entry's options.
+fn deliver_with(
+    kind: &str,
+    remote: &str,
+    conn: Value,
+    options: Value,
+    bytes: &[u8],
+) -> Result<String, String> {
+    let dir = tempfile::tempdir().unwrap();
+    let local = dir.path().join("report.csv");
+    std::fs::write(&local, bytes).unwrap();
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start_for(bin(), Some(&plugin(kind)), log, None).unwrap();
+    let (Value::Object(c), Value::Object(o)) = (conn, options) else {
+        panic!()
+    };
+    let file = dre_protocol::msg::DeliveryFile {
+        local_path: local.to_str().unwrap().to_string(),
+        remote_path: Some(remote.to_string()),
+    };
+    p.deliver_files(&[file], c, o).map_err(|e| e.to_string())
+}
+
+/// `if_exists`: `error` refuses a name already taken, `number` picks the next free one.
+fn check_if_exists(kind: &str, remote: &str, conn: Value) {
+    let numbered = remote.replace(".csv", "_2.csv");
+    deliver(kind, remote, conn.clone(), b"one").unwrap();
+    deliver(kind, remote, conn.clone(), b"overwritten").unwrap();
+    let err = deliver_with(kind, remote, conn.clone(), json!({"if_exists": "error"}), b"x").unwrap_err();
+    assert!(err.contains("already"), "{err}");
+    assert_eq!(
+        deliver_with(kind, remote, conn.clone(), json!({"if_exists": "number"}), b"two").unwrap(),
+        numbered
+    );
+    let err = deliver_with(kind, remote, conn, json!({"if_exists": "keep"}), b"x").unwrap_err();
+    assert!(err.contains("if_exists"), "{err}");
+}
+
 /// ~20 MB of varied bytes, enough for a multipart upload.
 fn payload() -> Vec<u8> {
     (0..20_000_000u32)
@@ -97,6 +135,11 @@ fn s3_uploads_and_reports_failures() {
         deliver("s3", "small.csv", c2, b"a,b\r\n").unwrap(),
         "s3://reports/small.csv"
     );
+    check_if_exists(
+        "s3",
+        &format!("s3://reports/if-exists/{}.csv", std::process::id()),
+        conn.clone(),
+    );
     let err = deliver("s3", "s3://no-such-bucket/x.csv", conn, b"x").unwrap_err();
     assert!(
         err.contains("upload to s3://no-such-bucket/x.csv failed"),
@@ -120,8 +163,13 @@ fn gcs_uploads_through_the_emulator() {
     let conn = json!({"service_account_key_path": key.to_str().unwrap()});
     let data = payload();
     assert_eq!(
-        deliver("gcs", "gs://reports/out/report.csv", conn, &data).unwrap(),
+        deliver("gcs", "gs://reports/out/report.csv", conn.clone(), &data).unwrap(),
         "gs://reports/out/report.csv"
+    );
+    check_if_exists(
+        "gcs",
+        &format!("gs://reports/if-exists/{}.csv", std::process::id()),
+        conn,
     );
     let store = object_store::gcp::GoogleCloudStorageBuilder::new()
         .with_bucket_name("reports")
@@ -182,8 +230,13 @@ fn azure_uploads_with_a_connection_string_or_a_key() {
     let conn =
         json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": blob, "container": "reports"});
     assert_eq!(
-        deliver("azure", "key/report.csv", conn, b"a\r\n").unwrap(),
+        deliver("azure", "key/report.csv", conn.clone(), b"a\r\n").unwrap(),
         "az://reports/key/report.csv"
+    );
+    check_if_exists(
+        "azure",
+        &format!("az://reports/if-exists/{}.csv", std::process::id()),
+        conn,
     );
     let store = object_store::azure::MicrosoftAzureBuilder::new()
         .with_account(AZ_ACCOUNT)
@@ -289,4 +342,106 @@ fn s3_reads_a_named_profile_from_the_shared_files() {
         Ok(loc) => assert_eq!(loc, "s3://reports/profile/x.csv"),
         Err(e) => assert!(!e.contains("credentials"), "{e}"),
     }
+}
+
+/// A server that answers 503 (with `Retry-After: 0`) to the first request, then `ok` to every
+/// other: (status, extra headers) by request number, method and path. Returns its URL and the
+/// requests it saw.
+fn flaky_server(
+    ok: impl Fn(&str, &str, &str) -> (u16, Vec<(String, String)>) + Send + 'static,
+) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let base = url.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut r = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            if r.read_line(&mut line).is_err() {
+                continue;
+            }
+            let mut len = 0usize;
+            loop {
+                let mut h = String::new();
+                r.read_line(&mut h).unwrap();
+                if h.trim().is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = h.split_once(':')
+                    && k.eq_ignore_ascii_case("content-length")
+                {
+                    len = v.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0; len];
+            r.read_exact(&mut body).unwrap();
+            let mut parts = line.split_whitespace();
+            let (method, path) = (
+                parts.next().unwrap().to_string(),
+                parts.next().unwrap().to_string(),
+            );
+            let n = {
+                let mut l = log.lock().unwrap();
+                l.push(format!("{method} {path}"));
+                l.len()
+            };
+            let (status, headers) = if n == 1 {
+                (503, vec![("Retry-After".to_string(), "0".to_string())])
+            } else {
+                ok(&method, &path, &base)
+            };
+            let mut resp = format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n");
+            for (k, v) in headers {
+                resp.push_str(&format!("{k}: {v}\r\n"));
+            }
+            resp.push_str("\r\n");
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    (url, seen)
+}
+
+#[test]
+fn a_503_is_tried_again_for_each_object_store() {
+    // S3: one PUT for a small file.
+    let (url, seen) = flaky_server(|_, _, _| (200, vec![("ETag".into(), "\"e\"".into())]));
+    let conn =
+        json!({"endpoint": url, "region": "us-east-1", "access_key_id": "a", "secret_access_key": "b"});
+    assert_eq!(deliver("s3", "s3://b/r.csv", conn, b"x").unwrap(), "s3://b/r.csv");
+    assert_eq!(seen.lock().unwrap().len(), 2, "{:?}", seen.lock().unwrap());
+    // Azure: one PUT.
+    let (url, seen) = flaky_server(|_, _, _| (201, vec![("ETag".into(), "\"e\"".into())]));
+    let conn = json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": url});
+    assert_eq!(
+        deliver("azure", "az://c/r.csv", conn, b"x").unwrap(),
+        "az://c/r.csv"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 2, "{:?}", seen.lock().unwrap());
+    // GCS: the resumable protocol's start, then the bytes.
+    let (url, seen) = flaky_server(|method, _, base| match method {
+        "POST" => (200, vec![("Location".into(), format!("{base}/session"))]),
+        _ => (200, vec![]),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("key.json");
+    std::fs::write(&key, json!({"gcs_base_url": url, "disable_oauth": true, "client_email": "", "private_key": "", "private_key_id": ""}).to_string()).unwrap();
+    let conn = json!({"service_account_key_path": key.to_str().unwrap(), "endpoint": url});
+    assert_eq!(
+        deliver("gcs", "gs://b/r.csv", conn, b"x").unwrap(),
+        "gs://b/r.csv"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 3, "{:?}", seen.lock().unwrap());
+    // `retries: 0` fails at once, and a 403 is never tried again.
+    let (url, seen) = flaky_server(|_, _, _| (200, vec![]));
+    let conn = json!({"endpoint": url, "region": "us-east-1", "access_key_id": "a", "secret_access_key": "b", "retries": 0});
+    assert!(
+        deliver("s3", "s3://b/r.csv", conn, b"x")
+            .unwrap_err()
+            .contains("503")
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }

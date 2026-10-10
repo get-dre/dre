@@ -53,6 +53,8 @@ fn types_and_values_survive_a_round_trip() {
         anchor: None,
         header: None,
         columns: Default::default(),
+        autofit: None,
+        style: None,
     };
     p.write_begin(
         path.to_str().unwrap(),

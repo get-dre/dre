@@ -21,22 +21,41 @@ Never write a secret's value: use `env_var()` (SEC-3).
 
 | Field | Required | Secret | Default | Description |
 |---|---|---|---|---|
-| `account_name` | yes | no |  | storage account name |
+| `account_name` | no | no |  | storage account name |
 | `container` | no | no |  | default container (or use az://container/... paths) |
 | `connection_string` | no | yes |  | connection string (or set sas_token / access_key) |
+| `sas_token` | no | yes |  | a SAS token |
+| `access_key` | no | yes |  | the account's access key |
+| `use_managed_identity` | no | no |  | sign in as the machine's managed identity |
+| `use_azure_cli` | no | no |  | sign in with the `az login` session |
+| `endpoint` | no | no |  | an emulator's URL |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
+| `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |
 
 ## Report options
 
-None.
+Set in the report's `output.destination` entry.
+
+| Option | Type | Required | Default | Allowed | Description |
+|---|---|---|---|---|---|
+| `if_exists` | string | no | `overwrite` | `overwrite`, `error`, `number` | when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one |
 
 ## From the plugin docs
+
+### Azure Blob Storage
+
+#### Notes
+
+`account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
+`use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
 
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
-plugin and no declaration.
+plugin and no declaration. It takes the options `if_exists`, `atomic` and `temp_dir`, described
+below.
 
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
@@ -52,6 +71,29 @@ Every destination that talks to a server takes two timeouts in its profile entry
 
 There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
 run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
+
+### Tries again
+
+A temporary failure is tried again: a connection refused, reset or timed out, an HTTP 429 or a
+5xx. The waits are about 1s, 4s and 16s (a little random), or the server's `Retry-After`. Each
+retry is logged at info level, and a delivery that took several tries has `attempts` in
+`run_results.json`. Refused credentials or permissions, and other 4xx answers, fail at once.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `retries` | `3` | How many times to try again, in the profile entry of every destination and source that talks to a server. `0` never tries again. |
+
+Nothing is ever sent twice:
+
+- **Files** (`sftp`, `ftp`, object stores, `databricks`): an upload is tried again whole; with
+  `atomic` (the default) the half-written temporary file is replaced, never shown.
+- **Email**: only when the server certainly didn't accept the message: the connection failed
+  before the session began, or the server answered 4xx (try later). A connection dropped after
+  the message was sent isn't tried again.
+- **Chat posts** (`slack`, `teams`, `google_chat`): only on a 429 or 503, or when no connection
+  was made.
+- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`): only while connecting or
+  signing in, never once a query is sent.
 
 ### Several destinations
 
@@ -88,14 +130,35 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
-- A destination that takes no options (`local`, `s3`, `sftp`, ...) fails the delivery if its
-  entry has any other key, so a misspelt `path` is caught instead of ignored.
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+- A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
+  is caught instead of ignored.
 
-### azure_blob
+### A file already at the path
 
-`account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
-`use_managed_identity: true`, or `use_azure_cli: true` (the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+By default a delivery **replaces** a file already at its path: the usual reason a name is taken
+is a rerun of a corrected report, and replacing the bad file is what's wanted. Every file
+destination (`local`, `s3`, `gcs`, `azure_blob`, `sftp`, `ftp`, `databricks`) takes
+`if_exists` per destination entry to change that:
+
+```yaml
+destination:
+  profile: client_sftp
+  path: "outbound/monthly-{{ run.date.yyyymm }}.xlsx"
+  if_exists: error      # overwrite (default) | error | number
+```
+
+| Value | What happens |
+|---|---|
+| `overwrite` | The new file replaces the old one. |
+| `error` | That delivery fails (code `<plugin>/file-exists`, `local/file-exists` for `local`); the run's other deliveries still go, and the run exits 1. |
+| `number` | Both are kept: the new file is saved as `<name>_2.<ext>`, else `_3`, and so on. `run_results.json` (`location`) and the log show the name used. |
+
+The check and the write are one step where the server allows it: SFTP's exclusive create and
+no-replace rename, conditional uploads on object stores (`If-None-Match: *`, GCS's
+`ifGenerationMatch=0`), `overwrite=false` on Databricks, and an exclusive create for `local`. FTP
+has no such step, so DRE looks first, then uploads: two runs at the same moment could both see the
+name free. Put a date or a period in delivery paths so different runs don't collide by accident.
 
 ## Guide notes
 

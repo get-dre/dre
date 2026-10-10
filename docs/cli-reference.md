@@ -49,6 +49,7 @@ dre validate [OPTIONS] [SELECTOR]...
 | `--live` |  | After the offline checks, connect to each Binding's source and check every rendered statement without executing it (EXPLAIN or the dialect's equivalent). |
 | `--set <SET>` |  | Compile (and with --live, check) one Set instead of every Set. |
 | `--strict` |  | Treat warnings as errors: exit 1 when there are any. |
+| `--all-targets` |  | Check the connection settings of every entry in profiles.yml, not only the entries the selected reports would use with these flags. |
 
 Example:
 
@@ -462,4 +463,4 @@ dre unlock monthly_revenue --binding client_a
 
 ---
 
-**Previous:** [First-party plugins](plugins.md) · **Next:** [YAML reference](yaml-reference.md)
+**Previous:** [Google Chat](plugin-google_chat.md) · **Next:** [YAML reference](yaml-reference.md)

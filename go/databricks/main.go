@@ -39,7 +39,7 @@ var (
 	}
 	destinationRole = plugin.Role{
 		Kind: "destination", Name: "databricks", Capabilities: []string{"validate"},
-		Fields: volumesFields(), Deliver: deliver,
+		Fields: volumesFields(), Options: deliveryOptions(), Deliver: deliver,
 	}
 	// pkg is every plugin the package provides, in the order `provides` lists them.
 	pkg = plugin.Package{Version: version, Roles: []plugin.Role{sourceRole, destinationRole}}
@@ -64,11 +64,16 @@ func connectionFields() []plugin.Field {
 	return []plugin.Field{
 		{Name: "host", Description: "workspace host, e.g. adb-123.4.azuredatabricks.net", Required: true},
 		{Name: "http_path", Description: "the SQL warehouse's HTTP path, e.g. /sql/1.0/warehouses/abc", Required: true},
-		{Name: "auth_type", Description: "pat (a token) or oauth (browser sign-in; with client_id and client_secret, a service principal)", Default: "pat", SameAsSource: "databricks"},
+		{Name: "auth_type", Description: "pat (a token) or oauth (browser sign-in; with client_id and client_secret, a service principal)", Default: "pat", SameAsSource: "databricks", Choices: []string{"auto", "pat", "token", "oauth"}},
 		{Name: "token", Description: "personal access token, for auth_type pat", Secret: true, SameAsSource: "databricks"},
 		{Name: "client_id", Description: "OAuth client; a service principal's application ID (browser sign-in defaults to databricks-cli)", SameAsSource: "databricks"},
 		{Name: "client_secret", Description: "service principal OAuth secret", Secret: true, SameAsSource: "databricks"},
 		{Name: "catalog", Description: "default catalog"},
 		{Name: "schema", Description: "default schema"},
+		{Name: "profile", Description: "a ~/.databrickscfg profile to sign in with (auth_type auto)", Manual: true, SameAsSource: "databricks"},
+		{Name: "scopes", Description: "OAuth scopes", Manual: true, SameAsSource: "databricks"},
+		{Name: "redirect_port", Description: "the localhost port browser sign-in redirects to (default 8020)", Manual: true, SameAsSource: "databricks", Kind: "integer"},
+		{Name: "retry_timeout", Description: "seconds to keep waiting while a stopped warehouse starts (default 900)", Manual: true, Kind: "integer"},
+		{Name: "retries", Kind: "integer", Description: "how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload", Default: 3, Manual: true, SameAsSource: "databricks"},
 	}
 }

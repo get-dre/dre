@@ -29,6 +29,11 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `client_secret` | no | yes |  | service principal OAuth secret |
 | `catalog` | no | no |  | default catalog |
 | `schema` | no | no |  | default schema |
+| `profile` | no | no |  | a ~/.databrickscfg profile to sign in with (auth_type auto) |
+| `scopes` | no | no |  | OAuth scopes |
+| `redirect_port` | no | no |  | the localhost port browser sign-in redirects to (default 8020) |
+| `retry_timeout` | no | no |  | seconds to keep waiting while a stopped warehouse starts (default 900) |
+| `retries` | no | no | `3` | how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload |
 
 ## Report options
 
@@ -36,7 +41,9 @@ None: a source's settings are its profile fields.
 
 ## From the plugin docs
 
-### databricks
+### Databricks
+
+#### As a source
 
 | Field | Notes |
 |---|---|
@@ -50,6 +57,7 @@ None: a source's settings are its profile fields.
 | `scopes` | For `oauth`: default `all-apis offline_access` for browser sign-in, `all-apis` for a service principal. |
 | `redirect_port` | For browser sign-in: the localhost port the sign-in redirects to. Default 8020, which is what `databricks-cli` allows. |
 | `catalog`, `schema` | Defaults for the session. |
+| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). The destination uses it for uploads too. |
 | `retry_timeout` | Seconds to keep waiting while a stopped warehouse starts. Default 900. While it waits, DRE says so every 30 seconds. A host that doesn't resolve, or refuses the connection, fails at once. |
 
 ```yaml
@@ -115,6 +123,37 @@ escaped quote: `'O''Brien'` is two literals, `'O'` and `'Brien'`, which Databric
 `VARIANT`, `STRUCT`, `ARRAY` and `MAP` columns arrive as compact JSON text (from `databricks`
 1.2.0; before, `STRUCT`, `ARRAY` and `MAP` were passed on as nested Arrow), intervals and
 geography as text. See [Types from warehouses](https://github.com/get-dre/dre/blob/master/docs/plugins.md#types-from-warehouses).
+
+#### As a destination
+
+Unity Catalog Volumes and workspace files, chosen by the path. `host` and the same sign-in fields
+as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`, `profile`, `scopes`,
+`redirect_port`), so one set of
+credentials, and one OAuth session per workspace, serves both. It's the same program as the
+source.
+
+```yaml
+destinations:
+  lakehouse:
+    targets:
+      prod: {type: databricks, host: dbc-123.cloud.databricks.com}
+```
+
+- **`/Volumes/<catalog>/<schema>/<volume>/...`**: uploaded to the Volume through the Files API.
+  Missing directories under the volume are created. Use it anywhere, for any size of file.
+- **`/Workspace/Users/<user>/...`, `/Workspace/Shared/...` or `/Workspace/Repos/...`** (the
+  `/Workspace` prefix is optional): a workspace file, for outputs people open from the workspace
+  browser, next to notebooks and dashboards. Missing folders are created, the file replaces one
+  already at the path (unless `if_exists` says otherwise), and it's always a plain file: a `.sql` or `.py` output isn't turned into a
+  notebook. Workspace files are meant for small files (the import API takes up to about 10 MB);
+  use a Volume for large outputs.
+
+On Databricks compute, where `/Volumes` and `/Workspace` are mounted, the file is copied there
+directly instead: no API call and no sign-in, with the job's own access. The same report works
+outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databricks job or cluster.
+
+Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
+`overwrite=false` refuses a taken name in the same step.
 
 ### Types from warehouses
 

@@ -118,14 +118,14 @@ func (f *fakeDB) Close() { f.closed = true }
 func pkg(db *fakeDB, delivered *[]string) plugin.Package {
 	src := plugin.Role{
 		Kind: "source", Name: "fake", Capabilities: []string{"sessions", "check", "load", "validate"},
-		Fields:          []plugin.Field{{Name: "host", Description: "h", Required: true}, {Name: "token", Description: "t", Secret: true}},
+		Fields:          []plugin.Field{{Name: "host", Description: "h"}, {Name: "token", Description: "t", Secret: true}},
 		IdentifierQuote: "`",
 		Open:            func(map[string]any) (plugin.Session, error) { return db, nil },
 	}
 	dst := plugin.Role{
 		Kind: "destination", Name: "fake", Capabilities: []string{"validate"},
-		Fields: []plugin.Field{{Name: "host", Description: "h", Required: true}},
-		Deliver: func(local, remote string, _ map[string]any) (string, error) {
+		Fields: []plugin.Field{{Name: "host", Description: "h"}},
+		Deliver: func(local, remote string, _, _ map[string]any) (string, error) {
 			if remote == "" {
 				return "", errors.New("needs a path")
 			}
@@ -391,4 +391,54 @@ func TestProtocolOneIdsLogsErrorsAndCancel(t *testing.T) {
 	if r := c.Reply(); r["type"] != "describe" || r["id"] != 5.0 {
 		t.Fatalf("after cancel: %v", r)
 	}
+}
+
+func TestDeclaredOptionsAreDescribedCheckedAndPassedOn(t *testing.T) {
+	var got map[string]any
+	p := plugin.Package{Version: "1", Roles: []plugin.Role{{
+		Kind: "destination", Name: "fake", Options: plugin.DeliveryOptions()[:2],
+		Deliver: func(_, remote string, _, opts map[string]any) (string, error) {
+			got = opts
+			return remote, nil
+		},
+	}}}
+	c := plugintest.Start(t, p, p.Roles[0])
+	c.Hello()
+	c.Send(map[string]any{"type": "describe"})
+	if d := c.Reply(); len(d["option_fields"].([]any)) != 2 {
+		t.Fatalf("%v", d)
+	}
+	c.Send(map[string]any{"type": "validate", "options": map[string]any{"if_exists": "keep", "atomic": "yes", "tmp": 1}})
+	r := c.Reply()
+	errs := fmt.Sprint(r["errors"])
+	for _, want := range []string{"`atomic` must be true or false", "`if_exists` must be one of `overwrite`, `error`, `number`", "unknown option `tmp` for destination `fake`; expected one of if_exists, atomic"} {
+		if !strings.Contains(errs, want) {
+			t.Fatalf("%q lacks %q", errs, want)
+		}
+	}
+	// Jinja is rendered later, so it isn't checked.
+	c.Send(map[string]any{"type": "validate", "options": map[string]any{"if_exists": "{{ var('mode') }}"}})
+	if r := c.Reply(); len(r["errors"].([]any)) != 0 {
+		t.Fatalf("%v", r)
+	}
+	c.Send(map[string]any{"type": "deliver", "local_path": "/a", "remote_path": "b", "connection": map[string]any{}, "options": map[string]any{"if_exists": "number"}})
+	if r := c.Reply(); r["type"] != "delivered" || got["if_exists"] != "number" {
+		t.Fatalf("%v %v", r, got)
+	}
+}
+
+func TestValidateConnectionAnswersWithoutConnecting(t *testing.T) {
+	var delivered []string
+	p := pkg(&fakeDB{}, &delivered)
+	p.Roles[1].Fields = append(p.Roles[1].Fields, plugin.Field{Name: "port", Kind: "integer"})
+	c := plugintest.Start(t, p, p.Roles[1])
+	c.Hello()
+	c.Send(map[string]any{"type": "validate_connection", "connection": map[string]any{"port": "x", "hots": 1}})
+	r := c.Reply()
+	if fmt.Sprint(r["errors"]) != "[`port` must be a whole number]" || !strings.Contains(fmt.Sprint(r["warnings"]), "did you mean `host`") {
+		t.Fatalf("%v", r)
+	}
+	// deliver runs the same checks first.
+	c.Send(map[string]any{"type": "deliver", "local_path": "/a", "remote_path": "b", "connection": map[string]any{"port": "x"}, "options": map[string]any{}})
+	plugintest.ExpectError(t, c.Reply(), "`port` must be a whole number")
 }

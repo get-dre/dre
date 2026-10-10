@@ -290,6 +290,7 @@ fn describe_lists_connection_fields() {
             .collect::<Vec<_>>(),
         vec![
             ("path", false, false),
+            ("fail", false, true),
             ("token", true, false),
             ("token_text", true, true)
         ]

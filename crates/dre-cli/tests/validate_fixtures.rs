@@ -27,8 +27,8 @@ fn fixtures_dir() -> PathBuf {
 }
 
 /// The plugins fixtures commonly declare, so `--no-auto-install` doesn't warn in every golden.
-/// Formats and destinations are the real plugins, which check their options; sources are empty
-/// stand-ins, which validation never starts.
+/// Every plugin is the real one, which checks its options and its profile entries' settings
+/// (without connecting), except the fixture source, an empty stand-in validation never starts.
 fn stand_in_plugins() -> PathBuf {
     static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
@@ -57,7 +57,7 @@ fn stand_in_plugins() -> PathBuf {
             &d.path()
                 .join(format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX)),
         );
-        // Installed packages, which say what they provide without being started.
+        // Installed packages (the real programs), which say what they provide in `plugin.json`.
         for (package, provides) in [
             ("duckdb", &["source/duckdb"][..]),
             ("postgres", &["source/postgres"]),
@@ -69,7 +69,11 @@ fn stand_in_plugins() -> PathBuf {
             let dir = d.path().join(package).join("0.0.1");
             std::fs::create_dir_all(&dir).unwrap();
             let exe = format!("dre-plugin-{package}{}", std::env::consts::EXE_SUFFIX);
-            stand_in(&dir.join(&exe));
+            std::fs::copy(
+                common::workspace_bin(&format!("dre-plugin-{package}")),
+                dir.join(&exe),
+            )
+            .unwrap();
             let manifest = serde_json::json!({"executable": exe, "provides": provides});
             std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         }

@@ -47,6 +47,15 @@ pub enum Request {
     Validate {
         options: Map<String, Value>,
     },
+    /// Source or destination (protocol 1): check a profile entry's connection settings without
+    /// connecting: the declared fields' generic checks, then the plugin's own rules. Keys in
+    /// `unresolved` (an unset `env_var()`) arrive as `null` and count as set, unchecked. Replies
+    /// `validated`, with `warnings` for unknown keys.
+    ValidateConnection {
+        connection: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unresolved: Vec<String>,
+    },
     /// Source: open a session. All later `execute`/`check` requests run on it.
     Open {
         connection: Map<String, Value>,
@@ -143,6 +152,9 @@ pub enum Response {
     /// Every problem with the options, each a sentence naming the key; empty when they're fine.
     Validated {
         errors: Vec<String>,
+        /// Problems that don't stop a run (an unknown key); `validate_connection` only.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
     },
     Ok {},
     /// A result set follows as Arrow frames, ended by `result_end`.
@@ -164,6 +176,9 @@ pub enum Response {
     },
     Delivered {
         location: String,
+        /// How many tries the delivery took, when it was more than one (protocol 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<u32>,
     },
     /// `relation` is what SQL uses to read the loaded rows. `warning`, when set, is shown to the
     /// user (e.g. the database has no bulk path, so a load this size is slow).
@@ -279,6 +294,13 @@ pub struct ResultSetMeta {
     /// The query entry's `columns:` map: per result column, how to show it.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub columns: std::collections::BTreeMap<String, ColumnOptions>,
+    /// The query entry's `autofit` (xlsx): size this tab's columns from their content, over the
+    /// output's `autofit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autofit: Option<bool>,
+    /// The query entry's `style` (xlsx), over the output's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<crate::style::SheetStyle>,
 }
 
 /// One entry of a `columns:` map.
@@ -295,6 +317,27 @@ pub struct ColumnOptions {
     /// over whole columns (`=SUM({amount:*})/COUNT({qty:*})`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<String>,
+    /// The column's width (xlsx), over the tab's and output's `autofit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<ColumnWidth>,
+    /// How the column's data cells look (xlsx), over the tab's and output's `style`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<crate::style::CellStyle>,
+}
+
+/// A column width: sized from the content, or a number of characters.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ColumnWidth {
+    Chars(f64),
+    Auto(AutoWidth),
+}
+
+/// The word `auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoWidth {
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -317,6 +360,28 @@ pub struct ConnectionField {
     /// prompted field (a key given as text instead of a file) and nested blocks (`ssh:`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub manual: bool,
+    /// What the value must be, checked by `validate_connection` (and `dre init` as you type).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<FieldKind>,
+    /// The only values it may take (`dre init` offers them as a choice).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+/// What a connection field's value must be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    String,
+    /// A whole number, or a string of one (`port: "5432"`).
+    Integer,
+    Boolean,
+    /// A file that must exist; a leading `~/` is the home directory.
+    Path,
+    /// `30s`, `2m`, `1h`, or seconds.
+    Duration,
+    /// A block of settings (`ssh:`), checked by the plugin's own rules.
+    Map,
 }
 
 impl ConnectionField {
@@ -329,7 +394,18 @@ impl ConnectionField {
             default: None,
             same_as_source: None,
             manual: false,
+            kind: None,
+            choices: Vec::new(),
         }
+    }
+    pub fn kind(mut self, kind: FieldKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+    pub fn choices(mut self, choices: &[&str]) -> Self {
+        self.choices = choices.iter().map(|c| c.to_string()).collect();
+        self.kind.get_or_insert(FieldKind::String);
+        self
     }
     pub fn required(mut self) -> Self {
         self.required = true;

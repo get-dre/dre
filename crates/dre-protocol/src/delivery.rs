@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
-use crate::msg::ConnectionField;
+use crate::msg::{ConnectionField, FieldKind};
 use crate::options::{OptionField, OptionType};
 use crate::plugin::{ErrorKind, PluginError};
 
@@ -194,18 +194,21 @@ pub fn connection_fields() -> Vec<ConnectionField> {
             "how long to wait for a connection (`30s`, `2m`, or seconds)",
         )
         .default("30s")
+        .kind(FieldKind::Duration)
         .manual(),
         ConnectionField::new(
             "timeout",
             "how long a read or write may make no progress before it fails",
         )
         .default("60s")
+        .kind(FieldKind::Duration)
         .manual(),
         ConnectionField::new(
             "retries",
             "how many times to try again after a temporary error (0: never)",
         )
         .default(DEFAULT_RETRIES)
+        .kind(FieldKind::Integer)
         .manual(),
     ]
 }
@@ -290,6 +293,97 @@ pub trait Store {
     fn exists(&mut self, remote: &str) -> Result<bool, StoreError>;
     /// Remove `remote`; a missing file isn't an error.
     fn delete(&mut self, remote: &str) -> Result<(), StoreError>;
+    /// Called before trying again after a temporary error: drop a broken connection, so the
+    /// next call makes a new one.
+    fn reset(&mut self) {}
+}
+
+/// The most tries any delivery step took in the request being served, for the `delivered`
+/// reply (the plugin SDK reads it).
+static ATTEMPTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn note_attempts(n: u32) {
+    ATTEMPTS.fetch_max(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The most tries a step took since the last call, at least 1; resets the count.
+pub fn take_attempts() -> u32 {
+    ATTEMPTS.swap(0, std::sync::atomic::Ordering::Relaxed).max(1)
+}
+
+/// What one try of a [`retry`] step gave.
+#[derive(Debug)]
+pub enum Retry<E> {
+    /// Trying again may work (a connection refused or reset, a 429 or 503); with the server's
+    /// `Retry-After`.
+    Temporary(E, Option<Duration>),
+    /// Trying again won't help, or might repeat something already done (a message the server
+    /// may have accepted).
+    Fail(E),
+}
+
+/// Run `f`, trying again on [`Retry::Temporary`] up to `retries` more times, with backoff
+/// (about 1s, then 4s, then 16s) or the server's `Retry-After`. Each retry is logged at info
+/// level, naming `what`; a step that needed several tries is reported to core.
+pub fn retry<T, E: std::fmt::Display>(
+    retries: u32,
+    what: &str,
+    f: impl FnMut() -> Result<T, Retry<E>>,
+) -> Result<T, E> {
+    retry_with(retries, what, &mut std::thread::sleep, f)
+}
+
+/// [`retry`], with the wait between tries supplied (tests don't wait).
+pub fn retry_with<T, E: std::fmt::Display>(
+    retries: u32,
+    what: &str,
+    sleep: &mut dyn FnMut(Duration),
+    mut f: impl FnMut() -> Result<T, Retry<E>>,
+) -> Result<T, E> {
+    let mut attempt = 1;
+    loop {
+        let r = f();
+        note_attempts(attempt);
+        match r {
+            Ok(v) => return Ok(v),
+            Err(Retry::Temporary(e, retry_after)) if attempt <= retries => {
+                let wait = retry_after.unwrap_or_else(|| backoff(attempt));
+                crate::log::info!(
+                    "{what}: {e}; trying again in {}s (attempt {} of {})",
+                    wait.as_secs(),
+                    attempt + 1,
+                    retries + 1
+                );
+                sleep(wait);
+                attempt += 1;
+            }
+            Err(Retry::Temporary(e, _) | Retry::Fail(e)) => return Err(e),
+        }
+    }
+}
+
+/// Whether an I/O error is a connection failing (refused, reset, aborted, timed out, closed
+/// early), which trying again may fix.
+pub fn is_connection_error(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(
+        e.kind(),
+        ConnectionRefused
+            | ConnectionReset
+            | ConnectionAborted
+            | NotConnected
+            | BrokenPipe
+            | TimedOut
+            | UnexpectedEof
+            | HostUnreachable
+            | NetworkUnreachable
+            | NetworkDown
+    )
+}
+
+/// The `Retry-After` of a 429 or 503, in seconds (an HTTP date isn't read).
+pub fn retry_after(header: Option<&str>) -> Option<Duration> {
+    header?.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
 /// Where a delivery landed.
@@ -345,7 +439,9 @@ pub fn deliver_with(
 ) -> Result<Delivered, DeliveryError> {
     let mut attempt = 1;
     loop {
-        match try_once(store, local, remote, rules) {
+        let r = try_once(store, local, remote, rules);
+        note_attempts(attempt);
+        match r {
             Ok(path) => {
                 return Ok(Delivered {
                     path,
@@ -360,6 +456,7 @@ pub fn deliver_with(
                     attempt + 1,
                     rules.retries + 1
                 );
+                store.reset();
                 sleep(wait);
                 attempt += 1;
             }

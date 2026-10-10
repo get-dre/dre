@@ -86,7 +86,7 @@ func TestWorkspacePaths(t *testing.T) {
 func TestMakesTheFolderThenImportsARawFile(t *testing.T) {
 	srv, calls := fakeWorkspace(t)
 	loc, err := deliverToWorkspace(localFile(t, "a,b\r\n1,2\r\n"), "/Workspace/Users/a@b.com/reports/2026/jan.csv",
-		map[string]any{"host": srv.URL, "token": "good"})
+		map[string]any{"host": srv.URL, "token": "good"}, nil)
 	if err != nil || loc != "/Workspace/Users/a@b.com/reports/2026/jan.csv" {
 		t.Fatal(loc, err)
 	}
@@ -99,7 +99,7 @@ func TestMakesTheFolderThenImportsARawFile(t *testing.T) {
 		imp.fields["format"] != "RAW" || imp.fields["overwrite"] != "true" || imp.file != "a,b\r\n1,2\r\n" {
 		t.Fatalf("%+v", imp)
 	}
-	_, err = deliverToWorkspace(localFile(t, "x"), "/Workspace/Shared/x.csv", map[string]any{"host": srv.URL, "token": "bad"})
+	_, err = deliverToWorkspace(localFile(t, "x"), "/Workspace/Shared/x.csv", map[string]any{"host": srv.URL, "token": "bad"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || !strings.Contains(err.Error(), "PERMISSION_DENIED: no") {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestOnDatabricksComputeTheFileIsCopiedToTheMountedWorkspace(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, "Workspace", "Shared"), 0o755)
 	t.Setenv("DATABRICKS_RUNTIME_VERSION", "15.4")
 	t.Setenv("DRE_WORKSPACE_ROOT", root)
-	loc, err := deliverToWorkspace(localFile(t, "hello"), "/Workspace/Shared/out/x.csv", map[string]any{})
+	loc, err := deliverToWorkspace(localFile(t, "hello"), "/Workspace/Shared/out/x.csv", map[string]any{}, nil)
 	if err != nil || loc != "/Workspace/Shared/out/x.csv" {
 		t.Fatal(loc, err)
 	}

@@ -35,9 +35,6 @@ type session struct {
 }
 
 func open(conn map[string]any) (*session, error) {
-	if err := plugin.Unknown(conn, fields, append(aliases, dbtOnly...)...); err != nil {
-		return nil, err
-	}
 	project := first(conn, "project", "database")
 	if project == "" {
 		return nil, fmt.Errorf("the profile output needs a `project` field (dbt's `database`)")
@@ -109,7 +106,20 @@ func open(conn map[string]any) (*session, error) {
 			debugf("the Storage Read API isn't available (%v); results are read over the REST API", err)
 		}
 	}
-	if err := s.startSession(); err != nil {
+	// Tried again (`retries`) while starting the session, before any query of the report.
+	rules, _, err := plugin.RulesFrom(plugin.DefaultRules(), conn, nil, nil)
+	if err != nil {
+		s.client.Close()
+		return nil, err
+	}
+	_, err = plugin.Retry(rules.Retries, "starting the BigQuery session", func() (struct{}, error) {
+		err := s.startSession()
+		if err != nil && (transient(err) || plugin.IsConnectionError(err)) {
+			return struct{}{}, &plugin.TemporaryError{Err: err}
+		}
+		return struct{}{}, err
+	})
+	if err != nil {
 		s.client.Close()
 		return nil, err
 	}

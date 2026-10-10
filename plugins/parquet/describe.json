@@ -1,0 +1,9 @@
+{
+  "format/parquet": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [],
+    "option_fields": []
+  }
+}

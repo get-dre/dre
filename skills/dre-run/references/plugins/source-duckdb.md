@@ -31,7 +31,9 @@ None: a source's settings are its profile fields.
 
 ## From the plugin docs
 
-### duckdb
+### DuckDB
+
+#### Notes
 
 | Field | Notes |
 |---|---|

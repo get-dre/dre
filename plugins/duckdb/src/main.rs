@@ -9,7 +9,7 @@ mod bridge;
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Schema};
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
 use duckdb::{AccessMode, Config, Connection};
@@ -102,7 +102,7 @@ impl Source for DuckDb {
                 "DuckDB database file (relative to the project), or :memory:",
             )
             .default(":memory:"),
-            ConnectionField::new("threads", "number of threads DuckDB may use"),
+            ConnectionField::new("threads", "number of threads DuckDB may use").kind(FieldKind::Integer),
             ConnectionField::new("memory_limit", "DuckDB memory limit, e.g. 4GB"),
         ]
     }

@@ -40,6 +40,8 @@ fn meta(name: &str, entries: &[(&str, &str, &str)]) -> ResultSetMeta {
         anchor: None,
         header: None,
         columns: cols(entries),
+        autofit: None,
+        style: None,
     }
 }
 

@@ -607,6 +607,15 @@
           ],
           "description": "Where it went."
         },
+        "attempts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many tries it took, when the plugin had to try again after a temporary error.",
+          "format": "uint32",
+          "minimum": 0
+        },
         "error": {
           "type": [
             "string",

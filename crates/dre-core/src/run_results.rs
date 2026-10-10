@@ -202,6 +202,9 @@ pub struct Delivery {
     /// Where it went.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
+    /// How many tries it took, when the plugin had to try again after a temporary error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

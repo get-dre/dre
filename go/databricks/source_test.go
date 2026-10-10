@@ -109,7 +109,7 @@ func TestTheSourceDescribesItsFieldsAndQuote(t *testing.T) {
 	}
 	c.Send(map[string]any{"type": "describe"})
 	d := c.Reply()
-	if plugintest.FieldNames(d) != "host,http_path,auth_type,token,client_id,client_secret,catalog,schema" || d["identifier_quote"] != "`" {
+	if plugintest.FieldNames(d) != "host,http_path,auth_type,token,client_id,client_secret,catalog,schema,profile,scopes,redirect_port,retry_timeout,retries" || d["identifier_quote"] != "`" {
 		t.Fatalf("%v", d)
 	}
 }

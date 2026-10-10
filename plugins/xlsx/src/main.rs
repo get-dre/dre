@@ -1,8 +1,9 @@
 //! DRE format plugin `xlsx`: one sheet per result set, written in constant memory, or a branded
 //! template filled in place (see `template`).
 //!
-//! Options: `header` (default true), `max_rows_per_sheet` (default 1,000,000), `columns` (per
-//! column name: a number `format`, a row `formula`, a `total`), `date_format`, `datetime_format`,
+//! Options: `header` (default true), `max_rows_per_sheet` (default 1,000,000), `autofit` (default
+//! true: column widths from the content, see `widths`), `columns` (per column name: a number
+//! `format`, a row `formula`, a `total`, a `width`), `date_format`, `datetime_format`,
 //! `time_format` (see `formats`), `totals_label` (see `formulas`). Per result set: `anchor`
 //! (default `A1`), `header` and `columns`. A result set longer than `max_rows_per_sheet`
 //! continues on `Name (2)`, `Name (3)`, ... with the header repeated, and a totals row on each.
@@ -14,16 +15,19 @@
 mod cells;
 mod formats;
 mod formulas;
+mod styles;
 mod template;
+mod widths;
 
 use dre_protocol::options::{OptionField, OptionType};
 use dre_protocol::plugin::{About, Format, Result, ResultSets, WriteRequest, serve_format};
-use rust_xlsxwriter::{Format as XFormat, Workbook};
+use rust_xlsxwriter::Workbook;
 use serde_json::Value;
 
 use cells::{CellWriter, parse_cell};
 use formats::Formats;
 use formulas::{Acc, SetFormulas, Total};
+use widths::Widths;
 
 pub const EXCEL_MAX_ROWS: u32 = 1_048_576;
 const DEFAULT_MAX_ROWS: u64 = 1_000_000;
@@ -51,6 +55,17 @@ impl Format for Xlsx {
                 "columns",
                 OptionType::Map,
                 "per column name, on any sheet: `{format: <Excel number format>, formula: \"={a}*{b}\", total: sum}`; a query entry's `columns` wins",
+            ),
+            OptionField::new(
+                "autofit",
+                OptionType::Boolean,
+                "size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win",
+            )
+            .default(true),
+            OptionField::new(
+                "style",
+                OptionType::Map,
+                "how sheets look: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell; a query entry's `style` and a column's win",
             ),
             OptionField::new(
                 "totals_label",
@@ -103,9 +118,18 @@ impl Format for Xlsx {
             .and_then(Value::as_str)
             .unwrap_or(DEFAULT_TOTALS_LABEL)
             .to_string();
+        let autofit_default = req
+            .options
+            .get("autofit")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let output_style = req
+            .options
+            .get("style")
+            .map(|v| dre_protocol::style::parse_sheet(v).0)
+            .unwrap_or_default();
         let mut fmts = Formats::new(&req.options)?;
         let mut wb = Workbook::new();
-        let bold = XFormat::new().set_bold();
         let mut cells = CellWriter::new();
         while let Some(mut rs) = sets.next_set()? {
             let normalized = cells::normalize(&arrow::array::RecordBatch::new_empty(rs.schema.clone()))?;
@@ -118,6 +142,58 @@ impl Format for Xlsx {
             };
             let header = rs.meta.header.unwrap_or(header_default);
             let names: Vec<String> = rs.schema.fields().iter().map(|f| f.name().clone()).collect();
+            // Column widths: a column's `width` (the tab's, else the output's), else `autofit`.
+            let col_widths: Vec<_> = names
+                .iter()
+                .map(|n| {
+                    rs.meta
+                        .columns
+                        .get(n)
+                        .and_then(|c| c.width)
+                        .or_else(|| fmts.output().get(n).and_then(|c| c.width))
+                })
+                .collect();
+            let autofit = rs.meta.autofit.unwrap_or(autofit_default);
+            // The look: the output's style with the tab's over it, and each column's own.
+            let look = styles::Look::new(
+                &output_style.merged(&rs.meta.style.clone().unwrap_or_default()),
+                names
+                    .iter()
+                    .map(|n| {
+                        rs.meta
+                            .columns
+                            .get(n)
+                            .and_then(|c| c.style.clone())
+                            .or_else(|| fmts.output().get(n).and_then(|c| c.style.clone()))
+                    })
+                    .collect(),
+            );
+            let header_fmt = look.header();
+            // Each column's data format, plain and on a banded row.
+            let data_styles: Vec<[Option<cells::ColumnStyle>; 2]> = (0..names.len())
+                .map(|c| {
+                    if !look.styled() {
+                        return [styles[c].clone(), styles[c].clone()];
+                    }
+                    let code = col_formats[c].code();
+                    let at = |banded| {
+                        Some(cells::ColumnStyle {
+                            format: look.data(c, code, banded),
+                            explicit: col_formats[c].is_explicit(),
+                            blanks: true,
+                        })
+                    };
+                    [at(false), at(look.band.is_some())]
+                })
+                .collect();
+            let set_widths = |ws: &mut rust_xlsxwriter::Worksheet, w: &Widths| -> Result<()> {
+                for (c, width) in w.widths().into_iter().enumerate() {
+                    if let Some(width) = width {
+                        ws.set_column_width(anchor_col + c as u16, width)?;
+                    }
+                }
+                Ok(())
+            };
             let totals = set.has_totals();
             let room = (EXCEL_MAX_ROWS - anchor_row) as u64 - u64::from(header) - u64::from(totals);
             let cap = max_rows.min(room);
@@ -136,8 +212,8 @@ impl Format for Xlsx {
                     .map(|i| u32::from(anchor_col) + i as u32)
             };
             let first_row = anchor_row + u32::from(header);
-            let totals_row = |cells: &mut CellWriter,
-                              ws: &mut rust_xlsxwriter::Worksheet,
+            let totals_row = |ws: &mut rust_xlsxwriter::Worksheet,
+                              widths: &mut Widths,
                               row: u32,
                               accs: &[Acc]|
              -> Result<()> {
@@ -146,7 +222,7 @@ impl Format for Xlsx {
                 }
                 for (c, (t, acc)) in set.totals.iter().zip(accs).enumerate() {
                     let col = anchor_col + c as u16;
-                    let fmt = cells.totals_format(col_formats[c].code());
+                    let fmt = look.totals(col_formats[c].code());
                     match t {
                         Some(Total::Function { agg, excel }) => {
                             let f = format!(
@@ -155,7 +231,10 @@ impl Format for Xlsx {
                                 first_row + 1,
                                 row
                             );
-                            let f = rust_xlsxwriter::Formula::new(f).set_result(acc.result(*agg));
+                            let result = acc.result(*agg);
+                            let value = result.parse::<f64>().ok().map(cells::Excel::Number);
+                            widths.total(c, &value, col_formats[c].code());
+                            let f = rust_xlsxwriter::Formula::new(f).set_result(result);
                             ws.write_formula_with_format(row, col, f, &fmt)?;
                         }
                         Some(Total::Formula(parts)) => {
@@ -164,7 +243,8 @@ impl Format for Xlsx {
                             ws.write_formula_with_format(row, col, rust_xlsxwriter::Formula::new(f), &fmt)?;
                         }
                         None if c == 0 && !label.is_empty() => {
-                            ws.write_string_with_format(row, col, &label, &cells.totals_format(None))?;
+                            widths.text(c, &label);
+                            ws.write_string_with_format(row, col, &label, &look.totals(None))?;
                         }
                         None => {
                             ws.write_blank(row, col, &fmt)?;
@@ -182,9 +262,11 @@ impl Format for Xlsx {
             let mut written: u64 = 0;
             let mut row = anchor_row;
             let mut accs = vec![Acc::default(); names.len()];
+            let mut widths = Widths::new(autofit, &col_widths);
             if header {
                 for (c, n) in names.iter().enumerate() {
-                    ws.write_string_with_format(row, anchor_col + c as u16, n, &bold)?;
+                    widths.text(c, n);
+                    ws.write_string_with_format(row, anchor_col + c as u16, n, &header_fmt)?;
                 }
                 row += 1;
             }
@@ -192,7 +274,9 @@ impl Format for Xlsx {
                 let batch = cells::normalize(&batch)?;
                 for i in 0..batch.num_rows() {
                     if written == cap {
-                        totals_row(&mut cells, ws, row, &accs)?;
+                        totals_row(ws, &mut widths, row, &accs)?;
+                        set_widths(ws, &widths)?;
+                        widths = Widths::new(autofit, &col_widths);
                         accs = vec![Acc::default(); names.len()];
                         part += 1;
                         ws = wb.add_worksheet_with_constant_memory();
@@ -203,7 +287,8 @@ impl Format for Xlsx {
                         written = 0;
                         if header {
                             for (c, n) in names.iter().enumerate() {
-                                ws.write_string_with_format(row, anchor_col + c as u16, n, &bold)?;
+                                widths.text(c, n);
+                                ws.write_string_with_format(row, anchor_col + c as u16, n, &header_fmt)?;
                             }
                             row += 1;
                         }
@@ -219,7 +304,8 @@ impl Format for Xlsx {
                         };
                         // Totals see what the sheet holds: a row formula's cached result.
                         accs[c].add(&v);
-                        let style = styles[c].as_ref();
+                        widths.value(c, &v, col_formats[c].code());
+                        let style = data_styles[c][usize::from(written % 2 == 1)].as_ref();
                         cells.write(
                             ws,
                             &sheet,
@@ -234,9 +320,11 @@ impl Format for Xlsx {
                     }
                     row += 1;
                     written += 1;
+                    widths.end_row();
                 }
             }
-            totals_row(&mut cells, ws, row, &accs)?;
+            totals_row(ws, &mut widths, row, &accs)?;
+            set_widths(ws, &widths)?;
         }
         fmts.finish()?;
         wb.save(&req.path)

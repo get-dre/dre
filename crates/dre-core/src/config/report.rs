@@ -83,9 +83,37 @@ pub struct QueryEntry {
     #[serde(default)]
     #[schemars(schema_with = "columns")]
     pub columns: Option<serde_json::Value>,
+    /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
+    pub autofit: Option<Loose<bool>>,
+    /// How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page.
+    #[serde(default)]
+    #[schemars(schema_with = "sheet_style")]
+    pub style: Option<serde_json::Value>,
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub unknown: UnknownKeys,
+}
+
+fn sheet_style(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "description": "How an xlsx tab looks. Cell keys apply to every data cell; `header` and `totals` take cell keys for those rows.",
+        "properties": {
+            "header": {"type": "object", "description": "Cell keys for the header row (default: bold)."},
+            "totals": {"type": "object", "description": "Cell keys for the totals row (default: bold, a thin top border)."},
+            "banded_rows": {"oneOf": [{"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$"}, {"const": false}], "description": "The fill of every other data row, `\"#RRGGBB\"`, or `false`."},
+            "borders": {"enum": ["none", "thin", "medium"], "description": "A border around every cell of the table."},
+            "bold": {"type": "boolean", "description": "Bold text in every data cell."},
+            "italic": {"type": "boolean", "description": "Italic text in every data cell."},
+            "underline": {"type": "boolean", "description": "Underlined text in every data cell."},
+            "font": {"type": "object", "description": "The font: `{name: Calibri, size: 11}`.", "properties": {"name": {"type": "string", "description": "The font's name."}, "size": {"type": "number", "description": "The size in points."}}, "additionalProperties": false},
+            "font_color": {"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$", "description": "The text colour, `\"#RRGGBB\"`."},
+            "fill": {"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$", "description": "The background colour, `\"#RRGGBB\"`."},
+            "align": {"enum": ["left", "center", "right"], "description": "Horizontal alignment."},
+            "border": {"enum": ["none", "thin", "medium"], "description": "A border around each data cell."}
+        },
+        "additionalProperties": false
+    })
 }
 
 fn columns(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -97,7 +125,9 @@ fn columns(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
             "properties": {
                 "format": {"type": "string", "description": "The Excel number format of the column, e.g. `#,##0.00` or `dd/mm/yyyy`. See the xlsx column formats in the plugins reference."},
                 "formula": {"type": "string", "description": "An Excel formula for each row of this column; `{name}` stands for that column's cell on the same row, e.g. `=ROUND({qty}*{unit_price},2)`. The SQL selects a placeholder column where the formula goes."},
-                "total": {"type": "string", "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."}
+                "total": {"type": "string", "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."},
+                "style": {"type": "object", "description": "How the column's data cells look: `bold`, `italic`, `underline`, `font` (`{name, size}`), `font_color`, `fill` (`\"#RRGGBB\"`), `align` (`left`, `center`, `right`), `border` (`none`, `thin`, `medium`). Over the tab's and output's `style`."},
+                "width": {"oneOf": [{"const": "auto"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 255}], "description": "The column's width: `auto` (sized from its content, at most 60 characters) or a number of characters. Over the tab's and output's `autofit`."}
             },
             "additionalProperties": false
         },

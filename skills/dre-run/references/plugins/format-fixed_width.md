@@ -33,58 +33,15 @@ Set in the report's `output:` block.
 
 ## From the plugin docs
 
-### Formats
+### Fixed-width text
 
-Each format plugin declares and checks its own options: `dre validate` and `dre run` send every
-report's `output:` keys to the plugin before anything runs, and report each problem with the
-report it came from. A format no declared package provides, or whose package isn't installed, is
-an error. For one no declared package provides, `dre validate` and `dre run` look it up in DRE's
-plugin registry and name the package to add under `plugins:` in `dependencies.yml`.
+#### Values
 
-Project-wide defaults for a format go in `dre_project.yml` under `format_options`, keyed by
-format. They apply under every output of that format, whatever folder or report chose it, and a
-report's own keys win:
-
-```yaml
-format_options:
-  delimited: {delimiter: "|", quoting: strings}
-  csv: {quoting: all}
-```
-
-| Format | Options |
-|---|---|
-| `csv`, `delimited` | `delimiter`, `quote`, `quoting`, `header`, `line_ending`, `encoding`, `null`, `byte_order_mark` |
-| `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugins.md#fixed-width-columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
-| `parquet` | none; Arrow types are preserved |
-| `xlsx` | `header`, `max_rows_per_sheet`, `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugins.md#xlsx-column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugins.md#xlsx-formulas-and-totals-rows)); per query `anchor`/`header`/`columns`; `template` |
-| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
-
-Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
-`""` for none. The file is written the same way; only its name changes.
-
-- `quoting` (csv, delimited) picks which fields are wrapped in `quote`:
-  - `minimal` (the default): only fields holding the delimiter, the quote or a line break;
-  - `all`: every field but nulls;
-  - `strings`: every value of a text, date, time or timestamp column, and the header; numbers,
-    booleans and nulls stay bare unless they hold the delimiter;
-  - `none`: no field. A value that can't be written without quotes fails the run, naming the row
-    and column.
-
-  A doubled quote escapes a quote inside a quoted field. For tab- or pipe-separated text, use
-  `delimited` with `delimiter: "\t"` and, say, `extension: tsv`.
-- `null: "NULL"` (csv, delimited) writes that marker for nulls instead of an empty field. It can be
-  written unquoted as above: DRE reads a YAML `null:` key as the option `null`.
-- Timestamps with a timezone are written in their zone with the offset,
-  `2026-01-01 11:00:00+11:00`; timestamps without one as `2026-01-01 00:00:00`.
 - `fixed_width` refuses a value with a line break, since it would split the record, naming the
   row and column. `line_breaks: replace` writes a space instead. Tabs and other characters are
   written as they are.
-- `xlsx` keeps every value exact. What Excel can't store as a number or date is written as text,
-  with one warning per column: numbers with more than 15 significant digits (large integers,
-  wide decimals), numbers beyond Excel's range, and dates or timestamps before 1900-03-01 or
-  after 9999-12-31 (as ISO text). Those values get no number format, and the warning says so.
 
-### Fixed-width columns
+#### Columns
 
 Write the query as normal SQL; `columns:` lays each result column out, in order. Every key but
 `name` and `width` (or `picture`) is optional. By default every field is left-aligned and
@@ -139,6 +96,38 @@ A 9 picture is right-aligned and zero-filled, as in COBOL; `align` and `pad` sti
 `trailing` adds one character to the width for the sign (COBOL `SIGN SEPARATE`). Overpunch
 writes the last digit 0–9 as `{`, `A`–`I` for positive numbers and `}`, `J`–`R` for negative
 ones. Packed decimal (`COMP-3`) is binary, not text, and isn't supported.
+
+### Formats
+
+Each format plugin declares and checks its own options: `dre validate` and `dre run` send every
+report's `output:` keys to the plugin before anything runs, and report each problem with the
+report it came from. A format no declared package provides, or whose package isn't installed, is
+an error. For one no declared package provides, `dre validate` and `dre run` look it up in DRE's
+plugin registry and name the package to add under `plugins:` in `dependencies.yml`.
+
+Project-wide defaults for a format go in `dre_project.yml` under `format_options`, keyed by
+format. They apply under every output of that format, whatever folder or report chose it, and a
+report's own keys win:
+
+```yaml
+format_options:
+  delimited: {delimiter: "|", quoting: strings}
+  csv: {quoting: all}
+```
+
+| Format | Options |
+|---|---|
+| `csv`, `delimited` | `delimiter`, `quote`, `quoting`, `header`, `line_ending`, `encoding`, `null`, `byte_order_mark` |
+| `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
+| `parquet` | none; Arrow types are preserved |
+| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-widths)), `style` (see [Styles](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
+| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
+
+Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
+`""` for none. The file is written the same way; only its name changes.
+
+- Timestamps with a timezone are written in their zone with the offset,
+  `2026-01-01 11:00:00+11:00`; timestamps without one as `2026-01-01 00:00:00`.
 
 ## Guide notes
 
