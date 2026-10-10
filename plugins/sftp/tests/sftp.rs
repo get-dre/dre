@@ -220,3 +220,25 @@ fn uploads_under_a_temporary_name_replacing_a_file_already_there() {
     let err = deliver_with("upload/atomic/u.csv", conn, json!({"atomic": "yes"}), b"x").unwrap_err();
     assert!(err.contains("atomic"), "{err}");
 }
+
+#[test]
+fn if_exists_refuses_or_numbers_a_name_already_taken() {
+    let Some((host, port)) = server() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let kh = known_hosts(dir.path(), &host, port);
+    let conn = base(json!({"known_hosts_path": kh}));
+    let name = format!("upload/exists/{}.csv", std::process::id());
+    deliver(&name, conn.clone(), b"one").unwrap();
+    for atomic in [true, false] {
+        let opts = json!({"if_exists": "error", "atomic": atomic});
+        let err = deliver_with(&name, conn.clone(), opts, b"x").unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        let opts = json!({"if_exists": "number", "atomic": atomic});
+        let loc = deliver_with(&name, conn.clone(), opts, b"two").unwrap();
+        let n = if atomic { 2 } else { 3 };
+        assert!(
+            loc.ends_with(&name.replace(".csv", &format!("_{n}.csv"))),
+            "{loc}"
+        );
+    }
+}

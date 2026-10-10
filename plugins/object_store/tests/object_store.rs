@@ -39,6 +39,44 @@ fn deliver(kind: &str, remote: &str, conn: Value, bytes: &[u8]) -> Result<String
         .map_err(|e| e.to_string())
 }
 
+/// `deliver` with the destination entry's options.
+fn deliver_with(
+    kind: &str,
+    remote: &str,
+    conn: Value,
+    options: Value,
+    bytes: &[u8],
+) -> Result<String, String> {
+    let dir = tempfile::tempdir().unwrap();
+    let local = dir.path().join("report.csv");
+    std::fs::write(&local, bytes).unwrap();
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start_for(bin(), Some(&plugin(kind)), log, None).unwrap();
+    let (Value::Object(c), Value::Object(o)) = (conn, options) else {
+        panic!()
+    };
+    let file = dre_protocol::msg::DeliveryFile {
+        local_path: local.to_str().unwrap().to_string(),
+        remote_path: Some(remote.to_string()),
+    };
+    p.deliver_files(&[file], c, o).map_err(|e| e.to_string())
+}
+
+/// `if_exists`: `error` refuses a name already taken, `number` picks the next free one.
+fn check_if_exists(kind: &str, remote: &str, conn: Value) {
+    let numbered = remote.replace(".csv", "_2.csv");
+    deliver(kind, remote, conn.clone(), b"one").unwrap();
+    deliver(kind, remote, conn.clone(), b"overwritten").unwrap();
+    let err = deliver_with(kind, remote, conn.clone(), json!({"if_exists": "error"}), b"x").unwrap_err();
+    assert!(err.contains("already"), "{err}");
+    assert_eq!(
+        deliver_with(kind, remote, conn.clone(), json!({"if_exists": "number"}), b"two").unwrap(),
+        numbered
+    );
+    let err = deliver_with(kind, remote, conn, json!({"if_exists": "keep"}), b"x").unwrap_err();
+    assert!(err.contains("if_exists"), "{err}");
+}
+
 /// ~20 MB of varied bytes, enough for a multipart upload.
 fn payload() -> Vec<u8> {
     (0..20_000_000u32)
@@ -97,6 +135,11 @@ fn s3_uploads_and_reports_failures() {
         deliver("s3", "small.csv", c2, b"a,b\r\n").unwrap(),
         "s3://reports/small.csv"
     );
+    check_if_exists(
+        "s3",
+        &format!("s3://reports/if-exists/{}.csv", std::process::id()),
+        conn.clone(),
+    );
     let err = deliver("s3", "s3://no-such-bucket/x.csv", conn, b"x").unwrap_err();
     assert!(
         err.contains("upload to s3://no-such-bucket/x.csv failed"),
@@ -120,8 +163,13 @@ fn gcs_uploads_through_the_emulator() {
     let conn = json!({"service_account_key_path": key.to_str().unwrap()});
     let data = payload();
     assert_eq!(
-        deliver("gcs", "gs://reports/out/report.csv", conn, &data).unwrap(),
+        deliver("gcs", "gs://reports/out/report.csv", conn.clone(), &data).unwrap(),
         "gs://reports/out/report.csv"
+    );
+    check_if_exists(
+        "gcs",
+        &format!("gs://reports/if-exists/{}.csv", std::process::id()),
+        conn,
     );
     let store = object_store::gcp::GoogleCloudStorageBuilder::new()
         .with_bucket_name("reports")
@@ -182,8 +230,13 @@ fn azure_uploads_with_a_connection_string_or_a_key() {
     let conn =
         json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": blob, "container": "reports"});
     assert_eq!(
-        deliver("azure", "key/report.csv", conn, b"a\r\n").unwrap(),
+        deliver("azure", "key/report.csv", conn.clone(), b"a\r\n").unwrap(),
         "az://reports/key/report.csv"
+    );
+    check_if_exists(
+        "azure",
+        &format!("az://reports/if-exists/{}.csv", std::process::id()),
+        conn,
     );
     let store = object_store::azure::MicrosoftAzureBuilder::new()
         .with_account(AZ_ACCOUNT)

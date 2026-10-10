@@ -244,13 +244,10 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
     }
 }
 
-/// The options core's built-in `local` destination takes: the shared delivery rules' `atomic`
-/// and `temp_dir`.
+/// The options core's built-in `local` destination takes: the shared delivery rules'
+/// `if_exists`, `atomic` and `temp_dir`.
 pub fn local_options() -> Vec<dre_protocol::options::OptionField> {
     dre_protocol::delivery::option_fields()
-        .into_iter()
-        .filter(|f| f.name == "atomic" || f.name == "temp_dir")
-        .collect()
 }
 
 /// Every problem with a `local` destination entry's options.

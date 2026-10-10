@@ -590,7 +590,49 @@ ones. Packed decimal (`COMP-3`) is binary, not text, and isn't supported.
 ## Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
-plugin and no declaration. It takes the options `atomic` and `temp_dir`, described below.
+plugin and no declaration. It takes the options `if_exists`, `atomic` and `temp_dir`, described
+below.
+
+A destination entry's keys other than `profile` and `path` are the plugin's options, and the
+plugin checks them the same way formats do, against the destination profile's entry for the
+run's target. A value holding Jinja is checked once it's rendered, at delivery.
+
+Every destination that talks to a server takes two timeouts in its profile entry, as durations
+(`30s`, `5m`) or seconds:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `connect_timeout` | `30s` | How long to wait for a connection. |
+| `timeout` | `60s` | How long a request may make no progress (the server sends or accepts nothing) before it fails. For object stores, how long one request may take; large files go up in parts. |
+
+There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
+run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
+
+### A file already at the path
+
+By default a delivery **replaces** a file already at its path: the usual reason a name is taken
+is a rerun of a corrected report, and replacing the bad file is what's wanted. Every file
+destination (`local`, `s3`, `gcs`, `azure_blob`, `sftp`, `ftp`, `databricks`) takes
+`if_exists` per destination entry to change that:
+
+```yaml
+destination:
+  profile: client_sftp
+  path: "outbound/monthly-{{ run.date.yyyymm }}.xlsx"
+  if_exists: error      # overwrite (default) | error | number
+```
+
+| Value | What happens |
+|---|---|
+| `overwrite` | The new file replaces the old one. |
+| `error` | That delivery fails (code `<plugin>/file-exists`, `local/file-exists` for `local`); the run's other deliveries still go, and the run exits 1. |
+| `number` | Both are kept: the new file is saved as `<name>_2.<ext>`, else `_3`, and so on. `run_results.json` (`location`) and the log show the name used. |
+
+The check and the write are one step where the server allows it: SFTP's exclusive create and
+no-replace rename, conditional uploads on object stores (`If-None-Match: *`, GCS's
+`ifGenerationMatch=0`), `overwrite=false` on Databricks, and an exclusive create for `local`. FTP
+has no such step, so DRE looks first, then uploads: two runs at the same moment could both see the
+name free. Put a date or a period in delivery paths so different runs don't collide by accident.
 
 ### Uploads under a temporary name
 
@@ -607,21 +649,6 @@ Replacing a file already there: SFTP's rename can't replace one, so DRE removes 
 before the rename (a moment with no file at that name); an FTP server's rename usually replaces it
 in one step. Object stores (`s3`, `gcs`, `azure_blob`) and Databricks Volumes and Workspace files
 only show a file once its upload completes, so they need no temporary name.
-
-A destination entry's keys other than `profile` and `path` are the plugin's options, and the
-plugin checks them the same way formats do, against the destination profile's entry for the
-run's target. A value holding Jinja is checked once it's rendered, at delivery.
-
-Every destination that talks to a server takes two timeouts in its profile entry, as durations
-(`30s`, `5m`) or seconds:
-
-| Field | Default | Meaning |
-|---|---|---|
-| `connect_timeout` | `30s` | How long to wait for a connection. |
-| `timeout` | `60s` | How long a request may make no progress (the server sends or accepts nothing) before it fails. For object stores, how long one request may take; large files go up in parts. |
-
-There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
-run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
 
 ### Several destinations
 
@@ -659,8 +686,8 @@ output:
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
   fails that entry; DRE can't email a link instead (see [`email`](#email)).
-- A destination that takes no options (`local`, `s3`, `sftp`, ...) fails the delivery if its
-  entry has any other key, so a misspelt `path` is caught instead of ignored.
+- A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
+  is caught instead of ignored.
 
 ### `s3`
 
@@ -670,19 +697,22 @@ shared config and credentials files (the profile named by `profile:`, else `AWS_
 `credential_process`, web identity, and container or instance roles. `AWS_EC2_METADATA_DISABLED`
 is honoured, and with no credentials anywhere the delivery fails at once, listing what it tried.
 The region comes from `region:`, else the AWS config. `endpoint` and `allow_http` point it at
-S3-compatible stores. Paths are `s3://bucket/key`, or a bare key in `bucket`.
+S3-compatible stores. Paths are `s3://bucket/key`, or a bare key in `bucket`. Takes `if_exists`
+(see [above](#a-file-already-at-the-path)); the S3-compatible store must support conditional
+writes for `error` and `number`.
 
 ### `gcs`
 
 `bucket`, and `service_account_key_path` or `service_account_key`. Leave both out to use
 application default credentials: `GOOGLE_APPLICATION_CREDENTIALS`, the file
 `gcloud auth application-default login` writes, or the metadata server on Google Cloud. `endpoint` is for emulators. Paths are `gs://bucket/key`.
-Uploads use GCS's resumable protocol.
+Uploads use GCS's resumable protocol. Takes `if_exists` (see [above](#a-file-already-at-the-path)).
 
 ### `azure_blob`
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
 `use_managed_identity: true`, or `use_azure_cli: true` (the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+Takes `if_exists` (see [above](#a-file-already-at-the-path)).
 
 ### `sftp`
 
@@ -694,7 +724,8 @@ checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
 `~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
-see [above](#uploads-under-a-temporary-name)). The [`postgres`](#postgres)
+see [above](#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
+write (see [above](#a-file-already-at-the-path)). The [`postgres`](#postgres)
 source's `ssh:` block takes the same settings.
 
 ### `ftp`
@@ -707,7 +738,8 @@ which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv
 connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
 Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
 [above](#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
-server when it can.
+server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
+rename; FTP can't do both in one step (see [above](#a-file-already-at-the-path)).
 
 ### `databricks`
 
@@ -728,13 +760,16 @@ destinations:
 - **`/Workspace/Users/<user>/...`, `/Workspace/Shared/...` or `/Workspace/Repos/...`** (the
   `/Workspace` prefix is optional): a workspace file, for outputs people open from the workspace
   browser, next to notebooks and dashboards. Missing folders are created, the file replaces one
-  already at the path, and it's always a plain file: a `.sql` or `.py` output isn't turned into a
+  already at the path (unless `if_exists` says otherwise), and it's always a plain file: a `.sql` or `.py` output isn't turned into a
   notebook. Workspace files are meant for small files (the import API takes up to about 10 MB);
   use a Volume for large outputs.
 
 On Databricks compute, where `/Volumes` and `/Workspace` are mounted, the file is copied there
 directly instead: no API call and no sign-in, with the job's own access. The same report works
 outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databricks job or cluster.
+
+Takes `if_exists` (see [above](#a-file-already-at-the-path)): the Files and Workspace APIs'
+`overwrite=false` refuses a taken name in the same step.
 
 ### `email`
 

@@ -31,14 +31,21 @@ Never write a secret's value: use `env_var()` (SEC-3).
 
 ## Report options
 
-None.
+Set in the report's `output.destination` entry.
+
+| Option | Type | Required | Default | Allowed | Description |
+|---|---|---|---|---|---|
+| `if_exists` | string | no | `overwrite` | `overwrite`, `error`, `number` | when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one |
+| `atomic` | boolean | no | `true` |  | upload under a temporary name, then rename, so no half-written file appears |
+| `temp_dir` | string | no |  |  | where the temporary file goes (on the same server), for receivers that pick up any new file |
 
 ## From the plugin docs
 
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
-plugin and no declaration.
+plugin and no declaration. It takes the options `if_exists`, `atomic` and `temp_dir`, described
+below.
 
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
@@ -91,8 +98,50 @@ output:
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
   fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
-- A destination that takes no options (`local`, `s3`, `sftp`, ...) fails the delivery if its
-  entry has any other key, so a misspelt `path` is caught instead of ignored.
+- A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
+  is caught instead of ignored.
+
+### A file already at the path
+
+By default a delivery **replaces** a file already at its path: the usual reason a name is taken
+is a rerun of a corrected report, and replacing the bad file is what's wanted. Every file
+destination (`local`, `s3`, `gcs`, `azure_blob`, `sftp`, `ftp`, `databricks`) takes
+`if_exists` per destination entry to change that:
+
+```yaml
+destination:
+  profile: client_sftp
+  path: "outbound/monthly-{{ run.date.yyyymm }}.xlsx"
+  if_exists: error      # overwrite (default) | error | number
+```
+
+| Value | What happens |
+|---|---|
+| `overwrite` | The new file replaces the old one. |
+| `error` | That delivery fails (code `<plugin>/file-exists`, `local/file-exists` for `local`); the run's other deliveries still go, and the run exits 1. |
+| `number` | Both are kept: the new file is saved as `<name>_2.<ext>`, else `_3`, and so on. `run_results.json` (`location`) and the log show the name used. |
+
+The check and the write are one step where the server allows it: SFTP's exclusive create and
+no-replace rename, conditional uploads on object stores (`If-None-Match: *`, GCS's
+`ifGenerationMatch=0`), `overwrite=false` on Databricks, and an exclusive create for `local`. FTP
+has no such step, so DRE looks first, then uploads: two runs at the same moment could both see the
+name free. Put a date or a period in delivery paths so different runs don't collide by accident.
+
+### Uploads under a temporary name
+
+The `local`, `sftp` and `ftp` destinations write a file as `.<name>.dre-part` in the same folder,
+then rename it to its final name, so a dropped connection or a stopped run never leaves a
+half-written file where a receiving system may pick it up. Two options, per destination entry:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `atomic` | `true` | `false` writes straight to the final name (for a server that forbids renames). |
+| `temp_dir` | | Where the temporary file goes, on the same server: absolute, or relative to the file's folder (`../staging`). For a receiver that picks up any new file, even a hidden one. |
+
+Replacing a file already there: SFTP's rename can't replace one, so DRE removes the old file just
+before the rename (a moment with no file at that name); an FTP server's rename usually replaces it
+in one step. Object stores (`s3`, `gcs`, `azure_blob`) and Databricks Volumes and Workspace files
+only show a file once its upload completes, so they need no temporary name.
 
 ### ftp
 
@@ -102,7 +151,10 @@ output:
 Paths are relative to the folder the login starts in; a leading `/` means the server's root,
 which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
 connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
-Server require by default. A failed upload removes the partial file from the server when it can.
+Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
+[above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
+server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
+rename; FTP can't do both in one step (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
 
 ## Guide notes
 

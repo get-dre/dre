@@ -110,3 +110,27 @@ fn uploads_under_a_temporary_name_replacing_a_file_already_there() {
     .unwrap();
     deliver_with("atomic/t.csv", conn, json!({"atomic": false}), b"four").unwrap();
 }
+
+#[test]
+fn if_exists_refuses_or_numbers_a_name_already_taken() {
+    let Ok(server) = std::env::var("DRE_TEST_FTP") else {
+        eprintln!("skipped: set DRE_TEST_FTP=host:port");
+        return;
+    };
+    let (host, port) = server.split_once(':').unwrap();
+    let conn = json!({"host": host, "port": port, "username": "dre", "password": "dre-pass"});
+    let name = format!("exists/{}.csv", std::process::id());
+    deliver(&name, conn.clone(), b"one").unwrap();
+    for atomic in [true, false] {
+        let opts = json!({"if_exists": "error", "atomic": atomic});
+        let err = deliver_with(&name, conn.clone(), opts, b"x").unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        let opts = json!({"if_exists": "number", "atomic": atomic});
+        let loc = deliver_with(&name, conn.clone(), opts, b"two").unwrap();
+        let n = if atomic { 2 } else { 3 };
+        assert!(
+            loc.ends_with(&name.replace(".csv", &format!("_{n}.csv"))),
+            "{loc}"
+        );
+    }
+}

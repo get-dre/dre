@@ -2353,7 +2353,8 @@ impl<'a> BindingRun<'a> {
             if !errors.is_empty() {
                 return Err(format!("destination `{}`: {}", d.profile, errors.join("; ")).into());
             }
-            // `atomic` (default true: written as `.<name>.dre-part`, then renamed) and `temp_dir`.
+            // `if_exists`, `atomic` (default true: written as `.<name>.dre-part`, then renamed)
+            // and `temp_dir`.
             let (rules, _) = dre_protocol::delivery::Rules::from_settings(
                 dre_protocol::delivery::Rules {
                     retries: 0,
@@ -2376,7 +2377,19 @@ impl<'a> BindingRun<'a> {
                     &dst,
                     &rules,
                 )
-                .map_err(|e| format!("delivery to {dst} failed: {e}; the output is still in target/"))?;
+                .map_err(|e| {
+                    let message = format!("delivery to {dst} failed: {e}; the output is still in target/");
+                    if e.exists {
+                        // `if_exists: error`, coded as a plugin's would be.
+                        let code = crate::codes::ErrorCode::Plugin {
+                            code: "local/file-exists".into(),
+                            kind: crate::codes::Kind::Delivery,
+                        };
+                        Fail::new(code, message)
+                    } else {
+                        Fail::new(Code::DeliveryFailed, message)
+                    }
+                })?;
                 let loc = delivered.path;
                 self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
                 self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());

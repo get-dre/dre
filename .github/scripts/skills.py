@@ -57,6 +57,8 @@ COPIES = {
 # None takes the text between the ## heading and its first ###. Every field and option a plugin
 # declares must be named (in backticks) in its sections.
 _DEST = [("Destinations", None), ("Destinations", "Several destinations")]
+_EXISTS = [("Destinations", "A file already at the path")]
+_FILES = _EXISTS + [("Destinations", "Uploads under a temporary name")]
 _FORMAT = [("Formats", None)]
 DOC_SECTIONS = {
     "source/duckdb": [("Sources", "`duckdb`")],
@@ -69,12 +71,12 @@ DOC_SECTIONS = {
     "format/fixed_width": _FORMAT + [("Formats", "Fixed-width columns")],
     "format/parquet": _FORMAT,
     "format/xlsx": _FORMAT + [("Formats", "xlsx column formats"), ("Formats", "xlsx formulas and totals rows")],
-    "destination/s3": _DEST + [("Destinations", "`s3`")],
-    "destination/gcs": _DEST + [("Destinations", "`gcs`")],
-    "destination/azure_blob": _DEST + [("Destinations", "`azure_blob`")],
-    "destination/sftp": _DEST + [("Destinations", "`sftp`")],
-    "destination/ftp": _DEST + [("Destinations", "`ftp`")],
-    "destination/databricks": _DEST + [("Destinations", "`databricks`")],
+    "destination/s3": _DEST + _EXISTS + [("Destinations", "`s3`")],
+    "destination/gcs": _DEST + _EXISTS + [("Destinations", "`gcs`")],
+    "destination/azure_blob": _DEST + _EXISTS + [("Destinations", "`azure_blob`")],
+    "destination/sftp": _DEST + _FILES + [("Destinations", "`sftp`")],
+    "destination/ftp": _DEST + _FILES + [("Destinations", "`ftp`")],
+    "destination/databricks": _DEST + _EXISTS + [("Destinations", "`databricks`")],
     "destination/email": _DEST + [("Destinations", "`email`")],
     "destination/slack": _DEST + [("Destinations", "`slack`")],
     "destination/teams": _DEST + [("Destinations", "`teams`")],

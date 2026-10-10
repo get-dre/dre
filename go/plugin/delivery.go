@@ -177,6 +177,16 @@ func DeliveryFields() []Field {
 	}
 }
 
+// DeliveryOptions are the options a destination entry takes for these rules: if_exists, atomic
+// and temp_dir. A store whose files only appear once complete needs only if_exists.
+func DeliveryOptions() []OptionField {
+	return []OptionField{
+		{Name: "if_exists", Type: "string", Description: "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one", Default: "overwrite", Choices: []string{"overwrite", "error", "number"}},
+		{Name: "atomic", Type: "boolean", Description: "upload under a temporary name, then rename, so no half-written file appears", Default: true},
+		{Name: "temp_dir", Type: "string", Description: "where the temporary file goes (on the same server), for receivers that pick up any new file"},
+	}
+}
+
 // Caps is what a store can do in one step.
 type Caps struct {
 	// CreateExclusive: Write with exclusive fails with ErrExists in the same step.

@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,7 +34,7 @@ func volumesFields() []plugin.Field {
 	return out
 }
 
-func deliverToVolume(local, remote string, conn map[string]any) (string, error) {
+func deliverToVolume(local, remote string, conn, opts map[string]any) (string, error) {
 	if remote == "" {
 		return "", fmt.Errorf("the databricks destination needs `output.destination.path`")
 	}
@@ -46,8 +47,16 @@ func deliverToVolume(local, remote string, conn map[string]any) (string, error) 
 		return "", fmt.Errorf("`%s` must be /Volumes/<catalog>/<schema>/<volume>/<file>", remote)
 	}
 	path := "/" + strings.Join(parts, "/")
-	if loc, ok, err := copyToMountedVolume(local, parts); ok || err != nil {
-		return loc, err
+	rules, err := rulesFor(opts)
+	if err != nil {
+		return "", err
+	}
+	if root, ok := mountedVolume(parts); ok {
+		d, err := plugin.Deliver(mountStore{root}, local, path, rules)
+		if err != nil {
+			return "", failed("copy to", path, err)
+		}
+		return d.Path, nil
 	}
 	host, err := required(conn, "host")
 	if err != nil {
@@ -73,52 +82,73 @@ func deliverToVolume(local, remote string, conn map[string]any) (string, error) 
 			return "", fmt.Errorf("can't create %s: %v", dir, err)
 		}
 	}
-	if err := volumeRequest(client, base+"/api/2.0/fs/files"+percentEncode(path, true)+"?overwrite=true", a, local); err != nil {
-		return "", fmt.Errorf("upload to %s failed: %v; the output is still in target/", path, err)
+	d, err := plugin.Deliver(&volumeStore{client, base, a}, local, path, rules)
+	if err != nil {
+		return "", failed("upload to", path, err)
 	}
-	return "dbfs:" + path, nil
+	return "dbfs:" + d.Path, nil
 }
 
-// copyToMountedVolume writes to /Volumes/... directly when this runs on Databricks compute and
-// the volume is mounted. ok is false when it doesn't apply, so the Files API is used instead.
-// DRE_VOLUMES_ROOT stands in for / in tests.
-func copyToMountedVolume(local string, parts []string) (loc string, ok bool, err error) {
-	if os.Getenv("DATABRICKS_RUNTIME_VERSION") == "" {
-		return "", false, nil
+// volumeStore is the Files API, as the shared delivery rules' store: `overwrite=false` refuses
+// a file already there in the same step (409).
+type volumeStore struct {
+	client *http.Client
+	base   string
+	a      *auth
+}
+
+func (*volumeStore) Caps() plugin.Caps {
+	return plugin.Caps{CreateExclusive: true, VisibleWhenComplete: true}
+}
+
+func (s *volumeStore) Write(local, remote string, exclusive bool) error {
+	url := fmt.Sprintf("%s/api/2.0/fs/files%s?overwrite=%t", s.base, percentEncode(remote, true), !exclusive)
+	err := volumeRequest(s.client, url, s.a, local)
+	var he *httpError
+	if errors.As(err, &he) && he.status == 409 {
+		return plugin.ErrExists
 	}
-	root := os.Getenv("DRE_VOLUMES_ROOT")
+	return err
+}
+
+func (*volumeStore) Rename(_, to string, _ bool) error {
+	return fmt.Errorf("can't rename to %s: Volumes need no temporary name", to)
+}
+
+func (s *volumeStore) Exists(remote string) (bool, error) {
+	st, err := statusOf(s.client, "HEAD", s.base+"/api/2.0/fs/files"+percentEncode(remote, true), s.a)
+	switch {
+	case err != nil:
+		return false, err
+	case st == 404:
+		return false, nil
+	case st >= 200 && st < 300:
+		return true, nil
+	}
+	return false, fmt.Errorf("can't look for %s: HTTP %d", remote, st)
+}
+
+func (s *volumeStore) Delete(remote string) error {
+	_, err := statusOf(s.client, "DELETE", s.base+"/api/2.0/fs/files"+percentEncode(remote, true), s.a)
+	return err
+}
+
+// mountedVolume is the root to write /Volumes/... under when this runs on Databricks compute
+// and the volume is mounted; ok is false when it doesn't apply, so the Files API is used
+// instead. DRE_VOLUMES_ROOT stands in for / in tests.
+func mountedVolume(parts []string) (root string, ok bool) {
+	if os.Getenv("DATABRICKS_RUNTIME_VERSION") == "" {
+		return "", false
+	}
+	root = os.Getenv("DRE_VOLUMES_ROOT")
 	if root == "" {
 		root = "/"
 	}
 	volume := filepath.Join(append([]string{root}, parts[:4]...)...)
 	if st, err := os.Stat(volume); err != nil || !st.IsDir() {
-		return "", false, nil
+		return "", false
 	}
-	dest := filepath.Join(append([]string{root}, parts...)...)
-	path := "/" + strings.Join(parts, "/")
-	fail := func(err error) (string, bool, error) {
-		return "", true, fmt.Errorf("copy to %s failed: %v; the output is still in target/", path, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fail(err)
-	}
-	in, err := os.Open(local)
-	if err != nil {
-		return fail(err)
-	}
-	defer in.Close()
-	out, err := os.Create(dest)
-	if err != nil {
-		return fail(err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return fail(err)
-	}
-	if err := out.Close(); err != nil {
-		return fail(err)
-	}
-	return path, true, nil
+	return root, true
 }
 
 // volumeRequest PUTs to url (with the file at local as the body, when set), retrying while the
@@ -186,7 +216,7 @@ func volumeRequest(client *http.Client, url string, a *auth, local string) error
 		case 404:
 			hint = " (check the catalog, schema and volume exist)"
 		}
-		return fmt.Errorf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))
+		return &httpError{resp.StatusCode, apiErrorCode(text), fmt.Sprintf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))}
 	}
 }
 
@@ -204,6 +234,15 @@ func apiError(body []byte) string {
 		return e.Message
 	}
 	return truncate(strings.TrimSpace(string(body)), 300)
+}
+
+// apiErrorCode is a Databricks REST error's `error_code`, or "".
+func apiErrorCode(body []byte) string {
+	var e struct {
+		Code string `json:"error_code"`
+	}
+	json.Unmarshal(body, &e)
+	return e.Code
 }
 
 // percentEncode escapes everything but RFC 3986 unreserved characters (and / when keepSlash).

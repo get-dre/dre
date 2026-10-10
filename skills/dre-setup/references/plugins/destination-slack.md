@@ -41,7 +41,8 @@ Set in the report's `output.destination` entry.
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
-plugin and no declaration.
+plugin and no declaration. It takes the options `if_exists`, `atomic` and `temp_dir`, described
+below.
 
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
@@ -94,8 +95,8 @@ output:
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
   fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
-- A destination that takes no options (`local`, `s3`, `sftp`, ...) fails the delivery if its
-  entry has any other key, so a misspelt `path` is caught instead of ignored.
+- A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
+  is caught instead of ignored.
 
 ### slack
 

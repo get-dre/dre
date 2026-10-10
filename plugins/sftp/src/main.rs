@@ -198,12 +198,9 @@ impl Destination for Sftp {
         .collect()
     }
 
-    /// `atomic` and `temp_dir` (the shared delivery rules).
+    /// `if_exists`, `atomic` and `temp_dir` (the shared delivery rules).
     fn options(&self) -> Vec<OptionField> {
         delivery::option_fields()
-            .into_iter()
-            .filter(|f| f.name == "atomic" || f.name == "temp_dir")
-            .collect()
     }
 
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {

@@ -39,7 +39,7 @@ var (
 	}
 	destinationRole = plugin.Role{
 		Kind: "destination", Name: "databricks", Capabilities: []string{"validate"},
-		Fields: volumesFields(), Deliver: deliver,
+		Fields: volumesFields(), Options: deliveryOptions(), Deliver: deliver,
 	}
 	// pkg is every plugin the package provides, in the order `provides` lists them.
 	pkg = plugin.Package{Version: version, Roles: []plugin.Role{sourceRole, destinationRole}}

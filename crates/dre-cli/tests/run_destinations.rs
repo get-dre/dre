@@ -320,3 +320,30 @@ fn the_local_destination_writes_under_a_temporary_name_then_renames() {
     );
     p.dre("validate", &[]).failed().says("`atomic`");
 }
+
+#[test]
+fn if_exists_on_the_local_destination_refuses_or_numbers_a_name_already_taken() {
+    let (p, _rec) = project(
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: number}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    p.dre("run", &["daily"]).ok().says("daily_2.csv");
+    let r = results(&p);
+    let loc = r["deliveries"][0]["location"].as_str().unwrap();
+    assert!(loc.ends_with("out/daily_2.csv"), "{loc}");
+    assert!(p.path("out/daily_2.csv").is_file());
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: error}\n",
+    );
+    p.dre("run", &["daily"]).failed().says("already exists");
+    let r = results(&p);
+    assert_eq!(r["deliveries"][0]["status"], "failed");
+    assert_eq!(r["deliveries"][0]["error_code"], "local/file-exists");
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: keep}\n",
+    );
+    p.dre("validate", &[]).failed().says("`if_exists`");
+}

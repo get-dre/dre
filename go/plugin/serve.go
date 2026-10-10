@@ -71,6 +71,18 @@ type Field struct {
 	Manual       bool   `json:"manual,omitempty"`
 }
 
+// OptionField mirrors the protocol's `describe` entry for one option a report's config block
+// takes (a destination entry's keys). Type is one of the protocol's option types; the Go SDK
+// checks `string` (with Choices) and `boolean`, and accepts any value for the others.
+type OptionField struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Required    bool     `json:"required,omitempty"`
+	Default     any      `json:"default,omitempty"`
+	Choices     []string `json:"choices,omitempty"`
+}
+
 // Role is one plugin a package serves.
 type Role struct {
 	Kind         string // "source" or "destination"
@@ -81,8 +93,11 @@ type Role struct {
 	IdentifierQuote string
 	// Open starts a source session from the profile target's fields.
 	Open func(conn map[string]any) (Session, error)
-	// Deliver sends one local file to remote, returning where it landed.
-	Deliver func(local, remote string, conn map[string]any) (string, error)
+	// Options are what a report's config block for this role takes (checked before Deliver).
+	Options []OptionField
+	// Deliver sends one local file to remote, returning where it landed. opts is the
+	// destination entry's options, already checked against Options.
+	Deliver func(local, remote string, conn, opts map[string]any) (string, error)
 	// Cancel, when set, stops a running delivery (see Canceller).
 	Cancel func()
 }
@@ -462,19 +477,85 @@ func (s *server) hello(req map[string]json.RawMessage) {
 	})
 }
 
-// optionErrors checks a config block of options. No Go role takes options, so every key is
-// refused and a misspelt one is an error, not silently dropped.
+// optionErrors checks a config block of options against the role's Options: an unknown
+// (misspelt) key is an error, not silently dropped. Values with Jinja (`{{`, `{%`) are rendered
+// later, so they aren't checked.
 func (s *server) optionErrors(opts map[string]any) []string {
 	keys := make([]string, 0, len(opts))
 	for k := range opts {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	known := make([]string, len(s.role.Options))
+	for i, f := range s.role.Options {
+		known[i] = f.Name
+	}
 	errs := []string{}
 	for _, k := range keys {
-		errs = append(errs, fmt.Sprintf("the `%s` %s takes no options, but got `%s`; check the key's spelling", s.role.Name, s.role.Kind, k))
+		var f *OptionField
+		for i := range s.role.Options {
+			if s.role.Options[i].Name == k {
+				f = &s.role.Options[i]
+			}
+		}
+		switch {
+		case f == nil && len(known) == 0:
+			errs = append(errs, fmt.Sprintf("the `%s` %s takes no options, but got `%s`; check the key's spelling", s.role.Name, s.role.Kind, k))
+		case f == nil:
+			errs = append(errs, fmt.Sprintf("unknown option `%s` for %s `%s`; expected one of %s", k, s.role.Kind, s.role.Name, strings.Join(known, ", ")))
+		default:
+			if e := checkOption(*f, opts[k]); e != "" {
+				errs = append(errs, fmt.Sprintf("`%s` %s", k, e))
+			}
+		}
+	}
+	for _, f := range s.role.Options {
+		if v, ok := opts[f.Name]; f.Required && (!ok || v == nil) {
+			errs = append(errs, fmt.Sprintf("`%s` is required", f.Name))
+		}
 	}
 	return errs
+}
+
+func checkOption(f OptionField, v any) string {
+	if v == nil {
+		return ""
+	}
+	if str, ok := v.(string); ok && (strings.Contains(str, "{{") || strings.Contains(str, "{%")) {
+		return ""
+	}
+	switch f.Type {
+	case "string":
+		str, ok := v.(string)
+		if !ok {
+			return "must be a string"
+		}
+		if len(f.Choices) > 0 {
+			for _, c := range f.Choices {
+				if c == str {
+					return ""
+				}
+			}
+			return "must be " + oneOf(f.Choices)
+		}
+	case "boolean":
+		if _, ok := v.(bool); !ok {
+			return "must be true or false"
+		}
+	}
+	return ""
+}
+
+// oneOf reads as the Rust SDK's: `a` or `b`; one of `a`, `b`, `c`.
+func oneOf(choices []string) string {
+	q := make([]string, len(choices))
+	for i, c := range choices {
+		q[i] = "`" + c + "`"
+	}
+	if len(q) == 2 {
+		return q[0] + " or " + q[1]
+	}
+	return "one of " + strings.Join(q, ", ")
 }
 
 func (s *server) handle(t string, req map[string]json.RawMessage) error {
@@ -561,7 +642,11 @@ func fields(r Role) []Field {
 func (s *server) handleDestination(t string, req map[string]json.RawMessage) error {
 	switch t {
 	case "describe":
-		s.send(map[string]any{"type": "describe", "connection_fields": fields(s.role)})
+		d := map[string]any{"type": "describe", "connection_fields": fields(s.role)}
+		if len(s.role.Options) > 0 {
+			d["option_fields"] = s.role.Options
+		}
+		s.send(d)
 		return nil
 	case "deliver":
 		var r struct {
@@ -597,7 +682,10 @@ func (s *server) handleDestination(t string, req map[string]json.RawMessage) err
 		default:
 			return fmt.Errorf("`deliver` needs exactly one of `local_path` or `files`")
 		}
-		loc, err := s.role.Deliver(local, remote, r.Connection)
+		if r.Options == nil {
+			r.Options = map[string]any{}
+		}
+		loc, err := s.role.Deliver(local, remote, r.Connection, r.Options)
 		if err != nil {
 			return err
 		}
