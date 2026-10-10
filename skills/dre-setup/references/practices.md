@@ -1,8 +1,8 @@
 ---
 title: "DRE practices"
 description: "The opinions DRE’s agent skills give, and the reasons behind them."
-sidebar:
-  order: 17
+section: build-reports
+position: 5
 ---
 
 # DRE practices

@@ -16,14 +16,29 @@ fn dre(args: &[&str]) -> Output {
 fn the_error_codes_page_is_current() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference-error-codes.md");
     let page = dre_core::codes::reference_page();
+    let (body, nav) = split_nav(&std::fs::read_to_string(&path).unwrap_or_default());
     if std::env::var_os("DRE_UPDATE_DOCS").is_some() {
-        std::fs::write(&path, &page).unwrap();
+        // Keep the page's previous/next links (.github/scripts/docs_sections.py writes them).
+        let nav = if nav.is_empty() {
+            String::new()
+        } else {
+            format!("\n{nav}")
+        };
+        std::fs::write(&path, format!("{page}{nav}")).unwrap();
     } else {
         assert_eq!(
-            std::fs::read_to_string(&path).unwrap_or_default(),
+            format!("{}\n", body.trim_end()),
             page,
             "docs/reference-error-codes.md is stale: run `DRE_UPDATE_DOCS=1 cargo test -p dre-cli --test error_codes`"
         );
+    }
+}
+
+/// A docs page's text before its previous/next block, and the block.
+fn split_nav(text: &str) -> (String, String) {
+    match text.find("\n<!-- docs-nav") {
+        Some(i) => (text[..=i].to_string(), text[i + 1..].to_string()),
+        None => (text.to_string(), String::new()),
     }
 }
 

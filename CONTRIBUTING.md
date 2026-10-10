@@ -118,7 +118,11 @@ artifacts.
 - **Tests:** a bug fix comes with a test that fails without it; a feature comes with tests
   for it.
 - **Docs:** update `README.md` or `docs/` when you change behaviour users can see. Practices
-  and opinions go in [`docs/practices.md`](docs/practices.md).
+  and opinions go in [`docs/practices.md`](docs/practices.md). A new page names its `section` and
+  `position` in its front matter (the sections are in [`docs/sections.json`](docs/sections.json));
+  then run `python3 .github/scripts/docs_sections.py sync`, which updates
+  [`docs/README.md`](docs/README.md) and the previous/next links. Generated pages say so at the
+  top (the YAML, CLI and error codes references): change their source, not the page.
 - **Plugins** are versioned on their own. If you change a plugin's code, bump the `version` in
   that plugin's `Cargo.toml` (CI warns when you forget).
 - **Compatibility:** a patch release (0.2.x) never breaks a project. A minor release (0.2 → 0.3)
