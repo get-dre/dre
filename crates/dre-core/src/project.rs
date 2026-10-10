@@ -898,6 +898,21 @@ impl Loader {
         match crate::target::resolve(&self.root, self.opts.target_path.as_deref(), project_target) {
             Ok(t) => {
                 self.target_inside = crate::target::inside(&self.root, &t.dir);
+                // Databricks Workspace files don't reliably keep a rename: run folders' `current`
+                // pointer and atomic writes need a Volume (or local disk).
+                if crate::slash(&t.dir).to_string_lossy().starts_with("/Workspace/") {
+                    let from_file =
+                        self.opts.target_path.is_none() && crate::settings::env(crate::target::ENV).is_none();
+                    self.diags.warning(
+                        Code::TargetPathOnWorkspace,
+                        from_file.then(|| PathBuf::from(PROJECT_FILE)),
+                        from_file.then_some(target_line).flatten(),
+                        format!(
+                            "the target path {} is in Databricks Workspace files, which don't reliably keep DRE's atomic writes and run pointer; use a Volume (`/Volumes/<catalog>/<schema>/<volume>/...`) or local disk",
+                            t.dir.display()
+                        ),
+                    );
+                }
                 self.target = t;
             }
             Err(e) => {

@@ -128,7 +128,7 @@ fn each_tab_runs_on_its_own_connection_in_yaml_order() {
     );
     assert_eq!(r["result_sets"][2]["rows"], 1);
     // Strict YAML order across connections, in the SQL log.
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     let at = |s: &str| {
         log.find(s)
             .unwrap_or_else(|| panic!("{s} not in the log:\n{log}"))
@@ -181,7 +181,7 @@ fn a_lookup_is_loaded_into_each_session_that_uses_it() {
         "name: acme\ndefault_profile: duck_a\nlookup_inline_max_rows: 1\n",
     );
     p.dre("run", &["lk"]).ok();
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     assert_eq!(
         log.matches("rows loaded through the plugin's `load` request")
             .count(),

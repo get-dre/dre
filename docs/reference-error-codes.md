@@ -479,6 +479,12 @@ The profiles are on another target than the run.
 
 Every profile the run uses chooses a different entry than the run's target (`--target`, `DRE_TARGET`, else `dev`). Pass `--target` or set `DRE_TARGET` so `target.name` matches.
 
+### target-path-on-workspace
+
+The target path is in Databricks Workspace files.
+
+Workspace files (`/Workspace/...`) have shown flushing and rename problems, so DRE's atomic writes and the `current` pointer of its run folders can't be relied on there. On Databricks, point the target path at a Unity Catalog Volume (`/Volumes/<catalog>/<schema>/<volume>/dre/target`), or at local disk when nothing needs to outlive the job. A warning, so a run there still works as before.
+
 ### target-path-unwritable
 
 The target path can't be written.
