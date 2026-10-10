@@ -29,6 +29,8 @@ pub enum RunEvent {
         report: String,
         set: Option<String>,
     },
+    /// The running Binding's log file (`runs/<run id>/dre.log`), once its run folder exists.
+    BindingLog(PathBuf),
     /// The schedule a Binding runs under (if any) and every var it uses.
     BindingVars {
         schedule: Option<String>,
@@ -123,6 +125,7 @@ pub fn dispatch(ui: &mut dyn Ui, e: RunEvent, plugin_log: &LogSink, sql_log: &Lo
         RunEvent::Targets(t) => ui.targets(&t),
         RunEvent::Plan(n) => ui.plan(n),
         RunEvent::BindingStart { report, set } => ui.binding_start(&report, set.as_deref()),
+        RunEvent::BindingLog(path) => ui.binding_log(&path),
         RunEvent::BindingVars {
             schedule,
             schedule_vars,

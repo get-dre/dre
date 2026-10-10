@@ -112,6 +112,8 @@ pub trait Ui {
     /// The number of Bindings about to run, once Sets are resolved.
     fn plan(&mut self, _bindings: usize) {}
     fn binding_start(&mut self, _report: &str, _set: Option<&str>) {}
+    /// The running Binding's log file, in its run folder (a real run only).
+    fn binding_log(&mut self, _path: &Path) {}
     /// Right after `binding_start`: the schedule it runs under (if any) and every var it uses.
     fn binding_vars(
         &mut self,
@@ -1162,6 +1164,10 @@ impl<'a> BindingRun<'a> {
                     .warn(&format!("can't move the earlier run's files into runs/: {e}")),
             }
             self.becomes_current = !self.older_than_current();
+            // The run's own log, in its folder.
+            if std::fs::create_dir_all(&self.run_dir).is_ok() {
+                self.ui.emit(RunEvent::BindingLog(self.run_dir.join("dre.log")));
+            }
         }
         let result = self.run_inner();
         // A Binding that fails after the run was cancelled was stopped by it (a plugin's

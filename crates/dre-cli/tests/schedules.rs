@@ -154,7 +154,7 @@ fn the_run_record_and_log_carry_the_schedule_vars_and_parameters() {
     assert_eq!(r["params"]["schedule"], "close_monthly");
     assert_eq!(r["params"]["vars"], serde_json::json!({"level": "cli"}));
 
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     assert!(log.contains("INFO  Parameters {"), "{log}");
     assert!(
         log.contains("Schedule close_monthly vars {\"period\":\"month\"}"),
@@ -277,7 +277,7 @@ fn dre_secret_env_vars_are_masked_everywhere_people_read() {
         compiled.contains("length('*****')") && compiled.contains("visible-value"),
         "{compiled}"
     );
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     assert!(!log.contains("hunter2") && log.contains("*****"), "{log}");
     // A failing statement's error message is masked too.
     p.write(
@@ -287,7 +287,7 @@ fn dre_secret_env_vars_are_masked_everywhere_people_read() {
     let r = p.dre_env("run", &["secret"], &env);
     r.failed();
     assert!(
-        !r.stdout.contains("hunter2") && !p.read("logs/dre.log").contains("hunter2"),
+        !r.stdout.contains("hunter2") && !p.run_logs().contains("hunter2"),
         "{}",
         r.stdout
     );
@@ -343,7 +343,7 @@ fn dre_secrets_needing_json_escapes_never_reach_json_output() {
             "run_results.json",
             p.read("target/run/secret/default/run_results.json"),
         ),
-        ("dre.log", p.read("logs/dre.log")),
+        ("dre.log", p.run_logs()),
         ("compiled sql", p.read("target/compiled/secret/default/s.sql")),
     ];
     for (name, text) in &surfaces {
@@ -488,7 +488,7 @@ fn source_errors_do_not_echo_secret_fragments() {
     );
     r.failed();
     let results = p.read("target/run/secret/default/run_results.json");
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("stdout", &r.stdout), ("run results", &results), ("log", &log)] {
         for fragment in ["ISSUE69-UNIQUE-SECRET", "ABCDEFGHIJKLMNOPQRSTUVWXYZ-END"] {
             assert!(!text.contains(fragment), "{name} leaks {fragment:?}:\n{text}");
@@ -545,7 +545,7 @@ fn splitting_sql_cannot_split_a_secret_out_of_protection() {
     );
     r.failed();
     let results = p.read("target/run/unmanaged_secret/default/run_results.json");
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("stdout", &r.stdout), ("run results", &results), ("log", &log)] {
         for fragment in ["ISSUE69-SPLIT-SECRET", "TAIL"] {
             assert!(!text.contains(fragment), "{name} leaks {fragment:?}:\n{text}");
@@ -589,7 +589,7 @@ fn secret_sql_is_masked_before_internal_summaries_are_truncated() {
     let r = p.dre_env("run", &["unmanaged_secret"], &env);
     r.failed();
     let output = format!("{}{}", r.stdout, r.stderr);
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("output", output.as_str()), ("log", log.as_str())] {
         assert!(!text.contains("ISSUE69-INTERNAL-SUMMARY"), "{name}:\n{text}");
         assert!(text.contains("*****"), "{name}:\n{text}");

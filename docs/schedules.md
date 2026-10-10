@@ -34,7 +34,7 @@ below `--var`, and `run.schedule` renders as its name, so SQL can say
 `{% if var('period') == 'day' %}...`. Pass the instant the run was scheduled for through
 `DRE_RUN_AT` (or just the date through `DRE_RUN_DATE`) so reruns render the same: `DRE_RUN_AT`
 pins `run.now` and `run.scheduled_at` too, so a rerun of the 18:00 firing at 21:00 still renders
-as 18:00. `run_results.json`, the JSON events and `logs/dre.log` record the schedule, its
+as 18:00. `run_results.json`, the JSON events and the run's `dre.log` record the schedule, its
 vars, the scheduled instant (`scheduled_at`), every var the run used and the command's parameters.
 
 ## See when schedules fire

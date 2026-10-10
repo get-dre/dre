@@ -1,14 +1,15 @@
 //! Terminal output: right-aligned coloured status verbs, a live progress bar, log levels,
-//! JSON lines for machines, and a full debug log in `logs/dre.log`: every event, and the full
-//! text of every SQL statement sent to a database. The log rotates every 10,000 lines
-//! (`DRE_LOG_MAX_LINES` overrides), keeping `dre.log.1` (newest) to `dre.log.5`.
+//! JSON lines for machines, and for `dre run` a full debug log per run, `dre.log` in each
+//! Binding's run folder: every event, and the full text of every SQL statement sent to a
+//! database. It goes with its run when runs are pruned, so it never needs rotating; overlapping
+//! runs each write their own. Other commands write to the console only.
 //!
 //! Lines go to stdout. The progress bar goes to stderr and only appears when stderr is a
 //! terminal. Colour follows `--color`, `NO_COLOR` and whether stdout is a terminal.
 
 use std::fs::File;
 use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -70,6 +71,14 @@ struct Inner {
     color: bool,
     bar: Option<ProgressBar>,
     log: Option<LogFile>,
+    /// `dre run`: each Binding logs to `dre.log` in its run folder.
+    run_logs: bool,
+    /// Lines logged before the first Binding (the run's settings): they open every Binding's log.
+    header: Vec<String>,
+    /// Lines logged since the Binding started, before its log file was known.
+    pending: Vec<String>,
+    in_binding: bool,
+    seen_binding: bool,
     current: String,
     started: Instant,
     succeeded: usize,
@@ -98,6 +107,11 @@ impl Printer {
                 color,
                 bar: None,
                 log: None,
+                run_logs: false,
+                header: Vec::new(),
+                pending: Vec::new(),
+                in_binding: false,
+                seen_binding: false,
                 current: String::new(),
                 started: Instant::now(),
                 succeeded: 0,
@@ -106,15 +120,10 @@ impl Printer {
         }
     }
 
-    /// Also write every event, at debug level, to `<project>/logs/dre.log`.
-    pub fn log_to(&self, project: &Path) {
-        let max_lines = dre_core::settings::env(dre_core::settings::LOG_MAX_LINES)
-            .and_then(|v| v.parse().ok())
-            .filter(|n| *n > 0)
-            .unwrap_or(LOG_MAX_LINES);
-        if let Some(l) = LogFile::open(&project.join(LOGS_DIR).join("dre.log"), max_lines) {
-            self.inner.lock().unwrap().log = Some(l);
-        }
+    /// `dre run`: also write every event, at debug level, to `dre.log` in each Binding's run
+    /// folder (see the module docs).
+    pub fn log_runs(&self) {
+        self.inner.lock().unwrap().run_logs = true;
     }
 
     /// Colour a diagnostic's `error[...]`/`warning[...]` prefix.
@@ -328,77 +337,42 @@ impl Inner {
     }
 
     fn file_log(&mut self, level: &str, msg: &str) {
-        if let Some(f) = self.log.as_mut() {
-            let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            let ctx = if self.current.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", self.current)
-            };
-            f.write(&dre_core::secrets::mask(&format!("{ts} {level:<5}{ctx} {msg}\n")));
+        if !self.run_logs {
+            return;
+        }
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ctx = if self.current.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", self.current)
+        };
+        let line = dre_core::secrets::mask(&format!("{ts} {level:<5}{ctx} {msg}\n")).into_owned();
+        match self.log.as_mut() {
+            Some(f) => f.write(&line),
+            None if !self.seen_binding => self.header.push(line),
+            None if self.in_binding => self.pending.push(line),
+            None => {}
         }
     }
 }
 
-pub use dre_core::project::LOGS_DIR;
-const LOG_MAX_LINES: usize = 10_000;
-/// Rotated files kept: `dre.log.1` (newest) to `dre.log.5`.
-const LOG_KEEP: usize = 5;
-
-/// An append-only log that rotates once it reaches `max_lines`.
+/// A run's log file, appended to.
 struct LogFile {
-    path: PathBuf,
     file: File,
-    lines: usize,
-    max_lines: usize,
 }
 
 impl LogFile {
-    fn open(path: &Path, max_lines: usize) -> Option<LogFile> {
-        std::fs::create_dir_all(path.parent()?).ok()?;
-        let lines = std::fs::read(path).map_or(0, |b| b.iter().filter(|c| **c == b'\n').count());
+    fn open(path: &Path) -> Option<LogFile> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
             .ok()?;
-        let mut l = LogFile {
-            path: path.to_path_buf(),
-            file,
-            lines,
-            max_lines,
-        };
-        if l.lines >= l.max_lines {
-            l.rotate();
-        }
-        Some(l)
+        Some(LogFile { file })
     }
 
-    /// Entries are never split across files; a file can end a few lines over the limit.
     fn write(&mut self, entry: &str) {
         let _ = self.file.write_all(entry.as_bytes());
-        self.lines += entry.matches('\n').count();
-        if self.lines >= self.max_lines {
-            self.rotate();
-        }
-    }
-
-    fn rotate(&mut self) {
-        let _ = self.file.flush();
-        let name = |n: usize| PathBuf::from(format!("{}.{n}", self.path.display()));
-        let _ = std::fs::remove_file(name(LOG_KEEP));
-        for n in (1..LOG_KEEP).rev() {
-            let _ = std::fs::rename(name(n), name(n + 1));
-        }
-        let _ = std::fs::rename(&self.path, name(1));
-        if let Ok(f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
-            self.file = f;
-            self.lines = 0;
-        }
     }
 }
 
@@ -474,6 +448,9 @@ impl Ui for Printer {
 
     fn binding_start(&mut self, report: &str, set: Option<&str>) {
         let mut i = self.inner.lock().unwrap();
+        i.seen_binding = true;
+        i.in_binding = true;
+        i.pending.clear();
         i.current = label(report, set);
         i.file_log("INFO", "Started");
         if let Some(b) = &i.bar {
@@ -514,6 +491,20 @@ impl Ui for Printer {
             i.json(json!({"event": "warning", "binding": i.current, "message": msg}));
         } else if i.verbosity != Verbosity::Quiet {
             i.print(Tone::Warn, "Warning", msg);
+        }
+    }
+
+    fn binding_log(&mut self, path: &Path) {
+        let mut i = self.inner.lock().unwrap();
+        if !i.run_logs {
+            return;
+        }
+        if let Some(mut f) = LogFile::open(path) {
+            for line in i.header.iter().chain(i.pending.iter()) {
+                f.write(line);
+            }
+            i.pending.clear();
+            i.log = Some(f);
         }
     }
 
@@ -599,6 +590,8 @@ impl Ui for Printer {
             &format!("{verb} in {} {detail}", fmt_secs(o.elapsed.as_secs_f64())),
         );
         i.current.clear();
+        i.log = None;
+        i.in_binding = false;
         if i.format == LogFormat::Json {
             i.json(json!({
                 "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,

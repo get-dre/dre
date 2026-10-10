@@ -34,6 +34,12 @@ fn project() -> TestProject {
             ),
             ("reports/slow/wait.sql", "sleep 20"),
             ("reports/slow/more.sql", "rows 1"),
+            (
+                "reports/brief/brief.yml",
+                "queries:\n  - {query: pause, tab: false}\n  - few\noutput: {format: csv}\n",
+            ),
+            ("reports/brief/pause.sql", "sleep 3"),
+            ("reports/brief/few.sql", "rows 1"),
         ],
         PROFILES,
     )
@@ -198,4 +204,34 @@ fn a_rerun_for_an_earlier_instant_doesnt_replace_a_later_one() {
     );
     let current = std::fs::read_to_string(binding(&p, "daily").join("current")).unwrap();
     assert_eq!(current.trim(), later);
+}
+
+#[test]
+fn different_reports_run_in_parallel_on_one_target_path() {
+    let p = project();
+    let mut brief = Command::new(env!("CARGO_BIN_EXE_dre"))
+        .args(["run", "brief", "--project-dir"])
+        .arg(p.root())
+        .arg("--profiles-dir")
+        .arg(p.dir.path().join("profiles"))
+        .env("DRE_PLUGINS_DIR", &p.plugins)
+        .env("HOME", p.dir.path().join("home"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let lock = binding(&p, "brief").join("lock");
+    for _ in 0..200 {
+        if lock.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(lock.exists(), "brief never started");
+    // Another report runs while brief holds its own lock.
+    p.dre("run", &["daily"]).ok();
+    assert!(lock.exists(), "brief was still running");
+    assert!(brief.wait().unwrap().success());
+    assert_eq!(runs(&p, "brief").len(), 1);
+    assert_eq!(runs(&p, "daily").len(), 1);
 }

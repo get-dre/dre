@@ -305,3 +305,17 @@ fn the_manifest_is_the_same_wherever_the_target_path_is() {
         std::fs::read(p.path("target/manifest.json")).unwrap()
     );
 }
+
+// Databricks compute is Linux: on Windows `/Workspace/...` would be a folder on drive C.
+#[cfg(unix)]
+#[test]
+fn databricks_workspace_files_are_warned_about() {
+    let p = project();
+    let out = p.dre(
+        "validate",
+        &["--target-path", "/Workspace/Users/someone/dre/target"],
+    );
+    let text = out.stdout.clone() + &out.stderr;
+    assert!(text.contains("warning[target-path-on-workspace]"), "{text}");
+    assert!(text.contains("use a Volume"), "{text}");
+}

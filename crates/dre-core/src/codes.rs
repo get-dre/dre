@@ -256,6 +256,9 @@ codes! {
     InvalidTargetPath = "invalid-target-path", Config,
         "The target path isn't usable.",
         "The target path (`--target-path`, `DRE_TARGET_PATH` or `target_path:`) must be a local or mounted folder outside the project's sources, not a URL. To copy outputs to object storage, deliver them with a destination.";
+    TargetPathOnWorkspace = "target-path-on-workspace", Config,
+        "The target path is in Databricks Workspace files.",
+        "Workspace files (`/Workspace/...`) have shown flushing and rename problems, so DRE's atomic writes and the `current` pointer of its run folders can't be relied on there. On Databricks, point the target path at a Unity Catalog Volume (`/Volumes/<catalog>/<schema>/<volume>/dre/target`), or at local disk when nothing needs to outlive the job. A warning, so a run there still works as before.";
     TargetPathUnwritable = "target-path-unwritable", Config,
         "The target path can't be written.",
         "DRE couldn't create or write the target folder (permissions, a read-only mount, a full disk). The message has the reason.";

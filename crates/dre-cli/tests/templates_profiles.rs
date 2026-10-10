@@ -196,14 +196,14 @@ fn columns_lists_a_relations_columns_once_per_file() {
          from orders\n\
          -- 4 id,doubled\n"
     );
-    let log = p.read("logs/dre.log");
+    // The report runs, and its log shows one introspection query per relation.
+    p.dre_env("run", &["-s", "monthly"], &[SECRET]).ok();
+    let log = p.run_logs();
     assert_eq!(
         log.matches("from orders as _dre_cols where 1=0").count(),
         1,
         "one introspection query per relation:\n{log}"
     );
-    // And the report still runs.
-    p.dre_env("run", &["-s", "monthly"], &[SECRET]).ok();
 }
 
 #[test]

@@ -620,7 +620,6 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
     let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
         return exit::not_started();
     };
-    printer.log_to(&project.root);
     // Compiling only needs the source plugin for templates that query; with installing off, a
     // missing plugin is reported by the Binding that needs it.
     if !a.project.no_auto_install && !plugins::ensure(&project, true, false, &printer) {
@@ -879,7 +878,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
         return exit::not_started();
     };
-    printer.log_to(&project.root);
+    printer.log_runs();
     for s in project.settings.lines() {
         printer.detail(output::Tone::Note, "Setting", &s);
     }

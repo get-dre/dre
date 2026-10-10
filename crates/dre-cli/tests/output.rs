@@ -154,13 +154,17 @@ fn colour_is_off_unless_asked_for_when_not_a_terminal() {
 }
 
 #[test]
-fn every_run_appends_a_debug_log_with_the_sql_it_ran() {
+fn every_run_writes_a_debug_log_with_the_sql_it_ran_in_its_folder() {
     let p = project();
     p.dre("run", &["daily"]).ok();
-    let log = p.read("logs/dre.log");
+    // In the run's own folder.
+    let log = p.read("target/run/daily/default/dre.log");
+    assert!(
+        log.contains("DEBUG Setting run_date = 2026-01-25"),
+        "the run's settings open its log: {log}"
+    );
     assert!(log.contains("DEBUG [daily] Executed"), "{log}");
     assert!(log.contains("INFO  [daily] Succeeded"), "{log}");
-    assert!(log.contains("Finished 'run'"), "{log}");
     // The full statement, indented under a label naming its file and line.
     assert!(
         log.contains("DEBUG [daily] SQL reports/ops/daily/setup.sql:1:\n    create temp table t as select 1 as n union all select 2\n"),
@@ -173,18 +177,24 @@ fn every_run_appends_a_debug_log_with_the_sql_it_ran() {
 }
 
 #[test]
-fn the_log_rotates_keeping_five_old_files() {
+fn each_run_has_its_own_log_and_other_commands_write_none() {
     let p = project();
-    for _ in 0..8 {
-        p.dre_env("run", &["daily"], &[("DRE_LOG_MAX_LINES", "5")]).ok();
+    p.dre("run", &["daily", "--keep-runs", "2"]).ok();
+    std::thread::sleep(std::time::Duration::from_millis(1050));
+    p.dre("run", &["daily", "--keep-runs", "2"]).ok();
+    let runs: Vec<_> = std::fs::read_dir(p.root().join("target/run/daily/default/runs"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(runs.len(), 2);
+    for r in &runs {
+        let log = std::fs::read_to_string(r.join("dre.log")).unwrap();
+        // One run's lines only.
+        assert_eq!(log.matches("[daily] Started").count(), 1, "{log}");
     }
-    for n in 1..=5 {
-        assert!(p.path(&format!("logs/dre.log.{n}")).exists(), "dre.log.{n}");
-    }
-    assert!(!p.path("logs/dre.log.6").exists());
-    // Every run writes more than 5 lines, so each file ends with at most one entry past the limit.
-    let current = p.read("logs/dre.log");
-    assert!(current.lines().count() < 5 + 3, "{current}");
+    p.dre("compile", &[]).ok();
+    p.dre("validate", &[]).ok();
+    assert!(!p.path("logs").exists(), "no shared project log");
 }
 
 #[test]

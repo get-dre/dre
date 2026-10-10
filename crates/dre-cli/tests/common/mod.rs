@@ -152,6 +152,27 @@ impl TestProject {
         std::fs::write(p, content).unwrap();
     }
 
+    /// Every run's `dre.log` (`target/run/*/*/runs/*/dre.log`), joined, oldest run first.
+    pub fn run_logs(&self) -> String {
+        let mut logs: Vec<(String, String)> = Vec::new();
+        let run = self.root().join("target/run");
+        for report in std::fs::read_dir(&run).into_iter().flatten().flatten() {
+            for binding in std::fs::read_dir(report.path()).into_iter().flatten().flatten() {
+                for r in std::fs::read_dir(binding.path().join("runs"))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                {
+                    if let Ok(text) = std::fs::read_to_string(r.path().join("dre.log")) {
+                        logs.push((r.file_name().to_string_lossy().to_string(), text));
+                    }
+                }
+            }
+        }
+        logs.sort();
+        logs.into_iter().map(|(_, t)| t).collect()
+    }
+
     pub fn json(&self, rel: &str) -> serde_json::Value {
         serde_json::from_str(&self.read(rel)).unwrap()
     }

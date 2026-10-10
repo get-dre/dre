@@ -269,7 +269,7 @@ fn transformed_source_plugin_logs_do_not_echo_secret_fragments() {
     );
     run.ok();
 
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("stdout", run.stdout.as_str()), ("log", log.as_str())] {
         assert!(!text.contains("ISSUE69-PLUGIN-LOG"), "{name}:\n{text}");
         assert!(
@@ -301,7 +301,7 @@ fn columns_diagnostics_and_sql_logs_do_not_echo_secret_relations() {
     run.failed();
 
     let output = format!("{}{}", run.stdout, run.stderr);
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("output", output.as_str()), ("log", log.as_str())] {
         assert!(
             !text.contains(secret),
@@ -326,7 +326,7 @@ fn connection_secrets_are_masked_without_hiding_open_errors() {
     run.failed().says("fixture rejected token ***** at login");
 
     let output = format!("{}{}", run.stdout, run.stderr);
-    let log = p.read("logs/dre.log");
+    let log = p.run_logs();
     for (name, text) in [("output", output.as_str()), ("log", log.as_str())] {
         assert!(
             !text.contains(secret),

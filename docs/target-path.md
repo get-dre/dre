@@ -32,7 +32,9 @@ outlives the run:
 dre run --schedule close_monthly --target-path /mnt/shared/dre/target
 ```
 
-In a Databricks job, a Volume keeps the snapshots and the manifest between runs:
+In a Databricks job, a Volume keeps the snapshots and the manifest between runs. Use a Volume
+(or local disk), not Workspace files (`/Workspace/...`): those don't reliably keep the renames
+behind DRE's atomic writes and run pointer, and `dre validate` warns about them.
 
 ```bash
 export DRE_TARGET_PATH=/Volumes/main/reporting/dre/target
@@ -52,7 +54,8 @@ target/run/<report>/<set or default>/
     20261009T060000Z-k3f9/   one folder per run: its files and run_results.json
 ```
 
-A run id is the run's UTC start time and four random characters. `dre history <report>` lists a
+A run id is the run's UTC start time and four random characters. Each run's log, `dre.log`, is in
+its folder too (other commands write to the console only). `dre history <report>` lists a
 report's runs and which is current; `dre history <report> --latest --path` prints the folder
 with the latest files, for scripts.
 

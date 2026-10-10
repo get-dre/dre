@@ -33,8 +33,6 @@ pub const HTTP_TIMEOUT: &str = "DRE_HTTP_TIMEOUT";
 pub const RUN_TIMEOUT: &str = "DRE_RUN_TIMEOUT";
 /// How many runs of each Binding to keep: `--keep-runs`, `DRE_KEEP_RUNS`, `flags: keep_runs`.
 pub const KEEP_RUNS: &str = "DRE_KEEP_RUNS";
-/// How many lines `dre.log` keeps: `DRE_LOG_MAX_LINES`.
-pub const LOG_MAX_LINES: &str = "DRE_LOG_MAX_LINES";
 
 /// A `DRE_*` environment variable's value; set but empty counts as unset.
 pub fn env(name: &str) -> Option<String> {

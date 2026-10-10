@@ -44,9 +44,10 @@ position: 3
   from one run of its queries, each from its own `queries:`. A `message` output turns the results
   into a short headline posted to Slack, Teams, Google Chat or an email body; `when:` sends an
   output only when the data calls for it. See [messages](messages.md).
-- **Logs**: every run appends to `logs/dre.log` in the project, including the full SQL of each
-  statement sent to the database (report queries, `run_query()`, lookup loads). The file rotates
-  every 10,000 lines, keeping `dre.log.1` to `dre.log.5`.
+- **Logs**: each `dre run` of a report and Set writes `dre.log` in its own run folder
+  (`target/run/<report>/<set>/runs/<run id>/`), including the full SQL of each statement, the
+  run's settings and every step; it goes when the run is pruned (`keep_runs`). Other commands
+  write to the console only. `--log-format json` prints the same events as JSON lines.
 - **Verification**: `dre validate` checks the project and compiles its SQL; with `-s` it also shows,
   per selected Binding, the compiled files, the target, each query's connection, the output file and every
   destination (non-dev targets stand out). `dre compile` just renders the SQL into
