@@ -41,7 +41,10 @@ static TIMEOUT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 
 /// Time the run: cancel it when `timeout` (counted from [`watch`]) runs out.
 pub fn set_timeout(timeout: Option<Duration>) {
-    TIMEOUT_MS.store(timeout.map_or(0, |t| t.as_millis().max(1) as u64), Ordering::SeqCst);
+    TIMEOUT_MS.store(
+        timeout.map_or(0, |t| t.as_millis().max(1) as u64),
+        Ordering::SeqCst,
+    );
 }
 
 /// Catch the signals from now on, for the rest of the process: cancel `cancel` on the first one
