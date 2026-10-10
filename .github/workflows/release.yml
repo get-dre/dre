@@ -501,7 +501,8 @@ jobs:
   wheel-sboms:
     name: Attach the wheels' SBOMs
     needs: [attest-wheels]
-    if: github.event_name == 'push' || !inputs.dry_run
+    # always(): attest-wheels may follow a skipped `pypi` (a manual run for an existing release).
+    if: always() && needs.attest-wheels.result == 'success' && (github.event_name == 'push' || !inputs.dry_run)
     runs-on: ubuntu-latest
     permissions:
       contents: write
