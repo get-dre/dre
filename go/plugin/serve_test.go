@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,9 +47,11 @@ type fakeDB struct {
 	loaded []string
 	closed bool
 	stop   chan struct{}
+	once   sync.Once
 }
 
-func (f *fakeDB) Cancel() { close(f.stop) }
+// Cancel may come twice: from the test, and when the test's input closes mid-request.
+func (f *fakeDB) Cancel() { f.once.Do(func() { close(f.stop) }) }
 
 var idSchema = arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
 

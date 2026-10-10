@@ -21,6 +21,11 @@ Anything that lets someone read or write what they shouldn't, run code they shou
 secret: for example a secret leaking into a log, `run_results.json` or the manifest; a path that
 escapes the target folder; or a weakness in how DRE downloads and verifies plugins or its own updates.
 
+## Verifying releases
+
+Releases from 0.4.0 carry signed build provenance and a CycloneDX SBOM for every archive and
+wheel. See [Verifying a download](docs/install.md#verifying-a-download).
+
 ## Known issues
 
 - **RSA SSH keys** ([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)):

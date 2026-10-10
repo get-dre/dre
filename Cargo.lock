@@ -1916,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "dre-cli"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1947,7 +1947,7 @@ dependencies = [
 
 [[package]]
 name = "dre-core"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arrow 59.3.0",

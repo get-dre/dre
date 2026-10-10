@@ -3,8 +3,8 @@ name: dre-run
 description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed.
 license: GPL-3.0-only
 metadata:
-  version: "2.3.0"
-  dre: ">=0.2.1, <0.4.0"
+  version: "3.0.0"
+  dre: ">=0.4.0, <0.5.0"
 ---
 
 # Run, check and deliver DRE reports
@@ -118,6 +118,12 @@ targets stand out. The `Target` line names the run's target, where it came from,
 whose entry differs (`dev (default); connection `warehouse`: prod`). Read that back to the user:
 it's what a run will do.
 
+Validate also checks each profile entry the run would use, without connecting (a required field
+missing, a value of the wrong form, two settings that can't go together): errors fail it, and a
+misspelt key is a warning with the nearest key (an error with `--strict`). `--all-targets` checks
+every entry in `profiles.yml`, used or not. An unset `env_var()` in a profile is a warning here
+(CI often validates without secrets) but fails the run.
+
 `dre compile -s <report>` only renders the SQL into `target/compiled/` and lists the files, to
 read the SQL exactly as the database will get it. `dre validate -s <report> --live` also checks
 every statement against the database without running it.
@@ -168,9 +174,11 @@ destination's entry for this target `{deliver: false}`.
 
 ### Step 7: read the result
 
-The summary shows each Binding's status and each delivery's. `target/run_results.json` has the
-detail (`deliveries` with `target`, `status` and `location`; `not_delivered` is a
-`{deliver: false}` entry, not a failure), and `logs/dre.log` the full SQL of every statement.
+The summary shows each Binding's status and each delivery's. Each Binding's run folder
+(`dre history <report> --latest --path` prints it) has its
+`run_results.json` with the detail (`deliveries` with `target`, `status`, `location` and
+`attempts` when a temporary error was tried again; `not_delivered` is a `{deliver: false}` entry,
+not a failure) and its `dre.log` with the full SQL of every statement.
 Report what was delivered where, what delivered nowhere on purpose, and what failed. With
 several outputs, `output_results` has one entry per output: `skipped` (its `when:` was false, or
 its message rendered empty) is not a failure, and a message's entry holds the full text it sent.
@@ -199,6 +207,14 @@ These need dre 0.1.2 or later; if `dre --version` is older, say so and offer `dr
   (https://getdre.com/docs/orchestration/): a Postgres table loaded after every merge, a weekly
   refresh and a minimal executor, plus cron, Airflow and Databricks Jobs examples. Adapt it to
   their setup; don't invent a scheduler.
+- **Exit codes** (https://getdre.com/docs/exit-codes/): `0` success; `1` something failed (a
+  report or a delivery; `run_results.json` says which), a retry may help; `2` couldn't start (bad
+  flags, an invalid project or profile, a missing plugin), fix it, don't retry; `124` the run's
+  timeout (`--timeout`); `130` Ctrl-C; `143` a termination signal (an orchestrator cancelling).
+  Tell the user to retry on `1` only, and to alert on `2`.
+- **Many reports in one job:** a connection entry's `threads:` runs that many Bindings at once,
+  and `dre run --threads N` caps the run. Suggest it when a scheduled run is slow; concurrent
+  Bindings mustn't write the same permanent table or the same delivery path.
 - **CI and job snippets follow the secret rules:** the database URL and DRE's credentials come
   from the CI's or job's secret store (`${{ secrets.DRE_SCHEDULER_DB }}`, a Databricks secret
   scope) or environment, never written into a file or a workflow (SEC-1, SEC-3). The occurrences
@@ -223,7 +239,7 @@ Read the error: DRE names the report, Binding, file and line. Then:
   their own `target:`, or set `DRE_TARGET` where reports run.
 - **"environment variable `X` is not set":** the user sets it themselves (SEC-3), in the shell
   `dre` runs in; check with SEC-4.
-- **SQL errors from the database:** show the compiled SQL (`target/compiled/`, or `logs/dre.log`)
+- **SQL errors from the database:** show the compiled SQL (`target/compiled/`, or the run's `dre.log`)
   and the database's message; fix it in the report's `.sql` file (`dre-report`).
 - **A column a format option names isn't in the query** (xlsx `columns:`, a formula's `{name}`):
   the error names the sheet and column; fix the option or the SQL.
@@ -233,7 +249,7 @@ Read the error: DRE names the report, Binding, file and line. Then:
 - **The output's schema changed since the last successful run:** the run stops before delivering.
   Find out why (RUN-5) before running again with `--accept-schema-change`.
 - **A delivery failed:** the other destinations were still attempted, the output stays in
-  `target/run/`, and the run exits non-zero. Use the destination's reference for its known
+  `target/run/`, and the run exits 1. Use the destination's reference for its known
   errors: email (no recipients, attachment too large), Slack (bot not in the channel, a missing
   scope, the DM tab turned off), SFTP (unknown host key), FTP (path relative to the login
   folder), object storage (credentials, bucket, region).

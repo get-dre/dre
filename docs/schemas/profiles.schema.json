@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-dre-schema-version": "0.3",
+  "x-dre-schema-version": "0.4",
   "title": "DRE profiles",
   "type": "object",
   "description": "Connections and destinations, in `profiles.yml`: what reports read from and where outputs go. Kept outside the project (`~/.dre`, `--profiles-dir` or `DRE_PROFILES_DIR`). Every profile lists its targets (environments). Each profile the run uses picks one: `--target`, else `DRE_TARGET` (either sets every profile), else the profile's own `target`, else `dev`; a used profile without that entry is an error.",

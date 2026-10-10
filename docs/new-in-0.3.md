@@ -2,7 +2,7 @@
 title: "New in 0.3"
 description: "Messages, several outputs per report, when:, number filters and locale:, and the teams and google_chat destinations."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.3
@@ -37,4 +37,4 @@ to use them. The schemas for editor checks are at `/schemas/v0.3/`.
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [Upgrading to 0.2](migrating-to-0.2.md)
+**Previous:** [New in 0.4](new-in-0.4.md) · **Next:** [Upgrading to 0.2](migrating-to-0.2.md)
