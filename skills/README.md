@@ -79,17 +79,24 @@ only its own folder. Content shared between skills is therefore written once and
 |---|---|
 | `shared/contract.md`, `shared/secrets.md`, `shared/version-check.md` | each `SKILL.md`, between its `<!-- BEGIN shared/... -->` and `<!-- END shared/... -->` markers |
 | [`docs/practices.md`](../docs/practices.md) | `<skill>/references/practices.md` |
-| each plugin's `describe` reply, its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
+| each plugin's `describe` reply (its package's `describe.json`), its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
 
 Never edit the copies. After changing a source, a plugin's fields or options, or the plugin
-docs, build `dre` and the plugins and regenerate:
+docs, regenerate:
 
 ```bash
-cargo build --workspace --bins
-for p in databricks bigquery snowflake; do (cd "go/$p" && go build -o "../../target/debug/dre-plugin-$p" .); done
 python3 .github/scripts/skills.py sync
-python3 .github/scripts/skills.py generate --plugins-dir target/debug
-python3 .github/scripts/skills.py check --dre target/debug/dre --plugins-dir target/debug
+python3 .github/scripts/skills.py generate
+python3 .github/scripts/skills.py check
+```
+
+A plugin's fields and options reach the references through its package's `describe.json`
+(`plugins/<package>/describe.json`, `go/<package>/describe.json`). After changing them in the
+plugin's code, rewrite the file from the built plugins and commit it; CI's `describe_json` test
+fails while it's stale:
+
+```bash
+DRE_UPDATE_DESCRIBE=1 DRE_TEST_GO_PLUGINS=<dir of built Go plugins> cargo test -p dre-cli --test describe_json
 ```
 
 The Skills workflow runs `check` on every change to the skills, the plugin docs, the CLI or a

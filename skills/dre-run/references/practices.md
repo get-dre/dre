@@ -1,8 +1,8 @@
 ---
 title: "DRE practices"
 description: "The opinions DRE’s agent skills give, and the reasons behind them."
-sidebar:
-  order: 17
+section: build-reports
+position: 5
 ---
 
 # DRE practices
@@ -372,6 +372,18 @@ renders.
 
 *Warned when:* you ask to run a report with a `message` output against a real destination before
 it has been previewed.
+
+### RUN-7: A date or period in delivery paths
+
+**Level:** advise
+
+Put the period a file covers in its delivery path (`monthly-{{ run.date.yyyymm }}.xlsx`), and
+set `if_exists: error` where a file must never be replaced (a regulated drop) or `number` to keep
+every copy.
+
+*Why:* a delivery replaces a file already at its path by default. With the period in the name,
+only a rerun of the same period replaces its file, which is usually what's wanted after a fix;
+without it, every run overwrites the last.
 
 ## Schedules
 
