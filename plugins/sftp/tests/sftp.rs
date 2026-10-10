@@ -242,3 +242,30 @@ fn if_exists_refuses_or_numbers_a_name_already_taken() {
         );
     }
 }
+
+#[test]
+fn a_refused_connection_is_tried_again_and_refused_credentials_are_not() {
+    // Nothing listens on the port: refused at once, tried again after about a second.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let conn = json!({"host": "127.0.0.1", "port": port, "username": "dre", "password": "x",
+        "accept_unknown_host": true, "retries": 1});
+    let err = deliver("upload/x.csv", conn, b"x").unwrap_err();
+    assert!(err.contains("after 2 tries"), "{err}");
+    let Some((host, port)) = server() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let kh = known_hosts(dir.path(), &host, port);
+    let err = deliver(
+        "upload/x.csv",
+        base(json!({"known_hosts_path": kh, "password": "wrong", "retries": 3})),
+        b"x",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("refused the credentials") && !err.contains("tries"),
+        "{err}"
+    );
+}

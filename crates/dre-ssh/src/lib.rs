@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use dre_protocol::delivery::{Retry, is_connection_error};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{Result, conn_str};
 use russh::client;
@@ -138,6 +139,19 @@ impl Ssh {
     /// Connect, check the host key and authenticate. `timeout` bounds reaching the server and
     /// the key exchange.
     pub async fn connect(&self, config: client::Config, timeout: Duration) -> Result<Session> {
+        self.try_connect(config, timeout).await.map_err(|e| match e {
+            Retry::Temporary(e, _) | Retry::Fail(e) => e,
+        })
+    }
+
+    /// [`connect`](Self::connect), saying whether trying again may help: a timeout or a
+    /// connection refused or dropped may; refused credentials or a host key that doesn't match
+    /// won't.
+    pub async fn try_connect(
+        &self,
+        config: client::Config,
+        timeout: Duration,
+    ) -> std::result::Result<Session, Retry<dre_protocol::plugin::Error>> {
         let (host, port) = (self.host.as_str(), self.port);
         let refused = Arc::new(Mutex::new(None));
         let check = HostCheck {
@@ -149,28 +163,43 @@ impl Ssh {
             refused: refused.clone(),
         };
         let connecting = client::connect(Arc::new(config), (host, port), check);
+        let temporary = |m: String| Retry::Temporary(m.into(), None);
+        let fail = |m: String| Retry::Fail(m.into());
         let mut session = match tokio::time::timeout(timeout, connecting).await {
-            Err(_) => return Err(format!("timed out connecting to {host}:{port}").into()),
+            Err(_) => return Err(temporary(format!("timed out connecting to {host}:{port}"))),
             Ok(Err(e)) => {
-                let why = refused.lock().unwrap().take();
-                return Err(why
-                    .unwrap_or_else(|| format!("can't connect to {host}:{port}: {e}"))
-                    .into());
+                if let Some(why) = refused.lock().unwrap().take() {
+                    return Err(fail(why));
+                }
+                let m = format!("can't connect to {host}:{port}: {e}");
+                return Err(match &e {
+                    russh::Error::IO(io) if is_connection_error(io) => temporary(m),
+                    russh::Error::Disconnect | russh::Error::ConnectionTimeout => temporary(m),
+                    _ => fail(m),
+                });
             }
             Ok(Ok(s)) => s,
         };
         let user = &self.username;
+        let dropped = |e: russh::Error| Retry::Temporary(e.into(), None);
         let auth = match &self.auth {
             Auth::Key(key) => {
-                let hash = session.best_supported_rsa_hash().await?.flatten();
+                let hash = session
+                    .best_supported_rsa_hash()
+                    .await
+                    .map_err(dropped)?
+                    .flatten();
                 session
                     .authenticate_publickey(user, PrivateKeyWithHashAlg::new(key.clone(), hash))
-                    .await?
+                    .await
+                    .map_err(dropped)?
             }
-            Auth::Password(pw) => session.authenticate_password(user, pw).await?,
+            Auth::Password(pw) => session.authenticate_password(user, pw).await.map_err(dropped)?,
         };
         if !auth.success() {
-            return Err(format!("{host}:{port} refused the credentials for `{user}`").into());
+            return Err(fail(format!(
+                "{host}:{port} refused the credentials for `{user}`"
+            )));
         }
         Ok(session)
     }

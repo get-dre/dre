@@ -7,7 +7,7 @@ package main
 // places.
 //
 // The remote path must be /Volumes/<catalog>/<schema>/<volume>/...; missing directories are
-// created. Retries while the workspace answers 429/503.
+// created. A 429, 503 or dropped connection is tried again (`retries`).
 
 import (
 	"encoding/json"
@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/get-dre/dre/go/plugin"
 )
@@ -47,7 +46,7 @@ func deliverToVolume(local, remote string, conn, opts map[string]any) (string, e
 		return "", fmt.Errorf("`%s` must be /Volumes/<catalog>/<schema>/<volume>/<file>", remote)
 	}
 	path := "/" + strings.Join(parts, "/")
-	rules, err := rulesFor(opts)
+	rules, err := rulesFor(conn, opts)
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +77,10 @@ func deliverToVolume(local, remote string, conn, opts map[string]any) (string, e
 	// Directories under the volume (the volume itself must exist).
 	if len(parts) > 5 {
 		dir := "/" + strings.Join(parts[:len(parts)-1], "/")
-		if err := volumeRequest(client, base+"/api/2.0/fs/directories"+percentEncode(dir, true), a, ""); err != nil {
+		_, err := plugin.Retry(rules.Retries, "creating "+dir, func() (struct{}, error) {
+			return struct{}{}, volumeRequest(client, base+"/api/2.0/fs/directories"+percentEncode(dir, true), a, "")
+		})
+		if err != nil {
 			return "", fmt.Errorf("can't create %s: %v", dir, err)
 		}
 	}
@@ -151,73 +153,65 @@ func mountedVolume(parts []string) (root string, ok bool) {
 	return root, true
 }
 
-// volumeRequest PUTs to url (with the file at local as the body, when set), retrying while the
-// workspace answers 429/503.
+// volumeRequest PUTs to url (with the file at local as the body, when set), once. A 429, 503 or
+// connection failure comes back as a *plugin.TemporaryError, for the delivery rules to retry.
 func volumeRequest(client *http.Client, url string, a *auth, local string) error {
-	start := time.Now()
-	wait := time.Second
-	for {
-		bearer, err := a.bearer()
+	bearer, err := a.bearer()
+	if err != nil {
+		return err
+	}
+	var body io.Reader = http.NoBody
+	var size int64
+	var f *os.File
+	if local != "" {
+		f, err = os.Open(local)
 		if err != nil {
+			return fmt.Errorf("can't read %s: %v", local, err)
+		}
+		st, err := f.Stat()
+		if err != nil {
+			f.Close()
 			return err
 		}
-		var body io.Reader = http.NoBody
-		var size int64
-		var f *os.File
-		if local != "" {
-			f, err = os.Open(local)
-			if err != nil {
-				return fmt.Errorf("can't read %s: %v", local, err)
-			}
-			st, err := f.Stat()
-			if err != nil {
-				f.Close()
-				return err
-			}
-			body, size = f, st.Size()
-		}
-		req, err := http.NewRequest("PUT", url, body)
-		if err != nil {
-			if f != nil {
-				f.Close()
-			}
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		req.Header.Set("User-Agent", "dre")
-		if f != nil {
-			req.ContentLength = size
-			req.Header.Set("Content-Type", "application/octet-stream")
-		}
-		resp, err := client.Do(req)
+		body, size = f, st.Size()
+	}
+	req, err := http.NewRequest("PUT", url, body)
+	if err != nil {
 		if f != nil {
 			f.Close()
 		}
-		if err != nil {
-			return fmt.Errorf("can't reach Databricks: %v", err)
-		}
-		text, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		if (resp.StatusCode == 429 || resp.StatusCode == 503) && time.Since(start) < 300*time.Second {
-			time.Sleep(wait)
-			wait = min(wait*2, 30*time.Second)
-			continue
-		}
-		hint := ""
-		switch resp.StatusCode {
-		case 401, 403:
-			hint = " (check the token and its permissions on the volume)"
-			if a.oauth != nil {
-				hint = " (check the signed-in identity's permissions on the volume)"
-			}
-		case 404:
-			hint = " (check the catalog, schema and volume exist)"
-		}
-		return &httpError{resp.StatusCode, apiErrorCode(text), fmt.Sprintf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))}
+		return err
 	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("User-Agent", "dre")
+	if f != nil {
+		req.ContentLength = size
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	resp, err := client.Do(req)
+	if f != nil {
+		f.Close()
+	}
+	if err != nil {
+		return temporary(fmt.Errorf("can't reach Databricks: %v", err), 0, "")
+	}
+	text, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	hint := ""
+	switch resp.StatusCode {
+	case 401, 403:
+		hint = " (check the token and its permissions on the volume)"
+		if a.oauth != nil {
+			hint = " (check the signed-in identity's permissions on the volume)"
+		}
+	case 404:
+		hint = " (check the catalog, schema and volume exist)"
+	}
+	herr := &httpError{resp.StatusCode, apiErrorCode(text), fmt.Sprintf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))}
+	return temporary(herr, resp.StatusCode, resp.Header.Get("Retry-After"))
 }
 
 // apiError is the readable part of a Databricks REST error: `ERROR_CODE: message` from its JSON

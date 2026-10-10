@@ -24,6 +24,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `webhook_url` | yes | yes |  | the space's webhook URL (keep it secret) |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
+| `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |
 
 ## Report options
 
@@ -51,6 +52,29 @@ Every destination that talks to a server takes two timeouts in its profile entry
 
 There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
 run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
+
+### Tries again
+
+A temporary failure is tried again: a connection refused, reset or timed out, an HTTP 429 or a
+5xx. The waits are about 1s, 4s and 16s (a little random), or the server's `Retry-After`. Each
+retry is logged at info level, and a delivery that took several tries has `attempts` in
+`run_results.json`. Refused credentials or permissions, and other 4xx answers, fail at once.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `retries` | `3` | How many times to try again, in the profile entry of every destination and source that talks to a server. `0` never tries again. |
+
+Nothing is ever sent twice:
+
+- **Files** (`sftp`, `ftp`, object stores, `databricks`): an upload is tried again whole; with
+  `atomic` (the default) the half-written temporary file is replaced, never shown.
+- **Email**: only when the server certainly didn't accept the message: the connection failed
+  before the session began, or the server answered 4xx (try later). A connection dropped after
+  the message was sent isn't tried again.
+- **Chat posts** (`slack`, `teams`, `google_chat`): only on a 429 or 503, or when no connection
+  was made.
+- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`): only while connecting or
+  signing in, never once a query is sent.
 
 ### Several destinations
 
@@ -110,7 +134,7 @@ To create the webhook: in Google Chat, open the space, then **Apps & integration
 > **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
 may need to allow webhooks). The message is the title in bold, then the text in Chat's
 formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
-is retried once.
+is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
 
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.

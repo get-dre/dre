@@ -811,6 +811,8 @@ struct BindingRun<'a> {
     produced: Vec<Produced>,
     /// Each of the Binding's outputs, in order.
     outs: Vec<OutputRun>,
+    /// How many tries the delivery being made took (a plugin retrying a temporary error).
+    attempts: u32,
     drift: Vec<String>,
     /// The current schema with stable identities and any protection carried from the baseline.
     protected_snapshot: Option<Json>,
@@ -959,6 +961,7 @@ impl<'a> BindingRun<'a> {
             started_at,
             produced: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
+            attempts: 1,
             drift: Vec::new(),
             protected_snapshot: None,
         }
@@ -2254,6 +2257,7 @@ impl<'a> BindingRun<'a> {
             let kind = profiles
                 .target(Role::Destination, &d.profile)
                 .map(|o| o.kind.clone());
+            self.attempts = 1;
             let (status, location, error) =
                 match self.deliver_one(oi, d).map_err(|e| e.or(Code::DeliveryFailed)) {
                     Ok(Some(loc)) => ("delivered", Some(loc), None),
@@ -2272,6 +2276,7 @@ impl<'a> BindingRun<'a> {
                 target,
                 status,
                 location,
+                attempts: Some(self.attempts).filter(|n| *n > 1),
                 error_code: error.as_ref().map(|e| e.code.clone()),
                 error: error.map(|e| e.message),
             };
@@ -2440,6 +2445,7 @@ impl<'a> BindingRun<'a> {
             let loc = p
                 .deliver_message(&message, &attach, connection, d.options.clone())
                 .map_err(failed)?;
+            self.attempts = p.last_attempts();
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             self.outs[oi].files[0].1.get_or_insert_with(|| loc.clone());
             let _ = p.close();
@@ -2463,6 +2469,7 @@ impl<'a> BindingRun<'a> {
             let loc = p
                 .deliver_files(&files, connection.clone(), d.options.clone())
                 .map_err(failed)?;
+            self.attempts = self.attempts.max(p.last_attempts());
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             for i in batch {
                 self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());

@@ -164,6 +164,9 @@ pub enum Response {
     },
     Delivered {
         location: String,
+        /// How many tries the delivery took, when it was more than one (protocol 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<u32>,
     },
     /// `relation` is what SQL uses to read the loaded rows. `warning`, when set, is shown to the
     /// user (e.g. the database has no bulk path, so a load this size is slow).

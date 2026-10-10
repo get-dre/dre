@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -318,9 +319,15 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 	s := &server{pkg: p, role: r, frames: make(chan frameOrErr, 16), out: bufio.NewWriter(stdout)}
 	go s.readInput(bufio.NewReader(stdin))
 	active.Store(s)
-	prev := slog.Default()
+	// slog.SetDefault also sends the log package's output to the new handler, and restoring
+	// slog's own default doesn't undo that, so restore the log package's writer and flags too.
+	prev, prevOut, prevFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slogHandler{}))
-	defer slog.SetDefault(prev)
+	defer func() {
+		slog.SetDefault(prev)
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	}()
 	defer func() {
 		if p := recover(); p != nil {
 			if c, ok := p.(exitCode); ok {
@@ -685,11 +692,16 @@ func (s *server) handleDestination(t string, req map[string]json.RawMessage) err
 		if r.Options == nil {
 			r.Options = map[string]any{}
 		}
+		takeAttempts()
 		loc, err := s.role.Deliver(local, remote, r.Connection, r.Options)
 		if err != nil {
 			return err
 		}
-		s.send(map[string]any{"type": "delivered", "location": loc})
+		reply := map[string]any{"type": "delivered", "location": loc}
+		if n := takeAttempts(); n > 1 {
+			reply["attempts"] = n
+		}
+		s.send(reply)
 		return nil
 	case "open", "execute", "check", "load", "write", "result_set_end", "finish":
 		return fmt.Errorf("a destination plugin doesn't handle %s requests", t)

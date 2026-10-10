@@ -33,6 +33,7 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use bytes::Bytes;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
+use dre_protocol::delivery::{self, Retry, retry};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
@@ -371,6 +372,8 @@ struct Settings {
     host: String,
     port: u16,
     connect_timeout: Option<Duration>,
+    /// `retries`: how many times to try connecting again after a temporary failure.
+    retries: u32,
     tls: Option<native_tls::TlsConnector>,
     /// The bastion from the `ssh:` block.
     ssh: Option<Ssh>,
@@ -395,16 +398,13 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
     }
     // The shared `connect_timeout` (default 30s). Queries get no time limit: the run's timeout
     // is the backstop, and keepalives notice a dead connection.
-    let connect_timeout = Some(
-        dre_protocol::delivery::Rules::from_settings(
-            dre_protocol::delivery::Rules::default(),
-            c,
-            &Map::new(),
-            &[],
-        )?
-        .0
-        .connect_timeout,
-    );
+    let (rules, _) = dre_protocol::delivery::Rules::from_settings(
+        dre_protocol::delivery::Rules::default(),
+        c,
+        &Map::new(),
+        &[],
+    )?;
+    let connect_timeout = Some(rules.connect_timeout);
     cfg.application_name("dre");
     let mode = conn_str(c, "sslmode").unwrap_or("prefer");
     let mut tls = native_tls::TlsConnector::builder();
@@ -460,6 +460,7 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
         host,
         port,
         connect_timeout,
+        retries: rules.retries,
         tls,
         ssh,
     })
@@ -524,22 +525,42 @@ fn cancel_on_server(
 }
 
 /// Connect directly, or through the bastion. `at` names the server in errors: `db` (from
-/// [`server`]), and the bastion when there is one.
-async fn connect(s: &Settings, db: &str, at: &str) -> std::result::Result<Session, String> {
-    let fail = |e: tokio_postgres::Error| format!("can't connect to Postgres at {at}: {}", describe(&e));
+/// [`server`]), and the bastion when there is one. A failure trying again may fix (the server
+/// unreachable, starting up or dropping the connection) is [`Retry::Temporary`]; refused
+/// credentials or a missing database aren't.
+async fn connect(s: &Settings, db: &str, at: &str) -> std::result::Result<Session, Retry<String>> {
+    let fail = |e: tokio_postgres::Error| {
+        let m = format!("can't connect to Postgres at {at}: {}", describe(&e));
+        // 57P03: the server is starting up or shutting down; no SQLSTATE: the connection dropped.
+        match e.code() {
+            Some(c) if *c == tokio_postgres::error::SqlState::CANNOT_CONNECT_NOW => Retry::Temporary(m, None),
+            None if e.as_db_error().is_none() && e.source().is_some_and(|x| x.is::<std::io::Error>()) => {
+                Retry::Temporary(m, None)
+            }
+            _ => Retry::Fail(m),
+        }
+    };
+    let unreachable = |e: std::io::Error| {
+        let m = format!("can't connect to Postgres at {at}: error connecting to server: {e}");
+        if delivery::is_connection_error(&e) {
+            Retry::Temporary(m, None)
+        } else {
+            Retry::Fail(m)
+        }
+    };
     let Some(ssh) = &s.ssh else {
         #[cfg(unix)]
         if s.host.starts_with('/') {
             let socket = format!("{}/.s.PGSQL.{}", s.host, s.port);
             let stream = tokio::net::UnixStream::connect(&socket)
                 .await
-                .map_err(|e| format!("can't connect to Postgres at {at}: error connecting to server: {e}"))?;
+                .map_err(unreachable)?;
             let client = handshake(stream, s).await.map_err(fail)?;
             return Ok(Session { client, tunnel: None });
         }
         let stream = tokio::net::TcpStream::connect((s.host.as_str(), s.port))
             .await
-            .map_err(|e| format!("can't connect to Postgres at {at}: error connecting to server: {e}"))?;
+            .map_err(unreachable)?;
         // As libpq does: no Nagle delay, and keepalives after two idle hours.
         let _ = stream.set_nodelay(true);
         let keepalive = socket2::TcpKeepalive::new().with_time(Duration::from_secs(7200));
@@ -554,17 +575,23 @@ async fn connect(s: &Settings, db: &str, at: &str) -> std::result::Result<Sessio
         ..Default::default()
     };
     let tunnel = ssh
-        .connect(config, s.connect_timeout.unwrap_or(Duration::from_secs(30)))
+        .try_connect(config, s.connect_timeout.unwrap_or(Duration::from_secs(30)))
         .await
-        .map_err(|e| format!("can't reach the SSH bastion {bastion} (for Postgres at {db}): {e}"))?;
+        .map_err(|e| {
+            let m = |e| format!("can't reach the SSH bastion {bastion} (for Postgres at {db}): {e}");
+            match e {
+                Retry::Temporary(e, w) => Retry::Temporary(m(e), w),
+                Retry::Fail(e) => Retry::Fail(m(e)),
+            }
+        })?;
     let channel = tunnel
         .channel_open_direct_tcpip(s.host.as_str(), u32::from(s.port), "127.0.0.1", 0)
         .await
         .map_err(|e| {
-            format!(
+            Retry::Fail(format!(
                 "the SSH bastion {bastion} couldn't connect to {}:{} (for Postgres at {db}): {e}",
                 s.host, s.port
-            )
+            ))
         })?;
     let client = handshake(channel.into_stream(), s).await.map_err(fail)?;
     Ok(Session {
@@ -620,11 +647,12 @@ impl Source for Postgres {
             .manual(),
         ]
         .into_iter()
-        // Only the connect timeout: a query has no time limit of its own.
+        // The connect timeout and retries: a query has no time limit of its own, and is never
+        // tried again.
         .chain(
-            dre_protocol::delivery::timeout_fields()
+            delivery::connection_fields()
                 .into_iter()
-                .filter(|f| f.name == "connect_timeout"),
+                .filter(|f| f.name != "timeout"),
         )
         .collect()
     }
@@ -636,18 +664,24 @@ impl Source for Postgres {
             Some(ssh) => format!("{db} through the SSH bastion {}:{}", ssh.host, ssh.port),
             None => db.clone(),
         };
-        let session = self.rt.block_on(async {
-            match s.connect_timeout {
-                Some(t) => tokio::time::timeout(t, connect(&s, &db, &at))
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(format!(
-                            "can't connect to Postgres at {at}: timed out after {}s",
-                            t.as_secs()
-                        ))
-                    }),
-                None => connect(&s, &db, &at).await,
-            }
+        // Tried again (`retries`) only while connecting, never once a query is sent.
+        let session = retry(s.retries, &format!("connecting to Postgres at {at}"), || {
+            self.rt.block_on(async {
+                match s.connect_timeout {
+                    Some(t) => tokio::time::timeout(t, connect(&s, &db, &at))
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(Retry::Temporary(
+                                format!(
+                                    "can't connect to Postgres at {at}: timed out after {}s",
+                                    t.as_secs()
+                                ),
+                                None,
+                            ))
+                        }),
+                    None => connect(&s, &db, &at).await,
+                }
+            })
         })?;
         let mut setup = Vec::new();
         if let Some(role) = conn_str(c, "role") {

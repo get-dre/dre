@@ -13,6 +13,7 @@
 use std::path::Path;
 use std::str::FromStr;
 
+use dre_protocol::delivery::{Retry, retry};
 use dre_protocol::markdown;
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::options::{OptionField, OptionType, is_template};
@@ -51,7 +52,7 @@ impl Destination for Email {
             .default(false),
         ]
         .into_iter()
-        .chain(dre_protocol::delivery::timeout_fields())
+        .chain(dre_protocol::delivery::connection_fields())
         .collect()
     }
 
@@ -284,6 +285,8 @@ struct Smtp {
     accept_invalid_certs: bool,
     /// `timeout`: how long connecting, or any read or write, may take.
     timeout: std::time::Duration,
+    /// `retries`: how many times to try again when the message certainly wasn't accepted.
+    retries: u32,
 }
 
 impl Smtp {
@@ -327,6 +330,7 @@ impl Smtp {
             credentials,
             accept_invalid_certs: conn_bool(c, "tls_accept_invalid_certs") == Some(true),
             timeout: rules.timeout,
+            retries: rules.retries,
         })
     }
 
@@ -350,9 +354,21 @@ impl Smtp {
         if let Some(c) = &self.credentials {
             b = b.credentials(c.clone());
         }
-        b.build()
-            .send(message)
-            .map_err(|e| format!("sending through SMTP server {at} failed: {e}"))?;
+        let transport = b.build();
+        // Tried again only when the message certainly wasn't accepted: the connection failed
+        // before the session started, or the server answered 4xx (try later). A connection
+        // dropped mid-session isn't, as the server may already have accepted the message.
+        let what = format!("SMTP server {at}");
+        retry(self.retries, &what, || {
+            transport.send(message).map(|_| ()).map_err(|e| {
+                let m = format!("sending through SMTP server {at} failed: {e}");
+                if e.is_transient() || e.to_string().starts_with("Connection error") {
+                    Retry::Temporary(m, None)
+                } else {
+                    Retry::Fail(m)
+                }
+            })
+        })?;
         Ok(())
     }
 }

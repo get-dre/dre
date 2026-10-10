@@ -1011,11 +1011,13 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 options,
                 message,
             };
+            crate::delivery::take_attempts();
             let location = match &delivery.message {
                 Some(m) => d.deliver_message(&delivery, m)?,
                 None => d.deliver_files(&delivery)?,
             };
-            out.send(&Response::Delivered { location });
+            let attempts = Some(crate::delivery::take_attempts()).filter(|n| *n > 1);
+            out.send(&Response::Delivered { location, attempts });
         }
         (h, req) => {
             let t = serde_json::to_value(&req)

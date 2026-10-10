@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/get-dre/dre/go/plugin"
 )
@@ -50,7 +49,7 @@ func deliverToWorkspace(local, remote string, conn, opts map[string]any) (string
 	if err != nil {
 		return "", err
 	}
-	rules, err := rulesFor(opts)
+	rules, err := rulesFor(conn, opts)
 	if err != nil {
 		return "", err
 	}
@@ -79,9 +78,12 @@ func deliverToWorkspace(local, remote string, conn, opts map[string]any) (string
 	client := &http.Client{}
 	dir := api[:strings.LastIndex(api, "/")]
 	mkdirs, _ := json.Marshal(map[string]string{"path": dir})
-	if err := workspaceRequest(client, base+"/api/2.0/workspace/mkdirs", a, func() (io.Reader, string, error) {
-		return bytes.NewReader(mkdirs), "application/json", nil
-	}); err != nil {
+	_, err = plugin.Retry(rules.Retries, "creating /Workspace"+dir, func() (struct{}, error) {
+		return struct{}{}, workspaceRequest(client, base+"/api/2.0/workspace/mkdirs", a, func() (io.Reader, string, error) {
+			return bytes.NewReader(mkdirs), "application/json", nil
+		})
+	})
+	if err != nil {
 		return "", fmt.Errorf("can't create /Workspace%s: %v", dir, err)
 	}
 	d, err := plugin.Deliver(&workspaceStore{client, base, a}, local, shown, rules)
@@ -171,56 +173,48 @@ func importForm(local, api string, overwrite bool) (io.Reader, string, error) {
 	return pr, mw.FormDataContentType(), nil
 }
 
-// workspaceRequest POSTs the body from mk (made afresh for each attempt), retrying while the
-// workspace answers 429/503.
+// workspaceRequest POSTs the body from mk, once. A 429, 503 or connection failure comes back as
+// a *plugin.TemporaryError, for the delivery rules to retry.
 func workspaceRequest(client *http.Client, url string, a *auth, mk func() (io.Reader, string, error)) error {
-	start := time.Now()
-	wait := time.Second
-	for {
-		bearer, err := a.bearer()
-		if err != nil {
-			return err
-		}
-		body, ctype, err := mk()
-		if err != nil {
-			return err
-		}
-		req, err := http.NewRequest("POST", url, body)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		req.Header.Set("User-Agent", "dre")
-		req.Header.Set("Content-Type", ctype)
-		resp, err := client.Do(req)
-		if c, ok := body.(io.Closer); ok {
-			c.Close()
-		}
-		if err != nil {
-			return fmt.Errorf("can't reach Databricks: %v", err)
-		}
-		text, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		if (resp.StatusCode == 429 || resp.StatusCode == 503) && time.Since(start) < 300*time.Second {
-			time.Sleep(wait)
-			wait = min(wait*2, 30*time.Second)
-			continue
-		}
-		hint := ""
-		switch resp.StatusCode {
-		case 401, 403:
-			hint = " (check the token and its permissions on the folder)"
-			if a.oauth != nil {
-				hint = " (check the signed-in identity's permissions on the folder)"
-			}
-		case 404:
-			hint = " (check the user or repo folder exists)"
-		}
-		return &httpError{resp.StatusCode, apiErrorCode(text), fmt.Sprintf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))}
+	bearer, err := a.bearer()
+	if err != nil {
+		return err
 	}
+	body, ctype, err := mk()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("User-Agent", "dre")
+	req.Header.Set("Content-Type", ctype)
+	resp, err := client.Do(req)
+	if c, ok := body.(io.Closer); ok {
+		c.Close()
+	}
+	if err != nil {
+		return temporary(fmt.Errorf("can't reach Databricks: %v", err), 0, "")
+	}
+	text, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	hint := ""
+	switch resp.StatusCode {
+	case 401, 403:
+		hint = " (check the token and its permissions on the folder)"
+		if a.oauth != nil {
+			hint = " (check the signed-in identity's permissions on the folder)"
+		}
+	case 404:
+		hint = " (check the user or repo folder exists)"
+	}
+	herr := &httpError{resp.StatusCode, apiErrorCode(text), fmt.Sprintf("HTTP %d%s: %s", resp.StatusCode, hint, apiError(text))}
+	return temporary(herr, resp.StatusCode, resp.Header.Get("Retry-After"))
 }
 
 // mountedWorkspace is the root to write /Workspace/... under on Databricks compute, where the

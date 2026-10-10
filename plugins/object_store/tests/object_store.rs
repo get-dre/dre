@@ -343,3 +343,105 @@ fn s3_reads_a_named_profile_from_the_shared_files() {
         Err(e) => assert!(!e.contains("credentials"), "{e}"),
     }
 }
+
+/// A server that answers 503 (with `Retry-After: 0`) to the first request, then `ok` to every
+/// other: (status, extra headers) by request number, method and path. Returns its URL and the
+/// requests it saw.
+fn flaky_server(
+    ok: impl Fn(&str, &str, &str) -> (u16, Vec<(String, String)>) + Send + 'static,
+) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let base = url.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut r = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            if r.read_line(&mut line).is_err() {
+                continue;
+            }
+            let mut len = 0usize;
+            loop {
+                let mut h = String::new();
+                r.read_line(&mut h).unwrap();
+                if h.trim().is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = h.split_once(':')
+                    && k.eq_ignore_ascii_case("content-length")
+                {
+                    len = v.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0; len];
+            r.read_exact(&mut body).unwrap();
+            let mut parts = line.split_whitespace();
+            let (method, path) = (
+                parts.next().unwrap().to_string(),
+                parts.next().unwrap().to_string(),
+            );
+            let n = {
+                let mut l = log.lock().unwrap();
+                l.push(format!("{method} {path}"));
+                l.len()
+            };
+            let (status, headers) = if n == 1 {
+                (503, vec![("Retry-After".to_string(), "0".to_string())])
+            } else {
+                ok(&method, &path, &base)
+            };
+            let mut resp = format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n");
+            for (k, v) in headers {
+                resp.push_str(&format!("{k}: {v}\r\n"));
+            }
+            resp.push_str("\r\n");
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    (url, seen)
+}
+
+#[test]
+fn a_503_is_tried_again_for_each_object_store() {
+    // S3: one PUT for a small file.
+    let (url, seen) = flaky_server(|_, _, _| (200, vec![("ETag".into(), "\"e\"".into())]));
+    let conn =
+        json!({"endpoint": url, "region": "us-east-1", "access_key_id": "a", "secret_access_key": "b"});
+    assert_eq!(deliver("s3", "s3://b/r.csv", conn, b"x").unwrap(), "s3://b/r.csv");
+    assert_eq!(seen.lock().unwrap().len(), 2, "{:?}", seen.lock().unwrap());
+    // Azure: one PUT.
+    let (url, seen) = flaky_server(|_, _, _| (201, vec![("ETag".into(), "\"e\"".into())]));
+    let conn = json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": url});
+    assert_eq!(
+        deliver("azure", "az://c/r.csv", conn, b"x").unwrap(),
+        "az://c/r.csv"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 2, "{:?}", seen.lock().unwrap());
+    // GCS: the resumable protocol's start, then the bytes.
+    let (url, seen) = flaky_server(|method, _, base| match method {
+        "POST" => (200, vec![("Location".into(), format!("{base}/session"))]),
+        _ => (200, vec![]),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("key.json");
+    std::fs::write(&key, json!({"gcs_base_url": url, "disable_oauth": true, "client_email": "", "private_key": "", "private_key_id": ""}).to_string()).unwrap();
+    let conn = json!({"service_account_key_path": key.to_str().unwrap(), "endpoint": url});
+    assert_eq!(
+        deliver("gcs", "gs://b/r.csv", conn, b"x").unwrap(),
+        "gs://b/r.csv"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 3, "{:?}", seen.lock().unwrap());
+    // `retries: 0` fails at once, and a 403 is never tried again.
+    let (url, seen) = flaky_server(|_, _, _| (200, vec![]));
+    let conn = json!({"endpoint": url, "region": "us-east-1", "access_key_id": "a", "secret_access_key": "b", "retries": 0});
+    assert!(
+        deliver("s3", "s3://b/r.csv", conn, b"x")
+            .unwrap_err()
+            .contains("503")
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}

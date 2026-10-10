@@ -87,8 +87,21 @@ func newDatabricks(conn map[string]any) (*databricks, error) {
 	}
 	db := sql.OpenDB(c)
 	db.SetMaxOpenConns(1)
+	rules, _, err := plugin.RulesFrom(plugin.DefaultRules(), conn, nil, nil)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	stop := waiting(fmt.Sprintf("the SQL warehouse %s", path))
-	cn, err := db.Conn(context.Background())
+	// Tried again (`retries`) only while connecting; the connector itself waits for a stopped
+	// warehouse to start.
+	cn, err := plugin.Retry(rules.Retries, "connecting to Databricks", func() (*sql.Conn, error) {
+		cn, err := db.Conn(context.Background())
+		if err != nil && plugin.IsConnectionError(err) {
+			return nil, &plugin.TemporaryError{Err: err}
+		}
+		return cn, err
+	})
 	stop()
 	if err != nil {
 		db.Close()

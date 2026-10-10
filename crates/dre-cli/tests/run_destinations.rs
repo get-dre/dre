@@ -13,6 +13,7 @@ fn profiles(rec: &str) -> String {
          \x20 inbox:\n    targets:\n      dev: {{type: local}}\n\
          \x20 rec:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\"}}\n\
          \x20 broken:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\", fail: true}}\n\
+         \x20 flaky:\n    targets:\n      dev: {{type: fixture, dir: \"{rec}\", temporary_failures: 2}}\n\
          \x20 mail:\n    targets:\n      dev: {{deliver: false}}\n      prod: {{type: fixture, dir: \"{rec}\"}}\n"
     )
 }
@@ -346,4 +347,18 @@ fn if_exists_on_the_local_destination_refuses_or_numbers_a_name_already_taken() 
         "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, if_exists: keep}\n",
     );
     p.dre("validate", &[]).failed().says("`if_exists`");
+}
+
+#[test]
+fn a_delivery_that_took_several_tries_says_so_in_run_results() {
+    let (p, rec) = project(
+        "queries: [q]\noutput:\n  destination:\n    - {profile: flaky, path: a.csv}\n    - {profile: rec, path: b.csv}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    assert_eq!(deliveries(&rec).len(), 2);
+    let r = results(&p);
+    assert_eq!(r["deliveries"][0]["attempts"], 3);
+    assert!(r["deliveries"][1].get("attempts").is_none(), "{r}");
+    assert!(p.run_logs().contains("trying again"), "{}", p.run_logs());
 }

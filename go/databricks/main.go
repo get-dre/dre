@@ -70,5 +70,6 @@ func connectionFields() []plugin.Field {
 		{Name: "client_secret", Description: "service principal OAuth secret", Secret: true, SameAsSource: "databricks"},
 		{Name: "catalog", Description: "default catalog"},
 		{Name: "schema", Description: "default schema"},
+		{Name: "retries", Description: "how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload", Default: 3, Manual: true, SameAsSource: "databricks"},
 	}
 }

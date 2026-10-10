@@ -8,11 +8,15 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
+	"net"
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -225,6 +229,83 @@ type Store interface {
 	Delete(remote string) error
 }
 
+// Resetter is a Store that drops a broken connection before Deliver tries again, so the next
+// call makes a new one.
+type Resetter interface {
+	Reset()
+}
+
+// attempts is the most tries any delivery step took in the request being served, for the
+// `delivered` reply.
+var attempts atomic.Int32
+
+func noteAttempts(n int) {
+	for {
+		cur := attempts.Load()
+		if int32(n) <= cur || attempts.CompareAndSwap(cur, int32(n)) {
+			return
+		}
+	}
+}
+
+// takeAttempts is the most tries a step took since the last call, at least 1; it resets the
+// count.
+func takeAttempts() int {
+	return max(int(attempts.Swap(0)), 1)
+}
+
+// Retry runs f, trying again while it returns a *TemporaryError, up to retries more times, with
+// backoff (about 1s, then 4s, then 16s) or the server's Retry-After. Each retry is logged at
+// info level, naming what; a step that needed several tries is reported to core. Return a
+// plain error for a failure trying again won't fix, or that might repeat something already done.
+func Retry[T any](retries int, what string, f func() (T, error)) (T, error) {
+	return retryWith(retries, what, time.Sleep, f)
+}
+
+func retryWith[T any](retries int, what string, sleep func(time.Duration), f func() (T, error)) (T, error) {
+	for attempt := 1; ; attempt++ {
+		v, err := f()
+		noteAttempts(attempt)
+		var temp *TemporaryError
+		if err == nil || !errors.As(err, &temp) || attempt > retries {
+			if temp != nil {
+				err = temp.Err
+			}
+			return v, err
+		}
+		wait := temp.RetryAfter
+		if wait == 0 {
+			wait = backoff(attempt)
+		}
+		slog.Info(fmt.Sprintf("%s: %v; trying again in %ds (attempt %d of %d)", what, temp.Err, int(wait.Seconds()), attempt+1, retries+1))
+		sleep(wait)
+	}
+}
+
+// IsConnectionError is whether err is a connection failing (refused, reset, timed out, closed
+// early), which trying again may fix.
+func IsConnectionError(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	var oe *net.OpError
+	if errors.As(err, &oe) {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// RetryAfter is the Retry-After of a 429 or 503, in seconds (an HTTP date isn't read).
+func RetryAfter(header string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
+}
+
 // Delivered is where a delivery landed.
 type Delivered struct {
 	// Path is the final path (with IfExistsNumber, possibly report_2.xlsx).
@@ -242,6 +323,7 @@ func Deliver(s Store, local, remote string, r Rules) (Delivered, error) {
 func deliverWith(s Store, local, remote string, r Rules, sleep func(time.Duration)) (Delivered, error) {
 	for attempt := 1; ; attempt++ {
 		p, err := tryOnce(s, local, remote, r)
+		noteAttempts(attempt)
 		if err == nil {
 			return Delivered{Path: p, Attempts: attempt}, nil
 		}
@@ -252,6 +334,9 @@ func deliverWith(s Store, local, remote string, r Rules, sleep func(time.Duratio
 				wait = backoff(attempt)
 			}
 			slog.Info(fmt.Sprintf("%s: %v; trying again in %ds (attempt %d of %d)", remote, err, int(wait.Seconds()), attempt+1, r.Retries+1))
+			if rs, ok := s.(Resetter); ok {
+				rs.Reset()
+			}
 			sleep(wait)
 			continue
 		}

@@ -279,6 +279,8 @@ pub struct PluginProcess {
     info: Option<PluginInfo>,
     /// A reply that arrived while core was still sending (a format failing mid-stream).
     early: Option<std::result::Result<Frame, FrameError>>,
+    /// How many tries the last delivery took (1 without a retry).
+    last_attempts: u32,
     /// The plugin asked for in the handshake. By default the one a `dre-<kind>-<name>` file name
     /// names; none for a package executable, which then serves its first plugin.
     serve: Option<PluginId>,
@@ -438,6 +440,7 @@ impl PluginProcess {
             stderr_thread: Some(stderr_thread),
             info: None,
             early: None,
+            last_attempts: 1,
             serve,
         })
     }
@@ -1000,7 +1003,10 @@ impl PluginProcess {
         };
         self.send(&req)?;
         match self.recv_json("a delivered reply")? {
-            Response::Delivered { location } => Ok(location),
+            Response::Delivered { location, attempts } => {
+                self.last_attempts = attempts.unwrap_or(1);
+                Ok(location)
+            }
             other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),
         }
     }
@@ -1028,9 +1034,18 @@ impl PluginProcess {
             message: Some(message.clone()),
         })?;
         match self.recv_json("a delivered reply")? {
-            Response::Delivered { location } => Ok(location),
+            Response::Delivered { location, attempts } => {
+                self.last_attempts = attempts.unwrap_or(1);
+                Ok(location)
+            }
             other => Err(self.unexpected("a delivered reply", &Incoming::Json(other))),
         }
+    }
+
+    /// How many tries the last delivery took: 1, or more when the plugin retried a temporary
+    /// error.
+    pub fn last_attempts(&self) -> u32 {
+        self.last_attempts
     }
 
     /// Ask the plugin to exit, and wait for it.

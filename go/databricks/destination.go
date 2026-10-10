@@ -23,10 +23,20 @@ func deliveryOptions() []plugin.OptionField {
 	return plugin.DeliveryOptions()[:1]
 }
 
-// rulesFor is the delivery rules from a destination entry's options.
-func rulesFor(opts map[string]any) (plugin.Rules, error) {
-	r, _, err := plugin.RulesFrom(plugin.DefaultRules(), nil, opts, nil)
+// rulesFor is the delivery rules from the profile entry (`retries`) and a destination entry's
+// options (`if_exists`).
+func rulesFor(conn, opts map[string]any) (plugin.Rules, error) {
+	r, _, err := plugin.RulesFrom(plugin.DefaultRules(), conn, opts, nil)
 	return r, err
+}
+
+// temporary marks a request's failure trying again may fix: a 429 or 503 (with its
+// Retry-After), or a connection failing.
+func temporary(err error, status int, retryAfter string) error {
+	if status == 429 || status == 503 || (status == 0 && plugin.IsConnectionError(err)) {
+		return &plugin.TemporaryError{Err: err, RetryAfter: plugin.RetryAfter(retryAfter)}
+	}
+	return err
 }
 
 // failed words a delivery failure; a coded *plugin.Error (`if_exists: error`) passes as it is.

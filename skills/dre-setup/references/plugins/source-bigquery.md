@@ -43,6 +43,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `maximum_bytes_billed` | no | no |  | a job that would bill more bytes than this fails instead of running |
 | `job_execution_timeout_seconds` | no | no |  | stop a query that runs longer than this |
 | `job_creation_timeout_seconds` | no | no |  | give up starting a query after this long |
+| `retries` | no | no | `3` | how many times to try starting the session again after a temporary error (0: never) |
 | `job_retries` | no | no |  | how many times a query that fails with a transient error is run again (default 1) |
 | `job_retry_deadline_seconds` | no | no |  | stop retrying a query after this long |
 | `api_endpoint` | no | no |  | a BigQuery API endpoint other than Google's, e.g. Private Service Connect or an emulator |
@@ -79,6 +80,7 @@ Dataproc, `gcs_bucket`, ...) are accepted and ignored.
 | `priority` | `interactive` (default) or `batch`. |
 | `maximum_bytes_billed` | A job that would bill more fails instead of running. Set on every job. |
 | `job_execution_timeout_seconds`, `job_creation_timeout_seconds` | Stop a query that runs, or takes to start, longer than this. |
+| `retries` | How many times to try starting the session again after a server error, a rate limit or a dropped connection (default 3). |
 | `job_retries`, `job_retry_deadline_seconds` | A query that fails with a server error or rate limit runs again, up to `job_retries` times (default 1) within the deadline. |
 | `api_endpoint` | A BigQuery API endpoint other than Google's (Private Service Connect, an emulator). Results are then read over REST only. |
 

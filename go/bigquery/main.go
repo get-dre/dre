@@ -55,6 +55,7 @@ var fields = []plugin.Field{
 	{Name: "maximum_bytes_billed", Description: "a job that would bill more bytes than this fails instead of running", Manual: true},
 	{Name: "job_execution_timeout_seconds", Description: "stop a query that runs longer than this", Manual: true},
 	{Name: "job_creation_timeout_seconds", Description: "give up starting a query after this long", Manual: true},
+	{Name: "retries", Description: "how many times to try starting the session again after a temporary error (0: never)", Default: 3, Manual: true},
 	{Name: "job_retries", Description: "how many times a query that fails with a transient error is run again (default 1)", Manual: true},
 	{Name: "job_retry_deadline_seconds", Description: "stop retrying a query after this long", Manual: true},
 	{Name: "api_endpoint", Description: "a BigQuery API endpoint other than Google's, e.g. Private Service Connect or an emulator", Manual: true},

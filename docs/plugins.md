@@ -60,6 +60,7 @@ Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`).
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
+| `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](#tries-again)). |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |
@@ -129,6 +130,7 @@ than 825 days is rejected (Apple's limit), so issue server certificates for 825 
 | `scopes` | For `oauth`: default `all-apis offline_access` for browser sign-in, `all-apis` for a service principal. |
 | `redirect_port` | For browser sign-in: the localhost port the sign-in redirects to. Default 8020, which is what `databricks-cli` allows. |
 | `catalog`, `schema` | Defaults for the session. |
+| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](#tries-again)). The destination uses it for uploads too. |
 | `retry_timeout` | Seconds to keep waiting while a stopped warehouse starts. Default 900. While it waits, DRE says so every 30 seconds. A host that doesn't resolve, or refuses the connection, fails at once. |
 
 ```yaml
@@ -221,6 +223,7 @@ Dataproc, `gcs_bucket`, ...) are accepted and ignored.
 | `priority` | `interactive` (default) or `batch`. |
 | `maximum_bytes_billed` | A job that would bill more fails instead of running. Set on every job. |
 | `job_execution_timeout_seconds`, `job_creation_timeout_seconds` | Stop a query that runs, or takes to start, longer than this. |
+| `retries` | How many times to try starting the session again after a server error, a rate limit or a dropped connection (default 3). |
 | `job_retries`, `job_retry_deadline_seconds` | A query that fails with a server error or rate limit runs again, up to `job_retries` times (default 1) within the deadline. |
 | `api_endpoint` | A BigQuery API endpoint other than Google's (Private Service Connect, an emulator). Results are then read over REST only. |
 
@@ -275,7 +278,7 @@ Field names and values are dbt-snowflake's, so a dbt profile can be copied acros
 | `query_tag` | Tags every query of the session. |
 | `client_session_keep_alive` | Keep the session alive through a long report. |
 | `client_request_mfa_token`, `client_store_temporary_credential` | Let the driver cache the MFA token and the SSO token in the OS keychain (on by default on macOS and Windows). |
-| `connect_retries`, `connect_timeout` | Retries, and how long each connection attempt may take (a duration such as `30s`, or seconds), for connecting. Defaults 1 and `30s`. |
+| `retries` (dbt's `connect_retries`), `connect_timeout` | How many times to try connecting again, and how long each attempt may take (a duration such as `30s`, or seconds). Defaults 3 and `30s`. |
 | `host`, `port`, `protocol`, `proxy_host`, `proxy_port`, `insecure_mode` | Connection details for unusual networks. |
 
 ```yaml
@@ -608,6 +611,29 @@ Every destination that talks to a server takes two timeouts in its profile entry
 There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
 run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
 
+### Tries again
+
+A temporary failure is tried again: a connection refused, reset or timed out, an HTTP 429 or a
+5xx. The waits are about 1s, 4s and 16s (a little random), or the server's `Retry-After`. Each
+retry is logged at info level, and a delivery that took several tries has `attempts` in
+`run_results.json`. Refused credentials or permissions, and other 4xx answers, fail at once.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `retries` | `3` | How many times to try again, in the profile entry of every destination and source that talks to a server. `0` never tries again. |
+
+Nothing is ever sent twice:
+
+- **Files** (`sftp`, `ftp`, object stores, `databricks`): an upload is tried again whole; with
+  `atomic` (the default) the half-written temporary file is replaced, never shown.
+- **Email**: only when the server certainly didn't accept the message: the connection failed
+  before the session began, or the server answered 4xx (try later). A connection dropped after
+  the message was sent isn't tried again.
+- **Chat posts** (`slack`, `teams`, `google_chat`): only on a 429 or 503, or when no connection
+  was made.
+- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`): only while connecting or
+  signing in, never once a query is sent.
+
 ### A file already at the path
 
 By default a delivery **replaces** a file already at its path: the usual reason a name is taken
@@ -886,8 +912,8 @@ output:
       - {profile: team_slack, channel: "#finance", attach: [workbook]}
 ```
 
-If Slack rate-limits a call, the plugin retries it once after Slack's `Retry-After`, waiting at
-most 60 seconds. Errors such
+If Slack rate-limits a call or answers 503, the plugin tries again after Slack's `Retry-After`
+(at most 60 seconds), up to `retries` times (see [Tries again](#tries-again)). Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what
 to fix. The delivered location is the uploaded files' permalinks.
 
@@ -914,7 +940,7 @@ to a channel when a webhook request is received**, pick the team and channel, an
 it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
 links and bullets. Teams has no destination options. A message over 15,000 characters is cut
 short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
-warning. If Teams rate-limits the post, the plugin retries once after its `Retry-After`.
+warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](#tries-again)).
 
 ### `google_chat`
 
@@ -935,7 +961,7 @@ To create the webhook: in Google Chat, open the space, then **Apps & integration
 > **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
 may need to allow webhooks). The message is the title in bold, then the text in Chat's
 formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
-is retried once.
+is tried again (see [Tries again](#tries-again)).
 
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.

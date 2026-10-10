@@ -8,11 +8,13 @@
 //! - It takes messages (`message`, limit 3,000 characters), recorded with `"message"` and the
 //!   attached `files`, unless `DRE_FIXTURE_FILES_ONLY` is set. `DRE_FIXTURE_MESSAGE_ONLY` makes it
 //!   `message_only`: it refuses files.
-//! - A connection with `fail: true` makes every delivery fail.
+//! - A connection with `fail: true` makes every delivery fail; `temporary_failures: n` fails the
+//!   first `n` tries with a temporary error, which the SDK's retry tries again at once.
 //! - Its options are `to`, `subject` and `message`, recorded as given.
 
 use std::io::Write;
 
+use dre_protocol::delivery::Retry;
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::msg::Message;
 use dre_protocol::options::{OptionField, OptionType};
@@ -26,7 +28,10 @@ struct Fixture;
 
 impl Destination for Fixture {
     fn connection_fields(&self) -> Vec<ConnectionField> {
-        vec![ConnectionField::new("dir", "where deliveries are recorded").required()]
+        vec![
+            ConnectionField::new("dir", "where deliveries are recorded").required(),
+            ConnectionField::new("temporary_failures", "how many tries fail with a temporary error"),
+        ]
     }
 
     fn options(&self) -> Vec<OptionField> {
@@ -53,6 +58,22 @@ impl Destination for Fixture {
         if std::env::var_os("DRE_FIXTURE_MESSAGE_ONLY").is_some() {
             return Err("the fixture destination only takes messages".into());
         }
+        let failures = d
+            .connection
+            .get("temporary_failures")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let mut tries = 0;
+        dre_protocol::delivery::retry(3, "fixture", || {
+            tries += 1;
+            if tries <= failures {
+                return Err(Retry::Temporary(
+                    "temporary failure".to_string(),
+                    Some(std::time::Duration::ZERO),
+                ));
+            }
+            Ok(())
+        })?;
         let names = record(d, None)?;
         Ok(format!("fixture:{}", names.join(",")))
     }

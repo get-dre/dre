@@ -160,3 +160,39 @@ func TestRulesFromSettings(t *testing.T) {
 		t.Fatal(numbered("x.tar.gz", 2))
 	}
 }
+
+func TestRetryTriesAgainOnlyOnTemporaryErrors(t *testing.T) {
+	var waits []time.Duration
+	sleep := func(d time.Duration) { waits = append(waits, d) }
+	takeAttempts()
+	n := 0
+	v, err := retryWith(3, "post", sleep, func() (string, error) {
+		n++
+		if n < 3 {
+			return "", &TemporaryError{Err: errors.New("HTTP 503"), RetryAfter: 2 * time.Second}
+		}
+		return "ok", nil
+	})
+	if v != "ok" || err != nil || n != 3 || len(waits) != 2 || waits[0] != 2*time.Second {
+		t.Fatal(v, err, n, waits)
+	}
+	if takeAttempts() != 3 || takeAttempts() != 1 {
+		t.Fatal("attempts")
+	}
+	n = 0
+	_, err = retryWith(3, "post", sleep, func() (string, error) { n++; return "", errors.New("HTTP 401") })
+	if n != 1 || err.Error() != "HTTP 401" {
+		t.Fatal(n, err)
+	}
+	n = 0
+	_, err = retryWith(1, "post", sleep, func() (string, error) {
+		n++
+		return "", &TemporaryError{Err: errors.New("HTTP 503")}
+	})
+	if n != 2 || err.Error() != "HTTP 503" {
+		t.Fatal(n, err)
+	}
+	if RetryAfter(" 7 ") != 7*time.Second || RetryAfter("Wed, 21 Oct") != 0 {
+		t.Fatal("Retry-After")
+	}
+}

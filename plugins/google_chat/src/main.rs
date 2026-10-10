@@ -8,9 +8,7 @@
 //! formatting. Over the limit, the text is cut short with a marker. A rate-limited post is retried
 //! once, after `Retry-After`.
 
-use std::time::Duration;
-
-use dre_protocol::delivery::{Rules, timeout_fields};
+use dre_protocol::delivery::{self, Retry, Rules, retry};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
@@ -33,7 +31,7 @@ impl Destination for GoogleChat {
                 .secret(),
         ]
         .into_iter()
-        .chain(timeout_fields())
+        .chain(delivery::connection_fields())
         .collect()
     }
 
@@ -67,8 +65,8 @@ impl Destination for GoogleChat {
 
 const FILES_REFUSED: &str = "the google_chat destination only takes messages; deliver files to object storage and link them from a message";
 
-/// POST the message; retry once on 429. Errors never include the URL, which holds the key and
-/// token.
+/// POST the message. Tried again (`retries`) only when it certainly wasn't posted: a 429 or 503, or no
+/// connection made. Errors never include the URL, which is a credential.
 fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<()> {
     let (rules, _) = Rules::from_settings(Rules::default(), connection, &Map::new(), &[])?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -78,48 +76,59 @@ fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<(
         .build()
         .into();
     let body = payload.to_string();
-    for attempt in 0..2 {
+    let done = retry(rules.retries, "Google Chat webhook", || {
         let resp = agent
             .post(url)
             .header("Content-Type", "application/json; charset=UTF-8")
             .send(body.as_bytes())
             .map_err(|e| {
-                format!(
+                let m = format!(
                     "can't reach the Google Chat webhook: {}",
                     scrub(&e.to_string(), url)
-                )
+                );
+                if never_sent(&e) {
+                    Retry::Temporary(m, None)
+                } else {
+                    Retry::Fail(m)
+                }
             })?;
         let status = resp.status().as_u16();
+        let wait = delivery::retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
         match status {
-            200..=299 => return Ok(()),
-            429 => {
-                let wait = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.trim().parse::<u64>().ok())
-                    .unwrap_or(1);
-                if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    dre_protocol::log::debug!("Google Chat rate-limited the post; retrying in {wait}s");
-                    std::thread::sleep(Duration::from_secs(wait));
-                    continue;
-                }
-                return Err(format!(
-                    "Google Chat is rate-limiting posts (retry after {wait}s); try again later"
-                )
-                .into());
+            200..=299 => Ok(()),
+            429 | 503 if wait.is_none_or(|w| w.as_secs() <= MAX_RETRY_WAIT) => {
+                let m = if status == 429 {
+                    "Google Chat is rate-limiting posts; try again later".to_string()
+                } else {
+                    format!("the Google Chat webhook returned HTTP {status}")
+                };
+                Err(Retry::Temporary(m, wait))
             }
-            400 => return Err("the Google Chat webhook rejected the message (HTTP 400)".into()),
-            401 | 403 | 404 => {
-                return Err(format!(
-                    "the Google Chat webhook refused the post (HTTP {status}); the URL may be wrong or the webhook deleted: check `webhook_url` in the profile"
-                )
-                .into());
-            }
-            s => return Err(format!("the Google Chat webhook returned HTTP {s}").into()),
+            429 => Err(Retry::Fail(format!(
+                "Google Chat is rate-limiting posts (retry after {}s); try again later",
+                wait.map_or(0, |w| w.as_secs())
+            ))),
+            400 => Err(Retry::Fail(
+                "the Google Chat webhook rejected the message (HTTP 400)".to_string(),
+            )),
+            401 | 403 | 404 => Err(Retry::Fail(format!(
+                "the Google Chat webhook refused the post (HTTP {status}); the URL may be wrong or the webhook deleted: check `webhook_url` in the profile"
+            ))),
+            s => Err(Retry::Fail(format!("the Google Chat webhook returned HTTP {s}"))),
         }
-    }
-    unreachable!("the loop returns on its second attempt")
+    });
+    done.map_err(Into::into)
+}
+
+/// Whether a request certainly never reached the server (no connection was made), so trying
+/// again can't post twice.
+fn never_sent(e: &ureq::Error) -> bool {
+    matches!(
+        e,
+        ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
+    ) || matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused)
 }
 
 /// `text` with the webhook URL (and its query, which holds the key and token) removed.

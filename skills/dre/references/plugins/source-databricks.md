@@ -29,6 +29,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `client_secret` | no | yes |  | service principal OAuth secret |
 | `catalog` | no | no |  | default catalog |
 | `schema` | no | no |  | default schema |
+| `retries` | no | no | `3` | how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload |
 
 ## Report options
 
@@ -50,6 +51,7 @@ None: a source's settings are its profile fields.
 | `scopes` | For `oauth`: default `all-apis offline_access` for browser sign-in, `all-apis` for a service principal. |
 | `redirect_port` | For browser sign-in: the localhost port the sign-in redirects to. Default 8020, which is what `databricks-cli` allows. |
 | `catalog`, `schema` | Defaults for the session. |
+| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). The destination uses it for uploads too. |
 | `retry_timeout` | Seconds to keep waiting while a stopped warehouse starts. Default 900. While it waits, DRE says so every 30 seconds. A host that doesn't resolve, or refuses the connection, fails at once. |
 
 ```yaml

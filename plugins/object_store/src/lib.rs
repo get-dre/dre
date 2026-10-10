@@ -24,19 +24,20 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver, timeout_fields};
+use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::options::OptionField;
 use dre_protocol::plugin::{
     About, Delivery, Destination, Plugin, PluginError, Result, conn_bool, conn_str, serve_package,
 };
 use dre_protocol::util::percent_encode;
-use object_store::ClientOptions;
 use object_store::aws::AmazonS3Builder;
 use object_store::azure::{AzureConfigKey, MicrosoftAzureBuilder};
 use object_store::buffered::BufWriter;
+use object_store::client::{HttpError, HttpErrorKind};
 use object_store::gcp::{GoogleCloudStorageBuilder, GoogleConfigKey};
 use object_store::path::Path as ObjectPath;
+use object_store::{ClientOptions, RetryConfig};
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions};
 use serde_json::{Map, Value};
 use tokio::io::AsyncWriteExt;
@@ -111,6 +112,11 @@ fn build(
     let client = ClientOptions::new()
         .with_connect_timeout(rules.connect_timeout)
         .with_timeout(rules.timeout);
+    // The shared delivery rules retry (and log it), so object_store's own retries are off.
+    let no_retry = RetryConfig {
+        max_retries: 0,
+        ..Default::default()
+    };
     Ok(match kind {
         Kind::S3 => {
             let explicit = conn_str(c, "access_key_id").is_some();
@@ -119,7 +125,10 @@ fn build(
             } else {
                 AmazonS3Builder::from_env()
             };
-            b = b.with_client_options(client).with_bucket_name(bucket);
+            b = b
+                .with_client_options(client)
+                .with_retry(no_retry)
+                .with_bucket_name(bucket);
             if let Some(r) = conn_str(c, "region") {
                 b = b.with_region(r);
             }
@@ -158,6 +167,7 @@ fn build(
         Kind::Gcs => {
             let mut b = GoogleCloudStorageBuilder::from_env()
                 .with_client_options(client)
+                .with_retry(no_retry)
                 .with_bucket_name(bucket);
             if let Some(p) = conn_str(c, "service_account_key_path") {
                 b = b.with_service_account_path(p);
@@ -172,6 +182,7 @@ fn build(
         Kind::Azure => {
             let mut b = MicrosoftAzureBuilder::new()
                 .with_client_options(client.clone())
+                .with_retry(no_retry)
                 .with_container_name(bucket);
             let mut account = conn_str(c, "account_name").map(str::to_string);
             let mut endpoint = conn_str(c, "endpoint").map(str::to_string);
@@ -328,7 +339,7 @@ impl Destination for ObjectStoreDestination {
                 .secret(),
             ],
         };
-        fields.extend(timeout_fields());
+        fields.extend(delivery::connection_fields());
         fields
     }
 
@@ -363,17 +374,46 @@ impl Destination for ObjectStoreDestination {
     }
 }
 
-/// An object already has the name (a conditional upload refused).
-#[derive(Debug)]
-struct Exists;
-
-impl std::fmt::Display for Exists {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("an object is already there")
+/// A failed request, with `what` it was: a connection failing, a 429 or a 5xx may work if tried
+/// again; refused credentials or a missing bucket won't.
+fn store_error(what: &str, e: &(dyn std::error::Error + 'static)) -> StoreError {
+    let m = format!("{what} failed: {e}");
+    let mut source = Some(e);
+    while let Some(err) = source {
+        if let Some(h) = err.downcast_ref::<HttpError>()
+            && matches!(
+                h.kind(),
+                HttpErrorKind::Connect
+                    | HttpErrorKind::Request
+                    | HttpErrorKind::Timeout
+                    | HttpErrorKind::Interrupted
+            )
+        {
+            return StoreError::temporary(m);
+        }
+        if let Some(io) = err.downcast_ref::<std::io::Error>()
+            && delivery::is_connection_error(io)
+        {
+            return StoreError::temporary(m);
+        }
+        source = err.source();
+    }
+    // The status, as object_store words it: `status code: 503 Service Unavailable`.
+    let status = m
+        .split("status code: ")
+        .nth(1)
+        .and_then(|t| t.get(..3))
+        .and_then(|t| t.parse::<u16>().ok());
+    match status {
+        Some(code) if temporary_status(code) => StoreError::temporary(m),
+        _ => StoreError::Failed(m),
     }
 }
 
-impl std::error::Error for Exists {}
+/// 429 and 5xx: the server says try later, or failed before storing anything.
+fn temporary_status(code: u16) -> bool {
+    code == 429 || (500..600).contains(&code)
+}
 
 /// One bucket or container, as the shared delivery rules' store.
 struct ObjStore<'a> {
@@ -396,11 +436,7 @@ impl Store for ObjStore<'_> {
     fn write(&mut self, local: &Path, key: &str, exclusive: bool) -> std::result::Result<(), StoreError> {
         let location = format!("{}://{}/{key}", self.kind.scheme(), self.bucket);
         if self.kind == Kind::Gcs {
-            return match gcs_upload(&self.bucket, key, local, self.connection, exclusive) {
-                Ok(_) => Ok(()),
-                Err(e) if e.is::<Exists>() => Err(StoreError::Exists),
-                Err(e) => Err(StoreError::Failed(e.to_string())),
-            };
+            return gcs_upload(&self.bucket, key, local, self.connection, exclusive).map(|_| ());
         }
         let path = ObjectPath::from(key);
         self.rt.block_on(async {
@@ -417,7 +453,7 @@ impl Store for ObjStore<'_> {
                     Ok(_) => Ok(()),
                     Err(object_store::Error::AlreadyExists { .. })
                     | Err(object_store::Error::Precondition { .. }) => Err(StoreError::Exists),
-                    Err(e) => Err(StoreError::Failed(format!("upload to {location} failed: {e}"))),
+                    Err(e) => Err(store_error(&format!("upload to {location}"), &e)),
                 };
             }
             let mut file = tokio::fs::File::open(local)
@@ -426,11 +462,11 @@ impl Store for ObjStore<'_> {
             let mut w = BufWriter::with_capacity(self.store.clone(), path, 8 * 1024 * 1024);
             if let Err(e) = tokio::io::copy(&mut file, &mut w).await {
                 let _ = w.abort().await;
-                return Err(StoreError::Failed(format!("upload to {location} failed: {e}")));
+                return Err(store_error(&format!("upload to {location}"), &e));
             }
             w.shutdown()
                 .await
-                .map_err(|e| StoreError::Failed(format!("upload to {location} failed: {e}")))
+                .map_err(|e| store_error(&format!("upload to {location}"), &e))
         })
     }
 
@@ -444,7 +480,7 @@ impl Store for ObjStore<'_> {
         match self.rt.block_on(self.store.head(&ObjectPath::from(key))) {
             Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(e) => Err(StoreError::Failed(format!("can't look for {key}: {e}"))),
+            Err(e) => Err(store_error(&format!("looking for {key}"), &e)),
         }
     }
 
@@ -464,8 +500,9 @@ fn gcs_upload(
     local: &Path,
     c: &Map<String, Value>,
     exclusive: bool,
-) -> Result<String> {
+) -> std::result::Result<String, StoreError> {
     let location = format!("gs://{bucket}/{key}");
+    let failed = StoreError::Failed;
     let base = conn_str(c, "endpoint")
         .map(str::to_string)
         .or_else(|| {
@@ -481,20 +518,46 @@ fn gcs_upload(
     } else if let Some(k) = conn_str(c, "service_account_key") {
         b = b.with_service_account_key(k);
     }
-    let store = b.build()?;
+    let store = b.build().map_err(|e| failed(e.to_string()))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .build()?;
+        .build()
+        .map_err(|e| failed(e.to_string()))?;
     let token = rt
         .block_on(async { store.credentials().get_credential().await })
-        .map_err(|e| format!("GCS credentials: {e}"))?;
+        .map_err(|e| store_error("GCS credentials", &e))?;
     let auth = (!token.bearer.is_empty()).then(|| format!("Bearer {}", token.bearer));
     let size = std::fs::metadata(local)
-        .map_err(|e| format!("can't read {}: {e}", local.display()))?
+        .map_err(|e| failed(format!("can't read {}: {e}", local.display())))?
         .len();
-    let fail = |what: &str| format!("upload to {location} failed: {what}");
+    let what = format!("upload to {location}");
+    // A request that got no reply: a connection failing may work if tried again.
+    let unsent = |e: ureq::Error| match &e {
+        ureq::Error::Io(_)
+        | ureq::Error::Timeout(_)
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::HostNotFound => StoreError::temporary(format!("{what} failed: {e}")),
+        _ => failed(format!("{what} failed: {e}")),
+    };
+    // A reply that isn't success: 429 and 5xx may work if tried again (with `Retry-After`).
+    let refused = |resp: &mut ureq::http::Response<ureq::Body>| {
+        let status = resp.status().as_u16();
+        let retry_after =
+            delivery::retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+        let body = resp.body_mut().read_to_string().unwrap_or_default();
+        let message = format!(
+            "{what} failed: HTTP {status}: {}",
+            body.chars().take(300).collect::<String>()
+        );
+        if temporary_status(status) {
+            StoreError::Temporary { message, retry_after }
+        } else {
+            StoreError::Failed(message)
+        }
+    };
     // 308 means "resume incomplete" in this protocol, not a redirect.
-    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+    let (rules, _) =
+        Rules::from_settings(Rules::default(), c, &Map::new(), &[]).map_err(|e| failed(e.to_string()))?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
@@ -517,34 +580,33 @@ fn gcs_upload(
     if let Some(a) = &auth {
         req = req.header("Authorization", a);
     }
-    let mut resp = req.send("{}").map_err(|e| fail(&e.to_string()))?;
+    let mut resp = req.send("{}").map_err(unsent)?;
     if resp.status().as_u16() == 412 {
-        return Err(Box::new(Exists));
+        return Err(StoreError::Exists);
     }
     if !resp.status().is_success() {
-        let body = resp.body_mut().read_to_string().unwrap_or_default();
-        return Err(fail(&format!(
-            "HTTP {}: {}",
-            resp.status(),
-            body.chars().take(300).collect::<String>()
-        ))
-        .into());
+        return Err(refused(&mut resp));
     }
     let session = resp
         .headers()
         .get("Location")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| fail("the server didn't start an upload session"))?
+        .ok_or_else(|| {
+            failed(format!(
+                "{what} failed: the server didn't start an upload session"
+            ))
+        })?
         .to_string();
 
     use std::io::Read;
-    let mut file = std::fs::File::open(local)?;
+    let unreadable = |e: std::io::Error| failed(format!("can't read {}: {e}", local.display()));
+    let mut file = std::fs::File::open(local).map_err(unreadable)?;
     let mut buf = vec![0u8; GCS_CHUNK];
     let mut offset = 0u64;
     loop {
         let mut n = 0;
         while n < buf.len() {
-            let r = file.read(&mut buf[n..])?;
+            let r = file.read(&mut buf[n..]).map_err(unreadable)?;
             if r == 0 {
                 break;
             }
@@ -560,20 +622,12 @@ fn gcs_upload(
         if let Some(a) = &auth {
             put = put.header("Authorization", a);
         }
-        let mut resp = put.send(&buf[..n]).map_err(|e| fail(&e.to_string()))?;
-        let status = resp.status().as_u16();
-        match status {
+        let mut resp = put.send(&buf[..n]).map_err(unsent)?;
+        match resp.status().as_u16() {
             200 | 201 => break,
-            412 => return Err(Box::new(Exists)),
+            412 => return Err(StoreError::Exists),
             308 if !last => {}
-            _ => {
-                let body = resp.body_mut().read_to_string().unwrap_or_default();
-                return Err(fail(&format!(
-                    "HTTP {status}: {}",
-                    body.chars().take(300).collect::<String>()
-                ))
-                .into());
-            }
+            _ => return Err(refused(&mut resp)),
         }
         offset += n as u64;
     }

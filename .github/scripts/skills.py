@@ -56,7 +56,7 @@ COPIES = {
 # The sections of docs/plugins.md each plugin's reference includes, as (## heading, ### heading);
 # None takes the text between the ## heading and its first ###. Every field and option a plugin
 # declares must be named (in backticks) in its sections.
-_DEST = [("Destinations", None), ("Destinations", "Several destinations")]
+_DEST = [("Destinations", None), ("Destinations", "Tries again"), ("Destinations", "Several destinations")]
 _EXISTS = [("Destinations", "A file already at the path")]
 _FILES = _EXISTS + [("Destinations", "Uploads under a temporary name")]
 _FORMAT = [("Formats", None)]

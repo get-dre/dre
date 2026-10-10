@@ -9,9 +9,7 @@
 //! text, in the Markdown Teams renders. Over the limit, the text is cut short with a marker. A
 //! rate-limited post is retried once, after `Retry-After`.
 
-use std::time::Duration;
-
-use dre_protocol::delivery::{Rules, timeout_fields};
+use dre_protocol::delivery::{self, Retry, Rules, retry};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
@@ -37,7 +35,7 @@ impl Destination for Teams {
             .secret(),
         ]
         .into_iter()
-        .chain(timeout_fields())
+        .chain(delivery::connection_fields())
         .collect()
     }
 
@@ -106,7 +104,8 @@ fn card(title: &str, text: &str) -> Value {
     })
 }
 
-/// POST the card; retry once on 429. Errors never include the URL, which is a credential.
+/// POST the card. Tried again (`retries`) only when it certainly wasn't posted: a 429 or 503, or no
+/// connection made. Errors never include the URL, which is a credential.
 fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<()> {
     let (rules, _) = Rules::from_settings(Rules::default(), connection, &Map::new(), &[])?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -116,40 +115,54 @@ fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<(
         .build()
         .into();
     let body = payload.to_string();
-    for attempt in 0..2 {
+    let done = retry(rules.retries, "Teams webhook", || {
         let resp = agent
             .post(url)
             .header("Content-Type", "application/json")
             .send(body.as_bytes())
-            .map_err(|e| format!("can't reach the Teams webhook: {}", scrub(&e.to_string(), url)))?;
-        let status = resp.status().as_u16();
-        match status {
-            200..=299 => return Ok(()),
-            429 => {
-                let wait = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.trim().parse::<u64>().ok())
-                    .unwrap_or(1);
-                if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    dre_protocol::log::debug!("Teams rate-limited the post; retrying in {wait}s");
-                    std::thread::sleep(Duration::from_secs(wait));
-                    continue;
+            .map_err(|e| {
+                let m = format!("can't reach the Teams webhook: {}", scrub(&e.to_string(), url));
+                if never_sent(&e) {
+                    Retry::Temporary(m, None)
+                } else {
+                    Retry::Fail(m)
                 }
-                return Err(format!("Teams is rate-limiting posts (retry after {wait}s); try again later").into());
+            })?;
+        let status = resp.status().as_u16();
+        let wait = delivery::retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+        match status {
+            200..=299 => Ok(()),
+            429 | 503 if wait.is_none_or(|w| w.as_secs() <= MAX_RETRY_WAIT) => {
+                let m = if status == 429 {
+                    "Teams is rate-limiting posts; try again later".to_string()
+                } else {
+                    format!("the Teams webhook returned HTTP {status}")
+                };
+                Err(Retry::Temporary(m, wait))
             }
-            400 => return Err("the Teams webhook rejected the message (HTTP 400); check that the flow uses the \"Post to a channel when a webhook request is received\" template".into()),
-            401 | 403 | 404 => {
-                return Err(format!(
-                    "the Teams webhook refused the post (HTTP {status}); the URL may be wrong, or the flow turned off or deleted: check `webhook_url` in the profile"
-                )
-                .into());
-            }
-            s => return Err(format!("the Teams webhook returned HTTP {s}").into()),
+            429 => Err(Retry::Fail(format!(
+                "Teams is rate-limiting posts (retry after {}s); try again later",
+                wait.map_or(0, |w| w.as_secs())
+            ))),
+            400 => Err(Retry::Fail("the Teams webhook rejected the message (HTTP 400); check that the flow uses the \"Post to a channel when a webhook request is received\" template".to_string())),
+            401 | 403 | 404 => Err(Retry::Fail(format!(
+                "the Teams webhook refused the post (HTTP {status}); the URL may be wrong, or the flow turned off or deleted: check `webhook_url` in the profile"
+            ))),
+            s => Err(Retry::Fail(format!("the Teams webhook returned HTTP {s}"))),
         }
-    }
-    unreachable!("the loop returns on its second attempt")
+    });
+    done.map_err(Into::into)
+}
+
+/// Whether a request certainly never reached the server (no connection was made), so trying
+/// again can't post twice.
+fn never_sent(e: &ureq::Error) -> bool {
+    matches!(
+        e,
+        ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
+    ) || matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused)
 }
 
 /// `text` with the webhook URL (and its query, which holds the signature) removed.

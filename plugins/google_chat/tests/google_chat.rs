@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 type Posts = Arc<Mutex<Vec<(String, Value)>>>;
 
 /// A webhook server. Paths: `/slow...` is rate-limited once (Retry-After: 1), `/busy...` always
-/// (Retry-After: 120), `/gone...` is 404; anything else is accepted.
+/// (Retry-After: 120), `/down...` is 503 once, `/gone...` is 404; anything else is accepted.
 fn fake_webhook() -> (String, Posts) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -28,6 +28,7 @@ fn fake_webhook() -> (String, Posts) {
     let p = posts.clone();
     std::thread::spawn(move || {
         let mut slow_once = true;
+        let mut down_once = true;
         for stream in listener.incoming().flatten() {
             let mut r = BufReader::new(stream.try_clone().unwrap());
             let mut s = stream;
@@ -59,6 +60,8 @@ fn fake_webhook() -> (String, Posts) {
                 ("429 Too Many Requests", "Retry-After: 120\r\n")
             } else if path.starts_with("/slow") && std::mem::take(&mut slow_once) {
                 ("429 Too Many Requests", "Retry-After: 1\r\n")
+            } else if path.starts_with("/down") && std::mem::take(&mut down_once) {
+                ("503 Service Unavailable", "")
             } else if path.starts_with("/gone") {
                 ("404 Not Found", "")
             } else {
@@ -128,12 +131,17 @@ fn takes_only_messages_and_declares_its_limit() {
 }
 
 #[test]
-fn retries_once_when_rate_limited() {
+fn a_rate_limited_post_is_tried_again() {
     let (base, posts) = fake_webhook();
     post(&message("T", "x"), &format!("{base}/slow/hook")).unwrap();
     assert_eq!(posts.lock().unwrap().len(), 2);
     let err = post(&message("T", "x"), &format!("{base}/busy/hook")).unwrap_err();
     assert!(err.contains("rate-limiting"), "{err}");
+    // A 503 is tried again too; a 404 never.
+    post(&message("T", "x"), &format!("{base}/down/hook")).unwrap();
+    assert_eq!(posts.lock().unwrap().len(), 5);
+    assert!(post(&message("T", "x"), &format!("{base}/gone/hook")).is_err());
+    assert_eq!(posts.lock().unwrap().len(), 6);
 }
 
 #[test]

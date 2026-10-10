@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver, timeout_fields};
+use dre_protocol::delivery::{self, Caps, Retry, Rules, Store, StoreError, deliver};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::options::OptionField;
 use dre_protocol::plugin::{About, Delivery, Destination, PluginError, Result, conn_bool, serve_destination};
@@ -27,17 +27,65 @@ use tokio::io::AsyncWriteExt;
 
 struct Sftp;
 
-/// One SFTP session, as the shared delivery rules' store.
+/// The SFTP server, as the shared delivery rules' store. It connects on first use, and again
+/// after a temporary error (`reset`).
 struct SftpStore<'a> {
     rt: &'a tokio::runtime::Runtime,
-    sftp: SftpSession,
+    ssh: &'a Ssh,
+    rules: &'a Rules,
+    conn: Option<(dre_ssh::Session, SftpSession)>,
 }
 
 fn failed(what: &str, path: &str, e: impl std::fmt::Display) -> StoreError {
     StoreError::Failed(format!("can't {what} {path}: {e}"))
 }
 
+/// A failed transfer: a dropped connection may work on a new one.
+fn transfer_failed(what: &str, path: &str, e: std::io::Error) -> StoreError {
+    let m = format!("can't {what} {path}: {e}");
+    if delivery::is_connection_error(&e) {
+        StoreError::temporary(m)
+    } else {
+        StoreError::Failed(m)
+    }
+}
+
 impl SftpStore<'_> {
+    /// The session, connecting first if there's none.
+    fn connect(&mut self) -> std::result::Result<(), StoreError> {
+        if self.conn.is_some() {
+            return Ok(());
+        }
+        let config = client::Config {
+            inactivity_timeout: Some(self.rules.timeout),
+            ..Default::default()
+        };
+        let (ssh, timeout) = (self.ssh, self.rules.connect_timeout);
+        let conn = self.rt.block_on(async {
+            let session = ssh.try_connect(config, timeout).await.map_err(|e| match e {
+                Retry::Temporary(e, _) => StoreError::temporary(e.to_string()),
+                Retry::Fail(e) => StoreError::Failed(e.to_string()),
+            })?;
+            let start = async {
+                let channel = session.channel_open_session().await?;
+                channel.request_subsystem(true, "sftp").await?;
+                SftpSession::new(channel.into_stream())
+                    .await
+                    .map_err(|e| format!("can't start SFTP: {e}").into())
+            };
+            let sftp: SftpSession = start
+                .await
+                .map_err(|e: dre_protocol::plugin::Error| StoreError::temporary(e.to_string()))?;
+            Ok::<_, StoreError>((session, sftp))
+        })?;
+        self.conn = Some(conn);
+        Ok(())
+    }
+
+    fn sftp(&self) -> &SftpSession {
+        &self.conn.as_ref().expect("connected").1
+    }
+
     /// Create `path`'s missing parent folders.
     async fn make_parents(&self, path: &str) -> std::result::Result<(), StoreError> {
         let mut dir = String::new();
@@ -53,8 +101,8 @@ impl SftpStore<'_> {
                 dir.push('/');
             }
             dir.push_str(part);
-            if !self.sftp.try_exists(dir.clone()).await.unwrap_or(false) {
-                self.sftp
+            if !self.sftp().try_exists(dir.clone()).await.unwrap_or(false) {
+                self.sftp()
                     .create_dir(dir.clone())
                     .await
                     .map_err(|e| failed("create directory", &dir, e))?;
@@ -75,6 +123,7 @@ impl Store for SftpStore<'_> {
     }
 
     fn write(&mut self, local: &Path, remote: &str, exclusive: bool) -> std::result::Result<(), StoreError> {
+        self.connect()?;
         self.rt.block_on(async {
             self.make_parents(remote).await?;
             let mut src = tokio::fs::File::open(local)
@@ -85,27 +134,30 @@ impl Store for SftpStore<'_> {
             } else {
                 OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE
             };
-            let mut dst = match self.sftp.open_with_flags(remote, flags).await {
+            let mut dst = match self.sftp().open_with_flags(remote, flags).await {
                 Ok(f) => f,
-                Err(_) if exclusive && self.sftp.try_exists(remote).await.unwrap_or(false) => {
+                Err(_) if exclusive && self.sftp().try_exists(remote).await.unwrap_or(false) => {
                     return Err(StoreError::Exists);
                 }
                 Err(e) => return Err(failed("create", remote, e)),
             };
             tokio::io::copy(&mut src, &mut dst)
                 .await
-                .map_err(|e| failed("upload to", remote, e))?;
-            dst.shutdown().await.map_err(|e| failed("upload to", remote, e))
+                .map_err(|e| transfer_failed("upload to", remote, e))?;
+            dst.shutdown()
+                .await
+                .map_err(|e| transfer_failed("upload to", remote, e))
         })
     }
 
     fn rename(&mut self, from: &str, to: &str, replace: bool) -> std::result::Result<(), StoreError> {
+        self.connect()?;
         self.rt.block_on(async {
             self.make_parents(to).await?;
-            match self.sftp.rename(from, to).await {
+            match self.sftp().rename(from, to).await {
                 Ok(()) => Ok(()),
                 Err(e) => {
-                    if !self.sftp.try_exists(to).await.unwrap_or(false) {
+                    if !self.sftp().try_exists(to).await.unwrap_or(false) {
                         return Err(failed("rename to", to, e));
                     }
                     if !replace {
@@ -113,11 +165,11 @@ impl Store for SftpStore<'_> {
                     }
                     // SFTP's rename won't replace: remove the old file, then rename (a short
                     // window with no file at `to`).
-                    self.sftp
+                    self.sftp()
                         .remove_file(to)
                         .await
                         .map_err(|e| failed("replace", to, e))?;
-                    self.sftp
+                    self.sftp()
                         .rename(from, to)
                         .await
                         .map_err(|e| failed("rename to", to, e))
@@ -127,21 +179,29 @@ impl Store for SftpStore<'_> {
     }
 
     fn exists(&mut self, remote: &str) -> std::result::Result<bool, StoreError> {
+        self.connect()?;
         self.rt
-            .block_on(self.sftp.try_exists(remote))
+            .block_on(self.sftp().try_exists(remote))
             .map_err(|e| failed("look for", remote, e))
     }
 
     fn delete(&mut self, remote: &str) -> std::result::Result<(), StoreError> {
+        if self.conn.is_none() {
+            return Ok(());
+        }
         self.rt.block_on(async {
-            if self.sftp.try_exists(remote).await.unwrap_or(false) {
-                self.sftp
+            if self.sftp().try_exists(remote).await.unwrap_or(false) {
+                self.sftp()
                     .remove_file(remote)
                     .await
                     .map_err(|e| failed("remove", remote, e))?;
             }
             Ok(())
         })
+    }
+
+    fn reset(&mut self) {
+        self.conn = None;
     }
 }
 
@@ -154,31 +214,25 @@ fn upload(
     let mut ssh = Ssh::from_settings(c, "")?;
     ssh.accept_unknown = conn_bool(c, "accept_unknown_host").unwrap_or(false);
     let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
-    let config = client::Config {
-        inactivity_timeout: Some(rules.timeout),
-        ..Default::default()
-    };
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let (session, sftp) = rt.block_on(async {
-        let session = ssh.connect(config, rules.connect_timeout).await?;
-        let channel = session.channel_open_session().await?;
-        channel.request_subsystem(true, "sftp").await?;
-        let sftp = SftpSession::new(channel.into_stream())
-            .await
-            .map_err(|e| format!("can't start SFTP: {e}"))?;
-        Ok::<_, dre_protocol::plugin::Error>((session, sftp))
-    })?;
-    let (user, host, port) = (&ssh.username, &ssh.host, ssh.port);
-    let mut store = SftpStore { rt: &rt, sftp };
+    let mut store = SftpStore {
+        rt: &rt,
+        ssh: &ssh,
+        rules: &rules,
+        conn: None,
+    };
     let delivered = deliver(&mut store, local, remote, &rules).map_err(PluginError::from)?;
-    rt.block_on(async {
-        let _ = store.sftp.close().await;
-        let _ = session
-            .disconnect(russh::Disconnect::ByApplication, "", "en")
-            .await;
-    });
+    if let Some((session, sftp)) = store.conn.take() {
+        rt.block_on(async {
+            let _ = sftp.close().await;
+            let _ = session
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        });
+    }
+    let (user, host, port) = (&ssh.username, &ssh.host, ssh.port);
     Ok(format!(
         "sftp://{user}@{host}:{port}/{}",
         delivered.path.trim_start_matches('/')
@@ -194,7 +248,7 @@ impl Destination for Sftp {
         ]
         .into_iter()
         .chain(dre_ssh::auth_fields())
-        .chain(timeout_fields())
+        .chain(delivery::connection_fields())
         .collect()
     }
 

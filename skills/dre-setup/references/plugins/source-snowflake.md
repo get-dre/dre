@@ -41,7 +41,8 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `client_session_keep_alive` | no | no |  | keep the session alive while a long report runs |
 | `client_request_mfa_token` | no | no |  | cache the MFA token (username_password_mfa) in the OS keychain |
 | `client_store_temporary_credential` | no | no |  | cache the SSO token (externalbrowser) in the OS keychain |
-| `connect_retries` | no | no |  | how many times to retry connecting (default 1) |
+| `retries` | no | no | `3` | how many times to try connecting again after a temporary error (0: never) |
+| `connect_retries` | no | no |  | dbt's name for `retries` |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `host` | no | no |  | Snowflake host, when not <account>.snowflakecomputing.com |
 | `port` | no | no |  | port, with host |
@@ -76,7 +77,7 @@ Field names and values are dbt-snowflake's, so a dbt profile can be copied acros
 | `query_tag` | Tags every query of the session. |
 | `client_session_keep_alive` | Keep the session alive through a long report. |
 | `client_request_mfa_token`, `client_store_temporary_credential` | Let the driver cache the MFA token and the SSO token in the OS keychain (on by default on macOS and Windows). |
-| `connect_retries`, `connect_timeout` | Retries, and how long each connection attempt may take (a duration such as `30s`, or seconds), for connecting. Defaults 1 and `30s`. |
+| `retries` (dbt's `connect_retries`), `connect_timeout` | How many times to try connecting again, and how long each attempt may take (a duration such as `30s`, or seconds). Defaults 3 and `30s`. |
 | `host`, `port`, `protocol`, `proxy_host`, `proxy_port`, `insecure_mode` | Connection details for unusual networks. |
 
 ```yaml

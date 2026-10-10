@@ -134,3 +134,25 @@ fn if_exists_refuses_or_numbers_a_name_already_taken() {
         );
     }
 }
+
+#[test]
+fn a_refused_connection_is_tried_again_and_refused_credentials_are_not() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let conn = json!({"host": "127.0.0.1", "port": port, "username": "dre", "password": "x", "retries": 1});
+    let err = deliver("x.csv", conn, b"x").unwrap_err();
+    assert!(err.contains("after 2 tries"), "{err}");
+    let Ok(server) = std::env::var("DRE_TEST_FTP") else {
+        return;
+    };
+    let (host, port) = server.split_once(':').unwrap();
+    let conn = json!({"host": host, "port": port, "username": "dre", "password": "wrong", "retries": 3});
+    let err = deliver("x.csv", conn, b"x").unwrap_err();
+    assert!(
+        err.contains("refused the credentials") && !err.contains("tries"),
+        "{err}"
+    );
+}

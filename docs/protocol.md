@@ -392,8 +392,9 @@ by core.
 
 `deliver` copies the local file to `remote_path`. The path is already rendered, and may be absent
 when the destination profile alone says where. The reply is
-`{"type":"delivered","location":"<where it landed>"}`. The local file is never removed. It stays
-in `target/` whatever the outcome.
+`{"type":"delivered","location":"<where it landed>"}`, with `"attempts": n` when the plugin had to
+try more than once (protocol 1; core records it in `run_results.json`). The local file is never
+removed. It stays in `target/` whatever the outcome.
 
 `options` holds the destination entry's plugin options: every key of the entry in
 `output.destination` other than `profile` and `path` (for example `to` and `subject` for email,
