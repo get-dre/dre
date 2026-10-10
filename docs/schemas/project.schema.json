@@ -235,6 +235,19 @@
           "description": "Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it.",
           "default": 60,
           "minimum": 1
+        },
+        "run_timeout": {
+          "description": "How long a `dre run` may take before it's stopped (as for a termination signal; its Bindings are recorded as `timed_out` and `dre` exits 124): a duration such as `2h` or `90m`, or seconds. Off by default. `dre run --timeout` and `DRE_RUN_TIMEOUT` override it.",
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*(ms|s|m|h)?\\s*$"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
         }
       },
       "additionalProperties": false

@@ -51,7 +51,7 @@ var fields = []plugin.Field{
 	{Name: "client_request_mfa_token", Description: "cache the MFA token (username_password_mfa) in the OS keychain", Manual: true},
 	{Name: "client_store_temporary_credential", Description: "cache the SSO token (externalbrowser) in the OS keychain", Manual: true},
 	{Name: "connect_retries", Description: "how many times to retry connecting (default 1)", Manual: true},
-	{Name: "connect_timeout", Description: "seconds to wait for a connection (default 10)", Manual: true},
+	{Name: "connect_timeout", Description: "how long to wait for a connection (`30s`, `2m`, or seconds)", Default: "30s", Manual: true},
 	{Name: "host", Description: "Snowflake host, when not <account>.snowflakecomputing.com", Manual: true},
 	{Name: "port", Description: "port, with host", Manual: true},
 	{Name: "protocol", Description: "https (default) or http, with host", Manual: true},

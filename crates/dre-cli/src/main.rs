@@ -129,6 +129,11 @@ struct RunArgs {
     /// unless `--target-path` (or DRE_TARGET_PATH) points at a folder that persists.
     #[arg(long)]
     accept_schema_change: bool,
+    /// Stop the run if it takes longer than this: a duration such as `2h` or `90m`, or seconds
+    /// (default: $DRE_RUN_TIMEOUT, then `flags: run_timeout` in dre_project.yml; off without
+    /// any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124.
+    #[arg(long, value_name = "DURATION")]
+    timeout: Option<String>,
 }
 
 #[derive(Args)]
@@ -848,6 +853,23 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
         return ExitCode::FAILURE;
     }
+    // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
+    let run_timeout = match dre_core::settings::flag_or_env(
+        a.timeout.as_deref(),
+        "--timeout",
+        dre_core::settings::RUN_TIMEOUT,
+    ) {
+        Some((v, from)) => match dre_protocol::delivery::parse_duration(&serde_json::Value::String(v)) {
+            Ok(d) if !d.is_zero() => Some(d),
+            _ => {
+                printer.error(&format!(
+                    "{from} must be a duration such as `2h` or `90m`, or seconds"
+                ));
+                return ExitCode::from(2);
+            }
+        },
+        None => project.run_timeout,
+    };
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(&project, &a.project, &mut diags);
     if !diags.has_errors() {
@@ -893,23 +915,38 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     params["target_path"] = serde_json::json!(project.target_dir);
     printer.log_params(&params);
     printer.detail(output::Tone::Note, "Profiles", &profiles_line(&project.profiles));
-    signals::watch(opts.cancel.clone());
+    signals::watch(opts.cancel.clone(), run_timeout);
     let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
         return ExitCode::from(summary.exit_code());
     }
     if let Some(reason) = summary.cancelled {
-        let by = match reason {
-            dre_core::engine::CancelReason::Interrupt => "Ctrl-C",
-            dre_core::engine::CancelReason::Terminate => "a termination signal",
+        let what = match reason {
+            dre_core::engine::CancelReason::Interrupt => "was cancelled by Ctrl-C".to_string(),
+            dre_core::engine::CancelReason::Terminate => "was cancelled by a termination signal".to_string(),
+            dre_core::engine::CancelReason::Timeout => {
+                let during = summary
+                    .outcomes
+                    .iter()
+                    .find(|o| o.status == dre_core::run::Status::TimedOut)
+                    .map(|o| match &o.set {
+                        Some(set) => format!(" while running {} (Set {set})", o.report),
+                        None => format!(" while running {}", o.report),
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "timed out after {}{during}",
+                    run_timeout.map(signals::human).unwrap_or_default()
+                )
+            }
         };
         let not_run = match summary.not_run {
             0 => String::new(),
             1 => "; 1 Binding didn't run".into(),
             n => format!("; {n} Bindings didn't run"),
         };
-        printer.error(&format!("the run was cancelled by {by}{not_run}"));
+        printer.error(&format!("the run {what}{not_run}"));
     }
     printer.finish("run");
     ExitCode::from(summary.exit_code())

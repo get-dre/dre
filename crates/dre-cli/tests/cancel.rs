@@ -223,3 +223,51 @@ fn ctrl_c_exits_130_and_a_second_one_stops_at_once() {
     }
     assert!(!alive(plugin), "the plugin is still running");
 }
+
+#[test]
+fn a_run_past_its_timeout_is_stopped_and_exits_124() {
+    let p = project("sleep 60");
+    let pid_file = p.dir.path().join("plugin.pid");
+    let mut c = Command::new(env!("CARGO_BIN_EXE_dre"));
+    c.args(["run", "--timeout", "2s", "--project-dir"])
+        .arg(p.root())
+        .arg("--profiles-dir")
+        .arg(p.dir.path().join("profiles"))
+        .env("DRE_PLUGINS_DIR", &p.plugins)
+        .env("DRE_FIXTURE_PID_FILE", &pid_file)
+        .env("HOME", p.dir.path().join("home"))
+        .env_remove("DRE_RUN_TIMEOUT")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    let plugin = plugin_pid(&mut child, &pid_file);
+    let (code, out) = wait(child, Duration::from_secs(8));
+    assert_eq!(code, 124, "{out}");
+    assert!(
+        out.contains("the run timed out after 2s while running a_slow; 1 Binding didn't run"),
+        "{out}"
+    );
+    let results = p.json("target/run/a_slow/default/run_results.json");
+    assert_eq!(results["status"], "timed_out", "{results}");
+    assert_eq!(results["error_code"], "run-timed-out", "{results}");
+    assert_eq!(results["error_kind"], "timed_out", "{results}");
+    assert!(!p.path("out/a.csv").exists());
+    assert!(
+        !alive(plugin) || {
+            std::thread::sleep(Duration::from_secs(2));
+            !alive(plugin)
+        }
+    );
+}
+
+#[test]
+fn a_bad_timeout_is_refused() {
+    let p = project("rows 1");
+    let out = p.dre("run", &["--timeout", "soon"]);
+    assert_eq!(out.code, 2, "{out:?}");
+    assert!(
+        out.stderr.contains("--timeout must be a duration")
+            || out.stdout.contains("--timeout must be a duration"),
+        "{out:?}"
+    );
+}

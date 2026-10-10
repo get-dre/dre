@@ -9,7 +9,6 @@
 
 use std::net::ToSocketAddrs;
 use std::path::Path;
-use std::time::Duration;
 
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{
@@ -18,6 +17,7 @@ use dre_protocol::plugin::{
 use serde_json::{Map, Value};
 use std::sync::Arc;
 
+use dre_protocol::delivery::Rules;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
@@ -28,14 +28,19 @@ struct Ftp;
 
 /// Connects to the first of `host`'s addresses that answers, like `TcpStream::connect` does:
 /// `localhost` resolves to both `::1` and `127.0.0.1`, and a server may listen on only one.
-fn connect(host: &str, port: u16) -> std::result::Result<RustlsFtpStream, String> {
+/// `rules` gives the connect timeout and the control connection's no-progress timeout.
+fn connect(host: &str, port: u16, rules: &Rules) -> std::result::Result<RustlsFtpStream, String> {
     let mut last = None;
     for addr in (host, port)
         .to_socket_addrs()
         .map_err(|e| format!("can't resolve {host}: {e}"))?
     {
-        match RustlsFtpStream::connect_timeout(addr, Duration::from_secs(30)) {
-            Ok(ftp) => return Ok(ftp),
+        match RustlsFtpStream::connect_timeout(addr, rules.connect_timeout) {
+            Ok(ftp) => {
+                let _ = ftp.get_ref().set_read_timeout(Some(rules.timeout));
+                let _ = ftp.get_ref().set_write_timeout(Some(rules.timeout));
+                return Ok(ftp);
+            }
             Err(e) => last = Some(e),
         }
     }
@@ -123,7 +128,8 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> 
     };
     let user = conn_required(c, "username")?;
     let password = conn_str(c, "password").unwrap_or("");
-    let mut ftp = connect(host, port)?;
+    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+    let mut ftp = connect(host, port, &rules)?;
     match conn_str(c, "tls").unwrap_or("none") {
         "none" => {}
         "explicit" => {
@@ -132,7 +138,7 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> 
                 Ok(f) => f,
                 Err(e12) => {
                     // Maybe a TLS 1.3-only server: once more, on a new connection.
-                    let again = connect(host, port)?;
+                    let again = connect(host, port, &rules)?;
                     again
                         .into_secure(RustlsConnector::from(tls_config(accept_invalid, true)?), host)
                         .map_err(|_| format!("{host}:{port} didn't accept explicit FTPS (AUTH TLS): {e12}"))?
@@ -190,6 +196,9 @@ impl Destination for Ftp {
             ConnectionField::new("password", "password").secret(),
             ConnectionField::new("tls", "none or explicit (FTPS)").default("none"),
         ]
+        .into_iter()
+        .chain(dre_protocol::delivery::timeout_fields())
+        .collect()
     }
 
     fn deliver(&mut self, local: &Path, remote: Option<&str>, c: &Map<String, Value>) -> Result<String> {
@@ -215,7 +224,7 @@ mod tests {
             let (mut s, _) = listener.accept().unwrap();
             s.write_all(b"220 ready\r\n").unwrap();
         });
-        super::connect("localhost", port).unwrap();
+        super::connect("localhost", port, &dre_protocol::delivery::Rules::default()).unwrap();
         server.join().unwrap();
     }
 }

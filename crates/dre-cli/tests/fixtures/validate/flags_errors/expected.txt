@@ -1,6 +1,7 @@
 exit: 1
 error[invalid-field]: dre_project.yml:3: `flags.http_timeout` must be a positive whole number of seconds
-error[unknown-key]: dre_project.yml:4: unknown key `flags.threads`; flags are: http_timeout
+error[unknown-key]: dre_project.yml:4: unknown key `flags.threads`; flags are: http_timeout, run_timeout
+error[invalid-field]: dre_project.yml:5: `flags.run_timeout` must be a duration such as `30s`, `5m` or a number of seconds, got "soon"
   Profiles  $CASE/no-profiles/profiles.yml (from --profiles-dir, not found)
     Target  dev (default)
-Validation failed: 2 errors, 0 warnings
+Validation failed: 3 errors, 0 warnings

@@ -164,6 +164,10 @@ func ParseDuration(v any) (time.Duration, error) {
 	return 0, bad
 }
 
+// TimeoutFields are the timeouts every network plugin shares (connect_timeout, timeout); read
+// them with RulesFrom.
+func TimeoutFields() []Field { return DeliveryFields()[:2] }
+
 // DeliveryFields are the connection fields every network plugin shares.
 func DeliveryFields() []Field {
 	return []Field{

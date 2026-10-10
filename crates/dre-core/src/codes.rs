@@ -465,6 +465,9 @@ codes! {
     RunCancelled = "run-cancelled", Cancelled,
         "The run was stopped by Ctrl-C or a termination signal.",
         "DRE received Ctrl-C (SIGINT) or a termination signal (SIGTERM; on Windows Ctrl-Break, closing the console, logging off or shutting down), from you or from the orchestrator cancelling the job. It asked every running plugin to stop, waited up to 8 seconds, then stopped them; a source that can cancel its query on the server (Postgres, Databricks, DuckDB) did. The Binding that was running is recorded as `cancelled` in its `run_results.json`, Bindings that hadn't started don't run, and nothing is delivered after the cancel. `dre` exits 130 after Ctrl-C and 143 after a termination. A second Ctrl-C stops at once.";
+    RunTimedOut = "run-timed-out", TimedOut,
+        "The run took longer than its timeout.",
+        "The run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT` or `flags: run_timeout` in dre_project.yml; off unless set) ran out. DRE stopped the run as it does for a termination signal: it asked every running plugin to stop, waited up to 8 seconds, then stopped them. The Binding that was running is recorded as `timed_out` in its `run_results.json`, the ones that hadn't started don't run, nothing is delivered after, and `dre` exits 124. Raise the timeout if the run is just slow, or look at which statement was running (the log names it).";
     ConnectionFailed = "connection-failed", Connection,
         "A connection couldn't be opened.",
         "The source plugin couldn't connect: the host is unreachable, the credentials are refused, the warehouse is unavailable. The message has the plugin's reason. Trying again can work when the cause is temporary.";

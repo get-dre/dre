@@ -29,6 +29,8 @@ pub const RUN_DATE: &str = "DRE_RUN_DATE";
 pub const RUN_AT: &str = "DRE_RUN_AT";
 /// Seconds a download may receive nothing: `DRE_HTTP_TIMEOUT`, `flags: http_timeout`.
 pub const HTTP_TIMEOUT: &str = "DRE_HTTP_TIMEOUT";
+/// How long a run may take: `--timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`.
+pub const RUN_TIMEOUT: &str = "DRE_RUN_TIMEOUT";
 /// How many lines `dre.log` keeps: `DRE_LOG_MAX_LINES`.
 pub const LOG_MAX_LINES: &str = "DRE_LOG_MAX_LINES";
 

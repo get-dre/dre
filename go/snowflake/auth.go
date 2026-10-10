@@ -54,7 +54,7 @@ func config(conn map[string]any) (*sf.Config, error) {
 	if tag := plugin.Optional(conn, "query_tag"); tag != "" {
 		cfg.Params["query_tag"] = &tag
 	}
-	timeout, err := plugin.Int(conn, "connect_timeout", 10)
+	rules, _, err := plugin.RulesFrom(plugin.DefaultRules(), conn, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func config(conn map[string]any) (*sf.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.LoginTimeout = time.Duration(timeout*(retries+1)) * time.Second
+	cfg.LoginTimeout = rules.ConnectTimeout * time.Duration(retries+1)
 	cfg.MaxRetryCount = int(retries)
 	if keep, err := plugin.Bool(conn, "client_session_keep_alive", false); err != nil {
 		return nil, err

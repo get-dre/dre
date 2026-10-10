@@ -150,14 +150,18 @@ pub enum CancelReason {
     Interrupt,
     /// SIGTERM, or on Windows Ctrl-Break, closing the console, logging off or shutting down.
     Terminate,
+    /// The run took longer than its timeout (`--timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
+    Timeout,
 }
 
 impl CancelReason {
-    /// The conventional exit code: 130 after an interrupt, 143 after a termination.
+    /// The conventional exit code: 130 after an interrupt, 143 after a termination, 124 after a
+    /// timeout (as `timeout(1)`).
     pub fn exit_code(self) -> u8 {
         match self {
             CancelReason::Interrupt => 130,
             CancelReason::Terminate => 143,
+            CancelReason::Timeout => 124,
         }
     }
 
@@ -165,6 +169,7 @@ impl CancelReason {
         match self {
             CancelReason::Interrupt => 1,
             CancelReason::Terminate => 2,
+            CancelReason::Timeout => 3,
         }
     }
 }
@@ -197,6 +202,7 @@ impl CancelToken {
         match self.0.load(Ordering::SeqCst) {
             1 => Some(CancelReason::Interrupt),
             2 => Some(CancelReason::Terminate),
+            3 => Some(CancelReason::Timeout),
             _ => None,
         }
     }

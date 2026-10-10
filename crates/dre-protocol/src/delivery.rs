@@ -177,6 +177,15 @@ pub fn parse_duration(v: &Value) -> Result<Duration, String> {
     Ok(Duration::from_secs_f64(secs))
 }
 
+/// The timeouts every network plugin shares (`connect_timeout`, `timeout`), for its
+/// `connection_fields()`. Read them with [`Rules::from_settings`].
+pub fn timeout_fields() -> Vec<ConnectionField> {
+    connection_fields()
+        .into_iter()
+        .filter(|f| f.name != "retries")
+        .collect()
+}
+
 /// The connection fields every network plugin shares, for its `connection_fields()`.
 pub fn connection_fields() -> Vec<ConnectionField> {
     vec![

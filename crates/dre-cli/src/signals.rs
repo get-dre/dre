@@ -1,11 +1,11 @@
-//! Clean cancellation of `dre run`: Ctrl-C (SIGINT) and termination (SIGTERM; on Windows
-//! Ctrl-Break, closing the console, logging off, shutting down).
+//! Clean cancellation of `dre run`: Ctrl-C (SIGINT), termination (SIGTERM; on Windows
+//! Ctrl-Break, closing the console, logging off, shutting down) and the run's timeout.
 //!
-//! On the first signal the run's [`CancelToken`] is cancelled (no further Binding, statement or
+//! On the first signal (or when the timeout runs out) the run's [`CancelToken`] is cancelled (no further Binding, statement or
 //! delivery starts) and every running plugin is sent `cancel`. Plugins get 8 seconds to stop,
 //! then are killed; 2 seconds later, if the run still hasn't finished, `dre` exits anyway, so the
 //! whole stop fits Docker's 10-second grace period. A second Ctrl-C stops at once. The exit code
-//! is 130 after Ctrl-C and 143 after a termination.
+//! is 130 after Ctrl-C, 143 after a termination and 124 after a timeout.
 //!
 //! A signal handler may only do async-signal-safe work, so it just records the signal; a watcher
 //! thread acts on it.
@@ -28,23 +28,37 @@ static COUNT: AtomicU32 = AtomicU32::new(0);
 fn record(reason: CancelReason) {
     LAST.store(
         match reason {
-            CancelReason::Interrupt => 1,
             CancelReason::Terminate => 2,
+            _ => 1,
         },
         Ordering::SeqCst,
     );
     COUNT.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Catch the signals and cancel `cancel` on the first one, for the rest of the process.
-pub fn watch(cancel: CancelToken) {
+/// Catch the signals, and time the run when `timeout` is set: cancel `cancel` on the first
+/// signal or when the timeout runs out, for the rest of the process.
+pub fn watch(cancel: CancelToken, timeout: Option<Duration>) {
     install();
+    let started = Instant::now();
     std::thread::spawn(move || {
         let mut seen = 0;
         let mut first: Option<(Instant, CancelReason)> = None;
         let mut killed = false;
         loop {
             std::thread::sleep(Duration::from_millis(50));
+            if first.is_none()
+                && let Some(t) = timeout
+                && started.elapsed() >= t
+            {
+                first = Some((Instant::now(), CancelReason::Timeout));
+                cancel.cancel_with(CancelReason::Timeout);
+                eprintln!(
+                    "\nTimed out after {}: stopping the running plugins",
+                    crate::signals::human(t)
+                );
+                dre_protocol::host::cancel_all();
+            }
             let count = COUNT.load(Ordering::SeqCst);
             if count > seen {
                 seen = count;
@@ -80,6 +94,16 @@ pub fn watch(cancel: CancelToken) {
             }
         }
     });
+}
+
+/// `2h`, `90m`, `45s`.
+pub fn human(d: Duration) -> String {
+    let s = d.as_secs();
+    match s {
+        _ if s >= 3600 && s.is_multiple_of(3600) => format!("{}h", s / 3600),
+        _ if s >= 60 && s.is_multiple_of(60) => format!("{}m", s / 60),
+        _ => format!("{s}s"),
+    }
 }
 
 #[cfg(unix)]

@@ -23,6 +23,8 @@ Never write a secret's value: use `env_var()` (SEC-3).
 |---|---|---|---|---|
 | `token` | yes | yes |  | bot token (xoxb-...) |
 | `channel` | no | no |  | default channel ID (C0123) or #name |
+| `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
+| `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 
 ## Report options
 
@@ -44,6 +46,17 @@ plugin and no declaration.
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
 run's target. A value holding Jinja is checked once it's rendered, at delivery.
+
+Every destination that talks to a server takes two timeouts in its profile entry, as durations
+(`30s`, `5m`) or seconds:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `connect_timeout` | `30s` | How long to wait for a connection. |
+| `timeout` | `60s` | How long a request may make no progress (the server sends or accepts nothing) before it fails. For object stores, how long one request may take; large files go up in parts. |
+
+There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
+run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
 
 ### Several destinations
 

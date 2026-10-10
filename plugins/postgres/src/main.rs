@@ -2,7 +2,7 @@
 //!
 //! Profile target fields: `host`, `port` (5432), `user`, `password`, `database` (or `dbname`),
 //! `sslmode` (`disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`),
-//! `sslrootcert`, `connect_timeout` (seconds), `schema` (sets the search path), `role`, and `ssh`.
+//! `sslrootcert`, `connect_timeout` (`30s` by default; a duration or seconds), `schema` (sets the search path), `role`, and `ssh`.
 //!
 //! `ssh:` reaches the server through an SSH bastion: a block of `dre-ssh` settings (`host`,
 //! `port`, `username`, `password`/`private_key_path`/`private_key`, `known_hosts_path` or
@@ -393,10 +393,18 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
     if let Some(d) = conn_str(c, "database").or_else(|| conn_str(c, "dbname")) {
         cfg.dbname(d);
     }
-    let connect_timeout = c
-        .get("connect_timeout")
-        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
-        .map(Duration::from_secs);
+    // The shared `connect_timeout` (default 30s). Queries get no time limit: the run's timeout
+    // is the backstop, and keepalives notice a dead connection.
+    let connect_timeout = Some(
+        dre_protocol::delivery::Rules::from_settings(
+            dre_protocol::delivery::Rules::default(),
+            c,
+            &Map::new(),
+            &[],
+        )?
+        .0
+        .connect_timeout,
+    );
     cfg.application_name("dre");
     let mode = conn_str(c, "sslmode").unwrap_or("prefer");
     let mut tls = native_tls::TlsConnector::builder();
@@ -611,6 +619,14 @@ impl Source for Postgres {
             .secret()
             .manual(),
         ]
+        .into_iter()
+        // Only the connect timeout: a query has no time limit of its own.
+        .chain(
+            dre_protocol::delivery::timeout_fields()
+                .into_iter()
+                .filter(|f| f.name == "connect_timeout"),
+        )
+        .collect()
     }
 
     fn open(&mut self, c: &Map<String, Value>, read_only: bool) -> Result<()> {

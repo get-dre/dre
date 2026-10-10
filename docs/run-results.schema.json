@@ -384,6 +384,11 @@
           "type": "string",
           "description": "Stopped by Ctrl-C or a termination signal while it ran; nothing was delivered after.",
           "const": "cancelled"
+        },
+        {
+          "type": "string",
+          "description": "Stopped because the run took longer than its timeout; nothing was delivered after.",
+          "const": "timed_out"
         }
       ]
     },

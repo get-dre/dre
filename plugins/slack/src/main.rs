@@ -18,6 +18,7 @@
 
 use std::time::Duration;
 
+use dre_protocol::delivery::{Rules, timeout_fields};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::options::{OptionField, OptionType};
@@ -44,6 +45,9 @@ impl Destination for Slack {
                 .secret(),
             ConnectionField::new("channel", "default channel ID (C0123) or #name"),
         ]
+        .into_iter()
+        .chain(timeout_fields())
+        .collect()
     }
 
     fn options(&self) -> Vec<OptionField> {
@@ -240,9 +244,11 @@ impl Api {
             .unwrap_or(DEFAULT_API)
             .trim_end_matches('/')
             .to_string();
+        let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(300)))
+            .timeout_connect(Some(rules.connect_timeout))
+            .timeout_recv_response(Some(rules.timeout))
             .build()
             .into();
         Ok(Api { base, token, agent })

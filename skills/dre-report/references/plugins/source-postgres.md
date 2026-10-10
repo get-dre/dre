@@ -29,6 +29,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `sslmode` | no | no | `prefer` | disable, prefer, require, verify-ca or verify-full |
 | `schema` | no | no |  | schema to put first on the search path |
 | `ssh` | no | yes |  | reach the server through an SSH bastion (a block of settings) |
+| `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 
 ## Report options
 
@@ -45,7 +46,7 @@ None: a source's settings are its profile fields.
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
-| `connect_timeout` | Seconds. |
+| `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |

@@ -24,9 +24,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use dre_protocol::delivery::{Rules, timeout_fields};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{About, Destination, Plugin, Result, conn_bool, conn_str, serve_package};
 use dre_protocol::util::percent_encode;
+use object_store::ClientOptions;
 use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::azure::{AzureConfigKey, MicrosoftAzureBuilder};
@@ -101,6 +103,11 @@ fn build(
     c: &Map<String, Value>,
     rt: &tokio::runtime::Runtime,
 ) -> Result<Arc<dyn ObjectStore>> {
+    // `connect_timeout`, and `timeout` per request (uploads go in parts).
+    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+    let client = ClientOptions::new()
+        .with_connect_timeout(rules.connect_timeout)
+        .with_timeout(rules.timeout);
     Ok(match kind {
         Kind::S3 => {
             let explicit = conn_str(c, "access_key_id").is_some();
@@ -109,7 +116,7 @@ fn build(
             } else {
                 AmazonS3Builder::from_env()
             };
-            b = b.with_bucket_name(bucket);
+            b = b.with_client_options(client).with_bucket_name(bucket);
             if let Some(r) = conn_str(c, "region") {
                 b = b.with_region(r);
             }
@@ -146,7 +153,9 @@ fn build(
             Arc::new(b.build()?)
         }
         Kind::Gcs => {
-            let mut b = GoogleCloudStorageBuilder::from_env().with_bucket_name(bucket);
+            let mut b = GoogleCloudStorageBuilder::from_env()
+                .with_client_options(client)
+                .with_bucket_name(bucket);
             if let Some(p) = conn_str(c, "service_account_key_path") {
                 b = b.with_service_account_path(p);
             } else if let Some(k) = conn_str(c, "service_account_key") {
@@ -158,7 +167,9 @@ fn build(
             Arc::new(b.build()?)
         }
         Kind::Azure => {
-            let mut b = MicrosoftAzureBuilder::new().with_container_name(bucket);
+            let mut b = MicrosoftAzureBuilder::new()
+                .with_client_options(client.clone())
+                .with_container_name(bucket);
             let mut account = conn_str(c, "account_name").map(str::to_string);
             let mut endpoint = conn_str(c, "endpoint").map(str::to_string);
             if let Some(cs) = conn_str(c, "connection_string") {
@@ -186,7 +197,9 @@ fn build(
             } else if let Some(k) = conn_str(c, "access_key") {
                 b = b.with_access_key(k);
             } else if conn_bool(c, "use_managed_identity").unwrap_or(false) {
-                b = MicrosoftAzureBuilder::from_env().with_container_name(bucket);
+                b = MicrosoftAzureBuilder::from_env()
+                    .with_client_options(client.clone())
+                    .with_container_name(bucket);
             } else if conn_bool(c, "use_azure_cli").unwrap_or(false) {
                 b = b.with_config(AzureConfigKey::UseAzureCli, "true");
             } else {
@@ -284,7 +297,7 @@ pub struct ObjectStoreDestination {
 
 impl Destination for ObjectStoreDestination {
     fn connection_fields(&self) -> Vec<ConnectionField> {
-        match self.kind {
+        let mut fields = match self.kind {
             Kind::S3 => vec![
                 ConnectionField::new("bucket", "default bucket (or use s3://bucket/... paths)"),
                 ConnectionField::new("region", "AWS region, e.g. ap-southeast-2"),
@@ -311,7 +324,9 @@ impl Destination for ObjectStoreDestination {
                 )
                 .secret(),
             ],
-        }
+        };
+        fields.extend(timeout_fields());
+        fields
     }
 
     fn deliver(&mut self, local: &Path, remote: Option<&str>, c: &Map<String, Value>) -> Result<String> {
@@ -375,9 +390,12 @@ fn gcs_upload(bucket: &str, key: &str, local: &Path, c: &Map<String, Value>) -> 
         .len();
     let fail = |what: &str| format!("upload to {location} failed: {what}");
     // 308 means "resume incomplete" in this protocol, not a redirect.
+    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
+        .timeout_connect(Some(rules.connect_timeout))
+        .timeout_recv_response(Some(rules.timeout))
         .build()
         .into();
 

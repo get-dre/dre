@@ -59,7 +59,7 @@ Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`).
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
-| `connect_timeout` | Seconds. |
+| `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |
@@ -275,7 +275,7 @@ Field names and values are dbt-snowflake's, so a dbt profile can be copied acros
 | `query_tag` | Tags every query of the session. |
 | `client_session_keep_alive` | Keep the session alive through a long report. |
 | `client_request_mfa_token`, `client_store_temporary_credential` | Let the driver cache the MFA token and the SSO token in the OS keychain (on by default on macOS and Windows). |
-| `connect_retries`, `connect_timeout` | Retries and seconds for connecting. Defaults 1 and 10. |
+| `connect_retries`, `connect_timeout` | Retries, and how long each connection attempt may take (a duration such as `30s`, or seconds), for connecting. Defaults 1 and `30s`. |
 | `host`, `port`, `protocol`, `proxy_host`, `proxy_port`, `insecure_mode` | Connection details for unusual networks. |
 
 ```yaml
@@ -595,6 +595,17 @@ plugin and no declaration.
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
 run's target. A value holding Jinja is checked once it's rendered, at delivery.
+
+Every destination that talks to a server takes two timeouts in its profile entry, as durations
+(`30s`, `5m`) or seconds:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `connect_timeout` | `30s` | How long to wait for a connection. |
+| `timeout` | `60s` | How long a request may make no progress (the server sends or accepts nothing) before it fails. For object stores, how long one request may take; large files go up in parts. |
+
+There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
+run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
 
 ### Several destinations
 

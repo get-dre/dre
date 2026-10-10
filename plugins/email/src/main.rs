@@ -12,7 +12,6 @@
 
 use std::path::Path;
 use std::str::FromStr;
-use std::time::Duration;
 
 use dre_protocol::markdown;
 use dre_protocol::msg::ConnectionField;
@@ -51,6 +50,9 @@ impl Destination for Email {
             )
             .default(false),
         ]
+        .into_iter()
+        .chain(dre_protocol::delivery::timeout_fields())
+        .collect()
     }
 
     fn options(&self) -> Vec<OptionField> {
@@ -280,6 +282,8 @@ struct Smtp {
     tls: TlsMode,
     credentials: Option<Credentials>,
     accept_invalid_certs: bool,
+    /// `timeout`: how long connecting, or any read or write, may take.
+    timeout: std::time::Duration,
 }
 
 impl Smtp {
@@ -310,12 +314,19 @@ impl Smtp {
             (None, Some(_)) => return Err("`password` is set but `username` isn't".into()),
             (None, None) => None,
         };
+        let (rules, _) = dre_protocol::delivery::Rules::from_settings(
+            dre_protocol::delivery::Rules::default(),
+            c,
+            &Map::new(),
+            &[],
+        )?;
         Ok(Smtp {
             host,
             port,
             tls,
             credentials,
             accept_invalid_certs: conn_bool(c, "tls_accept_invalid_certs") == Some(true),
+            timeout: rules.timeout,
         })
     }
 
@@ -335,7 +346,7 @@ impl Smtp {
         let mut b = SmtpTransport::builder_dangerous(&self.host)
             .port(self.port)
             .tls(tls)
-            .timeout(Some(Duration::from_secs(60)));
+            .timeout(Some(self.timeout));
         if let Some(c) = &self.credentials {
             b = b.credentials(c.clone());
         }

@@ -580,8 +580,9 @@ impl Ui for Printer {
             Status::DryRun => (Tone::Good, "Compiled"),
             Status::Checked => (Tone::Good, "Checked"),
             Status::Cancelled => (Tone::Bad, "Cancelled"),
+            Status::TimedOut => (Tone::Bad, "Timed out"),
         };
-        if matches!(o.status, Status::Error | Status::Cancelled) {
+        if matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut) {
             i.failed += 1;
         } else {
             i.succeeded += 1;
@@ -608,7 +609,9 @@ impl Ui for Printer {
             }));
             return;
         }
-        if i.verbosity == Verbosity::Quiet && !matches!(o.status, Status::Error | Status::Cancelled) {
+        if i.verbosity == Verbosity::Quiet
+            && !matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut)
+        {
             return;
         }
         let name = i.paint(Style::new().effects(Effects::BOLD), &name);

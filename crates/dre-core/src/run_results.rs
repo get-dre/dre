@@ -98,6 +98,8 @@ pub enum Status {
     Checked,
     /// Stopped by Ctrl-C or a termination signal while it ran; nothing was delivered after.
     Cancelled,
+    /// Stopped because the run took longer than its timeout; nothing was delivered after.
+    TimedOut,
 }
 
 /// The command's parameters.
