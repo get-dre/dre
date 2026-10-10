@@ -731,6 +731,9 @@ struct TargetEntry {
     /// The plugin type of the connection, e.g. `duckdb`, `postgres`, `databricks`, `sftp`, `s3`. `local` needs no plugin.
     #[serde(rename = "type")]
     kind: String,
+    /// Connections only: how many Bindings may run on this entry at once in a `dre run` (default 1: one after another). A DuckDB file is always 1. `--threads` and `DRE_THREADS` cap the whole run. Concurrent Bindings must not write the same permanent table, and peak memory grows with it.
+    #[schemars(range(min = 1))]
+    threads: Option<u64>,
 }
 
 /// A destination entry is a delivery configuration (`type` and the plugin's fields, as for a connection), or `{deliver: false}`: it deliberately delivers nowhere. The output stays in the target path, the run logs it, and `run_results.json` records the delivery as `not_delivered`. Destinations only.

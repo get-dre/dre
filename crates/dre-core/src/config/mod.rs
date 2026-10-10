@@ -23,6 +23,13 @@ pub fn schema<T: schemars::JsonSchema>(version: &str) -> serde_json::Value {
     without_null(&mut out);
     if let serde_json::Value::Object(m) = &mut out {
         m.insert("x-dre-schema-version".into(), version.into());
+        // Top-level `x-*` keys hold YAML anchors to reuse; DRE ignores them.
+        if m.get("type").and_then(|t| t.as_str()) == Some("object") {
+            m.insert(
+                "patternProperties".into(),
+                serde_json::json!({"^x-": {"description": "Anything, for YAML anchors (`&name`) reused with aliases (`*name`) and merges (`<<: *name`). DRE ignores these keys."}}),
+            );
+        }
     }
     in_order(&mut out);
     out

@@ -9,6 +9,9 @@ use serde_json::{Map, Value};
 use crate::Kind;
 use crate::msg::{ConnectionField, FieldKind};
 
+/// Keys of a profile entry that core reads, which a plugin may ignore.
+pub const CORE_KEYS: &[&str] = &["threads"];
+
 /// What the checks found: errors stop a run; warnings (an unknown key) don't.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Checked {
@@ -28,6 +31,10 @@ pub fn check(
     let mut out = Checked::default();
     for (key, v) in connection {
         let Some(f) = fields.iter().find(|f| &f.name == key) else {
+            // Core's own keys on a connection entry: `threads` (how many Bindings run at once).
+            if CORE_KEYS.contains(&key.as_str()) {
+                continue;
+            }
             let hint = closest(key, fields.iter().map(|f| f.name.as_str()))
                 .map(|c| format!("; did you mean `{c}`?"))
                 .unwrap_or_default();

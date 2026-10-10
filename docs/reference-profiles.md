@@ -43,6 +43,7 @@ One target of a profile: a connection or delivery configuration. `type` names th
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `type` (required) | string |  | The plugin type of the connection, e.g. `duckdb`, `postgres`, `databricks`, `sftp`, `s3`. `local` needs no plugin. |
+| `threads` | integer |  | Connections only: how many Bindings may run on this entry at once in a `dre run` (default 1: one after another). A DuckDB file is always 1. `--threads` and `DRE_THREADS` cap the whole run. Concurrent Bindings must not write the same permanent table, and peak memory grows with it. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `destinations.<name>`

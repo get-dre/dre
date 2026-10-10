@@ -304,3 +304,28 @@ fn ref_needs_one_statement_and_catches_dynamic_cycles_at_run_time() {
         .says("`ref('two')` needs reports/shared/two.sql to hold exactly one statement, but it has 2");
     p.dre("run", &["d"]).failed().says("`ref()` cycle: d1 → d1");
 }
+
+#[test]
+fn loops_break_and_continue_and_maps_keep_their_written_order() {
+    let p = project(&[
+        (
+            "reports/finance/ordered/ordered.yml",
+            "queries: [q]\nvars: {limits: {zeta: 1, alpha: 2, mid: 3}, level: report}\n\
+             output:\n  destination: {profile: local_fs, path: out/ordered.csv}\n",
+        ),
+        (
+            "reports/finance/ordered/q.sql",
+            "{% set m = {'low': 10, 'high': 90} %}\
+             select '{% for k, v in m | items %}{{ k }}{% endfor %}' as literal,\n\
+             '{% for k, v in var('limits') | items %}{{ k }}{% endfor %}' as vars,\n\
+             '{% for i in range(10) %}{% if i == 1 %}{% continue %}{% endif %}{% if i == 4 %}{% break %}{% endif %}{{ i }}{% endfor %}' as loop\n",
+        ),
+    ]);
+    p.dre("run", &["ordered", "--var", "limits={alpha: 9, extra: 4}"])
+        .ok();
+    // `--var` replaces `limits` whole; a literal map and a vars map keep the order written.
+    assert_eq!(
+        p.read("out/ordered.csv"),
+        "literal,vars,loop\r\nlowhigh,alphaextra,023\r\n"
+    );
+}

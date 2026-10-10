@@ -73,6 +73,9 @@ pub struct RunOptions {
     pub cancel: CancelToken,
     /// `--keep-runs` or `DRE_KEEP_RUNS`: above `flags: keep_runs`.
     pub keep_runs: Option<usize>,
+    /// `--threads` or `DRE_THREADS`: how many Bindings may run at once in the whole run, over
+    /// each connection's `threads:`.
+    pub threads: Option<usize>,
 }
 
 impl RunOptions {
@@ -132,6 +135,9 @@ pub trait Ui {
     fn message(&mut self, _message: &ShownMessage) {}
     /// Ask which Set to run; `None` means "all".
     fn choose_set(&mut self, report: &str, sets: &[String]) -> Result<Option<String>, String>;
+    /// Bindings running at once: `label` started (`running`) or finished. Its own events come
+    /// later, together.
+    fn running(&mut self, _label: &str, _running: bool) {}
     /// Where plugin stderr goes.
     fn plugin_log(&self) -> LogSink;
     /// Where the full text of every statement sent to a source goes: `(label, sql)`.
@@ -436,8 +442,9 @@ pub fn plan<'a>(
     }
 }
 
-/// Run a plan's Bindings in order, reporting through `events`; a cancelled run starts no further
-/// Binding.
+/// Run a plan's Bindings, reporting through `events`; a cancelled run starts no further
+/// Binding. One at a time, in order, unless a connection's entry sets `threads:` above 1 or the
+/// run sets `--threads` (see [`Limits`]).
 pub fn execute(
     project: &Project,
     plan: &Plan<'_>,
@@ -445,22 +452,222 @@ pub fn execute(
     cancel: &CancelToken,
     events: Events,
 ) -> Vec<BindingOutcome> {
-    let store = RunStore::new(&project.target_dir);
-    let mut outcomes = Vec::new();
-    for (report, b) in &plan.bindings {
-        if cancel.is_cancelled() {
-            break;
+    let limits = Limits::new(project, plan, opts);
+    if limits.sequential() {
+        let store = RunStore::new(&project.target_dir);
+        let mut outcomes = Vec::new();
+        for (report, b) in &plan.bindings {
+            if cancel.is_cancelled() {
+                break;
+            }
+            events.emit(RunEvent::BindingStart {
+                report: report.name.clone(),
+                set: b.set.clone(),
+            });
+            let mut r = BindingRun::new(project, report, b, opts, events.clone(), &store);
+            let outcome = r.run();
+            events.emit(RunEvent::BindingEnd(outcome.clone()));
+            outcomes.push(outcome);
         }
-        events.emit(RunEvent::BindingStart {
-            report: report.name.clone(),
-            set: b.set.clone(),
-        });
-        let mut r = BindingRun::new(project, report, b, opts, events.clone(), &store);
-        let outcome = r.run();
-        events.emit(RunEvent::BindingEnd(outcome.clone()));
-        outcomes.push(outcome);
+        return outcomes;
     }
-    outcomes
+    let store = RunStore::concurrent(&project.target_dir);
+    let n = plan.bindings.len();
+    let state = std::sync::Mutex::new(Running::new(n));
+    let wake = std::sync::Condvar::new();
+    let outcomes: std::sync::Mutex<Vec<Option<BindingOutcome>>> = std::sync::Mutex::new(vec![None; n]);
+    std::thread::scope(|s| {
+        for _ in 0..limits.cap.min(n) {
+            s.spawn(|| {
+                loop {
+                    let i = {
+                        let mut st = state.lock().unwrap();
+                        loop {
+                            if cancel.is_cancelled() || st.started.iter().all(|x| *x) {
+                                break None;
+                            }
+                            match limits.next(&st) {
+                                Some(i) => {
+                                    st.start(i, &limits.uses[i]);
+                                    break Some(i);
+                                }
+                                None => st = wake.wait(st).unwrap(),
+                            }
+                        }
+                    };
+                    let Some(i) = i else {
+                        wake.notify_all();
+                        return;
+                    };
+                    let (report, b) = &plan.bindings[i];
+                    let label = match &b.set {
+                        Some(set) => format!("{} [{set}]", report.name),
+                        None => report.name.clone(),
+                    };
+                    let held = events.held();
+                    held.emit_now(RunEvent::Running {
+                        label: label.clone(),
+                        running: true,
+                    });
+                    held.emit(RunEvent::BindingStart {
+                        report: report.name.clone(),
+                        set: b.set.clone(),
+                    });
+                    let mut r = BindingRun::new(project, report, b, opts, held.clone(), &store);
+                    let outcome = r.run();
+                    held.emit(RunEvent::BindingEnd(outcome.clone()));
+                    held.emit_now(RunEvent::Running {
+                        label,
+                        running: false,
+                    });
+                    held.flush();
+                    outcomes.lock().unwrap()[i] = Some(outcome);
+                    state.lock().unwrap().finish(&limits.uses[i]);
+                    wake.notify_all();
+                }
+            });
+        }
+    });
+    // Declaration order, whatever order they finished in.
+    outcomes.into_inner().unwrap().into_iter().flatten().collect()
+}
+
+/// How many Bindings may run at once: each connection entry's `threads:` (default 1; a DuckDB
+/// file is always 1, as only one process can write it), and `--threads` (`DRE_THREADS`) over
+/// the whole run.
+struct Limits {
+    /// The connections each Binding uses.
+    uses: Vec<Vec<String>>,
+    per_connection: BTreeMap<String, usize>,
+    cap: usize,
+}
+
+/// Which Bindings have started, and what's running on each connection.
+struct Running {
+    started: Vec<bool>,
+    total: usize,
+    on: BTreeMap<String, usize>,
+    /// Connections a Binding has used to the end: until then, a connection runs one Binding,
+    /// so its sign-in (a browser, a token refresh) happens once.
+    warm: std::collections::BTreeSet<String>,
+}
+
+impl Running {
+    fn new(n: usize) -> Running {
+        Running {
+            started: vec![false; n],
+            total: 0,
+            on: BTreeMap::new(),
+            warm: Default::default(),
+        }
+    }
+
+    fn start(&mut self, i: usize, uses: &[String]) {
+        self.started[i] = true;
+        self.total += 1;
+        for c in uses {
+            *self.on.entry(c.clone()).or_default() += 1;
+        }
+    }
+
+    fn finish(&mut self, uses: &[String]) {
+        self.total -= 1;
+        for c in uses {
+            *self.on.entry(c.clone()).or_default() -= 1;
+            self.warm.insert(c.clone());
+        }
+    }
+}
+
+impl Limits {
+    fn new(project: &Project, plan: &Plan<'_>, opts: &RunOptions) -> Limits {
+        let schedule_vars = opts
+            .schedule
+            .as_ref()
+            .and_then(|n| project.schedules.iter().find(|e| &e.name == n))
+            .map(|e| e.vars.clone());
+        let inputs = crate::parse::Inputs {
+            target: project.target_name.clone(),
+            cli_vars: opts.vars.clone(),
+            date: opts.date,
+            scheduled_at: opts.scheduled_at,
+            timezone: opts.timezone.clone(),
+            schedule: opts.schedule.clone(),
+            started_at: None,
+        };
+        let uses: Vec<Vec<String>> = plan
+            .bindings
+            .iter()
+            .map(|(report, b)| {
+                let mut vars = b.vars.clone();
+                vars.extend(schedule_vars.clone().unwrap_or_default());
+                crate::parse::binding(project, report, b, &vars, &inputs)
+                    .connections()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .collect();
+        let mut per_connection = BTreeMap::new();
+        for c in uses.iter().flatten() {
+            per_connection
+                .entry(c.clone())
+                .or_insert_with(|| connection_threads(project, c));
+        }
+        // Only a real `dre run` (`--preview` included) runs Bindings at once.
+        let cap = if opts.dry_run || opts.live_check {
+            1
+        } else {
+            opts.threads.unwrap_or(usize::MAX).max(1)
+        };
+        Limits {
+            uses,
+            per_connection,
+            cap,
+        }
+    }
+
+    /// One at a time: `--threads 1`, or no `--threads` and no connection above 1.
+    fn sequential(&self) -> bool {
+        self.cap == 1 || (self.cap == usize::MAX && self.per_connection.values().all(|n| *n <= 1))
+    }
+
+    /// The first Binding, in declaration order, that may start now.
+    fn next(&self, st: &Running) -> Option<usize> {
+        if st.total >= self.cap {
+            return None;
+        }
+        (0..st.started.len()).find(|&i| {
+            !st.started[i]
+                && self.uses[i].iter().all(|c| {
+                    let on = st.on.get(c).copied().unwrap_or(0);
+                    let limit = if st.warm.contains(c) {
+                        self.per_connection[c]
+                    } else {
+                        1
+                    };
+                    on < limit
+                })
+        })
+    }
+}
+
+/// A connection entry's `threads:` (default 1); a DuckDB file is 1 whatever it says.
+fn connection_threads(project: &Project, connection: &str) -> usize {
+    let Some(t) = project.profiles.target(Role::Connection, connection) else {
+        return 1;
+    };
+    let n = match t.fields.get("threads") {
+        Some(Json::Number(n)) => n.as_u64().unwrap_or(1),
+        Some(Json::String(s)) => s.trim().parse().unwrap_or(1),
+        _ => 1,
+    } as usize;
+    let duckdb_file = t.kind == "duckdb"
+        && t.fields
+            .get("path")
+            .and_then(Json::as_str)
+            .is_some_and(|p| p != ":memory:");
+    if duckdb_file { 1 } else { n.max(1) }
 }
 
 /// A profile a run uses, and its entry.
@@ -2360,6 +2567,20 @@ impl<'a> BindingRun<'a> {
                 }
             })
             .collect();
+        // Bindings running at once never deliver to the same file.
+        for t in &targets {
+            if let Some(r) = &t.remote_path
+                && let Some(other) = self.store.claim(&d.profile, r, &self.label())
+            {
+                return Err(Fail::new(
+                    Code::DeliveryFailed,
+                    format!(
+                        "`{other}` delivers to `{r}` on destination `{}` in this run too; Bindings running at once (`threads:`) need different paths (put the Set or a var in the path)",
+                        d.profile
+                    ),
+                ));
+            }
+        }
         let mut locations = Vec::new();
         if kind == LOCAL_TYPE {
             let errors = crate::options::local_option_errors(&d.options);

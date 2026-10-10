@@ -622,12 +622,71 @@ impl Renderer {
 }
 
 /// `var()` (`--var` first, then the Binding's vars, then the default) and `env_var()`.
+/// A `--var` value as YAML 1.2's core rules read it: `true`/`false`, `null`/`~`, integers
+/// (no leading zeros), floats, and flow lists and maps (`[a, b]`, `{k: v}`) are typed; anything
+/// else stays a string (`yes`, `NO`, `2026-01-31`, `010`, `1.0.0`). Quoting forces a string
+/// (`'"false"'`), and an empty value is the empty string.
+pub fn cli_var_value(s: &str) -> Json {
+    let t = s.trim();
+    let int = regex_lite(t, |c, i| c.is_ascii_digit() || (i == 0 && (c == '-' || c == '+')));
+    match t {
+        "" => return Json::String(String::new()),
+        "true" | "True" | "TRUE" => return Json::Bool(true),
+        "false" | "False" | "FALSE" => return Json::Bool(false),
+        "null" | "Null" | "NULL" | "~" => return Json::Null,
+        _ => {}
+    }
+    if int {
+        let digits = t.trim_start_matches(['-', '+']);
+        if !digits.is_empty()
+            && !(digits.len() > 1 && digits.starts_with('0'))
+            && let Ok(n) = t.parse::<i64>()
+        {
+            return Json::from(n);
+        }
+        return Json::String(s.to_string());
+    }
+    let float = t.trim_start_matches(['-', '+']);
+    let is_float = !float.is_empty()
+        && float
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '-' | '+'))
+        && float
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit() || c == '.')
+        && float.chars().filter(|c| *c == '.').count() <= 1
+        && !float.starts_with("00")
+        && !(float.starts_with('0') && float.len() > 1 && float.as_bytes()[1].is_ascii_digit());
+    if is_float
+        && (float.contains('.') || float.contains(['e', 'E']))
+        && let Ok(f) = t.parse::<f64>()
+        && let Some(n) = serde_json::Number::from_f64(f)
+    {
+        return Json::Number(n);
+    }
+    let quoted = (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
+        || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2);
+    let flow = (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('{') && t.ends_with('}'));
+    if (quoted || flow)
+        && let Ok(v) = serde_saphyr::from_str::<Json>(t)
+    {
+        return v;
+    }
+    Json::String(s.to_string())
+}
+
+/// Whether every character passes `ok(c, index)`.
+fn regex_lite(s: &str, ok: impl Fn(char, usize) -> bool) -> bool {
+    !s.is_empty() && s.chars().enumerate().all(|(i, c)| ok(c, i))
+}
+
 fn add_vars(env: &mut Environment<'static>, vars: JsonMap<String, Json>, cli: BTreeMap<String, String>) {
     env.add_function(
         "var",
         move |name: String, default: Option<Value>| -> Result<Value, Error> {
             if let Some(v) = cli.get(&name) {
-                return Ok(Value::from(v.clone()));
+                return Ok(Value::from_serialize(cli_var_value(v)));
             }
             if let Some(v) = vars.get(&name) {
                 return Ok(Value::from_serialize(v));
@@ -1879,5 +1938,38 @@ mod tests {
         assert!(mentions("select * from sales.orders where 1", "sales.orders"));
         assert!(!mentions("select * from sales.orders_old", "sales.orders"));
         assert!(!mentions("select * from x.sales.orders", "sales.orders"));
+    }
+}
+
+#[cfg(test)]
+mod cli_var_tests {
+    use super::cli_var_value as v;
+    use serde_json::json;
+
+    #[test]
+    fn yaml_1_2_core_rules() {
+        assert_eq!(v("false"), json!(false));
+        assert_eq!(v("TRUE"), json!(true));
+        assert_eq!(v("~"), json!(null));
+        assert_eq!(v("5"), json!(5));
+        assert_eq!(v("-12"), json!(-12));
+        assert_eq!(v("2.5"), json!(2.5));
+        assert_eq!(v("[\"NAM\", EMEA]"), json!(["NAM", "EMEA"]));
+        assert_eq!(v("{k: 1}"), json!({"k": 1}));
+        for s in [
+            "yes",
+            "NO",
+            "2026-01-31",
+            "010",
+            "1.0.0",
+            "abc",
+            "[unclosed",
+            "0x1F",
+        ] {
+            assert_eq!(v(s), json!(s), "{s}");
+        }
+        assert_eq!(v("\"false\""), json!("false"));
+        assert_eq!(v("'5'"), json!("5"));
+        assert_eq!(v(""), json!(""));
     }
 }

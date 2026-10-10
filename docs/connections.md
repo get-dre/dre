@@ -178,6 +178,39 @@ invalid in the manifest, and `dre validate` reports it, but it doesn't stop `dre
 `dre compile` of other reports. `raise_error()` doesn't fire in the parse pass (it may only mean
 `run_query()` returned nothing), but when rendering then fails, its message is the one reported.
 
+## Running Bindings at once
+
+By default a `dre run` runs its Bindings one after another. To run several at once, give the
+connection entry `threads:`, as dbt does:
+
+```yaml
+connections:
+  warehouse:
+    targets:
+      prod: {type: postgres, host: db.internal, user: reporting, database: analytics, threads: 4}
+```
+
+- Up to `threads` Bindings run on that entry at once (default 1); each entry's limit is its own.
+  `dre run --threads N` (or `DRE_THREADS`) caps the whole run, and `--threads 1` runs one at a
+  time. `threads` belongs to the connection entry, not to `flags:`.
+- The queries inside a Binding still run in order on one session, so temp tables, temp views,
+  lookups and `SET`s never clash between Bindings, even with the same names.
+- The first Binding on each entry runs on its own, so a sign-in (a browser, a token) happens once;
+  the rest start after it.
+- A DuckDB file is always one at a time: only one process can write it. `:memory:` follows
+  `threads`.
+- Two Bindings that deliver to the same path in one run would overwrite each other, so the second
+  fails that delivery, naming the first. Put the Set or a var in the path.
+- Concurrent Bindings mustn't write the same permanent table: use temp objects, or put the Set or
+  a var in the table's name.
+- Bindings start in the order they're declared; one failing doesn't stop the others, and the run
+  exits 1. `run_results.json` keeps the declared order. At a terminal the progress bar lists the
+  running Bindings, and each Binding's lines print together when it finishes.
+- Peak memory grows with `threads` (a large xlsx is built in memory): lower it if a run uses too
+  much.
+- Only `dre run` runs Bindings at once; `dre validate --live`, `dre compile` and `--dry-run` run
+  them one at a time.
+
 ## In templates
 
 | Name | What it is |

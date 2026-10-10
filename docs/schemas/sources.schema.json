@@ -237,5 +237,10 @@
       ],
       "additionalProperties": false
     }
+  },
+  "patternProperties": {
+    "^x-": {
+      "description": "Anything, for YAML anchors (`&name`) reused with aliases (`*name`) and merges (`<<: *name`). DRE ignores these keys."
+    }
   }
 }

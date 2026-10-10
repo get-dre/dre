@@ -28,6 +28,18 @@ in `macros/` and packages, every template sees:
 | `dispatch('macro', 'package')` | A package macro's per-database variant. |
 | `raise_error('message')` | Stop rendering with this error, e.g. from a macro that checks its arguments. |
 
+## Variables, loops and maps
+
+`--var` values are read as YAML 1.2, like a value in a YAML file: `--var with_total=false` is
+`false`, `--var n=5` is a number, and `--var 'regions=[NAM, EMEA]'` is a list a `{% for %}` walks.
+Anything else stays text (`yes`, `2026-01-31`, `010`, `1.0.0`). Quote a value to keep it text:
+`--var flag='"false"'`. Before 0.4, every `--var` was text.
+
+`{% break %}` and `{% continue %}` work inside a `{% for %}` loop. A map keeps the order it was
+written in: `{% for k, v in {'low': 10, 'high': 90} | items %}` gives `low` first, and a `vars:` map
+keeps its YAML order. When a lower level (a Set, `--var`) sets a variable the project already
+has, it replaces the whole value in place.
+
 ## Names from profiles: `connection`, `destination` and `profile()`
 
 > **Changed in 0.2.** `target.<field>` is now `connection.<field>`, `run.profile` is
