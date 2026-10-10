@@ -28,6 +28,13 @@
         "required": false
       },
       {
+        "name": "autofit",
+        "type": "boolean",
+        "description": "size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win",
+        "required": false,
+        "default": true
+      },
+      {
         "name": "totals_label",
         "type": "string",
         "description": "text in the first column of a totals row, when that column has no total",

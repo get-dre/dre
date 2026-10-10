@@ -294,6 +294,10 @@ pub struct ResultSetMeta {
     /// The query entry's `columns:` map: per result column, how to show it.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub columns: std::collections::BTreeMap<String, ColumnOptions>,
+    /// The query entry's `autofit` (xlsx): size this tab's columns from their content, over the
+    /// output's `autofit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autofit: Option<bool>,
 }
 
 /// One entry of a `columns:` map.
@@ -310,6 +314,24 @@ pub struct ColumnOptions {
     /// over whole columns (`=SUM({amount:*})/COUNT({qty:*})`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<String>,
+    /// The column's width (xlsx), over the tab's and output's `autofit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<ColumnWidth>,
+}
+
+/// A column width: sized from the content, or a number of characters.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ColumnWidth {
+    Chars(f64),
+    Auto(AutoWidth),
+}
+
+/// The word `auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoWidth {
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

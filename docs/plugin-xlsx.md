@@ -26,6 +26,7 @@ Set in a report's `output:` (or `format_options.xlsx` in `dre_project.yml`).
 | `header` | boolean | `true` | Write column names above each result set. |
 | `max_rows_per_sheet` | integer | `1000000` | Rows per sheet before continuing on `Name (2)`; Excel's limit less a header. |
 | `columns` | map |  | Per column name, on any sheet: `{format: <Excel number format>, formula: "={a}*{b}", total: sum}`; a query entry's `columns` wins. |
+| `autofit` | boolean | `true` | Size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win. |
 | `totals_label` | string | `Total` | Text in the first column of a totals row, when that column has no total. |
 | `date_format` | string | `yyyy-mm-dd` | Excel number format for date columns. |
 | `datetime_format` | string | `yyyy-mm-dd hh:mm:ss` | Excel number format for timestamp columns. |
@@ -39,6 +40,31 @@ Set in a report's `output:` (or `format_options.xlsx` in `dre_project.yml`).
   with one warning per column: numbers with more than 15 significant digits (large integers,
   wide decimals), numbers beyond Excel's range, and dates or timestamps before 1900-03-01 or
   after 9999-12-31 (as ISO text). Those values get no number format, and the warning says so.
+
+## Column widths
+
+Columns are sized from their content: each gets the width of its longest value as Excel shows it
+(number formats and dates applied), across the header, the data rows (the first 10,000 of each
+sheet) and the totals row, plus two characters; at least Excel's default (8.43) and at most 60
+characters, so a long text stops there and is cut off by the next cell, as in Excel. Numbers never
+show `#####`.
+
+```yaml
+queries:
+  - query: sales
+    autofit: false                 # this tab keeps Excel's default widths...
+    columns:
+      region: {width: auto}        # ...except region, sized from its content
+      comment: {width: 40}         # a fixed width in characters (above 60 too)
+output:
+  format: xlsx
+  autofit: true                    # the default
+```
+
+A column's `width` wins over its tab's `autofit`, which wins over the output's. `width` takes
+`auto` or a number of characters from 1 to 255; a fixed width is used as it is. In a template,
+sheets keep the template's own widths unless the tab sets `autofit: true` or a column sets a
+`width`.
 
 ## Column formats
 

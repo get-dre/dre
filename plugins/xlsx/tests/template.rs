@@ -25,6 +25,7 @@ fn meta(query: &str, name: &str) -> ResultSetMeta {
         anchor: None,
         header: None,
         columns: Default::default(),
+        autofit: None,
     }
 }
 
@@ -347,4 +348,43 @@ fn text_longer_than_an_excel_cell_fails_naming_the_sheet_and_cell() {
             && err.contains("32767-character cell limit"),
         "{err}"
     );
+}
+
+#[test]
+fn template_sheets_keep_their_widths_unless_the_tab_or_a_column_says() {
+    let width = |book: &Workbook, col: u32| {
+        book.sheet_by_name("Summary")
+            .unwrap()
+            .column_dimension_by_number(col)
+            .map(|d| d.width())
+    };
+    // The output's `autofit` (on by default) doesn't touch a template's sheets: they keep
+    // Excel's default width (umya writes it as 8.38), though `Client 0` would get 10.
+    let (_d, book) = fill(
+        vec![
+            (meta("accounts", "Accounts"), accounts(3)),
+            (meta("count_q", "Count"), count(3)),
+        ],
+        standard_bindings(),
+    )
+    .unwrap();
+    assert!((1..=3).all(|c| width(&book, c).is_none_or(|w| w < 9.0)));
+    // The tab's `autofit`, and a column's fixed `width`.
+    let mut m = meta("accounts", "Accounts");
+    m.autofit = Some(true);
+    m.columns.insert(
+        "balance".into(),
+        serde_json::from_value(json!({"width": 20})).unwrap(),
+    );
+    let (_d, book) = fill(
+        vec![(m, accounts(3)), (meta("count_q", "Count"), count(3))],
+        standard_bindings(),
+    )
+    .unwrap();
+    assert_eq!(
+        width(&book, 2).map(f64::floor),
+        Some(10.0),
+        "`Client 0` fits in the minimum, plus room"
+    );
+    assert_eq!(width(&book, 3).map(f64::floor), Some(20.0));
 }

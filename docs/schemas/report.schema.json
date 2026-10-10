@@ -200,6 +200,19 @@
               "total": {
                 "type": "string",
                 "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."
+              },
+              "width": {
+                "description": "The column's width: `auto` (sized from its content, at most 60 characters) or a number of characters. Over the tab's and output's `autofit`.",
+                "oneOf": [
+                  {
+                    "const": "auto"
+                  },
+                  {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 255
+                  }
+                ]
               }
             },
             "additionalProperties": false
@@ -207,6 +220,10 @@
           "propertyNames": {
             "minLength": 1
           }
+        },
+        "autofit": {
+          "type": "boolean",
+          "description": "Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on."
         }
       },
       "required": [

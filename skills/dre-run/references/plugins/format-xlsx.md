@@ -28,6 +28,7 @@ Set in the report's `output:` block.
 | `header` | boolean | no | `true` |  | write column names above each result set |
 | `max_rows_per_sheet` | integer | no | `1000000` | min 1.0, max 1048575.0 | rows per sheet before continuing on `Name (2)`; Excel's limit less a header |
 | `columns` | map | no |  |  | per column name, on any sheet: `{format: <Excel number format>, formula: "={a}*{b}", total: sum}`; a query entry's `columns` wins |
+| `autofit` | boolean | no | `true` |  | size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win |
 | `totals_label` | string | no | `Total` |  | text in the first column of a totals row, when that column has no total |
 | `date_format` | string | no | `yyyy-mm-dd` |  | Excel number format for date columns |
 | `datetime_format` | string | no | `yyyy-mm-dd hh:mm:ss` |  | Excel number format for timestamp columns |
@@ -43,6 +44,31 @@ Set in the report's `output:` block.
   with one warning per column: numbers with more than 15 significant digits (large integers,
   wide decimals), numbers beyond Excel's range, and dates or timestamps before 1900-03-01 or
   after 9999-12-31 (as ISO text). Those values get no number format, and the warning says so.
+
+#### Column widths
+
+Columns are sized from their content: each gets the width of its longest value as Excel shows it
+(number formats and dates applied), across the header, the data rows (the first 10,000 of each
+sheet) and the totals row, plus two characters; at least Excel's default (8.43) and at most 60
+characters, so a long text stops there and is cut off by the next cell, as in Excel. Numbers never
+show `#####`.
+
+```yaml
+queries:
+  - query: sales
+    autofit: false                 # this tab keeps Excel's default widths...
+    columns:
+      region: {width: auto}        # ...except region, sized from its content
+      comment: {width: 40}         # a fixed width in characters (above 60 too)
+output:
+  format: xlsx
+  autofit: true                    # the default
+```
+
+A column's `width` wins over its tab's `autofit`, which wins over the output's. `width` takes
+`auto` or a number of characters from 1 to 255; a fixed width is used as it is. In a template,
+sheets keep the template's own widths unless the tab sets `autofit: true` or a column sets a
+`width`.
 
 #### Column formats
 
@@ -166,7 +192,7 @@ format_options:
 | `csv`, `delimited` | `delimiter`, `quote`, `quoting`, `header`, `line_ending`, `encoding`, `null`, `byte_order_mark` |
 | `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
-| `xlsx` | `header`, `max_rows_per_sheet`, `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`columns`; `template` |
+| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-widths)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`columns`; `template` |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or

@@ -335,6 +335,9 @@ pub struct QueryEntry {
     /// xlsx: per result column, how to show it (`{format: "#,##0.00"}`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub columns: BTreeMap<String, ColumnOptions>,
+    /// xlsx: size this tab's columns from their content, over the output's `autofit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autofit: Option<bool>,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -2839,6 +2842,7 @@ impl Loader {
             anchor: None,
             header: None,
             columns: BTreeMap::new(),
+            autofit: None,
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -2918,6 +2922,17 @@ impl Loader {
                         file.clone(),
                         line,
                         format!("report `{report}`: `header` of `{name}` must be true or false"),
+                    ),
+                }
+            }
+            if let Some(a) = &m.autofit {
+                match a {
+                    Loose::Ok(b) => e.autofit = Some(*b),
+                    Loose::Bad(_) => self.diags.error(
+                        Code::InvalidField,
+                        file.clone(),
+                        line,
+                        format!("report `{report}`: `autofit` of `{name}` must be true or false"),
                     ),
                 }
             }
@@ -4202,6 +4217,7 @@ impl Loader {
             anchor: None,
             header: None,
             columns: BTreeMap::new(),
+            autofit: None,
         };
         let base = BindingBase {
             profile: profile.clone(),

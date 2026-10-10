@@ -42,6 +42,7 @@ fn meta(name: &str, formats: &[(&str, &str)]) -> ResultSetMeta {
         anchor: None,
         header: None,
         columns: cols(formats),
+        autofit: None,
     }
 }
 

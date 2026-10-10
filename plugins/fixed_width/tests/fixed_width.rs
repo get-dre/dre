@@ -24,6 +24,7 @@ fn write(options: Value, batch: RecordBatch) -> Result<Vec<u8>, String> {
         anchor: None,
         header: None,
         columns: Default::default(),
+        autofit: None,
     };
     p.write_begin(path.to_str().unwrap(), "fixed_width", options, vec![meta], None)
         .unwrap();

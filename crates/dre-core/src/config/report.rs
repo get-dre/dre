@@ -83,6 +83,8 @@ pub struct QueryEntry {
     #[serde(default)]
     #[schemars(schema_with = "columns")]
     pub columns: Option<serde_json::Value>,
+    /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
+    pub autofit: Option<Loose<bool>>,
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub unknown: UnknownKeys,
@@ -97,7 +99,8 @@ fn columns(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
             "properties": {
                 "format": {"type": "string", "description": "The Excel number format of the column, e.g. `#,##0.00` or `dd/mm/yyyy`. See the xlsx column formats in the plugins reference."},
                 "formula": {"type": "string", "description": "An Excel formula for each row of this column; `{name}` stands for that column's cell on the same row, e.g. `=ROUND({qty}*{unit_price},2)`. The SQL selects a placeholder column where the formula goes."},
-                "total": {"type": "string", "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."}
+                "total": {"type": "string", "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."},
+                "width": {"oneOf": [{"const": "auto"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 255}], "description": "The column's width: `auto` (sized from its content, at most 60 characters) or a number of characters. Over the tab's and output's `autofit`."}
             },
             "additionalProperties": false
         },

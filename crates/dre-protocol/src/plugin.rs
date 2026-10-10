@@ -953,6 +953,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                     anchor: None,
                     header: None,
                     columns: Default::default(),
+                    autofit: None,
                 },
                 schema,
                 first: Some(batches),

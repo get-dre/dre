@@ -755,6 +755,7 @@ struct Produced {
     anchor: Option<String>,
     header: Option<bool>,
     columns: BTreeMap<String, ColumnOptions>,
+    autofit: Option<bool>,
 }
 
 struct Statement {
@@ -1870,6 +1871,7 @@ impl<'a> BindingRun<'a> {
                 anchor: None,
                 header: None,
                 columns: Default::default(),
+                autofit: None,
             });
         }
         Ok(())
@@ -1953,6 +1955,7 @@ impl<'a> BindingRun<'a> {
             p.anchor = q.anchor.clone();
             p.header = q.header;
             p.columns = q.columns.clone();
+            p.autofit = q.autofit;
         }
         for o in self.b.outputs.iter().filter(|o| o.format == "xlsx") {
             let mut seen: BTreeMap<String, String> = BTreeMap::new();
@@ -2148,6 +2151,7 @@ impl<'a> BindingRun<'a> {
                         anchor: r.anchor.clone(),
                         header: r.header,
                         columns: r.columns.clone(),
+                        autofit: r.autofit,
                     }
                 })
                 .collect();

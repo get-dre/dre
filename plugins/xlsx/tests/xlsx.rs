@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BooleanArray, Date32Array, Decimal128Array, Int64Array, RecordBatch, StringArray,
+    ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float64Array, Int64Array, RecordBatch, StringArray,
     TimestampMicrosecondArray,
 };
 use calamine::{Data, Reader, Xlsx, open_workbook};
@@ -23,6 +23,7 @@ fn meta(name: &str, anchor: Option<&str>, header: Option<bool>) -> ResultSetMeta
         anchor: anchor.map(Into::into),
         header,
         columns: Default::default(),
+        autofit: None,
     }
 }
 
@@ -279,4 +280,75 @@ fn text_longer_than_an_excel_cell_fails_naming_the_sheet_and_cell() {
             && err.contains("text format such as csv"),
         "{err}"
     );
+}
+
+/// Each column's width on a sheet as Excel shows it (the file stores a little padding on top),
+/// `None` where none is set (Excel's default).
+fn widths(path: &Path, name: &str, cols: u32) -> Vec<Option<f64>> {
+    let book = umya_spreadsheet::reader::xlsx::read(path).unwrap();
+    let ws = book.sheet_by_name(name).unwrap();
+    (1..=cols)
+        .map(|c| {
+            ws.column_dimension_by_number(c)
+                .map(|d| d.width().floor())
+                .filter(|w| *w > 0.0)
+        })
+        .collect()
+}
+
+fn region_sales() -> RecordBatch {
+    RecordBatch::try_from_iter([
+        (
+            "region",
+            Arc::new(StringArray::from(vec!["Europe, Middle East & Africa", "Asia"])) as ArrayRef,
+        ),
+        (
+            "net",
+            Arc::new(Float64Array::from(vec![100630.38, 52000.0])) as ArrayRef,
+        ),
+        (
+            "note",
+            Arc::new(StringArray::from(vec!["x".repeat(200), "y".into()])) as ArrayRef,
+        ),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn columns_are_sized_from_their_formatted_content_by_default() {
+    let mut m = meta("By region", None, None);
+    m.columns.insert(
+        "net".into(),
+        serde_json::from_value(json!({"format": "#,##0.00", "total": "sum"})).unwrap(),
+    );
+    let (_d, path) = write(json!({}), vec![(m, vec![region_sales()])]);
+    let w = widths(&path, "By region", 3);
+    // The longest region, plus room; the totals row's `152,630.38` fits; long text stops at 60.
+    assert_eq!(w[0], Some(30.0));
+    assert!(w[1].unwrap() >= "152,630.38".len() as f64 + 2.0, "{w:?}");
+    assert_eq!(w[2], Some(60.0));
+}
+
+#[test]
+fn a_column_width_beats_the_tab_which_beats_the_output() {
+    let mut off = meta("Off", None, None);
+    off.autofit = Some(false);
+    off.columns.insert(
+        "net".into(),
+        serde_json::from_value(json!({"width": 14})).unwrap(),
+    );
+    let mut on = meta("On", None, None);
+    on.autofit = Some(true);
+    let plain = meta("Plain", None, None);
+    let (_d, path) = write(
+        json!({"autofit": false, "columns": {"region": {"width": "auto"}}}),
+        vec![
+            (off, vec![region_sales()]),
+            (on, vec![region_sales()]),
+            (plain, vec![region_sales()]),
+        ],
+    );
+    assert_eq!(widths(&path, "Off", 3), [Some(30.0), Some(14.0), None]);
+    assert_eq!(widths(&path, "On", 3), [Some(30.0), Some(11.0), Some(60.0)]);
+    assert_eq!(widths(&path, "Plain", 3), [Some(30.0), None, None]);
 }
