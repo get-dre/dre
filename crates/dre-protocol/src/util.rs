@@ -257,9 +257,11 @@ mod atomic_tests {
         if let Some(path) = std::env::var_os("DRE_ATOMIC_CHILD") {
             // The child: write big files forever.
             let path = std::path::PathBuf::from(path);
-            for i in 0u64.. {
+            let mut i = 0u64;
+            loop {
                 let body = format!("{{\"n\":{i},\"pad\":\"{}\"}}", "x".repeat(1 << 20));
                 write_atomic(&path, body.as_bytes()).unwrap();
+                i += 1;
             }
         }
         let dir = tempfile::tempdir().unwrap();
