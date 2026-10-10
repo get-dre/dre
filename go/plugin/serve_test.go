@@ -226,12 +226,12 @@ func TestExecuteStreamsResultsWithinTheRowLimit(t *testing.T) {
 	c.Send(map[string]any{"type": "execute", "sql": "bad sql"})
 	plugintest.ExpectError(t, c.Reply(), "syntax error")
 	c.Send(map[string]any{"type": "check", "sql": "select 1"})
-	// The check's note is logged (at debug: shown with -v).
-	if r := c.Reply(); r["type"] != "log" || r["level"] != "debug" || r["message"] != "would scan 10 bytes" {
-		t.Fatalf("%v", r)
-	}
 	if r := c.Reply(); r["type"] != "ok" {
 		t.Fatalf("%v", r)
+	}
+	// The check's note is logged (at debug: shown with -v).
+	if l := c.Logs[len(c.Logs)-1]; l["level"] != "debug" || l["message"] != "would scan 10 bytes" {
+		t.Fatalf("%v", l)
 	}
 	c.Send(map[string]any{"type": "check", "sql": "select nope"})
 	plugintest.ExpectError(t, c.Reply(), "`nope` cannot be resolved")
@@ -363,11 +363,11 @@ func TestProtocolOneIdsLogsErrorsAndCancel(t *testing.T) {
 	// A cancel for a request that isn't running is ignored.
 	c.Send(map[string]any{"type": "cancel", "id": 99})
 	c.Send(map[string]any{"type": "execute", "id": 2, "sql": "log"})
-	if r := c.Reply(); r["type"] != "log" || r["id"] != 2.0 || r["level"] != "info" || r["message"] != "hello" ||
+	if r := c.Message(); r["type"] != "log" || r["id"] != 2.0 || r["level"] != "info" || r["message"] != "hello" ||
 		fmt.Sprint(r["fields"]) != "map[attempt:2]" {
 		t.Fatalf("log: %v", r)
 	}
-	if r := c.Reply(); r["type"] != "progress" || r["done"] != 1.0 || r["total"] != 2.0 || r["message"] != "reading" {
+	if r := c.Message(); r["type"] != "progress" || r["done"] != 1.0 || r["total"] != 2.0 || r["message"] != "reading" {
 		t.Fatalf("progress: %v", r)
 	}
 	if r := c.Reply(); r["type"] != "no_result" || r["id"] != 2.0 {
