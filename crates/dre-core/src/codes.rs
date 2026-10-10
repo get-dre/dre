@@ -462,6 +462,9 @@ codes! {
     RunFailed = "run-failed", Internal,
         "A Binding failed for a reason without its own code.",
         "Something went wrong while running the Binding that isn't one of the other run errors. The message has the cause; please report it if it looks like a bug.";
+    RunCancelled = "run-cancelled", Cancelled,
+        "The run was stopped by Ctrl-C or a termination signal.",
+        "DRE received Ctrl-C (SIGINT) or a termination signal (SIGTERM; on Windows Ctrl-Break, closing the console, logging off or shutting down), from you or from the orchestrator cancelling the job. It asked every running plugin to stop, waited up to 8 seconds, then stopped them; a source that can cancel its query on the server (Postgres, Databricks, DuckDB) did. The Binding that was running is recorded as `cancelled` in its `run_results.json`, Bindings that hadn't started don't run, and nothing is delivered after the cancel. `dre` exits 130 after Ctrl-C and 143 after a termination. A second Ctrl-C stops at once.";
     ConnectionFailed = "connection-failed", Connection,
         "A connection couldn't be opened.",
         "The source plugin couldn't connect: the host is unreachable, the credentials are refused, the warehouse is unavailable. The message has the plugin's reason. Trying again can work when the cause is temporary.";

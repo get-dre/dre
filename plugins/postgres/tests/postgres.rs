@@ -552,3 +552,33 @@ fn the_ssh_block_is_a_secret_init_doesnt_ask_for() {
     let f = d.connection_fields.iter().find(|f| f.name == "ssh").unwrap();
     assert!(f.secret && f.manual);
 }
+
+#[test]
+fn a_cancel_stops_the_query_on_the_server() {
+    needs_server!();
+    let mut p = open(false, json!({}));
+    let canceller = p.canceller();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(canceller.cancel());
+    });
+    let started = std::time::Instant::now();
+    let err = p
+        .execute("select pg_sleep(30)::text", None, |_, _| Ok(()))
+        .unwrap_err();
+    t.join().unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    match err {
+        dre_protocol::host::HostError::Plugin { kind, message, .. } => {
+            assert_eq!(kind.as_deref(), Some("cancelled"), "{message}");
+            assert!(message.contains("cancel"), "{message}");
+        }
+        e => panic!("{e:?}"),
+    }
+    // The session is still there.
+    collect(&mut p, "select 1", None);
+}

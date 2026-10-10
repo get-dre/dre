@@ -579,8 +579,9 @@ impl Ui for Printer {
             Status::Success => (Tone::Good, "Succeeded"),
             Status::DryRun => (Tone::Good, "Compiled"),
             Status::Checked => (Tone::Good, "Checked"),
+            Status::Cancelled => (Tone::Bad, "Cancelled"),
         };
-        if o.status == Status::Error {
+        if matches!(o.status, Status::Error | Status::Cancelled) {
             i.failed += 1;
         } else {
             i.succeeded += 1;
@@ -607,7 +608,7 @@ impl Ui for Printer {
             }));
             return;
         }
-        if i.verbosity == Verbosity::Quiet && o.status != Status::Error {
+        if i.verbosity == Verbosity::Quiet && !matches!(o.status, Status::Error | Status::Cancelled) {
             return;
         }
         let name = i.paint(Style::new().effects(Effects::BOLD), &name);

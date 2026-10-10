@@ -5,6 +5,7 @@ mod ls;
 mod output;
 mod plugins;
 mod schedule;
+mod signals;
 mod system;
 
 use std::path::PathBuf;
@@ -873,6 +874,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         live_check: false,
         schedule: a.schedule,
         manifest_checksum,
+        cancel: dre_core::engine::CancelToken::new(),
     };
     if let Some(name) = &opts.schedule
         && !project.schedules.iter().any(|e| &e.name == name)
@@ -891,10 +893,23 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     params["target_path"] = serde_json::json!(project.target_dir);
     printer.log_params(&params);
     printer.detail(output::Tone::Note, "Profiles", &profiles_line(&project.profiles));
+    signals::watch(opts.cancel.clone());
     let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
         return ExitCode::from(summary.exit_code());
+    }
+    if let Some(reason) = summary.cancelled {
+        let by = match reason {
+            dre_core::engine::CancelReason::Interrupt => "Ctrl-C",
+            dre_core::engine::CancelReason::Terminate => "a termination signal",
+        };
+        let not_run = match summary.not_run {
+            0 => String::new(),
+            1 => "; 1 Binding didn't run".into(),
+            n => format!("; {n} Bindings didn't run"),
+        };
+        printer.error(&format!("the run was cancelled by {by}{not_run}"));
     }
     printer.finish("run");
     ExitCode::from(summary.exit_code())

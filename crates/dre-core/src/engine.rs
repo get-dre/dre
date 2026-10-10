@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -143,21 +143,62 @@ pub fn dispatch(ui: &mut dyn Ui, e: RunEvent, plugin_log: &LogSink, sql_log: &Lo
     }
 }
 
-/// Asks a run to stop. Clones share the request.
+/// Why a run was asked to stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelReason {
+    /// Ctrl-C (SIGINT).
+    Interrupt,
+    /// SIGTERM, or on Windows Ctrl-Break, closing the console, logging off or shutting down.
+    Terminate,
+}
+
+impl CancelReason {
+    /// The conventional exit code: 130 after an interrupt, 143 after a termination.
+    pub fn exit_code(self) -> u8 {
+        match self {
+            CancelReason::Interrupt => 130,
+            CancelReason::Terminate => 143,
+        }
+    }
+
+    fn code(self) -> u8 {
+        match self {
+            CancelReason::Interrupt => 1,
+            CancelReason::Terminate => 2,
+        }
+    }
+}
+
+/// Asks a run to stop. Clones share the request; the first reason given sticks.
 #[derive(Debug, Clone, Default)]
-pub struct CancelToken(Arc<AtomicBool>);
+pub struct CancelToken(Arc<AtomicU8>);
 
 impl CancelToken {
     pub fn new() -> CancelToken {
         CancelToken::default()
     }
 
+    /// Cancel as an interrupt (Ctrl-C).
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.cancel_with(CancelReason::Interrupt);
+    }
+
+    pub fn cancel_with(&self, reason: CancelReason) {
+        let _ = self
+            .0
+            .compare_exchange(0, reason.code(), Ordering::SeqCst, Ordering::SeqCst);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.reason().is_some()
+    }
+
+    pub fn reason(&self) -> Option<CancelReason> {
+        match self.0.load(Ordering::SeqCst) {
+            1 => Some(CancelReason::Interrupt),
+            2 => Some(CancelReason::Terminate),
+            _ => None,
+        }
     }
 }
 
@@ -218,8 +259,12 @@ mod tests {
         let a = CancelToken::new();
         let b = a.clone();
         assert!(!b.is_cancelled());
-        a.cancel();
+        a.cancel_with(CancelReason::Terminate);
         assert!(b.is_cancelled());
+        // The first reason sticks.
+        b.cancel();
+        assert_eq!(a.reason(), Some(CancelReason::Terminate));
+        assert_eq!(CancelReason::Terminate.exit_code(), 143);
     }
 
     #[test]

@@ -110,3 +110,31 @@ fn sql_errors_are_reported_and_the_session_survives() {
     assert!(err.to_string().contains("no_such_table"), "{err}");
     assert_eq!(rows(&mut p, "select 1"), Some(1));
 }
+
+#[test]
+fn a_cancel_interrupts_the_running_query() {
+    let mut p = open(":memory:", false);
+    let canceller = p.canceller();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(canceller.cancel());
+    });
+    let started = std::time::Instant::now();
+    let err = p
+        .execute(
+            "select count(*) from range(1000000) a, range(1000000) b",
+            None,
+            |_, _| Ok(()),
+        )
+        .unwrap_err();
+    t.join().unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    match err {
+        dre_protocol::host::HostError::Plugin { kind, .. } => assert_eq!(kind.as_deref(), Some("cancelled")),
+        e => panic!("{e:?}"),
+    }
+}

@@ -477,6 +477,44 @@ where
     }
 }
 
+/// Cancel the query running on `token`'s connection, from a new connection to the server.
+fn cancel_on_server(
+    token: &tokio_postgres::CancelToken,
+    host: &str,
+    port: u16,
+    tls: Option<native_tls::TlsConnector>,
+) {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+        return;
+    };
+    rt.block_on(async {
+        let stream = match tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::net::TcpStream::connect((host, port)),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            _ => {
+                dre_protocol::log::warn!("couldn't reach {host}:{port} to cancel the running query");
+                return;
+            }
+        };
+        let r = match tls {
+            Some(t) => {
+                token
+                    .cancel_query_raw(stream, postgres_native_tls::TlsConnector::new(t, host))
+                    .await
+            }
+            None => token.cancel_query_raw(stream, NoTls).await,
+        };
+        match r {
+            Ok(()) => dre_protocol::log::info!("asked Postgres to cancel the running query"),
+            Err(e) => dre_protocol::log::warn!("couldn't cancel the running query: {e}"),
+        }
+    });
+}
+
 /// Connect directly, or through the bastion. `at` names the server in errors: `db` (from
 /// [`server`]), and the bastion when there is one.
 async fn connect(s: &Settings, db: &str, at: &str) -> std::result::Result<Session, String> {
@@ -607,6 +645,16 @@ impl Source for Postgres {
         }
         for sql in setup {
             self.rt.block_on(session.client.batch_execute(&sql))?;
+        }
+        // When core cancels a request, ask the server to cancel the running query (as libpq's
+        // PQcancel does, on a new connection). Not through an SSH tunnel or a Unix socket.
+        if s.ssh.is_none() && !s.host.starts_with('/') {
+            let token = session.client.cancel_token();
+            let (host, port, tls) = (s.host.clone(), s.port, s.tls.clone());
+            dre_protocol::plugin::on_cancel(move || {
+                let (token, host, tls) = (token.clone(), host.clone(), tls.clone());
+                std::thread::spawn(move || cancel_on_server(&token, &host, port, tls));
+            });
         }
         self.session = Some(session);
         Ok(())

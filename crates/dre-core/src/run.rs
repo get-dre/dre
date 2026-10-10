@@ -69,6 +69,8 @@ pub struct RunOptions {
     pub timezone: Option<String>,
     /// SHA-256 of the manifest this command wrote, for `run_results.json`.
     pub manifest_checksum: Option<String>,
+    /// Stops the run: no further Binding, statement or delivery starts once it's cancelled.
+    pub cancel: CancelToken,
 }
 
 impl RunOptions {
@@ -237,11 +239,20 @@ pub struct RunSummary {
     pub error: Option<String>,
     /// `error` is about a profile's missing entry.
     pub missing_entry: bool,
+    /// Why the run was cancelled, if it was.
+    pub cancelled: Option<crate::engine::CancelReason>,
+    /// Bindings that never started because the run was cancelled.
+    pub not_run: usize,
 }
 
 impl RunSummary {
     pub fn failed(&self) -> bool {
-        self.error.is_some() || self.outcomes.iter().any(|o| o.status == Status::Error)
+        self.error.is_some()
+            || self.cancelled.is_some()
+            || self
+                .outcomes
+                .iter()
+                .any(|o| matches!(o.status, Status::Error | Status::Cancelled))
     }
 
     /// The code of what failed first: why nothing ran, else the first failed Binding's.
@@ -255,12 +266,17 @@ impl RunSummary {
         }
         self.outcomes
             .iter()
-            .find(|o| o.status == Status::Error)
+            .find(|o| matches!(o.status, Status::Error | Status::Cancelled))
             .map(|o| o.error_code.clone().unwrap_or(ErrorCode::Core(Code::RunFailed)))
+            .or_else(|| self.cancelled.map(|_| ErrorCode::Core(Code::RunCancelled)))
     }
 
-    /// The exit code: 0, else the one the failure's kind has.
+    /// The exit code: 130 or 143 for a cancelled run, else 0, else the one the failure's kind
+    /// has.
     pub fn exit_code(&self) -> u8 {
+        if let Some(r) = self.cancelled {
+            return r.exit_code();
+        }
         self.error_code().map_or(0, |c| c.kind().exit_code())
     }
 }
@@ -282,7 +298,7 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
     ui.plan(plan.bindings.len());
     let (plugin_log, sql_log) = (ui.plugin_log(), ui.sql_log());
     let (tx, rx) = std::sync::mpsc::channel();
-    let cancel = CancelToken::new();
+    let cancel = opts.cancel.clone();
     let outcomes = std::thread::scope(|s| {
         let worker = s.spawn(|| execute(project, &plan, opts, &cancel, Events::new(tx)));
         for e in rx {
@@ -290,6 +306,8 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
         }
         worker.join().expect("the run's worker doesn't panic")
     });
+    summary.not_run = plan.bindings.len().saturating_sub(outcomes.len());
+    summary.cancelled = cancel.reason();
     summary.outcomes.extend(outcomes);
     summary
 }
@@ -979,6 +997,15 @@ impl<'a> BindingRun<'a> {
             .ok_or_else(|| format!("query `{query}` has no connection").into())
     }
 
+    /// Fail once the run is cancelled, so no further statement, file or delivery starts.
+    fn not_cancelled(&self) -> Result<(), Fail> {
+        if self.opts.cancel.is_cancelled() {
+            Err(Fail::new(Code::RunCancelled, "the run was cancelled"))
+        } else {
+            Ok(())
+        }
+    }
+
     fn outcome(&self, status: Status, error: Option<Fail>) -> BindingOutcome {
         BindingOutcome {
             report: self.report.name.clone(),
@@ -1003,7 +1030,17 @@ impl<'a> BindingRun<'a> {
             let _ = std::fs::remove_dir_all(&self.run_dir);
         }
         let result = self.run_inner();
+        // A Binding that fails after the run was cancelled was stopped by it (a plugin's
+        // cancelled reply, or a check between steps).
+        let result = match result {
+            Err(e) if self.opts.cancel.is_cancelled() && e.code != Code::RunCancelled => Err(Fail::new(
+                Code::RunCancelled,
+                format!("the run was cancelled: {}", e.message),
+            )),
+            r => r,
+        };
         let status = match (&result, dry, self.opts.live_check) {
+            (Err(e), _, _) if e.code == Code::RunCancelled => Status::Cancelled,
             (Err(_), _, _) => Status::Error,
             (Ok(()), _, true) => Status::Checked,
             (Ok(()), true, _) => Status::DryRun,
@@ -1580,6 +1617,7 @@ impl<'a> BindingRun<'a> {
         i: usize,
         st: &Statement,
     ) -> Result<(), Fail> {
+        self.not_cancelled()?;
         let sql_log = self.ui.sql_log();
         sql_log(
             &format!("{}:{}", st.file.display(), st.line),
@@ -1874,6 +1912,7 @@ impl<'a> BindingRun<'a> {
 
     /// Write output `oi`'s files from the result sets of its queries.
     fn format(&mut self, oi: usize, filename: &str) -> Result<(), Fail> {
+        self.not_cancelled()?;
         std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
         let b = self.b;
         let out = &b.outputs[oi];
@@ -2097,6 +2136,8 @@ impl<'a> BindingRun<'a> {
     /// Deliver every file to one destination. `Ok(None)`: its entry for this run is
     /// `deliver: false`, so nothing was sent.
     fn deliver_one(&mut self, oi: usize, d: &RenderedDest) -> Result<Option<String>, Fail> {
+        // An output is never delivered once the run is cancelled.
+        self.not_cancelled()?;
         let profiles = &self.project.profiles;
         let out = match profiles.entry(Role::Destination, &d.profile) {
             Entry::Use(o) => o,
