@@ -95,13 +95,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/daily/default/daily.csv",
+      "output": "target/run/daily/default/runs/<run id>/daily.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/daily/default/daily.csv",
+          "output": "target/run/daily/default/runs/<run id>/daily.csv",
           "destinations": []
         }
       ],

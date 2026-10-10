@@ -109,7 +109,7 @@ fn validate_compiles_and_with_select_shows_where_output_goes() {
         .says("Compiled  target/compiled/daily/default/summary.sql")
         .says("Target  dev")
         .says("Query  summary on warehouse (duckdb)")
-        .says("Output  target/run/daily/default/daily-20260125.csv (csv)")
+        .says("Output  target/run/daily/default/runs/<run id>/daily-20260125.csv (csv)")
         .says("Delivers  inbox (local), target dev → out/daily-20260125.csv")
         .says("Schedules  daily_run");
     assert!(!v.stdout.contains("monthly"), "{}", v.stdout);

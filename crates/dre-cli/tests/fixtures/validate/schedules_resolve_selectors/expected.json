@@ -89,13 +89,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/fin_monthly/default/fin_monthly.csv",
+      "output": "target/run/fin_monthly/default/runs/<run id>/fin_monthly.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/fin_monthly/default/fin_monthly.csv",
+          "output": "target/run/fin_monthly/default/runs/<run id>/fin_monthly.csv",
           "destinations": []
         }
       ],
@@ -120,13 +120,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/ops_monthly/default/ops_monthly.csv",
+      "output": "target/run/ops_monthly/default/runs/<run id>/ops_monthly.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/ops_monthly/default/ops_monthly.csv",
+          "output": "target/run/ops_monthly/default/runs/<run id>/ops_monthly.csv",
           "destinations": []
         }
       ],

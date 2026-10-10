@@ -65,7 +65,7 @@ Then ask: "help me with dre".
 dre init               # pick a source, enter its connection, start a project
 cd my_reports
 dre validate           # check the project and compile its SQL
-dre run                # run every report; output lands in target/run/
+dre run                # run every report; output lands in target/run/ (one folder per run)
 ```
 
 ## Documentation

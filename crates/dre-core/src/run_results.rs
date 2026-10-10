@@ -17,13 +17,15 @@ type JsonMap = serde_json::Map<String, serde_json::Value>;
 /// The format's version.
 pub const SCHEMA_VERSION: &str = "dre/run-results/v1";
 
-/// `<target path>/run/<report>/<set or default>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.
+/// `<target path>/run/<report>/<set or default>/runs/<run id>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[schemars(title = "DRE run results")]
 pub struct RunResults {
     /// The format's version: `dre/run-results/v1`.
     #[schemars(schema_with = "schema_version")]
     pub schema_version: &'static str,
+    /// This run's id (`20261009T060000Z-k3f9`: its UTC start and four random characters), the name of its folder under `runs/`.
+    pub run_id: String,
     pub report: String,
     /// Null for a report without Sets.
     pub set: Option<String>,

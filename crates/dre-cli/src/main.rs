@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod cli_reference;
 mod exit;
+mod history;
 mod init;
 mod ls;
 mod output;
@@ -82,6 +83,12 @@ enum Command {
     System(system::SystemCommand),
     /// Explain an error code (`dre explain unknown-key`): what it means and how to fix it.
     Explain(ExplainArgs),
+    /// A report's runs in the target path, newest first, and which is current (the latest
+    /// finished); `--latest --path` prints where the latest files are.
+    History(history::HistoryArgs),
+    /// Remove a Binding's lock left by a run that's no longer going on (it shows the holder and
+    /// asks first).
+    Unlock(history::UnlockArgs),
 }
 
 #[derive(Args)]
@@ -328,6 +335,8 @@ fn main() -> ExitCode {
     }
     match cli.command {
         Command::Explain(a) => explain(&a.code),
+        Command::History(a) => history::history(a),
+        Command::Unlock(a) => history::unlock(a),
         Command::Validate(a) => validate(a, &printer),
         Command::Run(a) => run(a, printer),
         Command::Compile(a) => compile(a, printer),

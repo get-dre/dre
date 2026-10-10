@@ -110,13 +110,13 @@ exit: 1
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/quick_look/default/quick_look.csv",
+      "output": "target/run/quick_look/default/runs/<run id>/quick_look.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/quick_look/default/quick_look.csv",
+          "output": "target/run/quick_look/default/runs/<run id>/quick_look.csv",
           "destinations": []
         }
       ],
@@ -139,13 +139,13 @@ exit: 1
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/temp_then_select/default/temp_then_select.csv",
+      "output": "target/run/temp_then_select/default/runs/<run id>/temp_then_select.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/temp_then_select/default/temp_then_select.csv",
+          "output": "target/run/temp_then_select/default/runs/<run id>/temp_then_select.csv",
           "destinations": []
         }
       ],

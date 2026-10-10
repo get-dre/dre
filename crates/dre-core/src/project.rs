@@ -192,6 +192,9 @@ pub struct Project {
     pub default_set: Option<String>,
     pub vars: JsonMap<String, Json>,
     pub run_query_max_rows: u64,
+    /// How many runs of each Binding to keep in `target/run/` (the current one always stays).
+    #[serde(skip)]
+    pub keep_runs: usize,
     /// `flags: run_timeout`: how long a run may take (off when unset).
     #[serde(skip)]
     pub run_timeout: Option<std::time::Duration>,
@@ -1241,6 +1244,7 @@ impl Loader {
             default_set,
             vars,
             run_query_max_rows,
+            keep_runs: 1,
             run_timeout,
             reports: Vec::new(),
             sets: BTreeMap::new(),

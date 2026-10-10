@@ -218,11 +218,11 @@ fn single_table_formats_write_one_file_per_result_set_and_deliver_each() {
     assert_eq!(p.read("out/split_Summary.csv"), "a\r\n1\r\n");
     assert_eq!(p.read("out/split_Detail.csv"), "b\r\n2\r\n");
     let r = p.json("target/run/split/default/run_results.json");
-    let outs: Vec<&str> = r["outputs"]
+    let outs: Vec<String> = r["outputs"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|o| o["path"].as_str().unwrap())
+        .map(|o| common::without_run_id(o["path"].as_str().unwrap()))
         .collect();
     assert_eq!(
         outs,

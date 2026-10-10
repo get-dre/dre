@@ -203,9 +203,9 @@ fn validate_lists_every_output_with_its_destinations() {
     );
     p.dre("validate", &["-s", "daily"])
         .ok()
-        .says("target/run/daily/default/detail.csv (csv, output `workbook`)")
+        .says("target/run/daily/default/runs/<run id>/detail.csv (csv, output `workbook`)")
         .says("Delivers  inbox (local), target dev → out/detail.csv")
-        .says("target/run/daily/default/summary.csv (csv, output `summary`)")
+        .says("target/run/daily/default/runs/<run id>/summary.csv (csv, output `summary`)")
         .says("Delivers  rec (fixture), target dev → archive/summary.csv");
 }
 

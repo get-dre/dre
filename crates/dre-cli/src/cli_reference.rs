@@ -29,6 +29,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("plugin remove", "dre plugin remove duckdb@1.1.0"),
     ("system update", "dre system update --check"),
     ("explain", "dre explain unknown-key"),
+    ("history", "dre history monthly_revenue --latest --path"),
+    ("unlock", "dre unlock monthly_revenue --binding client_a"),
 ];
 
 /// The page for `cli`, the top-level command.

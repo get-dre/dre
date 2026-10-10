@@ -3,11 +3,15 @@
   "$id": "https://github.com/get-dre/dre/blob/master/docs/run-results.schema.json",
   "title": "DRE run results",
   "type": "object",
-  "description": "`<target path>/run/<report>/<set or default>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.",
+  "description": "`<target path>/run/<report>/<set or default>/runs/<run id>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.",
   "properties": {
     "schema_version": {
       "description": "The format's version: `dre/run-results/v1`.",
       "const": "dre/run-results/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "This run's id (`20261009T060000Z-k3f9`: its UTC start and four random characters), the name of its folder under `runs/`."
     },
     "report": {
       "type": "string"
@@ -224,6 +228,7 @@
   },
   "required": [
     "schema_version",
+    "run_id",
     "report",
     "set",
     "binding",

@@ -27,6 +27,7 @@ pub mod project;
 pub mod render;
 pub mod run;
 pub mod run_results;
+pub mod runs;
 pub mod schedule;
 mod schema;
 pub mod secrets;

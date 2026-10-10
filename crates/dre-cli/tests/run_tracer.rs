@@ -50,7 +50,10 @@ fn a_one_query_report_writes_csv_into_target_and_records_the_run() {
     assert_eq!(r["target"], "dev");
     assert_eq!(r["preview"], false);
     assert_eq!(r["result_sets"][0]["rows"], 3);
-    assert_eq!(r["outputs"][0]["path"], "target/run/daily/default/daily.csv");
+    assert_eq!(
+        common::without_run_id(r["outputs"][0]["path"].as_str().unwrap()),
+        "target/run/daily/default/daily.csv"
+    );
     assert_eq!(
         r["outputs"][0]["size"],
         p.read("target/run/daily/default/daily.csv").len()

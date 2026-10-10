@@ -39,11 +39,47 @@ export DRE_TARGET_PATH=/Volumes/main/reporting/dre/target
 dre run --schedule close_monthly
 ```
 
-Give each job that runs at the same time its own target path; two runs sharing one overwrite
-each other's files and snapshots. Each file DRE reads back (`run_results.json`, the schema snapshots, the
-manifest, `dre.lock`) is written whole: a temporary file next to it, flushed to disk, then renamed
-into place, so a run stopped mid-write leaves the previous file or the new one, never a broken
-one. `dre clean` deletes the target folder only if DRE created it
+## Runs, and runs that overlap
+
+Each run of a Binding writes into its own folder, and a small `current` file says which run is
+the latest that finished:
+
+```text
+target/run/<report>/<set or default>/
+  current          the id of the latest finished run
+  lock             only while a run is going on: its run id, host, process and start time
+  runs/
+    20261009T060000Z-k3f9/   one folder per run: its files and run_results.json
+```
+
+A run id is the run's UTC start time and four random characters. `dre history <report>` lists a
+report's runs and which is current; `dre history <report> --latest --path` prints the folder
+with the latest files, for scripts. Only the latest run is kept for now.
+
+So several runs can share one target path safely:
+
+- **The same report and Set never run twice at once.** A second `dre run` of it finds the `lock`,
+  stops at once and changes nothing (no files deleted, nothing delivered, the drift snapshot left
+  alone); its error names the run in progress. Different reports run in parallel freely. A lock
+  left by a process on this machine that has gone (a crash, a kill) is taken over with a warning;
+  one from another machine (a shared folder) is never guessed about: `dre unlock <report>
+  [--binding <set>]` shows it and removes it.
+- **A crash leaves the previous run current**, and only an unfinished folder behind, which the
+  next run removes.
+- **An older run never replaces a newer one.** A rerun for an earlier instant (`DRE_RUN_AT`) than
+  the current run's finishes in its own folder but doesn't become current, and doesn't touch the
+  drift snapshot.
+- **Each file DRE reads back** (`current`, `run_results.json`, the schema snapshots, the manifest,
+  `dre.lock`) is written whole: a temporary file next to it, flushed to disk, then renamed into
+  place, so a run stopped mid-write leaves the previous file or the new one, never a broken one.
+
+Before 0.4 a Binding's files were straight in `target/run/<report>/<set or default>/`. The first
+0.4 run moves them into a `runs/<time>-legacy/` folder (and the drift snapshot carries on). Don't
+run 0.3 and 0.4 on one target path.
+
+## Cleaning
+
+`dre clean` deletes the target folder only if DRE created it
 (it leaves a `.dre_target` file there) or it's the project's own `target/`, so a mistyped
 `--target-path` can't delete anything else.
 

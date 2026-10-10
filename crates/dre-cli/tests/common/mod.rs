@@ -136,8 +136,10 @@ impl TestProject {
         self.dir.path().join("project")
     }
 
+    /// A path in the project. `target/run/<report>/<binding>/<file>` means the file in that
+    /// Binding's current run (`runs/<current>/<file>`), as before run folders.
     pub fn path(&self, rel: &str) -> PathBuf {
-        self.root().join(rel)
+        resolve_run_path(&self.root(), rel)
     }
 
     pub fn read(&self, rel: &str) -> String {
@@ -171,7 +173,7 @@ impl TestProject {
         let mut c = assert_cmd::Command::cargo_bin("dre").unwrap();
         c.arg(cmd).args(args);
         c.arg("--project-dir").arg(self.root());
-        if cmd != "clean" {
+        if !["clean", "history", "unlock"].contains(&cmd) {
             c.arg("--profiles-dir").arg(self.dir.path().join("profiles"));
         }
         c.env("DRE_PLUGINS_DIR", &self.plugins)
@@ -228,3 +230,39 @@ impl Run {
 
 pub const DUCK_PROFILES: &str = "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb}\n      prod: {type: duckdb, path: prod.duckdb}\n";
 pub const PLUGINS_YML: &str = "plugins:\n  - duckdb\n  - csv\n";
+
+/// `target/run/<report>/<binding>/<rest>` under `root` → `.../runs/<current>/<rest>` when that
+/// Binding has a current run and `<rest>` isn't its own `current`, `lock` or `runs`.
+pub fn resolve_run_path(root: &Path, rel: &str) -> PathBuf {
+    let parts: Vec<&str> = rel.split('/').collect();
+    if parts.len() >= 5
+        && parts[0] == "target"
+        && parts[1] == "run"
+        && !["current", "lock", "runs"].contains(&parts[4])
+    {
+        let binding = root.join(parts[..4].join("/"));
+        if let Ok(id) = std::fs::read_to_string(binding.join("current")) {
+            return binding.join("runs").join(id.trim()).join(parts[4..].join("/"));
+        }
+    }
+    root.join(rel)
+}
+
+/// `<target>/run/<report>/<binding>/<file>` in that Binding's current run, for a target folder
+/// outside the project.
+pub fn current_run_file(target: &Path, report: &str, binding: &str, file: &str) -> PathBuf {
+    let b = target.join("run").join(report).join(binding);
+    let id = std::fs::read_to_string(b.join("current")).unwrap_or_default();
+    b.join("runs").join(id.trim()).join(file)
+}
+
+/// A recorded path without its run folder: `target/run/r/b/runs/<id>/f.csv` → `target/run/r/b/f.csv`.
+pub fn without_run_id(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    match parts.iter().position(|p| *p == "runs") {
+        Some(i) if i + 1 < parts.len() && parts.get(i.wrapping_sub(3)) == Some(&"run") => {
+            [&parts[..i], &parts[i + 2..]].concat().join("/")
+        }
+        _ => path.to_string(),
+    }
+}

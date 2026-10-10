@@ -8,7 +8,7 @@ warning[source-key-not-supported]: sources/shop.yml:3: dbt source keys DRE doesn
      Query  orders on duck (duckdb), reads sales.orders
      Query  accounts on pg (postgres), reads crm.accounts, crm.contacts
      Query  regions on duck (duckdb), reads lookups.regions
-    Output  target/run/daily/default/daily.csv (csv)
+    Output  target/run/daily/default/runs/<run id>/daily.csv (csv)
   Profiles  $CASE/profiles/profiles.yml (from --profiles-dir)
     Target  dev (default)
 Validation passed: 0 errors, 1 warning

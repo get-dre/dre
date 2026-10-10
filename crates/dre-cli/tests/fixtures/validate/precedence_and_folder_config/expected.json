@@ -89,13 +89,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/bare/default/bare.csv",
+      "output": "target/run/bare/default/runs/<run id>/bare.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/bare/default/bare.csv",
+          "output": "target/run/bare/default/runs/<run id>/bare.csv",
           "destinations": []
         }
       ],
@@ -118,13 +118,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "xlsx",
-      "output": "target/run/filing/client_a/filing.xlsx",
+      "output": "target/run/filing/client_a/runs/<run id>/filing.xlsx",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "xlsx",
-          "output": "target/run/filing/client_a/filing.xlsx",
+          "output": "target/run/filing/client_a/runs/<run id>/filing.xlsx",
           "destinations": []
         }
       ],
@@ -147,13 +147,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/ledger/default/ledger.csv",
+      "output": "target/run/ledger/default/runs/<run id>/ledger.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/ledger/default/ledger.csv",
+          "output": "target/run/ledger/default/runs/<run id>/ledger.csv",
           "destinations": []
         }
       ],
