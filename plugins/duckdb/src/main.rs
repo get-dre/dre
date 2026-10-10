@@ -124,6 +124,9 @@ impl Source for DuckDb {
         }
         let conn = Connection::open_with_flags(path, config)
             .map_err(|e| format!("can't open DuckDB database `{path}`: {e}"))?;
+        // When core cancels a request, interrupt the running query.
+        let interrupt = conn.interrupt_handle();
+        dre_protocol::plugin::on_cancel(move || interrupt.interrupt());
         self.conn = Some(conn);
         Ok(())
     }

@@ -217,7 +217,8 @@ selector or schedule that matches nothing exits non-zero. `dre ls` needs no conn
 Each Binding a `dre run` executes writes `run/<report>/<set or default>/run_results.json` in the
 target path. It records the report, Set, the inherited `profile`, the `target`, the
 `connections` its queries used, the schedule and its vars, every
-var the run used, the run date and timezone, the command's parameters, the status and any error,
+var the run used, the run date and timezone, the command's parameters, the status (`success`,
+`error`, `cancelled` when Ctrl-C or a termination signal stopped it) and any error,
 each result set (rows, columns and the `connection` it came from), each output file (`path`, relative to the project root, or to
 the target path when that's outside the project), each delivery (its profile, `type`, `target`
 and `status`: `delivered`, `not_delivered` for a `{deliver: false}` entry, or `failed`), schema

@@ -1931,6 +1931,7 @@ dependencies = [
  "flate2",
  "indicatif",
  "jsonschema",
+ "libc",
  "parquet",
  "semver",
  "serde",
@@ -1940,6 +1941,7 @@ dependencies = [
  "tar",
  "tempfile",
  "umya-spreadsheet",
+ "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
 

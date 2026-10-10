@@ -10,7 +10,8 @@
 //! - `no_sessions`: a normal source that doesn't advertise `sessions`
 //! - `no_check`: a normal source that doesn't advertise `check`
 //!
-//! Every `open` logs `fixture: opened read_only=<bool>` to stderr.
+//! Every `open` logs `fixture: opened read_only=<bool>` to stderr, and writes the process id to
+//! `$DRE_FIXTURE_PID_FILE` when it's set.
 //!
 //! In its normal mode it's a package of two plugins: the `fixture` source (served when core's
 //! hello names no plugin) and an `inbox` destination with the source's connection fields, which
@@ -18,7 +19,7 @@
 //!
 //! SQL it understands: `rows N` (N rows of `n`, batches of 3), `none`, `fail`, `crash`,
 //! `log <text>`, `log_prefix <text>`, `panic`, `sleep N` (up to N seconds, until cancelled; the
-//! cancel hook logs `fixture: cancel hook`), `slog <text>` (a `log` message at info, with a
+//! cancel hook logs `fixture: cancel hook`), `stubborn N` (N seconds, ignoring cancel), `slog <text>` (a `log` message at info, with a
 //! field), `progress` (two progress messages), `coded` (an error with kind `auth` and code
 //! `bad-token`). `check` accepts anything except `bad`.
 
@@ -69,6 +70,9 @@ impl Source for Fixture {
         }
         self.opened = true;
         eprintln!("fixture: opened read_only={_read_only}");
+        if let Ok(f) = std::env::var("DRE_FIXTURE_PID_FILE") {
+            let _ = std::fs::write(f, std::process::id().to_string());
+        }
         Ok(())
     }
 
@@ -120,6 +124,11 @@ impl Source for Fixture {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
+                out.no_result(None)
+            }
+            "stubborn" => {
+                // Ignores cancel: core has to kill it.
+                std::thread::sleep(std::time::Duration::from_secs(arg.parse()?));
                 out.no_result(None)
             }
             "slog" => {

@@ -96,6 +96,8 @@ pub enum Status {
     DryRun,
     /// `dre validate --live`: checked on the database, nothing executed.
     Checked,
+    /// Stopped by Ctrl-C or a termination signal while it ran; nothing was delivered after.
+    Cancelled,
 }
 
 /// The command's parameters.

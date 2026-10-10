@@ -379,6 +379,11 @@
           "type": "string",
           "description": "`dre validate --live`: checked on the database, nothing executed.",
           "const": "checked"
+        },
+        {
+          "type": "string",
+          "description": "Stopped by Ctrl-C or a termination signal while it ran; nothing was delivered after.",
+          "const": "cancelled"
         }
       ]
     },

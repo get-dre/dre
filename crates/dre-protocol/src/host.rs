@@ -182,11 +182,13 @@ impl HostError {
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
-/// Asks a running request to stop, from any thread (see [`PluginProcess::canceller`]).
+/// Asks a running request to stop, from any thread (see [`PluginProcess::canceller`]), and
+/// can kill the plugin.
 #[derive(Clone)]
 pub struct Canceller {
     stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
     current: Arc<AtomicU64>,
+    child: Arc<Mutex<Child>>,
 }
 
 impl Canceller {
@@ -202,6 +204,37 @@ impl Canceller {
         };
         frame::write_json(w, &Envelope::new(Some(id), Request::Cancel {})).is_ok()
     }
+
+    /// Kill the plugin process.
+    pub fn kill(&self) {
+        if let Ok(mut c) = self.child.lock() {
+            let _ = c.kill();
+        }
+    }
+}
+
+/// Every plugin process this program has running, by a number of its own, so a cancelled run
+/// can reach all of them wherever they were started.
+static RUNNING: Mutex<Vec<(u64, Canceller)>> = Mutex::new(Vec::new());
+static NEXT_PROCESS: AtomicU64 = AtomicU64::new(1);
+
+/// Send `cancel` to every running plugin's current request (protocol 1). Returns how many had one.
+pub fn cancel_all() -> usize {
+    let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
+    all.iter().filter(|c| c.cancel()).count()
+}
+
+/// Kill every running plugin process.
+pub fn kill_all() {
+    let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
+    for c in all {
+        c.kill();
+    }
+}
+
+/// How many plugin processes are running.
+pub fn running() -> usize {
+    RUNNING.lock().unwrap().len()
 }
 /// A message from the plugin.
 pub enum Incoming {
@@ -228,7 +261,10 @@ pub enum Execution {
 pub struct PluginProcess {
     label: String,
     path: PathBuf,
-    child: Child,
+    /// Shared with [`Canceller`]s, which can kill it.
+    child: Arc<Mutex<Child>>,
+    /// This process's entry in [`RUNNING`].
+    registered: u64,
     /// Shared with [`Canceller`]s; `None` once closed.
     stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
     rx: Receiver<std::result::Result<Frame, FrameError>>,
@@ -323,6 +359,19 @@ impl PluginProcess {
             let there = std::io::stderr().is_terminal() && std::io::stdin().is_terminal();
             cmd.env(INTERACTIVE_ENV, if there { "1" } else { "0" });
         }
+        // Its own process group: Ctrl-C at the terminal reaches core, which asks the plugin to
+        // stop with `cancel`, instead of killing the plugin mid-request.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
         let mut child = cmd
             .envs(env.iter().copied())
             .stdin(Stdio::piped())
@@ -364,15 +413,27 @@ impl PluginProcess {
             }
         });
         let serve = parse_executable_name(&label).map(|(k, n)| PluginId::new(k, n));
+        let child = Arc::new(Mutex::new(child));
+        let current = Arc::new(AtomicU64::new(0));
+        let registered = NEXT_PROCESS.fetch_add(1, Ordering::SeqCst);
+        RUNNING.lock().unwrap().push((
+            registered,
+            Canceller {
+                stdin: stdin.clone(),
+                current: current.clone(),
+                child: child.clone(),
+            },
+        ));
         Ok(PluginProcess {
             label,
             path: path.to_path_buf(),
             child,
+            registered,
             stdin,
             rx,
             log,
             last_id: 0,
-            current: Arc::new(AtomicU64::new(0)),
+            current,
             stderr,
             stderr_thread: Some(stderr_thread),
             info: None,
@@ -464,12 +525,18 @@ impl PluginProcess {
         self.info.as_ref().expect("handshake completed")
     }
 
+    /// The process's exit status if it has exited (the lock is held only for the call).
+    fn try_wait(&self) -> std::io::Result<Option<ExitStatus>> {
+        self.child.lock().unwrap().try_wait()
+    }
+
     /// A handle that can cancel the running request from another thread. Only a plugin on
     /// protocol 1 or later understands `cancel`.
     pub fn canceller(&self) -> Canceller {
         Canceller {
             stdin: self.stdin.clone(),
             current: self.current.clone(),
+            child: self.child.clone(),
         }
     }
 
@@ -504,7 +571,7 @@ impl PluginProcess {
         // Give the process a moment to finish exiting so its status and last stderr are known.
         let mut status = None;
         for _ in 0..50 {
-            if let Ok(Some(s)) = self.child.try_wait() {
+            if let Ok(Some(s)) = self.try_wait() {
                 status = Some(s);
                 break;
             }
@@ -972,12 +1039,12 @@ impl PluginProcess {
         let _ = self.recv(Some(Duration::from_secs(5)), "the close reply");
         self.stdin.lock().unwrap().take();
         for _ in 0..250 {
-            if let Ok(Some(_)) = self.child.try_wait() {
+            if let Ok(Some(_)) = self.try_wait() {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        let _ = self.child.kill();
+        let _ = self.child.lock().unwrap().kill();
         Ok(())
     }
 
@@ -995,7 +1062,7 @@ impl PluginProcess {
         self.stdin.lock().unwrap().take();
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {
-            if let Ok(Some(s)) = self.child.try_wait() {
+            if let Ok(Some(s)) = self.try_wait() {
                 return Some(s);
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -1021,19 +1088,22 @@ impl PluginProcess {
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
+        if let Ok(mut r) = RUNNING.lock() {
+            r.retain(|(id, _)| *id != self.registered);
+        }
         if let Ok(mut stdin) = self.stdin.lock() {
             stdin.take();
         }
-        if let Ok(None) = self.child.try_wait() {
+        if let Ok(None) = self.try_wait() {
             // Give it a moment to exit on its own (stdin is closed), then insist.
             for _ in 0..25 {
-                if let Ok(Some(_)) = self.child.try_wait() {
+                if let Ok(Some(_)) = self.try_wait() {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+            let _ = self.child.lock().unwrap().kill();
+            let _ = self.child.lock().unwrap().wait();
         }
         self.drain_stderr();
     }

@@ -283,6 +283,25 @@ WHEN NOT MATCHED THEN INSERT (key, project, schedule, fires_at, run_date, defini
   VALUES (s.key, s.project, s.schedule, s.fires_at, s.run_date, s.definition_hash, s.argv, s.env, 'pending');
 ```
 
+## Cancelling a run
+
+Orchestrators cancel a job by sending it a termination signal (SIGTERM; Docker, Kubernetes,
+Airflow, Dagster and Databricks Jobs all do), and you cancel one at the terminal with Ctrl-C.
+`dre run` stops cleanly either way:
+
+- no further Binding, statement or delivery starts, and an output is never delivered once the run
+  is cancelled;
+- every running plugin is asked to stop, and a source that can cancel its query on the server does
+  (Postgres, Databricks, DuckDB), so a long warehouse query doesn't keep running and costing money;
+- plugins get 8 seconds, then are stopped; `dre` itself exits within 10 seconds, inside Docker's
+  default grace period;
+- the Binding that was running is recorded as `cancelled` in its `run_results.json`, with the
+  error code [`run-cancelled`](reference-error-codes.md#run-cancelled); Bindings that hadn't started
+  don't run;
+- the exit code is **130** after Ctrl-C and **143** after a termination signal (on Windows,
+  Ctrl-Break, closing the console, logging off or shutting down count as termination). A second
+  Ctrl-C stops at once.
+
 ## What DRE does and doesn't do
 
 `dre schedule ls` is pure computation: the same project and window always give the same document,

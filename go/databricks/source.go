@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbsql "github.com/databricks/databricks-sql-go"
@@ -28,6 +29,9 @@ import (
 type databricks struct {
 	db   *sql.DB
 	conn *sql.Conn
+	// cancel stops the running statement (see Cancel); nil between statements.
+	mu     sync.Mutex
+	cancel context.CancelFunc
 }
 
 func newDatabricks(conn map[string]any) (*databricks, error) {
@@ -96,7 +100,16 @@ func newDatabricks(conn map[string]any) (*databricks, error) {
 // Run executes one statement. The connector's Arrow (v12) batches are handed on as arrow-go v18
 // ones through IPC (bridge.go).
 func (d *databricks) Run(query string, fn func(plugin.Result) error) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	d.mu.Lock()
+	d.cancel = cancel
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.cancel = nil
+		d.mu.Unlock()
+		cancel()
+	}()
 	err := d.conn.Raw(func(dc any) error {
 		q, ok := dc.(driver.QueryerContext)
 		if !ok {
@@ -123,6 +136,17 @@ func (d *databricks) Run(query string, fn func(plugin.Result) error) error {
 		return fn(&bridged{it: it})
 	})
 	return cleanErr(err)
+}
+
+// Cancel stops the running statement: the connector cancels it on the warehouse when its
+// context ends. Called when core cancels the request.
+func (d *databricks) Cancel() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cancel != nil {
+		d.cancel()
+		slog.Info("asked Databricks to cancel the running statement")
+	}
 }
 
 // Check runs EXPLAIN. A planning error is reported inside the plan text rather than failing,
