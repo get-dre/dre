@@ -61,6 +61,24 @@ allowed values, bounds, default, description), and adds any rule a declaration c
 `validate`, and checks the options again before every `write` and `deliver`, so plugin code only
 sees options that passed. The conformance suite checks every part of the interface.
 
+### Delivery rules in the SDKs
+
+File destinations share a set of rules: what to do when a file is already at the path
+(`if_exists`: `overwrite`, `error`, `number`), uploading under a temporary name and renaming
+(`atomic`, `temp_dir`), trying again after a temporary error (`retries`), and client timeouts
+(`connect_timeout`, `timeout`). The SDKs implement them once, so a destination only implements
+a few primitives on its server: write a file (optionally failing if one is there), rename (with
+or without replacing), exists, delete, and flags for what it can do in one step.
+
+- Rust: `dre_protocol::delivery` (`Store`, `Rules`, `deliver`; `LocalStore` is the local file
+  system, used by core's `local` destination).
+- Go: `go/plugin` (`Store`, `Rules`, `Deliver`).
+
+A temporary file is named `.<name>.dre-part`, next to the final file or in `temp_dir`. With
+`number`, the new file is saved as `<name>_2.<ext>`, then `_3`. Where a server can't check and
+write in one step (FTP), the rules look first, then write. A file already there with `if_exists:
+error` fails with kind `delivery` and code `<plugin>/file-exists`.
+
 ## Naming and location
 
 A plugin is identified by its kind and name, written `<kind>/<name>`:
