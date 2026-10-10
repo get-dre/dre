@@ -95,13 +95,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/monthly/client_a/monthly.csv",
+      "output": "target/run/monthly/client_a/runs/<run id>/monthly.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/monthly/client_a/monthly.csv",
+          "output": "target/run/monthly/client_a/runs/<run id>/monthly.csv",
           "destinations": []
         }
       ],
@@ -131,13 +131,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/monthly/client_b/monthly.csv",
+      "output": "target/run/monthly/client_b/runs/<run id>/monthly.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/monthly/client_b/monthly.csv",
+          "output": "target/run/monthly/client_b/runs/<run id>/monthly.csv",
           "destinations": []
         }
       ],
@@ -167,13 +167,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/monthly/client_c_pilot/monthly.csv",
+      "output": "target/run/monthly/client_c_pilot/runs/<run id>/monthly.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/monthly/client_c_pilot/monthly.csv",
+          "output": "target/run/monthly/client_c_pilot/runs/<run id>/monthly.csv",
           "destinations": []
         }
       ],

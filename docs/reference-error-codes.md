@@ -621,6 +621,12 @@ A connection type, format or destination type needs a plugin package listed unde
 
 ## Refused: unsafe statements
 
+### run-in-progress
+
+The same Binding is already running.
+
+Another `dre run` of this report and Set holds its lock (the `lock` file in `target/run/<report>/<set or default>/`), on this machine or, with a shared target path, on another. A Binding never runs twice at once, so the second run stops at once and changes nothing: it deletes no files, delivers nothing and leaves the drift snapshot alone. The message names the run in progress (its id, start time, host and process). Wait for it to finish. If that run is gone (a crashed machine, a killed container on another host), `dre unlock <report> [--binding <set>]` shows the lock and removes it. A lock left by a process on this machine that has gone is taken over automatically, with a warning.
+
 ### unmanaged-side-effect
 
 An unmanaged report runs a statement it may not.

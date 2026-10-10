@@ -12,7 +12,7 @@ DRE writes two kinds of JSON file into the [target path](target-path.md)
 
 - **`manifest.json`** says what the project *is*: every report, Set, Binding, schedule and
   plugin, as DRE resolves them. One file for the whole project.
-- **`run/<report>/<binding>/run_results.json`** says what one run of one Binding *did*: its
+- **`run/<report>/<binding>/runs/<run id>/run_results.json`** says what one run of one Binding *did*: its
   vars, rows, files, deliveries and status. It records the checksum of the manifest the run
   wrote, so a run's results can be matched to the exact project behind them.
 
@@ -214,8 +214,9 @@ selector or schedule that matches nothing exits 2 (see [exit codes](exit-codes.m
 
 ## `run_results.json`
 
-Each Binding a `dre run` executes writes `run/<report>/<set or default>/run_results.json` in the
-target path. It records the report, Set, the inherited `profile`, the `target`, the
+Each Binding a `dre run` executes writes `run/<report>/<set or default>/runs/<run id>/run_results.json`
+in the target path (`dre history <report> --latest --path` prints the latest run's folder; see
+[the target path](target-path.md)). It records its `run_id`, the report, Set, the inherited `profile`, the `target`, the
 `connections` its queries used, the schedule and its vars, every
 var the run used, the run date and timezone, the command's parameters, the status (`success`,
 `error`, `cancelled` when Ctrl-C or a termination signal stopped it) and any error,

@@ -289,8 +289,24 @@ impl RunSummary {
             // Nothing ran: the selection or a profile is wrong.
             return self.error_code().map_or(2, |c| c.kind().exit_code());
         }
+        let failed: Vec<&BindingOutcome> = self
+            .outcomes
+            .iter()
+            .filter(|o| matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut))
+            .collect();
+        // Every Binding that failed was refused before it started (already running): nothing ran.
+        if !failed.is_empty()
+            && failed.iter().all(|o| {
+                o.error_code
+                    .as_ref()
+                    .is_some_and(|c| c.kind() == crate::codes::Kind::Refused)
+            })
+            && self.outcomes.len() == failed.len()
+        {
+            return 2;
+        }
         // The run happened; a failed Binding exits 1 whatever its kind.
-        if self.failed() { 1 } else { 0 }
+        if failed.is_empty() { 0 } else { 1 }
     }
 }
 
@@ -769,7 +785,14 @@ struct BindingRun<'a> {
     ui: Events,
     store: &'a RunStore,
     compiled_dir: PathBuf,
+    /// The Binding's folder in `target/run/`, with its runs and `current` pointer.
+    runs: crate::runs::BindingRuns,
+    /// This run's id and folder (`runs/<run id>/`).
+    run_id: String,
     run_dir: PathBuf,
+    /// Whether this run becomes the current one when it finishes: false when a run for a later
+    /// instant already is (it then also leaves the drift snapshot alone).
+    becomes_current: bool,
     schema_dir: PathBuf,
     /// The run's target (environment).
     target: String,
@@ -898,6 +921,14 @@ impl<'a> BindingRun<'a> {
             v
         };
         ui.binding_vars(opts.schedule.as_deref(), schedule_vars.as_ref(), &rendered_vars);
+        let started_at = chrono::Utc::now();
+        let runs = crate::runs::BindingRuns::new(&store.run_dir(&report.name, b.dir_name()));
+        // A dry run (compile, validate) makes no run folder: its plan shows where files would go.
+        let run_id = if opts.dry_run || opts.live_check {
+            "<run id>".to_string()
+        } else {
+            crate::runs::new_run_id(started_at)
+        };
         BindingRun {
             project,
             report,
@@ -911,14 +942,17 @@ impl<'a> BindingRun<'a> {
             ui,
             store,
             compiled_dir: store.compiled_dir(&report.name, b.dir_name()),
-            run_dir: store.run_dir(&report.name, b.dir_name()),
+            run_dir: runs.run_dir(&run_id),
+            runs,
+            run_id,
+            becomes_current: true,
             schema_dir: store.schema_dir(&report.name, b.dir_name()),
             target: project.target_name.clone(),
             parsed: ParsedBinding::default(),
             pool: None,
             renderers: BTreeMap::new(),
             started: Instant::now(),
-            started_at: chrono::Utc::now(),
+            started_at,
             produced: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
             drift: Vec::new(),
@@ -1010,6 +1044,58 @@ impl<'a> BindingRun<'a> {
             .ok_or_else(|| format!("query `{query}` has no connection").into())
     }
 
+    /// `report` or `report (Set s)`, for messages.
+    fn label(&self) -> String {
+        match &self.b.set {
+            Some(s) => format!("{} (Set {s})", self.report.name),
+            None => self.report.name.clone(),
+        }
+    }
+
+    /// Why the Binding's lock couldn't be taken, with how to clear it.
+    fn lock_failure(&self, e: crate::runs::LockError) -> Fail {
+        let unlock = match &self.b.set {
+            Some(s) => format!("dre unlock {} --binding {s}", self.report.name),
+            None => format!("dre unlock {}", self.report.name),
+        };
+        let message = match e {
+            crate::runs::LockError::Held(h) => format!(
+                "{} is already running ({}); this run changed nothing. Wait for it, or if it's gone, `{unlock}`",
+                self.label(),
+                h.describe()
+            ),
+            crate::runs::LockError::Unreadable(p) => format!(
+                "{} has an unreadable lock at {}; if no run is going on, `{unlock}`",
+                self.label(),
+                p.display()
+            ),
+            crate::runs::LockError::Io(e) => format!("can't lock {}: {e}", self.label()),
+        };
+        Fail::new(Code::RunInProgress, message)
+    }
+
+    /// Whether the current run is for a later instant than this one (its `DRE_RUN_AT`, else
+    /// its start): then this run doesn't replace it.
+    fn older_than_current(&self) -> bool {
+        let Some(dir) = self.runs.current_dir() else {
+            return false;
+        };
+        let Ok(text) = std::fs::read_to_string(dir.join("run_results.json")) else {
+            return false;
+        };
+        let Ok(v) = serde_json::from_str::<Json>(&text) else {
+            return false;
+        };
+        let theirs = v
+            .get("scheduled_at")
+            .and_then(Json::as_str)
+            .or_else(|| v.get("started_at").and_then(Json::as_str))
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.with_timezone(&chrono::Utc));
+        let mine = self.opts.scheduled_at.unwrap_or(self.started_at);
+        theirs.is_some_and(|t| mine < t)
+    }
+
     /// Fail once the run is cancelled, so no further statement, file or delivery starts.
     fn not_cancelled(&self) -> Result<(), Fail> {
         match self.opts.cancel.reason() {
@@ -1041,8 +1127,39 @@ impl<'a> BindingRun<'a> {
 
     fn run(&mut self) -> BindingOutcome {
         let dry = self.opts.dry_run || self.opts.live_check;
-        if !dry {
-            let _ = std::fs::remove_dir_all(&self.run_dir);
+        // A real run holds the Binding's lock: the same Binding never runs twice at once.
+        let guard = if dry {
+            None
+        } else {
+            match self.runs.lock(&self.run_id, self.started_at) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    let error = self.lock_failure(e);
+                    return self.outcome(Status::Error, Some(error));
+                }
+            }
+        };
+        if let Some(g) = &guard {
+            if let Some(h) = &g.took_over {
+                self.ui.warn(&format!(
+                    "took over the lock of {} for {}: that process is gone (it crashed or was killed)",
+                    h.describe(),
+                    self.label()
+                ));
+            }
+            match self.runs.migrate_legacy() {
+                Ok(Some(id)) => self.ui.step(
+                    Level::Debug,
+                    "Moved",
+                    &format!("the files of the run before run folders into runs/{id}/"),
+                    None,
+                ),
+                Ok(None) => {}
+                Err(e) => self
+                    .ui
+                    .warn(&format!("can't move the earlier run's files into runs/: {e}")),
+            }
+            self.becomes_current = !self.older_than_current();
         }
         let result = self.run_inner();
         // A Binding that fails after the run was cancelled was stopped by it (a plugin's
@@ -1070,6 +1187,22 @@ impl<'a> BindingRun<'a> {
         let err = result.err();
         if !dry && let Err(e) = self.write_results(&status, err.as_ref()) {
             self.ui.warn(&format!("can't write run_results.json: {e}"));
+        }
+        if guard.is_some() {
+            if self.becomes_current {
+                if let Err(e) = self.runs.switch(&self.run_id) {
+                    self.ui.warn(&format!("can't make this run the current one: {e}"));
+                }
+            } else {
+                self.ui.warn(&format!(
+                    "{}: a run for a later instant is current, so this one doesn't replace it; its files are in {}",
+                    self.label(),
+                    rel(&self.project.root, &self.run_dir).display()
+                ));
+            }
+            for id in self.runs.prune(self.project.keep_runs) {
+                self.ui.step(Level::Debug, "Removed", &format!("run {id}"), None);
+            }
         }
         // Spools are scratch space.
         let _ = std::fs::remove_dir_all(self.run_dir.join(".spool"));
@@ -1294,8 +1427,10 @@ impl<'a> BindingRun<'a> {
             return Err(Fail::new(first.code.clone(), messages.join("; ")));
         }
 
-        // 7. Snapshot the schema for the next drift check.
+        // 7. Snapshot the schema for the next drift check (not from a run for an earlier instant
+        // than the current one).
         if self.opts.preview.is_none()
+            && self.becomes_current
             && let Err(error) = self.write_snapshot()
         {
             self.ui.warn(&format!(
@@ -2440,6 +2575,7 @@ impl<'a> BindingRun<'a> {
         let delivery = (!notes.is_empty()).then(|| notes.join("; "));
         let results = RunResults {
             schema_version: run_results::SCHEMA_VERSION,
+            run_id: self.run_id.clone(),
             report: self.report.name.clone(),
             set: self.b.set.clone(),
             binding: self.b.dir_name().to_string(),

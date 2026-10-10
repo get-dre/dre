@@ -283,7 +283,11 @@ fn run_auto_installs_declared_plugins_and_says_so() {
     e.dre(&["run", "f"]).ok().says("Installed").says("Succeeded");
     assert!(e.installed("1.1.0"));
     assert_eq!(
-        std::fs::read_to_string(e.p("project/target/run/f/default/f.csv")).unwrap(),
+        std::fs::read_to_string(common::resolve_run_path(
+            &e.p("project"),
+            "target/run/f/default/f.csv"
+        ))
+        .unwrap(),
         "n\r\n0\r\n1\r\n2\r\n"
     );
 }
@@ -342,7 +346,11 @@ fn format_options_are_checked_by_the_plugin_and_apply_under_every_output_of_that
     .unwrap();
     e.dre(&["run", "f"]).ok();
     assert_eq!(
-        std::fs::read_to_string(e.p("project/target/run/f/default/f.csv")).unwrap(),
+        std::fs::read_to_string(common::resolve_run_path(
+            &e.p("project"),
+            "target/run/f/default/f.csv"
+        ))
+        .unwrap(),
         "\"n\"\r\n\"0\"\r\n\"1\"\r\n\"2\"\r\n"
     );
     // A report's own keys win.
@@ -353,7 +361,11 @@ fn format_options_are_checked_by_the_plugin_and_apply_under_every_output_of_that
     .unwrap();
     e.dre(&["run", "f"]).ok();
     assert_eq!(
-        std::fs::read_to_string(e.p("project/target/run/f/default/f.csv")).unwrap(),
+        std::fs::read_to_string(common::resolve_run_path(
+            &e.p("project"),
+            "target/run/f/default/f.csv"
+        ))
+        .unwrap(),
         "n\r\n0\r\n1\r\n2\r\n"
     );
     // The plugin checks the project-wide block too, and a run refuses to start.

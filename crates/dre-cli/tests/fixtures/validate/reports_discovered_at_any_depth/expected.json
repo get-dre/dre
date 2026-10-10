@@ -81,13 +81,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/daily_summary/default/daily_summary.csv",
+      "output": "target/run/daily_summary/default/runs/<run id>/daily_summary.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/daily_summary/default/daily_summary.csv",
+          "output": "target/run/daily_summary/default/runs/<run id>/daily_summary.csv",
           "destinations": []
         }
       ],
@@ -110,13 +110,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/quarterly_filing/default/quarterly_filing.csv",
+      "output": "target/run/quarterly_filing/default/runs/<run id>/quarterly_filing.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/quarterly_filing/default/quarterly_filing.csv",
+          "output": "target/run/quarterly_filing/default/runs/<run id>/quarterly_filing.csv",
           "destinations": []
         }
       ],

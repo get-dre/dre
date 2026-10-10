@@ -81,13 +81,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/sales/client_a/sales.csv",
+      "output": "target/run/sales/client_a/runs/<run id>/sales.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/sales/client_a/sales.csv",
+          "output": "target/run/sales/client_a/runs/<run id>/sales.csv",
           "destinations": []
         }
       ],
@@ -112,13 +112,13 @@ exit: 0
       ],
       "target": "dev",
       "format": "csv",
-      "output": "target/run/sales/client_b/sales.csv",
+      "output": "target/run/sales/client_b/runs/<run id>/sales.csv",
       "destinations": [],
       "outputs": [
         {
           "name": null,
           "format": "csv",
-          "output": "target/run/sales/client_b/sales.csv",
+          "output": "target/run/sales/client_b/runs/<run id>/sales.csv",
           "destinations": []
         }
       ],

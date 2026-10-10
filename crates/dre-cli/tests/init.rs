@@ -216,7 +216,7 @@ fn a_new_project_runs_end_to_end() {
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
     assert_eq!(
-        std::fs::read_to_string(p.join("target/run/hello/default/hello.csv")).unwrap(),
+        std::fs::read_to_string(common::resolve_run_path(&p, "target/run/hello/default/hello.csv")).unwrap(),
         "report,run_date,message\r\nhello,2026-01-25,Hello from DRE\r\n"
     );
 }

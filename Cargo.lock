@@ -1959,6 +1959,7 @@ dependencies = [
  "dre-protocol",
  "encoding_rs",
  "flate2",
+ "libc",
  "minijinja",
  "minijinja-contrib",
  "regex",
@@ -1974,6 +1975,7 @@ dependencies = [
  "thiserror",
  "ureq",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

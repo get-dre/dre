@@ -63,7 +63,10 @@ fn the_default_is_target_in_the_project() {
     assert!(p.path("target/run/s/default/run_results.json").is_file());
     assert!(p.path("target/manifest.json").is_file());
     let results = p.json("target/run/s/default/run_results.json");
-    assert_eq!(results["outputs"][0]["path"], "target/run/s/default/s.csv");
+    assert_eq!(
+        common::without_run_id(results["outputs"][0]["path"].as_str().unwrap()),
+        "target/run/s/default/s.csv"
+    );
 }
 
 #[test]
@@ -73,17 +76,22 @@ fn everything_moves_to_the_flags_folder_and_delivery_still_works() {
     let r = p.dre("run", &["s", "--target-path", &arg(&t)]);
     r.ok();
     assert!(t.join("compiled/s/default/sq.sql").is_file());
-    assert!(t.join("run/s/default/s.csv").is_file());
-    assert!(t.join("run/s/default/run_results.json").is_file());
+    assert!(common::current_run_file(&t, "s", "default", "s.csv").is_file());
+    assert!(common::current_run_file(&t, "s", "default", "run_results.json").is_file());
     assert!(t.join("schema/s/default/last_success.json").is_file());
     assert!(t.join("manifest.json").is_file());
     assert!(!p.path("target").exists(), "nothing lands in target/");
     assert!(p.path("out/s.csv").is_file(), "delivered from the moved folder");
 
-    let results: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(t.join("run/s/default/run_results.json")).unwrap())
-            .unwrap();
-    assert_eq!(results["outputs"][0]["path"], "run/s/default/s.csv");
+    let results: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(common::current_run_file(&t, "s", "default", "run_results.json")).unwrap(),
+    )
+    .unwrap();
+    let id = results["run_id"].as_str().unwrap();
+    assert_eq!(
+        results["outputs"][0]["path"],
+        format!("run/s/default/runs/{id}/s.csv")
+    );
     assert_eq!(
         PathBuf::from(results["target_path"].as_str().unwrap()),
         t,
