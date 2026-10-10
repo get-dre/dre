@@ -387,6 +387,7 @@ fn signs_in_through_the_ssh_agent() {
     both["private_key_path"] = json!(key);
     let err = deliver("upload/x.csv", both, b"x").unwrap_err();
     let _ = agent.kill();
+    let _ = agent.wait();
     r.unwrap();
     assert!(err.contains("not both"), "{err}");
 }
