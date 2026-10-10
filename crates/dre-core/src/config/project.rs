@@ -64,6 +64,8 @@ pub struct ProjectFile {
     pub week_numbering: Option<Located<Loose<WeekNumbering>>>,
     /// Folder config: settings for the report folders, by folder name, nested to match the folders under `reports/`.
     pub reports: Option<Located<Loose<Folder>>>,
+    /// How DRE itself behaves, as in dbt's `flags:`. Each flag has a `DRE_` environment variable that wins over it.
+    pub flags: Option<Located<Loose<Flags>>>,
     /// Where DRE writes its generated files (compiled SQL, run outputs, the manifest). Default: `target/` in the project. `--target-path` and `DRE_TARGET_PATH` override it.
     pub target_path: Option<Located<Loose<String>>>,
     /// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.
@@ -82,6 +84,18 @@ pub struct ProjectFile {
     pub destinations: Option<Located<IgnoredAny>>,
     #[schemars(skip)]
     pub formats: Option<Located<IgnoredAny>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    pub unknown: UnknownKeys,
+}
+
+/// `flags:`: how DRE itself behaves. Each has a `DRE_` environment variable that wins over it.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct Flags {
+    /// Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it.
+    #[schemars(range(min = 1), extend("default" = 60))]
+    pub http_timeout: Option<Located<Loose<u64>>>,
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub unknown: UnknownKeys,
