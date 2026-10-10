@@ -590,7 +590,23 @@ ones. Packed decimal (`COMP-3`) is binary, not text, and isn't supported.
 ## Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
-plugin and no declaration.
+plugin and no declaration. It takes the options `atomic` and `temp_dir`, described below.
+
+### Uploads under a temporary name
+
+The `local`, `sftp` and `ftp` destinations write a file as `.<name>.dre-part` in the same folder,
+then rename it to its final name, so a dropped connection or a stopped run never leaves a
+half-written file where a receiving system may pick it up. Two options, per destination entry:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `atomic` | `true` | `false` writes straight to the final name (for a server that forbids renames). |
+| `temp_dir` | | Where the temporary file goes, on the same server: absolute, or relative to the file's folder (`../staging`). For a receiver that picks up any new file, even a hidden one. |
+
+Replacing a file already there: SFTP's rename can't replace one, so DRE removes the old file just
+before the rename (a moment with no file at that name); an FTP server's rename usually replaces it
+in one step. Object stores (`s3`, `gcs`, `azure_blob`) and Databricks Volumes and Workspace files
+only show a file once its upload completes, so they need no temporary name.
 
 A destination entry's keys other than `profile` and `path` are the plugin's options, and the
 plugin checks them the same way formats do, against the destination profile's entry for the
@@ -677,7 +693,8 @@ gets its line breaks back. Set `private_key_path` or `private_key`, not both. Th
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
 `~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
-Missing directories are created. The [`postgres`](#postgres)
+Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
+see [above](#uploads-under-a-temporary-name)). The [`postgres`](#postgres)
 source's `ssh:` block takes the same settings.
 
 ### `ftp`
@@ -688,7 +705,9 @@ source's `ssh:` block takes the same settings.
 Paths are relative to the folder the login starts in; a leading `/` means the server's root,
 which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
 connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
-Server require by default. A failed upload removes the partial file from the server when it can.
+Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
+[above](#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
+server when it can.
 
 ### `databricks`
 

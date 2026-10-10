@@ -135,15 +135,9 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 );
             }
             for (options, uses) in blocks.values() {
-                if let Some(k) = options.keys().next() {
+                for e in local_option_errors(options) {
                     for u in uses {
-                        report(
-                            diags,
-                            u,
-                            &format!(
-                                "the local destination takes no options, but got `{k}`; check the key's spelling"
-                            ),
-                        );
+                        report(diags, u, &e);
                     }
                 }
             }
@@ -248,4 +242,18 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
         }
         let _ = p.close();
     }
+}
+
+/// The options core's built-in `local` destination takes: the shared delivery rules' `atomic`
+/// and `temp_dir`.
+pub fn local_options() -> Vec<dre_protocol::options::OptionField> {
+    dre_protocol::delivery::option_fields()
+        .into_iter()
+        .filter(|f| f.name == "atomic" || f.name == "temp_dir")
+        .collect()
+}
+
+/// Every problem with a `local` destination entry's options.
+pub fn local_option_errors(options: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    dre_protocol::options::check(dre_protocol::Kind::Destination, LOCAL_TYPE, &local_options(), options)
 }

@@ -245,10 +245,11 @@ fn a_misspelt_key_on_a_destination_without_options_is_an_error_not_ignored() {
     // Refused before anything runs.
     p.dre("run", &["daily"])
         .failed()
-        .says("destination `inbox`: the local destination takes no options, but got `pth`")
+        .says("destination `inbox`")
+        .says("`pth`")
         .says("fix them before running");
     assert!(!p.dir.path().join("target/run").exists());
-    p.dre("validate", &[]).failed().says("but got `pth`");
+    p.dre("validate", &[]).failed().says("`pth`");
 }
 
 #[test]
@@ -281,4 +282,37 @@ fn a_not_delivered_entry_records_its_target_and_no_type() {
     assert_eq!(d["target"], "dev");
     assert!(d["type"].is_null(), "{d}");
     assert!(d.get("location").is_none() && d.get("error").is_none(), "{d}");
+}
+
+#[test]
+fn the_local_destination_writes_under_a_temporary_name_then_renames() {
+    let (p, _rec) = project(
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv}\n",
+        &[Q],
+    );
+    p.dre("run", &["daily"]).ok();
+    p.dre("run", &["daily"]).ok();
+    let names: Vec<String> = std::fs::read_dir(p.path("out"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(names, ["daily.csv"], "no temporary file left");
+    // temp_dir, and atomic: false.
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, temp_dir: ../staging}\n",
+    );
+    p.dre("run", &["daily"]).ok();
+    assert!(p.path("out/daily.csv").is_file());
+    assert_eq!(std::fs::read_dir(p.path("staging")).unwrap().count(), 0, "the temporary file moved in");
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, atomic: false}\n",
+    );
+    p.dre("run", &["daily"]).ok();
+    p.write(
+        "reports/ops/daily/daily.yml",
+        "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, atomic: maybe}\n",
+    );
+    p.dre("validate", &[]).failed().says("`atomic`");
 }

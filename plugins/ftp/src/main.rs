@@ -12,12 +12,13 @@ use std::path::Path;
 
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{
-    About, Destination, Result, conn_bool, conn_required, conn_str, serve_destination,
+    About, Delivery, Destination, PluginError, Result, conn_bool, conn_required, conn_str, serve_destination,
 };
 use serde_json::{Map, Value};
 use std::sync::Arc;
 
-use dre_protocol::delivery::Rules;
+use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver};
+use dre_protocol::options::OptionField;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
@@ -119,7 +120,7 @@ impl ServerCertVerifier for AcceptAny {
     }
 }
 
-fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> {
+fn upload(local: &Path, remote: &str, c: &Map<String, Value>, options: &Map<String, Value>) -> Result<String> {
     let host = conn_required(c, "host")?;
     let port: u16 = match c.get("port") {
         Some(Value::Number(n)) => n.as_u64().unwrap_or(21) as u16,
@@ -128,7 +129,7 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> 
     };
     let user = conn_required(c, "username")?;
     let password = conn_str(c, "password").unwrap_or("");
-    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+    let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
     let mut ftp = connect(host, port, &rules)?;
     match conn_str(c, "tls").unwrap_or("none") {
         "none" => {}
@@ -155,36 +156,79 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> 
         Mode::Active
     });
     ftp.transfer_type(suppaftp::types::FileType::Binary)?;
-
-    // Walk (and create) the directories, then upload the file there.
-    let (dir, name) = match remote.rsplit_once('/') {
-        Some((d, n)) => (d, n),
-        None => ("", remote),
-    };
-    if remote.starts_with('/') {
-        ftp.cwd("/")?;
-    }
-    for part in dir.split('/').filter(|p| !p.is_empty()) {
-        if ftp.cwd(part).is_err() {
-            ftp.mkdir(part)
-                .map_err(|e| format!("can't create directory `{part}`: {e}"))?;
-            ftp.cwd(part)?;
-        }
-    }
-    let mut f = std::fs::File::open(local).map_err(|e| format!("can't read {}: {e}", local.display()))?;
-    if let Err(e) = ftp.put_file(name, &mut f) {
-        // Don't leave a partial (often empty) file behind.
-        let cleanup = match ftp.rm(name) {
-            Ok(()) => "the partial remote file was removed",
-            Err(_) => "the partial remote file may be left on the server",
-        };
-        return Err(format!("upload to {remote} failed: {e} ({cleanup})").into());
-    }
-    let _ = ftp.quit();
+    let mut store = FtpStore { ftp };
+    let delivered = deliver(&mut store, local, remote, &rules).map_err(PluginError::from)?;
+    let _ = store.ftp.quit();
     Ok(format!(
         "ftp://{user}@{host}:{port}/{}",
-        remote.trim_start_matches('/')
+        delivered.path.trim_start_matches('/')
     ))
+}
+
+/// One FTP control connection, as the shared delivery rules' store. FTP can't create a file only
+/// if it's missing, nor rename without replacing, so the rules look first.
+struct FtpStore {
+    ftp: RustlsFtpStream,
+}
+
+fn failed(what: &str, path: &str, e: impl std::fmt::Display) -> StoreError {
+    StoreError::Failed(format!("can't {what} {path}: {e}"))
+}
+
+impl FtpStore {
+    /// Create `path`'s missing parent folders (each prefix in turn; ones that exist fail
+    /// harmlessly).
+    fn make_parents(&mut self, path: &str) {
+        let Some((dir, _)) = path.rsplit_once('/') else {
+            return;
+        };
+        let mut prefix = String::new();
+        if dir.starts_with('/') {
+            prefix.push('/');
+        }
+        for part in dir.split('/').filter(|p| !p.is_empty()) {
+            if !prefix.is_empty() && !prefix.ends_with('/') {
+                prefix.push('/');
+            }
+            prefix.push_str(part);
+            let _ = self.ftp.mkdir(&prefix);
+        }
+    }
+}
+
+impl Store for FtpStore {
+    fn caps(&self) -> Caps {
+        Caps::default()
+    }
+
+    fn write(&mut self, local: &Path, remote: &str, _exclusive: bool) -> std::result::Result<(), StoreError> {
+        self.make_parents(remote);
+        let mut f = std::fs::File::open(local)
+            .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
+        self.ftp.put_file(remote, &mut f).map(|_| ()).map_err(|e| failed("upload to", remote, e))
+    }
+
+    fn rename(&mut self, from: &str, to: &str, replace: bool) -> std::result::Result<(), StoreError> {
+        self.make_parents(to);
+        match self.ftp.rename(from, to) {
+            Ok(()) => Ok(()),
+            // A server whose rename won't replace a file: remove it, then rename.
+            Err(_) if replace && self.ftp.size(to).is_ok() => {
+                self.ftp.rm(to).map_err(|e| failed("replace", to, e))?;
+                self.ftp.rename(from, to).map_err(|e| failed("rename to", to, e))
+            }
+            Err(e) => Err(failed("rename to", to, e)),
+        }
+    }
+
+    fn exists(&mut self, remote: &str) -> std::result::Result<bool, StoreError> {
+        Ok(self.ftp.size(remote).is_ok())
+    }
+
+    fn delete(&mut self, remote: &str) -> std::result::Result<(), StoreError> {
+        let _ = self.ftp.rm(remote);
+        Ok(())
+    }
 }
 
 impl Destination for Ftp {
@@ -201,8 +245,20 @@ impl Destination for Ftp {
         .collect()
     }
 
-    fn deliver(&mut self, local: &Path, remote: Option<&str>, c: &Map<String, Value>) -> Result<String> {
-        upload(local, remote.ok_or("ftp needs `output.destination.path`")?, c)
+    /// `atomic` and `temp_dir` (the shared delivery rules).
+    fn options(&self) -> Vec<OptionField> {
+        delivery::option_fields()
+            .into_iter()
+            .filter(|f| f.name == "atomic" || f.name == "temp_dir")
+            .collect()
+    }
+
+    fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
+        let [f] = d.files.as_slice() else {
+            return Err("ftp takes one file per delivery".into());
+        };
+        let remote = f.remote.as_deref().ok_or("ftp needs `output.destination.path`")?;
+        upload(&f.local, remote, &d.connection, &d.options)
     }
 }
 

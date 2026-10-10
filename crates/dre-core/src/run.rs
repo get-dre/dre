@@ -2349,13 +2349,20 @@ impl<'a> BindingRun<'a> {
             .collect();
         let mut locations = Vec::new();
         if kind == LOCAL_TYPE {
-            if let Some(k) = d.options.keys().next() {
-                return Err(format!(
-                    "the local destination takes no options, but `{}` has `{k}`; check the key's spelling",
-                    d.profile
-                )
-                .into());
+            let errors = crate::options::local_option_errors(&d.options);
+            if !errors.is_empty() {
+                return Err(format!("destination `{}`: {}", d.profile, errors.join("; ")).into());
             }
+            // `atomic` (default true: written as `.<name>.dre-part`, then renamed) and `temp_dir`.
+            let (rules, _) = dre_protocol::delivery::Rules::from_settings(
+                dre_protocol::delivery::Rules {
+                    retries: 0,
+                    ..Default::default()
+                },
+                &JsonMap::new(),
+                &d.options,
+                &[],
+            )?;
             for (i, f) in targets.iter().enumerate() {
                 let t = Instant::now();
                 let r = f
@@ -2363,9 +2370,6 @@ impl<'a> BindingRun<'a> {
                     .as_ref()
                     .ok_or("the local destination needs `output.destination.path`")?;
                 let dst = self.project.root.join(r).to_string_lossy().to_string();
-                // The shared delivery rules, as they stand today (replace, straight to the
-                // final name).
-                let rules = dre_protocol::delivery::Rules::legacy();
                 let delivered = dre_protocol::delivery::deliver(
                     &mut dre_protocol::delivery::LocalStore,
                     Path::new(&f.local_path),

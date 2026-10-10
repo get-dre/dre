@@ -13,14 +13,22 @@ fn bin() -> &'static Path {
 }
 
 fn deliver(remote: &str, conn: Value, bytes: &[u8]) -> Result<String, String> {
+    deliver_with(remote, conn, json!({}), bytes)
+}
+
+/// `deliver` with the destination entry's options.
+fn deliver_with(remote: &str, conn: Value, options: Value, bytes: &[u8]) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
     let local = dir.path().join("report.csv");
     std::fs::write(&local, bytes).unwrap();
     let log: LogSink = Arc::new(|_, _| {});
     let mut p = PluginProcess::start(bin(), log).unwrap();
-    let Value::Object(c) = conn else { panic!() };
-    p.deliver(local.to_str().unwrap(), Some(remote), c)
-        .map_err(|e| e.to_string())
+    let (Value::Object(c), Value::Object(o)) = (conn, options) else { panic!() };
+    let file = dre_protocol::msg::DeliveryFile {
+        local_path: local.to_str().unwrap().to_string(),
+        remote_path: Some(remote.to_string()),
+    };
+    p.deliver_files(&[file], c, o).map_err(|e| e.to_string())
 }
 
 #[test]
@@ -79,4 +87,18 @@ fn explicit_ftps_reuses_the_tls_session_for_data() {
     strict["tls_accept_invalid_certs"] = json!(false);
     let e = deliver("tls/x.csv", strict, b"x").unwrap_err();
     assert!(e.contains("didn't accept explicit FTPS"), "{e}");
+}
+
+#[test]
+fn uploads_under_a_temporary_name_replacing_a_file_already_there() {
+    let Ok(server) = std::env::var("DRE_TEST_FTP") else {
+        eprintln!("skipped: set DRE_TEST_FTP=host:port");
+        return;
+    };
+    let (host, port) = server.split_once(':').unwrap();
+    let conn = json!({"host": host, "port": port, "username": "dre", "password": "dre-pass"});
+    deliver("atomic/r.csv", conn.clone(), b"one").unwrap();
+    deliver("atomic/r.csv", conn.clone(), b"two").unwrap();
+    deliver_with("atomic/s.csv", conn.clone(), json!({"temp_dir": "../staging"}), b"three").unwrap();
+    deliver_with("atomic/t.csv", conn, json!({"atomic": false}), b"four").unwrap();
 }
