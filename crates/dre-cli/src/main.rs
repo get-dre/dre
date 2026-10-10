@@ -238,7 +238,8 @@ struct ProjectArgs {
     /// project root. Unrelated to `--target`.
     #[arg(long, value_name = "PATH")]
     target_path: Option<String>,
-    /// Set a variable for `var()`, overriding every other level: `--var name=value`.
+    /// Set a variable for `var()`, overriding every other level: `--var name=value`. The value is
+    /// YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`.
     #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
     vars: Vec<(String, String)>,
     /// The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting
