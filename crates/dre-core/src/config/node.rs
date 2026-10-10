@@ -123,7 +123,15 @@ pub fn parse(text: &str) -> Result<Node, SyntaxError> {
         return Ok(Node::null());
     }
     match serde_saphyr::from_str_with_options::<Spanned<Raw>>(text, options) {
-        Ok(raw) => Ok(raw.into()),
+        Ok(raw) => {
+            let mut node: Node = raw.into();
+            // Top-level `x-*` keys (the docker-compose convention) hold YAML anchors to reuse
+            // with aliases and `<<:` merges; once those are resolved, DRE ignores them.
+            if let Kind::Map(m) = &mut node.kind {
+                m.retain(|(k, _)| !k.name.starts_with("x-"));
+            }
+            Ok(node)
+        }
         Err(e) => Err(syntax_error(&e)),
     }
 }
@@ -352,5 +360,18 @@ mod tests {
     fn jinja_in_quoted_values_is_a_string() {
         let n = parse("pw: \"{{ env_var('X') }}\"\n").unwrap();
         assert_eq!(n.get("pw").unwrap().as_str(), Some("{{ env_var('X') }}"));
+    }
+}
+
+#[cfg(test)]
+mod x_key_tests {
+    use super::*;
+
+    #[test]
+    fn top_level_x_keys_hold_anchors_and_are_dropped() {
+        let n = parse("x-dest: &dest {profile: s3, path: a.csv}\noutput:\n  destination:\n    <<: *dest\n    path: b.csv\n").unwrap();
+        let j = n.to_json();
+        assert!(j.get("x-dest").is_none(), "{j}");
+        assert_eq!(j["output"]["destination"], serde_json::json!({"profile": "s3", "path": "b.csv"}));
     }
 }
