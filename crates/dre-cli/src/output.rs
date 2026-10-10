@@ -601,7 +601,7 @@ impl Ui for Printer {
             i.json(json!({
                 "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
                 "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
-                "error_code": o.error_code, "error_kind": o.error_code.map(|c| c.kind()), "summary": o.summary,
+                "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
                 "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
                 "timezone": o.timezone,
             }));
@@ -675,7 +675,13 @@ impl Ui for Printer {
                 i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
                 return;
             }
-            i.file_log("DEBUG", &format!("[{plugin}] {line}"));
+            // `debug: ...` is a plugin's `log` message at debug; anything else is a raw stderr line
+            // (a panic, a native driver), kept in the log file at WARN.
+            let (level, line) = match line.strip_prefix("debug: ") {
+                Some(rest) => ("DEBUG", rest),
+                None => ("WARN", line),
+            };
+            i.file_log(level, &format!("[{plugin}] {line}"));
             if !i.shows(Level::Debug) {
                 return;
             }

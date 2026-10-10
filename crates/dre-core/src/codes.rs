@@ -65,6 +65,27 @@ impl Kind {
     }
 }
 
+impl Kind {
+    /// The kind with this name (`timed_out`), as plugins send it.
+    pub fn parse(name: &str) -> Option<Kind> {
+        [
+            Kind::Usage,
+            Kind::Config,
+            Kind::Plugin,
+            Kind::Refused,
+            Kind::Connection,
+            Kind::Auth,
+            Kind::Query,
+            Kind::Delivery,
+            Kind::Internal,
+            Kind::Cancelled,
+            Kind::TimedOut,
+        ]
+        .into_iter()
+        .find(|k| k.as_str() == name)
+    }
+}
+
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -119,6 +140,54 @@ impl fmt::Display for Code {
 }
 
 impl Serialize for Code {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+/// A code as a failure reports it: a registered [`Code`], or a plugin's own, namespaced by the
+/// plugin (`sftp/host-key-mismatch`) with the kind the plugin gave.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ErrorCode {
+    Core(Code),
+    Plugin { code: String, kind: Kind },
+}
+
+impl ErrorCode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ErrorCode::Core(c) => c.as_str(),
+            ErrorCode::Plugin { code, .. } => code,
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        match self {
+            ErrorCode::Core(c) => c.kind(),
+            ErrorCode::Plugin { kind, .. } => *kind,
+        }
+    }
+}
+
+impl From<Code> for ErrorCode {
+    fn from(c: Code) -> ErrorCode {
+        ErrorCode::Core(c)
+    }
+}
+
+impl PartialEq<Code> for ErrorCode {
+    fn eq(&self, other: &Code) -> bool {
+        *self == ErrorCode::Core(*other)
+    }
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for ErrorCode {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(self.as_str())
     }

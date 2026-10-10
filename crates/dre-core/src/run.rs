@@ -22,7 +22,7 @@ use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE, CAP_
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
-use crate::codes::Code;
+use crate::codes::{Code, ErrorCode};
 use crate::dates::Calendar;
 use crate::engine::{CancelToken, Events, RunEvent, RunStore};
 use crate::lookups::Table;
@@ -159,7 +159,7 @@ pub struct BindingOutcome {
     pub error: Option<String>,
     /// `error`'s code.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<Code>,
+    pub error_code: Option<ErrorCode>,
     pub files: Vec<PathBuf>,
     /// One line describing what the Binding produced (result sets, rows, outputs, delivery).
     pub summary: String,
@@ -245,18 +245,18 @@ impl RunSummary {
     }
 
     /// The code of what failed first: why nothing ran, else the first failed Binding's.
-    pub fn error_code(&self) -> Option<Code> {
+    pub fn error_code(&self) -> Option<ErrorCode> {
         if self.error.is_some() {
-            return Some(if self.missing_entry {
+            return Some(ErrorCode::Core(if self.missing_entry {
                 Code::MissingTargetEntry
             } else {
                 Code::InvalidSelector
-            });
+            }));
         }
         self.outcomes
             .iter()
             .find(|o| o.status == Status::Error)
-            .map(|o| o.error_code.unwrap_or(Code::RunFailed))
+            .map(|o| o.error_code.clone().unwrap_or(ErrorCode::Core(Code::RunFailed)))
     }
 
     /// The exit code: 0, else the one the failure's kind has.
@@ -354,7 +354,7 @@ pub fn plan<'a>(
                             binding: "-".into(),
                             status: Status::Error,
                             error: Some(e),
-                            error_code: Some(Code::InvalidSelector),
+                            error_code: Some(Code::InvalidSelector.into()),
                             files: Vec::new(),
                             summary: String::new(),
                             schedule: opts.schedule.clone(),
@@ -985,7 +985,7 @@ impl<'a> BindingRun<'a> {
             set: self.b.set.clone(),
             binding: self.b.dir_name().to_string(),
             status,
-            error_code: error.as_ref().map(|e| e.code),
+            error_code: error.as_ref().map(|e| e.code.clone()),
             error: error.map(|e| e.message),
             files: self.files().map(|(p, _)| p.clone()).collect(),
             summary: self.summary_line(),
@@ -1207,7 +1207,7 @@ impl<'a> BindingRun<'a> {
                     Ok(false) => continue,
                     Err(e) => {
                         let e = e.or(Code::RenderFailed);
-                        let e = Fail::new(e.code, format!("{}: {e}", self.b.outputs[oi].label(oi)));
+                        let e = Fail::new(e.code.clone(), format!("{}: {e}", self.b.outputs[oi].label(oi)));
                         self.outs[oi].status = Some(OutputStatus::Failed);
                         self.outs[oi].error = Some(e.message.clone());
                         failures.push(e);
@@ -1233,7 +1233,7 @@ impl<'a> BindingRun<'a> {
         }
         if let Some(first) = failures.first() {
             let messages: Vec<&str> = failures.iter().map(|f| f.message.as_str()).collect();
-            return Err(Fail::new(first.code, messages.join("; ")));
+            return Err(Fail::new(first.code.clone(), messages.join("; ")));
         }
 
         // 7. Snapshot the schema for the next drift check.
@@ -1601,15 +1601,13 @@ impl<'a> BindingRun<'a> {
                 writer.as_mut().unwrap().write(&batch).map_err(|e| e.to_string())
             })
             .map_err(|e| {
-                Fail::new(
-                    Code::QueryFailed,
-                    format!(
-                        "{}:{}: {}",
-                        st.file.display(),
-                        st.line,
-                        masked_source_error(&e, st.sensitive)
-                    ),
-                )
+                let message = format!(
+                    "{}:{}: {}",
+                    st.file.display(),
+                    st.line,
+                    masked_source_error(&e, st.sensitive)
+                );
+                Fail::from_plugin(&e, message).or(Code::QueryFailed)
             })?
         };
         let what = match &exec {
@@ -1974,7 +1972,7 @@ impl<'a> BindingRun<'a> {
             }
             let (files, warnings) = p
                 .write_finish_with_warnings()
-                .map_err(|e| format!("{} format: {e}", out.format))?;
+                .map_err(|e| Fail::from_plugin(&e, format!("{} format: {e}", out.format)))?;
             for w in warnings {
                 self.ui.warn(&format!("  {} format: {w}", out.format));
             }
@@ -2068,7 +2066,7 @@ impl<'a> BindingRun<'a> {
                 target,
                 status,
                 location,
-                error_code: error.as_ref().map(|e| e.code),
+                error_code: error.as_ref().map(|e| e.code.clone()),
                 error: error.map(|e| e.message),
             };
             self.outs[oi].deliveries.push(record);
@@ -2082,7 +2080,7 @@ impl<'a> BindingRun<'a> {
             0 => Ok(()),
             1 if o.dests.len() == 1 => Err(failures.remove(0)),
             n => Err(Fail::new(
-                failures[0].code,
+                failures[0].code.clone(),
                 format!(
                     "{n} of {} destinations failed: {}",
                     o.dests.len(),
@@ -2175,7 +2173,10 @@ impl<'a> BindingRun<'a> {
             return Ok(Some(locations.join(", ")));
         }
         let failed = |e: dre_protocol::host::HostError| {
-            format!("delivery through `{kind}` failed: {e}; the output is still in target/")
+            Fail::from_plugin(
+                &e,
+                format!("delivery through `{kind}` failed: {e}; the output is still in target/"),
+            )
         };
         let plugin = find_plugin(self.project, PluginKind::Destination, &kind)
             .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
@@ -2398,7 +2399,7 @@ impl<'a> BindingRun<'a> {
             params: self.opts.params(self.date),
             status: *status,
             error: error.map(|e| e.message.clone()),
-            error_code: error.map(|e| e.code),
+            error_code: error.map(|e| e.code.clone()),
             error_kind: error.map(|e| e.code.kind()),
             preview: self.opts.preview.is_some(),
             row_limit: self.opts.preview,

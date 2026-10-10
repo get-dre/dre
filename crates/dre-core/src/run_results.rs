@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::codes::{Code, Kind};
+use crate::codes::{Code, ErrorCode, Kind};
 use crate::settings::Settings;
 
 type JsonMap = serde_json::Map<String, serde_json::Value>;
@@ -55,7 +55,7 @@ pub struct RunResults {
     /// Why it failed.
     pub error: Option<String>,
     /// `error`'s code (see the error codes reference).
-    pub error_code: Option<Code>,
+    pub error_code: Option<ErrorCode>,
     /// `error_code`'s kind.
     pub error_kind: Option<Kind>,
     /// Whether it was a `--preview`: never delivered.
@@ -199,7 +199,7 @@ pub struct Delivery {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<Code>,
+    pub error_code: Option<ErrorCode>,
 }
 
 fn schema_version(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -236,6 +236,18 @@ impl JsonSchema for Code {
     }
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({"type": "string", "description": "A code from the error codes reference, e.g. `query-failed`."})
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+}
+
+impl JsonSchema for ErrorCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ErrorCode".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type": "string", "description": "A code from the error codes reference, e.g. `query-failed`, or a plugin's own, namespaced by the plugin, e.g. `sftp/host-key-mismatch`."})
     }
     fn inline_schema() -> bool {
         true

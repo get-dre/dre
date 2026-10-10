@@ -159,7 +159,9 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
             let p = start(path).map_err(|e| e.to_string())?;
             match p.info().protocol_version {
                 v if v >= 1 => p.close().map_err(|e| e.to_string()),
-                v => Err(format!("offered versions up to {MAX_VERSION}, the plugin chose {v}")),
+                v => Err(format!(
+                    "offered versions up to {MAX_VERSION}, the plugin chose {v}"
+                )),
             }
         })(),
     );
@@ -178,7 +180,9 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
                 let v = p.recv_raw(TIMEOUT).map_err(|e| e.to_string())?;
                 let id = req[req.len() - 3..req.len() - 1].parse::<u64>().unwrap();
                 if v["type"] != want || v["id"] != id {
-                    return Err(format!("sent {req}, expected a `{want}` reply with id {id}, got {v}"));
+                    return Err(format!(
+                        "sent {req}, expected a `{want}` reply with id {id}, got {v}"
+                    ));
                 }
             }
             p.close().map_err(|e| e.to_string())

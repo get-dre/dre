@@ -603,7 +603,7 @@
             "string",
             "null"
           ],
-          "description": "A code from the error codes reference, e.g. `query-failed`."
+          "description": "A code from the error codes reference, e.g. `query-failed`, or a plugin's own, namespaced by the plugin, e.g. `sftp/host-key-mismatch`."
         }
       },
       "required": [

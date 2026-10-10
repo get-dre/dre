@@ -2,8 +2,8 @@
 //!
 //! Plugins ship in packages: one executable, `dre-plugin-<package>`, serving every plugin the
 //! package provides (a single plugin may also be named `dre-<kind>-<name>`). It talks to DRE core
-//! over stdin/stdout in length-prefixed frames. Each frame is a JSON control message or an Arrow IPC stream; stderr
-//! is the plugin's log channel. See `docs/protocol.md` in the repository for the public contract.
+//! over stdin/stdout in length-prefixed frames. Each frame is a JSON control message or an Arrow IPC stream; plugins
+//! log through `log` messages, and stderr carries what can't (panics, native drivers). See `docs/protocol.md` in the repository for the public contract.
 //!
 //! - [`frame`]: the wire format.
 //! - [`msg`]: every control message.
@@ -13,6 +13,10 @@
 //! - [`conformance`]: checks any plugin binary against the protocol.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
 //! - [`markdown`]: the portable Markdown subset of messages, and its translations.
+
+/// The `log` crate, re-exported: plugins log with `dre_protocol::log::info!` and friends, which
+/// the SDK sends to core as `log` messages.
+pub use log;
 
 pub mod conformance;
 pub mod frame;

@@ -128,13 +128,20 @@ fn an_incompatible_version_names_both_ranges() {
 
 #[test]
 fn a_protocol_zero_plugin_is_told_to_update() {
-    let mut p = PluginProcess::spawn_env(fixture(), quiet(), &[("DRE_FIXTURE_MODE", "protocol_zero")]).unwrap();
+    let mut p =
+        PluginProcess::spawn_env(fixture(), quiet(), &[("DRE_FIXTURE_MODE", "protocol_zero")]).unwrap();
     let err = p
-        .handshake((dre_protocol::CORE_MIN_VERSION, MAX_VERSION), Duration::from_secs(10))
+        .handshake(
+            (dre_protocol::CORE_MIN_VERSION, MAX_VERSION),
+            Duration::from_secs(10),
+        )
         .err()
         .unwrap();
     let msg = err.to_string();
-    assert!(msg.contains("0..=0") && msg.contains("update the plugin"), "{msg}");
+    assert!(
+        msg.contains("0..=0") && msg.contains("update the plugin"),
+        "{msg}"
+    );
 }
 
 #[test]
@@ -162,7 +169,10 @@ fn log_and_progress_messages_reach_the_log_sink() {
     p.execute("slog hello there", None, |_, _| Ok(())).unwrap();
     p.execute("progress", None, |_, _| Ok(())).unwrap();
     let lines = lines.lock().unwrap().clone();
-    assert!(lines.contains(&"info: hello there attempt=2".to_string()), "{lines:?}");
+    assert!(
+        lines.contains(&"info: hello there attempt=2".to_string()),
+        "{lines:?}"
+    );
     assert!(lines.contains(&"info: reading (2/2)".to_string()), "{lines:?}");
 }
 
@@ -170,7 +180,9 @@ fn log_and_progress_messages_reach_the_log_sink() {
 fn an_error_carries_its_kind_and_namespaced_code() {
     let mut p = opened();
     match p.execute("coded", None, |_, _| Ok(())).unwrap_err() {
-        HostError::Plugin { kind, code, message, .. } => {
+        HostError::Plugin {
+            kind, code, message, ..
+        } => {
             assert_eq!(kind.as_deref(), Some("auth"));
             assert_eq!(code.as_deref(), Some("fixture/bad-token"));
             assert_eq!(message, "the token was refused");
@@ -202,7 +214,13 @@ fn a_cancelled_request_replies_cancelled_and_the_session_survives() {
         HostError::Plugin { kind, .. } => assert_eq!(kind.as_deref(), Some("cancelled")),
         e => panic!("{e:?}"),
     }
-    assert!(lines.lock().unwrap().iter().any(|l| l == "warning: fixture: cancel hook"));
+    assert!(
+        lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l == "warning: fixture: cancel hook")
+    );
     // The next request runs normally.
     let (_, values) = collect(&mut p, "rows 1", None);
     assert_eq!(values, vec![0]);

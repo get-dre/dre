@@ -21,7 +21,9 @@ use serde_json::{Map, Value};
 use crate::frame::{self, Frame, FrameError};
 use crate::msg::{ConnectionField, DeliveryFile, Envelope, LogLevel, Request, Response, ResultSetMeta};
 use crate::options::OptionField;
-use crate::{CORE_MIN_VERSION, Kind, MAX_VERSION, PluginId, parse_executable_name, parse_package_executable_name};
+use crate::{
+    CORE_MIN_VERSION, Kind, MAX_VERSION, PluginId, parse_executable_name, parse_package_executable_name,
+};
 
 /// Receives each line a plugin logs: `(plugin, line)`. A `log` message arrives prefixed by its
 /// level (`info: `, `warning: ` for warn and error, `debug: ` for debug and trace), as does
@@ -413,7 +415,10 @@ impl PluginProcess {
                 {
                     return Err(HostError::plugin(
                         &self.label,
-                        format!("`{}` was asked for the {want} plugin but serves {kind}/{name}", self.label),
+                        format!(
+                            "`{}` was asked for the {want} plugin but serves {kind}/{name}",
+                            self.label
+                        ),
                     ));
                 }
                 if provides.is_empty() {
@@ -586,7 +591,11 @@ impl PluginProcess {
     pub fn recv(&mut self, timeout: Option<Duration>, waiting_for: &'static str) -> Result<Incoming> {
         loop {
             match self.recv_any(timeout, waiting_for)? {
-                Incoming::Json(Response::Log { level, message, fields }) => {
+                Incoming::Json(Response::Log {
+                    level,
+                    message,
+                    fields,
+                }) => {
                     (self.log)(&self.label, &log_line(level, &message, &fields));
                 }
                 Incoming::Json(Response::Progress { message, done, total }) => {
@@ -634,12 +643,16 @@ impl PluginProcess {
         };
         match got {
             Some(Ok(Frame::Json(v))) => match serde_json::from_value::<Envelope<Response>>(v.clone()) {
-                Ok(Envelope { id: Some(id), body }) if !matches!(body, Response::Log { .. } | Response::Progress { .. }) => {
+                Ok(Envelope { id: Some(id), body })
+                    if !matches!(body, Response::Log { .. } | Response::Progress { .. }) =>
+                {
                     let current = self.current.load(Ordering::SeqCst);
                     if id != current {
                         return Err(HostError::Malformed {
                             plugin: self.label.clone(),
-                            message: format!("a reply to request {id} arrived while request {current} was running"),
+                            message: format!(
+                                "a reply to request {id} arrived while request {current} was running"
+                            ),
                         });
                     }
                     Ok(Incoming::Json(body))
