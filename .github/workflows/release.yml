@@ -139,6 +139,12 @@ jobs:
         if: runner.os == 'Linux' && needs.plan.outputs.go == ''
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
+      # Rust binaries carry the exact list of crates linked into them (`cargo auditable`), so the
+      # SBOM reflects what's in the binary. Go binaries carry it already.
+      - name: Install cargo-auditable
+        if: needs.plan.outputs.go == ''
+        run: cargo install cargo-auditable --locked --version 0.7.6
+
       - name: Build
         shell: bash
         env:
@@ -149,12 +155,12 @@ jobs:
           ext=""; [[ "$RUNNER_OS" == Windows ]] && ext=".exe"
           out="target/${{ matrix.target }}/release"
           if [[ "$KIND" == core ]]; then
-            cargo build --release --locked -p dre-cli --bin dre --target ${{ matrix.target }}
+            cargo auditable build --release --locked -p dre-cli --bin dre --target ${{ matrix.target }}
           elif [[ -n "$GO_DIR" ]]; then
             mkdir -p "$out"
             go -C "$GO_DIR" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$PWD/$out/dre-plugin-$PACKAGE$ext" .
           else
-            cargo build --release --locked -p "dre-plugin-$PACKAGE" --bins --target ${{ matrix.target }}
+            cargo auditable build --release --locked -p "dre-plugin-$PACKAGE" --bins --target ${{ matrix.target }}
           fi
 
       - name: Package
@@ -184,13 +190,58 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # A CycloneDX SBOM for every archive, and signed build provenance (GitHub artifact attestations,
+  # through Sigstore) for the archives and their SBOMs. Its own job, so only it can sign.
+  attest:
+    name: SBOMs and provenance
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Install syft
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/syft.tar.gz" https://github.com/anchore/syft/releases/download/v1.52.0/syft_1.52.0_linux_amd64.tar.gz
+          echo "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/syft.tar.gz" syft
+
+      - name: SBOMs
+        run: |
+          for f in dist/*.tar.gz dist/*.zip; do
+            [[ -e "$f" ]] || continue
+            "$RUNNER_TEMP/syft" scan "$f" -q -o "cyclonedx-json=$f.cdx.json"
+          done
+          ls -l dist
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: env.DRY_RUN != 'true'
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.cdx.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sboms
+          path: dist/*.cdx.json
+          if-no-files-found: error
+
   publish:
     name: Publish the release
     # After crates.io (DRE releases): a publish there can't be undone, so if it fails, no GitHub
     # release points people at crates that don't exist.
-    needs: [plan, build, crates]
+    needs: [plan, build, attest, crates]
     if: >-
-      always() && needs.build.result == 'success' &&
+      always() && needs.build.result == 'success' && needs.attest.result == 'success' &&
       (needs.crates.result == 'success' || needs.crates.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
@@ -212,6 +263,11 @@ jobs:
           pattern: dist-*
           path: dist
           merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sboms
+          path: dist
 
       - name: Checksums
         working-directory: dist
@@ -250,6 +306,7 @@ jobs:
             title="$PACKAGE plugin $VERSION"
             notes="The \`$PACKAGE\` plugin package, $VERSION. \`dre\` installs it on demand for projects that declare \`$PACKAGE\` under \`plugins:\`; \`dre plugin update $PACKAGE\` moves a project to it."
           fi
+          notes="$notes"$'\n\n'"Each archive has a CycloneDX SBOM (\`<archive>.cdx.json\`) and signed build provenance: \`gh attestation verify <archive> --repo ${{ github.repository }}\`."
           [[ -n "$message" ]] && notes="$message"$'\n\n'"$notes"
           gh release create "$TAG" dist/* "${flags[@]}" --title "$title" --notes "$notes"
 
@@ -419,6 +476,59 @@ jobs:
         with:
           name: wheels
           path: wheels/*.whl
+
+  # The wheels' SBOMs and provenance, as for the archives (PyPI adds its own attestations on
+  # upload through Trusted Publishing).
+  attest-wheels:
+    name: Wheel SBOMs and provenance
+    needs: [pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wheels
+          path: wheels
+
+      - name: Install syft
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/syft.tar.gz" https://github.com/anchore/syft/releases/download/v1.52.0/syft_1.52.0_linux_amd64.tar.gz
+          echo "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/syft.tar.gz" syft
+
+      - name: SBOMs
+        run: for f in wheels/*.whl; do "$RUNNER_TEMP/syft" scan "$f" -q -o "cyclonedx-json=$f.cdx.json"; done
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: env.DRY_RUN != 'true'
+        with:
+          subject-path: |
+            wheels/*.whl
+            wheels/*.cdx.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheel-sboms
+          path: wheels/*.cdx.json
+
+  wheel-sboms:
+    name: Attach the wheels' SBOMs
+    needs: [attest-wheels]
+    if: github.event_name == 'push' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wheel-sboms
+          path: sboms
+      - run: gh release upload "$TAG" sboms/*.cdx.json -R "$GITHUB_REPOSITORY"
 
   release-wheels:
     name: Wheels from ${{ inputs.tag }}
