@@ -10,7 +10,6 @@
 //! atomically, so two plugins saving different logins at once don't lose either.
 
 use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -44,16 +43,7 @@ fn store_at(path: &Path, key: &str, session: Option<Value>) -> std::io::Result<(
         None => all.remove(key),
     };
     let bytes = serde_json::to_vec_pretty(&Value::Object(all)).unwrap_or_default();
-    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    let mut opts = OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    opts.open(&tmp)?.write_all(&bytes)?;
-    std::fs::rename(&tmp, path)
+    crate::util::write_atomic_mode(path, &bytes, Some(0o600))
 }
 
 /// Every saved session; an unreadable or missing file is empty.

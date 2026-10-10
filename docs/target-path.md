@@ -40,7 +40,10 @@ dre run --schedule close_monthly
 ```
 
 Give each job that runs at the same time its own target path; two runs sharing one overwrite
-each other's files and snapshots. `dre clean` deletes the target folder only if DRE created it
+each other's files and snapshots. Each file DRE reads back (`run_results.json`, the schema snapshots, the
+manifest, `dre.lock`) is written whole: a temporary file next to it, flushed to disk, then renamed
+into place, so a run stopped mid-write leaves the previous file or the new one, never a broken
+one. `dre clean` deletes the target folder only if DRE created it
 (it leaves a `.dre_target` file there) or it's the project's own `target/`, so a mistyped
 `--target-path` can't delete anything else.
 

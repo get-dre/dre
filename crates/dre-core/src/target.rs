@@ -205,9 +205,9 @@ pub fn ensure(dir: &Path) -> std::io::Result<()> {
     let fresh = !dir.exists();
     std::fs::create_dir_all(dir)?;
     if fresh {
-        std::fs::write(
-            dir.join(MARKER),
-            "DRE writes its generated files here; `dre clean` may delete this folder.\n",
+        crate::fs::write_atomic(
+            &dir.join(MARKER),
+            b"DRE writes its generated files here; `dre clean` may delete this folder.\n",
         )?;
     }
     Ok(())

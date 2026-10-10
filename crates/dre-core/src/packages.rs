@@ -297,7 +297,7 @@ fn install_git(root: &Path, url: &str, checkout: &str) -> Result<(String, String
         let dst = installed_dir(root, &name);
         remove_dir_force(&dst);
         copy_tree(&tmp, &dst).map_err(|e| format!("can't install into {}: {e}", dst.display()))?;
-        std::fs::write(dst.join(INSTALLED_COMMIT), &commit).map_err(|e| e.to_string())?;
+        crate::fs::write_atomic(&dst.join(INSTALLED_COMMIT), commit.as_bytes()).map_err(|e| e.to_string())?;
         Ok((name, commit))
     })();
     remove_dir_force(&tmp);
