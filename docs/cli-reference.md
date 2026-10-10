@@ -43,7 +43,7 @@ dre validate [OPTIONS] [SELECTOR]...
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
 | `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
-| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
 | `--json` |  | Emit machine-readable JSON instead of text. |
 | `--live` |  | After the offline checks, connect to each Binding's source and check every rendered statement without executing it (EXPLAIN or the dialect's equivalent). |
@@ -77,7 +77,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
 | `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
-| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
 | `--set <SET>` |  | Run one Set (declared or ad hoc), or `all` of a report's Sets. |
 | `--schedule <NAME>` |  | Run the Bindings a schedules.yml entry targets, with its vars. Pass the scheduled instant through DRE_RUN_AT (or the date through DRE_RUN_DATE) so reruns render the same. With a selector and/or --set, run just those of its Bindings. |
@@ -89,6 +89,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--accept-schema-change` |  | Deliver even if the output schema changed since the last successful run, and accept the new schema. Snapshots live in the target path, so a fresh CI runner has no history unless `--target-path` (or DRE_TARGET_PATH) points at a folder that persists. |
 | `--timeout <DURATION>` |  | Stop the run if it takes longer than this: a duration such as `2h` or `90m`, or seconds (default: $DRE_RUN_TIMEOUT, then `flags: run_timeout` in dre_project.yml; off without any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124. |
 | `--keep-runs <N>` |  | How many runs of each report and Set to keep in the target path, the current one included (default: $DRE_KEEP_RUNS, then `flags: keep_runs` in dre_project.yml, then 1). |
+| `--threads <N>` |  | How many Bindings may run at once in this run (default: $DRE_THREADS; without it, each connection entry's `threads:`, default 1). `--threads 1` runs them one at a time. |
 
 Example:
 
@@ -116,7 +117,7 @@ dre compile [OPTIONS] [SELECTOR]...
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
 | `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
-| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
 | `--set <SET>` |  | Compile one Set (declared or ad hoc), or `all` of a report's Sets. |
 

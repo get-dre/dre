@@ -47,7 +47,8 @@ func CheckConnection(r Role, conn map[string]any, unresolved []string) (errs, wa
 		v := conn[k]
 		f, ok := byName[k]
 		if !ok {
-			if !accepted[k] {
+			// Core's own keys on a connection entry: threads (how many Bindings run at once).
+			if !accepted[k] && k != "threads" {
 				hint := ""
 				if c := Closest(k, names); c != "" {
 					hint = fmt.Sprintf("; did you mean `%s`?", c)

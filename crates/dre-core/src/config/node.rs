@@ -372,6 +372,9 @@ mod x_key_tests {
         let n = parse("x-dest: &dest {profile: s3, path: a.csv}\noutput:\n  destination:\n    <<: *dest\n    path: b.csv\n").unwrap();
         let j = n.to_json();
         assert!(j.get("x-dest").is_none(), "{j}");
-        assert_eq!(j["output"]["destination"], serde_json::json!({"profile": "s3", "path": "b.csv"}));
+        assert_eq!(
+            j["output"]["destination"],
+            serde_json::json!({"profile": "s3", "path": "b.csv"})
+        );
     }
 }

@@ -647,8 +647,13 @@ pub fn cli_var_value(s: &str) -> Json {
     }
     let float = t.trim_start_matches(['-', '+']);
     let is_float = !float.is_empty()
-        && float.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '-' | '+'))
-        && float.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '.')
+        && float
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '-' | '+'))
+        && float
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit() || c == '.')
         && float.chars().filter(|c| *c == '.').count() <= 1
         && !float.starts_with("00")
         && !(float.starts_with('0') && float.len() > 1 && float.as_bytes()[1].is_ascii_digit());
@@ -1950,7 +1955,16 @@ mod cli_var_tests {
         assert_eq!(v("2.5"), json!(2.5));
         assert_eq!(v("[\"NAM\", EMEA]"), json!(["NAM", "EMEA"]));
         assert_eq!(v("{k: 1}"), json!({"k": 1}));
-        for s in ["yes", "NO", "2026-01-31", "010", "1.0.0", "abc", "[unclosed", "0x1F"] {
+        for s in [
+            "yes",
+            "NO",
+            "2026-01-31",
+            "010",
+            "1.0.0",
+            "abc",
+            "[unclosed",
+            "0x1F",
+        ] {
             assert_eq!(v(s), json!(s), "{s}");
         }
         assert_eq!(v("\"false\""), json!("false"));

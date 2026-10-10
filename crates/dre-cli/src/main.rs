@@ -146,6 +146,10 @@ struct RunArgs {
     /// (default: $DRE_KEEP_RUNS, then `flags: keep_runs` in dre_project.yml, then 1).
     #[arg(long, value_name = "N")]
     keep_runs: Option<String>,
+    /// How many Bindings may run at once in this run (default: $DRE_THREADS; without it, each
+    /// connection entry's `threads:`, default 1). `--threads 1` runs them one at a time.
+    #[arg(long, value_name = "N")]
+    threads: Option<String>,
 }
 
 #[derive(Args)]
@@ -939,6 +943,19 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
             return exit::not_started();
         }
     };
+    // `--threads`, else `DRE_THREADS`.
+    let threads =
+        match dre_core::settings::flag_or_env(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)
+        {
+            None => None,
+            Some((v, from)) => match v.trim().parse::<usize>() {
+                Ok(n) if n > 0 => Some(n),
+                _ => {
+                    printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
+                    return exit::not_started();
+                }
+            },
+        };
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(&project, &a.project, &mut diags);
     if !diags.has_errors() {
@@ -967,6 +984,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         manifest_checksum,
         cancel,
         keep_runs,
+        threads,
     };
     if let Some(name) = &opts.schedule
         && !project.schedules.iter().any(|e| &e.name == name)

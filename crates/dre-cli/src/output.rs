@@ -80,6 +80,8 @@ struct Inner {
     in_binding: bool,
     seen_binding: bool,
     current: String,
+    /// Bindings running at once (`threads:`), shown on the progress bar.
+    running: Vec<String>,
     started: Instant,
     succeeded: usize,
     failed: usize,
@@ -113,6 +115,7 @@ impl Printer {
                 in_binding: false,
                 seen_binding: false,
                 current: String::new(),
+                running: Vec::new(),
                 started: Instant::now(),
                 succeeded: 0,
                 failed: 0,
@@ -446,6 +449,18 @@ impl Ui for Printer {
         }
     }
 
+    fn running(&mut self, label: &str, running: bool) {
+        let mut i = self.inner.lock().unwrap();
+        if running {
+            i.running.push(label.to_string());
+        } else {
+            i.running.retain(|l| l != label);
+        }
+        if let Some(b) = &i.bar {
+            b.set_message(format!("running {}", i.running.join(", ")));
+        }
+    }
+
     fn binding_start(&mut self, report: &str, set: Option<&str>) {
         let mut i = self.inner.lock().unwrap();
         i.seen_binding = true;
@@ -453,7 +468,7 @@ impl Ui for Printer {
         i.pending.clear();
         i.current = label(report, set);
         i.file_log("INFO", "Started");
-        if let Some(b) = &i.bar {
+        if let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty()) {
             b.set_message(i.current.clone());
         }
         if i.format == LogFormat::Json {
@@ -466,7 +481,7 @@ impl Ui for Printer {
 
     fn step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
         let mut i = self.inner.lock().unwrap();
-        if let Some(b) = &i.bar {
+        if let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty()) {
             b.set_message(format!("{} · {verb} {detail}", i.current));
         }
         let text = match elapsed {

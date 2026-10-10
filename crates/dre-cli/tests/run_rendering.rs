@@ -321,7 +321,11 @@ fn loops_break_and_continue_and_maps_keep_their_written_order() {
              '{% for i in range(10) %}{% if i == 1 %}{% continue %}{% endif %}{% if i == 4 %}{% break %}{% endif %}{{ i }}{% endfor %}' as loop\n",
         ),
     ]);
-    p.dre("run", &["ordered", "--var", "limits={alpha: 9, extra: 4}"]).ok();
+    p.dre("run", &["ordered", "--var", "limits={alpha: 9, extra: 4}"])
+        .ok();
     // `--var` replaces `limits` whole; a literal map and a vars map keep the order written.
-    assert_eq!(p.read("out/ordered.csv"), "literal,vars,loop\r\nlowhigh,alphaextra,023\r\n");
+    assert_eq!(
+        p.read("out/ordered.csv"),
+        "literal,vars,loop\r\nlowhigh,alphaextra,023\r\n"
+    );
 }

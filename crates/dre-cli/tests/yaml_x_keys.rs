@@ -8,8 +8,14 @@ use common::TestProject;
 fn x_keys_share_blocks_through_anchors_and_are_ignored() {
     let p = TestProject::new(
         &[
-            ("dre_project.yml", "name: acme\ndefault_profile: duck\nx-notes: anything at all\n"),
-            ("dependencies.yml", "plugins: [duckdb, csv]\nx-why: shared settings\n"),
+            (
+                "dre_project.yml",
+                "name: acme\ndefault_profile: duck\nx-notes: anything at all\n",
+            ),
+            (
+                "dependencies.yml",
+                "plugins: [duckdb, csv]\nx-why: shared settings\n",
+            ),
             (
                 "reports/a/a.yml",
                 "x-out: &out {format: csv, destination: {profile: inbox, path: out/a.csv}}\nqueries: [qa]\noutput:\n  <<: *out\n",

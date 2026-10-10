@@ -54,21 +54,65 @@ pub enum RunEvent {
     PluginLog(String, String),
     /// The full text of a statement sent to a source: `(label, sql)`.
     Sql(String, String),
+    /// Bindings running at once (`threads:`): one Binding started or finished. Sent as it
+    /// happens; the Binding's own events follow later, together, as a [`RunEvent::Block`].
+    Running {
+        label: String,
+        running: bool,
+    },
+    /// One Binding's events, in order, when Bindings run at once: shown together so their lines
+    /// don't interleave.
+    Block(Vec<RunEvent>),
 }
 
 /// Where a running Binding sends its events. Cheap to clone, and `Send`: the executor's worker
 /// and plugins' stderr readers hold one each.
 #[derive(Clone)]
-pub struct Events(Sender<RunEvent>);
+pub struct Events {
+    tx: Sender<RunEvent>,
+    /// When Bindings run at once, a Binding's events are held here and sent as one block.
+    held: Option<std::sync::Arc<std::sync::Mutex<Vec<RunEvent>>>>,
+}
 
 impl Events {
     pub fn new(sender: Sender<RunEvent>) -> Events {
-        Events(sender)
+        Events {
+            tx: sender,
+            held: None,
+        }
+    }
+
+    /// Events that are held until [`Events::flush`], for one of several Bindings running at once.
+    pub fn held(&self) -> Events {
+        Events {
+            tx: self.tx.clone(),
+            held: Some(Default::default()),
+        }
     }
 
     /// Send an event. Nobody listening (the run was abandoned) isn't an error.
     pub fn emit(&self, e: RunEvent) {
-        let _ = self.0.send(e);
+        match &self.held {
+            Some(h) => h.lock().unwrap().push(e),
+            None => {
+                let _ = self.tx.send(e);
+            }
+        }
+    }
+
+    /// Send an event now, even from held events.
+    pub fn emit_now(&self, e: RunEvent) {
+        let _ = self.tx.send(e);
+    }
+
+    /// Send the held events as one block.
+    pub fn flush(&self) {
+        if let Some(h) = &self.held {
+            let events = std::mem::take(&mut *h.lock().unwrap());
+            if !events.is_empty() {
+                let _ = self.tx.send(RunEvent::Block(events));
+            }
+        }
     }
 
     pub fn step(&self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
@@ -143,6 +187,12 @@ pub fn dispatch(ui: &mut dyn Ui, e: RunEvent, plugin_log: &LogSink, sql_log: &Lo
         RunEvent::Message(m) => ui.message(&m),
         RunEvent::PluginLog(plugin, line) => plugin_log(&plugin, &line),
         RunEvent::Sql(label, sql) => sql_log(&label, &sql),
+        RunEvent::Running { label, running } => ui.running(&label, running),
+        RunEvent::Block(events) => {
+            for e in events {
+                dispatch(ui, e, plugin_log, sql_log);
+            }
+        }
     }
 }
 
@@ -217,13 +267,34 @@ impl CancelToken {
 #[derive(Debug, Clone)]
 pub struct RunStore {
     target: PathBuf,
+    /// Bindings running at once: each destination path a Binding delivers to, and which Binding,
+    /// so two never write the same file.
+    claims: Option<std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>>,
 }
 
 impl RunStore {
     pub fn new(target: &Path) -> RunStore {
         RunStore {
             target: target.to_path_buf(),
+            claims: None,
         }
+    }
+
+    /// A store for Bindings running at once, which refuses a destination path two of them use.
+    pub fn concurrent(target: &Path) -> RunStore {
+        RunStore {
+            target: target.to_path_buf(),
+            claims: Some(Default::default()),
+        }
+    }
+
+    /// Claim `profile`'s `path` for `binding`; the Binding that already has it, if another.
+    pub fn claim(&self, profile: &str, path: &str, binding: &str) -> Option<String> {
+        let mut claims = self.claims.as_ref()?.lock().unwrap();
+        let owner = claims
+            .entry(format!("{profile}\u{0}{path}"))
+            .or_insert_with(|| binding.to_string());
+        (owner != binding).then(|| owner.clone())
     }
 
     fn binding(&self, kind: &str, report: &str, binding: &str) -> PathBuf {

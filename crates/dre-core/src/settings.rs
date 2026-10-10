@@ -33,6 +33,9 @@ pub const HTTP_TIMEOUT: &str = "DRE_HTTP_TIMEOUT";
 pub const RUN_TIMEOUT: &str = "DRE_RUN_TIMEOUT";
 /// How many runs of each Binding to keep: `--keep-runs`, `DRE_KEEP_RUNS`, `flags: keep_runs`.
 pub const KEEP_RUNS: &str = "DRE_KEEP_RUNS";
+/// How many Bindings may run at once in the whole run: `--threads`, `DRE_THREADS`, over each
+/// connection entry's `threads:`.
+pub const THREADS: &str = "DRE_THREADS";
 
 /// A `DRE_*` environment variable's value; set but empty counts as unset.
 pub fn env(name: &str) -> Option<String> {
