@@ -30,4 +30,4 @@ avoids GitHub's anonymous rate limit on shared IPs and CI runners.
 
 ---
 
-**Previous:** [The manifest and `run_results.json`](manifest.md) · **Next:** [New in 0.3](new-in-0.3.md)
+**Previous:** [The manifest and `run_results.json`](manifest.md) · **Next:** [New in 0.4](new-in-0.4.md)

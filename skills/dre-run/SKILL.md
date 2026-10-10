@@ -175,7 +175,7 @@ destination's entry for this target `{deliver: false}`.
 ### Step 7: read the result
 
 The summary shows each Binding's status and each delivery's. Each Binding's run folder
-(`target/run/<report>/<set>/current/`, or the path `dre history <report>` shows) has its
+(`dre history <report> --latest --path` prints it) has its
 `run_results.json` with the detail (`deliveries` with `target`, `status`, `location` and
 `attempts` when a temporary error was tried again; `not_delivered` is a `{deliver: false}` entry,
 not a failure) and its `dre.log` with the full SQL of every statement.

@@ -2,7 +2,7 @@
 title: "Upgrading to 0.2"
 description: "Every rename and removed name in DRE 0.2 (connections, targets, sources, template names) and what changed in 0.2.1, with what to write instead."
 section: upgrading
-position: 3
+position: 4
 ---
 
 # Upgrading to 0.2
