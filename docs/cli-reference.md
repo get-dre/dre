@@ -463,4 +463,4 @@ dre unlock monthly_revenue --binding client_a
 
 ---
 
-**Previous:** [First-party plugins](plugins.md) · **Next:** [YAML reference](yaml-reference.md)
+**Previous:** [Google Chat](plugin-google_chat.md) · **Next:** [YAML reference](yaml-reference.md)

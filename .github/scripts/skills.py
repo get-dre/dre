@@ -52,35 +52,64 @@ COPIES = {
     "dre-upgrade": [],
 }
 
-# The sections of docs/plugins.md each plugin's reference includes, as (## heading, ### heading);
-# None takes the text between the ## heading and its first ###. Every field and option a plugin
-# declares must be named (in backticks) in its sections.
+# What each plugin's reference includes from the docs: its own page (`("page", name)`: the
+# prose of docs/plugin-<name>.md after the generated block), and sections of docs/plugins.md the
+# plugins share, as (## heading, ### heading), None taking the text between the ## heading and its
+# first ###. Every field and option a plugin declares must be named (in backticks) in its sections.
 _DEST = [("Destinations", None), ("Destinations", "Tries again"), ("Destinations", "Several destinations")]
 _EXISTS = [("Destinations", "A file already at the path")]
 _FILES = _EXISTS + [("Destinations", "Uploads under a temporary name")]
 _FORMAT = [("Formats", None)]
+_WAREHOUSE = [("Sources", "Types from warehouses")]
 DOC_SECTIONS = {
-    "source/duckdb": [("Sources", "`duckdb`")],
-    "source/postgres": [("Sources", "`postgres`")],
-    "source/databricks": [("Sources", "`databricks`"), ("Sources", "Types from warehouses")],
-    "source/bigquery": [("Sources", "`bigquery`"), ("Sources", "Types from warehouses")],
-    "source/snowflake": [("Sources", "`snowflake`"), ("Sources", "Types from warehouses")],
-    "format/csv": _FORMAT,
-    "format/delimited": _FORMAT,
-    "format/fixed_width": _FORMAT + [("Formats", "Fixed-width columns")],
-    "format/parquet": _FORMAT,
-    "format/xlsx": _FORMAT + [("Formats", "xlsx column formats"), ("Formats", "xlsx formulas and totals rows")],
-    "destination/s3": _DEST + _EXISTS + [("Destinations", "`s3`")],
-    "destination/gcs": _DEST + _EXISTS + [("Destinations", "`gcs`")],
-    "destination/azure_blob": _DEST + _EXISTS + [("Destinations", "`azure_blob`")],
-    "destination/sftp": _DEST + _FILES + [("Destinations", "`sftp`")],
-    "destination/ftp": _DEST + _FILES + [("Destinations", "`ftp`")],
-    "destination/databricks": _DEST + _EXISTS + [("Destinations", "`databricks`")],
-    "destination/email": _DEST + [("Destinations", "`email`")],
-    "destination/slack": _DEST + [("Destinations", "`slack`")],
-    "destination/teams": _DEST + [("Destinations", "`teams`")],
-    "destination/google_chat": _DEST + [("Destinations", "`google_chat`")],
+    "source/duckdb": [("page", "duckdb")],
+    "source/postgres": [("page", "postgres")],
+    "source/databricks": [("page", "databricks")] + _WAREHOUSE,
+    "source/bigquery": [("page", "bigquery")] + _WAREHOUSE,
+    "source/snowflake": [("page", "snowflake")] + _WAREHOUSE,
+    "format/csv": [("page", "csv")] + _FORMAT,
+    "format/delimited": [("page", "csv")] + _FORMAT,
+    "format/fixed_width": [("page", "fixed_width")] + _FORMAT,
+    "format/parquet": [("page", "parquet")] + _FORMAT,
+    "format/xlsx": [("page", "xlsx")] + _FORMAT,
+    "destination/s3": [("page", "s3")] + _DEST + _EXISTS,
+    "destination/gcs": [("page", "gcs")] + _DEST + _EXISTS,
+    "destination/azure_blob": [("page", "azure_blob")] + _DEST + _EXISTS,
+    "destination/sftp": [("page", "sftp")] + _DEST + _FILES,
+    "destination/ftp": [("page", "ftp")] + _DEST + _FILES,
+    "destination/databricks": [("page", "databricks")] + _DEST + _EXISTS,
+    "destination/email": [("page", "email")] + _DEST,
+    "destination/slack": [("page", "slack")] + _DEST,
+    "destination/teams": [("page", "teams")] + _DEST,
+    "destination/google_chat": [("page", "google_chat")] + _DEST,
 }
+GENERATED_END = "<!-- END generated -->"
+
+
+class Docs:
+    """docs/plugins.md and the plugin pages, read once."""
+
+    def __init__(self, root):
+        self.root = root
+        self.overview = strip_nav((root / PLUGIN_DOCS).read_text())
+        self.pages = {}
+
+    def page(self, name):
+        if name not in self.pages:
+            text = strip_nav((self.root / "docs" / f"plugin-{name}.md").read_text())
+            title = re.search(r"^# (.+)$", text, re.M).group(1)
+            i = text.find(GENERATED_END)
+            self.pages[name] = (title, text[i + len(GENERATED_END):] if i >= 0 else text)
+        return self.pages[name]
+
+    def section(self, entry):
+        """(title, body, the page links in it are relative to) for one DOC_SECTIONS entry."""
+        if entry[0] == "page":
+            title, body = self.page(entry[1])
+            return title, body, f"plugin-{entry[1]}.md"
+        h2, h3 = entry
+        return (h3.strip("`") if h3 else h2), doc_section(self.overview, h2, h3), "plugins.md"
+
 
 # Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).
 PRACTICE_PREFIXES = ("SEC", "SET", "REP", "RUN")
@@ -399,7 +428,7 @@ def undocumented(plugin, fields, docs_text):
         if not (f.get("description") or "").strip():
             problems.append(f"`{plugin}`: `{f['name']}` has no description in its `describe` reply")
         elif f"`{f['name']}`" not in docs_text:
-            problems.append(f"`{plugin}`: `{f['name']}` isn't in its docs ({PLUGIN_DOCS})")
+            problems.append(f"`{plugin}`: `{f['name']}` isn't in its docs ({PLUGIN_DOCS} or its plugin page)")
     return problems
 
 
@@ -444,9 +473,9 @@ def _text(s):
     return (s or "").replace("|", "\\|").replace("\n", " ")
 
 
-def _relink(md):
+def _relink(md, page="plugins.md"):
     """Links relative to docs/ made absolute, so they work from inside an installed skill."""
-    md = re.sub(r"\]\(#([^)]+)\)", r"](%s#\1)" % (DOCS_URL + "plugins.md"), md)
+    md = re.sub(r"\]\(#([^)]+)\)", r"](%s#\1)" % (DOCS_URL + page), md)
     return re.sub(r"\]\((?!https?:|#)([^)]+)\)", lambda m: f"]({DOCS_URL}{m.group(1)})", md)
 
 
@@ -459,7 +488,7 @@ def _demote(md, to):
     return re.sub(r"^(#{1,6}) ", lambda m: "#" * min(6, len(m.group(1)) + shift) + " ", md, flags=re.M)
 
 
-def reference(plugin, package, reply, docs_md, notes):
+def reference(plugin, package, reply, docs, notes):
     kind, name = plugin.split("/")
     version = package_version(package)
     conn = reply.get("connection_fields") or []
@@ -513,10 +542,10 @@ def reference(plugin, package, reply, docs_md, notes):
                        f"{_cell(f.get('default'))} | {allowed} | {_text(f.get('description'))} |")
         out.append("")
     out += ["## From the plugin docs", ""]
-    for h2, h3 in DOC_SECTIONS[plugin]:
-        body = doc_section(docs_md, h2, h3).strip("\n")
-        title = h3.strip("`") if h3 else h2
-        out += [f"### {title}", "", _relink(_demote(body, 4)) if body else "", ""]
+    for entry in DOC_SECTIONS[plugin]:
+        title, body, page = docs.section(entry)
+        body = body.strip("\n")
+        out += [f"### {title}", "", _relink(_demote(body, 4), page) if body else "", ""]
     out += ["## Guide notes", "", notes.strip(), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -560,12 +589,12 @@ def sync(root):
 def generate(root, replies):
     """Write every plugin reference into each skill that takes them, under `root`."""
     skills_root = root / "skills"
-    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
+    docs = Docs(root)
     files = {}
     for package, plugin in plugins():
         notes_path = skills_root / "shared" / "guide-notes" / reference_name(plugin)
         notes = notes_path.read_text() if notes_path.exists() else "None yet."
-        files[reference_name(plugin)] = reference(plugin, package, replies[plugin], docs_md, notes)
+        files[reference_name(plugin)] = reference(plugin, package, replies[plugin], docs, notes)
     for skill in skill_dirs(skills_root):
         folder = skills_root / skill / "references" / "plugins"
         if folder.exists():
@@ -651,9 +680,9 @@ def check(root, replies):
         problems += command_problems(cli, path.relative_to(root).as_posix(), path.read_text())
 
     # Every declared field and option documented.
-    docs_md = strip_nav((root / PLUGIN_DOCS).read_text())
+    docs = Docs(root)
     for _, plugin in plugins():
-        text = "".join(doc_section(docs_md, h2, h3) for h2, h3 in DOC_SECTIONS[plugin])
+        text = "".join(docs.section(e)[1] for e in DOC_SECTIONS[plugin])
         fields = (replies[plugin].get("connection_fields") or []) + (replies[plugin].get("option_fields") or [])
         problems += undocumented(plugin, fields, text)
         if not (skills_root / "shared" / "guide-notes" / reference_name(plugin)).exists():
@@ -664,7 +693,7 @@ def check(root, replies):
         fresh = pathlib.Path(tmp)
         shutil.copytree(skills_root, fresh / "skills")
         (fresh / "docs").mkdir()
-        for doc in (PLUGIN_DOCS, PRACTICES):
+        for doc in (PLUGIN_DOCS, PRACTICES, *(f"docs/plugin-{p}.md" for p in {e[1] for es in DOC_SECTIONS.values() for e in es if e[0] == "page"})):
             shutil.copy(root / doc, fresh / doc)
         sync(fresh)
         generate(fresh, replies)

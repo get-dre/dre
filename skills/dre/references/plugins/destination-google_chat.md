@@ -32,6 +32,32 @@ None.
 
 ## From the plugin docs
 
+### Google Chat
+
+#### Notes
+
+Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Google Chat space through its incoming webhook. Like
+`teams`, it takes messages only. Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url` (it contains the space's key and token), best set with
+`env_var()`; it's never logged.
+
+```yaml
+destinations:
+  ops_chat:
+    targets:
+      prod: {type: google_chat, webhook_url: "{{ env_var('GCHAT_OPS_WEBHOOK') }}"}
+```
+
+To create the webhook: in Google Chat, open the space, then **Apps & integrations** > **Webhooks**
+> **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
+may need to allow webhooks). The message is the title in bold, then the text in Chat's
+formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
+is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
+
+Every destination streams the file from `target/run/`. If an upload fails, the output stays
+there and the run reports which Binding failed.
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -111,33 +137,9 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
-
-### google_chat
-
-Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Google Chat space through its incoming webhook. Like
-`teams`, it takes messages only. Released as `1.0.0-rc.1`.
-
-The profile holds `webhook_url` (it contains the space's key and token), best set with
-`env_var()`; it's never logged.
-
-```yaml
-destinations:
-  ops_chat:
-    targets:
-      prod: {type: google_chat, webhook_url: "{{ env_var('GCHAT_OPS_WEBHOOK') }}"}
-```
-
-To create the webhook: in Google Chat, open the space, then **Apps & integrations** > **Webhooks**
-> **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
-may need to allow webhooks). The message is the title in bold, then the text in Chat's
-formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
-is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
-
-Every destination streams the file from `target/run/`. If an upload fails, the output stays
-there and the run reports which Binding failed.
 
 ## Guide notes
 

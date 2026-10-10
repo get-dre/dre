@@ -61,6 +61,8 @@ jobs:
       - run: python3 .github/scripts/schema_docs.py check
       - run: python3 .github/scripts/test_docs_sections.py
       - run: python3 .github/scripts/docs_sections.py check
+      - run: python3 .github/scripts/plugin_pages.py check
+      - run: python3 .github/scripts/check_links.py
 
   lint:
     runs-on: ubuntu-latest

@@ -32,6 +32,33 @@ None.
 
 ## From the plugin docs
 
+### Microsoft Teams
+
+##### Notes
+
+Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
+It takes messages only: a file output, or `attach:`, sent to it is an error in `dre validate`.
+Deliver files to object storage and link them from the message with `outputs.<name>.location`.
+Released as `1.0.0-rc.1`.
+
+The profile holds `webhook_url`, which is a credential: anyone with it can post to the channel.
+Set it with `env_var()`. DRE never logs it or shows it in an error.
+
+```yaml
+#### profiles.yml
+destinations:
+  finance_teams:
+    targets:
+      prod: {type: teams, webhook_url: "{{ env_var('TEAMS_FINANCE_WEBHOOK') }}"}
+```
+
+To create the webhook: in Teams, open the channel's **...** menu > **Workflows**, choose **Post
+to a channel when a webhook request is received**, pick the team and channel, and copy the URL
+it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
+links and bullets. Teams has no destination options. A message over 15,000 characters is cut
+short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
+warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -111,34 +138,9 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
-
-### teams
-
-Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
-It takes messages only: a file output, or `attach:`, sent to it is an error in `dre validate`.
-Deliver files to object storage and link them from the message with `outputs.<name>.location`.
-Released as `1.0.0-rc.1`.
-
-The profile holds `webhook_url`, which is a credential: anyone with it can post to the channel.
-Set it with `env_var()`. DRE never logs it or shows it in an error.
-
-```yaml
-#### profiles.yml
-destinations:
-  finance_teams:
-    targets:
-      prod: {type: teams, webhook_url: "{{ env_var('TEAMS_FINANCE_WEBHOOK') }}"}
-```
-
-To create the webhook: in Teams, open the channel's **...** menu > **Workflows**, choose **Post
-to a channel when a webhook request is received**, pick the team and channel, and copy the URL
-it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
-links and bullets. Teams has no destination options. A message over 15,000 characters is cut
-short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
-warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
 
 ## Guide notes
 

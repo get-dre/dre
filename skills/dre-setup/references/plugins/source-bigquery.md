@@ -54,7 +54,9 @@ None: a source's settings are its profile fields.
 
 ## From the plugin docs
 
-### bigquery
+### BigQuery
+
+#### Notes
 
 An alpha: `bigquery` is published as 1.0.0 pre-releases (`1.0.0-alpha.N`), which `dre deps`
 installs while there's no stable release. It is tested against the BigQuery emulator; sessions,

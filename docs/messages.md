@@ -149,10 +149,10 @@ A real run logs one line per message sent, and `run_results.json` keeps its full
 
 | Destination | Takes | Limit | |
 |---|---|---|---|
-| [`slack`](plugins.md#slack) | messages and files | 4,000 characters | over the limit: cut short, full `.md` attached |
-| [`email`](plugins.md#email) | messages and files | | HTML body with a plain-text alternative; subject from the title |
-| [`teams`](plugins.md#teams) | messages only | 15,000 characters | a Workflows webhook |
-| [`google_chat`](plugins.md#google_chat) | messages only | 4,000 characters | a space webhook |
+| [`slack`](plugin-slack.md) | messages and files | 4,000 characters | over the limit: cut short, full `.md` attached |
+| [`email`](plugin-email.md) | messages and files | | HTML body with a plain-text alternative; subject from the title |
+| [`teams`](plugin-teams.md) | messages only | 15,000 characters | a Workflows webhook |
+| [`google_chat`](plugin-google_chat.md) | messages only | 4,000 characters | a space webhook |
 | any other | the `.md` file | | `s3`, `sftp`, `databricks` Volumes, `local`, ... |
 
 See [the `message` format](plugins.md#the-message-format) for every option, and

@@ -44,6 +44,21 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### FTP and FTPS
+
+#### Notes
+
+`host`, `port` (21), `username`, `password`, `passive` (default true), and `tls`: `none` or
+`explicit` (FTPS). `tls_accept_invalid_certs` allows self-signed server certificates.
+
+Paths are relative to the folder the login starts in; a leading `/` means the server's root,
+which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
+connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
+Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
+[Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
+server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
+rename; FTP can't do both in one step (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -123,7 +138,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
@@ -168,19 +183,6 @@ Replacing a file already there: SFTP's rename can't replace one, so DRE removes 
 before the rename (a moment with no file at that name); an FTP server's rename usually replaces it
 in one step. Object stores (`s3`, `gcs`, `azure_blob`) and Databricks Volumes and Workspace files
 only show a file once its upload completes, so they need no temporary name.
-
-### ftp
-
-`host`, `port` (21), `username`, `password`, `passive` (default true), and `tls`: `none` or
-`explicit` (FTPS). `tls_accept_invalid_certs` allows self-signed server certificates.
-
-Paths are relative to the folder the login starts in; a leading `/` means the server's root,
-which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
-connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
-Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
-[above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
-server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
-rename; FTP can't do both in one step (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
 
 ## Guide notes
 

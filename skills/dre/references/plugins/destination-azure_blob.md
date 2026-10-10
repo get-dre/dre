@@ -43,6 +43,14 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### Azure Blob Storage
+
+#### Notes
+
+`account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
+`use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -122,7 +130,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
@@ -151,12 +159,6 @@ no-replace rename, conditional uploads on object stores (`If-None-Match: *`, GCS
 `ifGenerationMatch=0`), `overwrite=false` on Databricks, and an exclusive create for `local`. FTP
 has no such step, so DRE looks first, then uploads: two runs at the same moment could both see the
 name free. Put a date or a period in delivery paths so different runs don't collide by accident.
-
-### azure_blob
-
-`account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
-`use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
-Takes `if_exists` (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
 
 ## Guide notes
 

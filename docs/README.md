@@ -45,6 +45,24 @@ Installing plugins, the registry, and every first-party plugin.
 - [Managing plugins](managing-plugins.md): Plugin packages are installed on demand; how to have them in place before the first run.
 - [Plugin packages, the registry and `dre.lock`](registry.md): Plugin packages, the registry index, dre.lock and macro packages.
 - [First-party plugins](plugins.md): The first-party plugins, their profile fields and output options.
+- [DuckDB](plugin-duckdb.md): The duckdb source: profile fields and notes.
+- [PostgreSQL](plugin-postgres.md): The postgres source: profile fields, TLS and SSH bastions.
+- [Databricks](plugin-databricks.md): The databricks source and destination: SQL warehouses, Volumes and workspace files.
+- [BigQuery](plugin-bigquery.md): The bigquery source: sign-in methods and job settings.
+- [Snowflake](plugin-snowflake.md): The snowflake source: sign-in methods and connection settings.
+- [csv and delimited](plugin-csv.md): The csv and delimited formats: options and quoting.
+- [Fixed-width text](plugin-fixed_width.md): The fixed_width format: column layout and options.
+- [Parquet](plugin-parquet.md): The parquet format.
+- [Excel (xlsx)](plugin-xlsx.md): The xlsx format: column formats, formulas, totals rows and templates.
+- [Amazon S3](plugin-s3.md): The s3 destination: credentials and paths.
+- [Google Cloud Storage](plugin-gcs.md): The gcs destination: credentials and paths.
+- [Azure Blob Storage](plugin-azure_blob.md): The azure_blob destination: credentials and paths.
+- [SFTP](plugin-sftp.md): The sftp destination: host keys, keys and the RSA advisory.
+- [FTP and FTPS](plugin-ftp.md): The ftp destination: FTP and explicit FTPS.
+- [Email](plugin-email.md): The email destination: SMTP settings and options.
+- [Slack](plugin-slack.md): The slack destination: tokens, channels and DMs.
+- [Microsoft Teams](plugin-teams.md): The teams destination: Workflows webhooks.
+- [Google Chat](plugin-google_chat.md): The google_chat destination: space webhooks.
 
 ## Reference
 

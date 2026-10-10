@@ -41,6 +41,120 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### Databricks
+
+#### As a source
+
+| Field | Notes |
+|---|---|
+| `host` | Workspace host. |
+| `http_path` | The SQL warehouse's HTTP path. |
+| `auth_type` | `auto` (default), `pat` or `oauth`. |
+| `token` | A personal access token, or any other bearer token. Optional with `auto`. |
+| `profile` | A `~/.databrickscfg` profile to sign in with (for `auto`). |
+| `client_id` | For `oauth`: the OAuth client. Browser sign-in defaults to `databricks-cli`, which every workspace has. For a service principal, its application ID. |
+| `client_secret` | For `oauth`: a service principal's OAuth secret. Without it, `oauth` signs you in through the browser. |
+| `scopes` | For `oauth`: default `all-apis offline_access` for browser sign-in, `all-apis` for a service principal. |
+| `redirect_port` | For browser sign-in: the localhost port the sign-in redirects to. Default 8020, which is what `databricks-cli` allows. |
+| `catalog`, `schema` | Defaults for the session. |
+| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). The destination uses it for uploads too. |
+| `retry_timeout` | Seconds to keep waiting while a stopped warehouse starts. Default 900. While it waits, DRE says so every 30 seconds. A host that doesn't resolve, or refuses the connection, fails at once. |
+
+```yaml
+connections:
+  warehouse:
+    targets:
+      dev:        # you, through the browser
+        type: databricks
+        host: dbc-123.cloud.databricks.com
+        http_path: /sql/1.0/warehouses/abc
+        auth_type: oauth
+      prod:       # a service principal, for the orchestrator
+        type: databricks
+        host: dbc-123.cloud.databricks.com
+        http_path: /sql/1.0/warehouses/abc
+        auth_type: oauth
+        client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+        client_secret: "{{ env_var('DATABRICKS_CLIENT_SECRET') }}"
+```
+
+With `auth_type: auto` (the default) most setups need no sign-in fields at all. DRE uses, in order:
+
+1. `token` in the profile, or `client_id` + `client_secret` (a service principal);
+2. whatever Databricks' own tools would use, through Databricks' Go SDK: `DATABRICKS_TOKEN`, or
+   `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET`; a `~/.databrickscfg` profile (`profile:`,
+   or `DATABRICKS_CONFIG_PROFILE`); a `databricks auth login` session; the VS Code extension; CI
+   OIDC tokens (GitHub Actions, Azure DevOps); Azure and Google credentials;
+3. DRE's own saved sign-in, then a browser sign-in if a person is at the terminal.
+
+When no one is at the terminal (a scheduler, CI, a Databricks job), DRE never waits for a
+browser: it fails at once and lists what would work. In a Databricks job, give it
+`DATABRICKS_TOKEN` or a service principal.
+
+DRE signs in only when a report actually uses the profile: a connection when the first query
+on it runs, a destination when it delivers.
+
+Browser sign-in opens your browser the first time and saves the session in
+`~/.dre/oauth_sessions.json`, which only you can read. The file has one entry per workspace and
+OAuth client, so a report can read from one workspace and deliver to another, and the `databricks`
+source and destination share one sign-in per workspace. After that the refresh token renews the
+session, and the browser only opens again once the refresh token stops
+working. Delete the file (or its entry) to sign out. Set `DRE_NO_BROWSER=1` to only print the
+sign-in URL.
+
+Service principal tokens stay in memory. With either kind, the access token is renewed before it
+expires, so a long run keeps its session. Passwords, tokens and client secrets are never saved:
+put them in environment variables and use `env_var()`.
+
+Capabilities: `sessions`, `check` (via `EXPLAIN`), `load`. The plugin holds a real warehouse
+session, so temp views and `SET`s last for the whole Binding. The session runs in UTC. Warehouses
+have no read-only mode.
+
+The `databricks` package is written in Go, on Databricks' official Go connector
+(`databricks-sql-go`): SQL warehouses only hold sessions for Databricks' own clients, and the
+connector identifies itself with `dre` appended. One program serves as this source and the
+`databricks` destination. Set `DATABRICKS_LOG_LEVEL=debug` to see the connector's own log.
+
+Databricks SQL reads backslashes as escapes in string literals and doesn't read `''` as an
+escaped quote: `'O''Brien'` is two literals, `'O'` and `'Brien'`, which Databricks joins into
+`OBrien`. Jinja that builds literals from values should escape for Databricks
+(`'O\'Brien'`); `dre_utils` does this through `dispatch()`, and lookups are inlined portably.
+
+`VARIANT`, `STRUCT`, `ARRAY` and `MAP` columns arrive as compact JSON text (from `databricks`
+1.2.0; before, `STRUCT`, `ARRAY` and `MAP` were passed on as nested Arrow), intervals and
+geography as text. See [Types from warehouses](https://github.com/get-dre/dre/blob/master/docs/plugins.md#types-from-warehouses).
+
+#### As a destination
+
+Unity Catalog Volumes and workspace files, chosen by the path. `host` and the same sign-in fields
+as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`, `profile`, `scopes`,
+`redirect_port`), so one set of
+credentials, and one OAuth session per workspace, serves both. It's the same program as the
+source.
+
+```yaml
+destinations:
+  lakehouse:
+    targets:
+      prod: {type: databricks, host: dbc-123.cloud.databricks.com}
+```
+
+- **`/Volumes/<catalog>/<schema>/<volume>/...`**: uploaded to the Volume through the Files API.
+  Missing directories under the volume are created. Use it anywhere, for any size of file.
+- **`/Workspace/Users/<user>/...`, `/Workspace/Shared/...` or `/Workspace/Repos/...`** (the
+  `/Workspace` prefix is optional): a workspace file, for outputs people open from the workspace
+  browser, next to notebooks and dashboards. Missing folders are created, the file replaces one
+  already at the path (unless `if_exists` says otherwise), and it's always a plain file: a `.sql` or `.py` output isn't turned into a
+  notebook. Workspace files are meant for small files (the import API takes up to about 10 MB);
+  use a Volume for large outputs.
+
+On Databricks compute, where `/Volumes` and `/Workspace` are mounted, the file is copied there
+directly instead: no API call and no sign-in, with the job's own access. The same report works
+outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databricks job or cluster.
+
+Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
+`overwrite=false` refuses a taken name in the same step.
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -120,7 +234,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
@@ -149,37 +263,6 @@ no-replace rename, conditional uploads on object stores (`If-None-Match: *`, GCS
 `ifGenerationMatch=0`), `overwrite=false` on Databricks, and an exclusive create for `local`. FTP
 has no such step, so DRE looks first, then uploads: two runs at the same moment could both see the
 name free. Put a date or a period in delivery paths so different runs don't collide by accident.
-
-### databricks
-
-Unity Catalog Volumes and workspace files, chosen by the path. `host` and the same sign-in fields
-as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`, `profile`, `scopes`,
-`redirect_port`), so one set of
-credentials, and one OAuth session per workspace, serves both. It's the same program as the
-source.
-
-```yaml
-destinations:
-  lakehouse:
-    targets:
-      prod: {type: databricks, host: dbc-123.cloud.databricks.com}
-```
-
-- **`/Volumes/<catalog>/<schema>/<volume>/...`**: uploaded to the Volume through the Files API.
-  Missing directories under the volume are created. Use it anywhere, for any size of file.
-- **`/Workspace/Users/<user>/...`, `/Workspace/Shared/...` or `/Workspace/Repos/...`** (the
-  `/Workspace` prefix is optional): a workspace file, for outputs people open from the workspace
-  browser, next to notebooks and dashboards. Missing folders are created, the file replaces one
-  already at the path (unless `if_exists` says otherwise), and it's always a plain file: a `.sql` or `.py` output isn't turned into a
-  notebook. Workspace files are meant for small files (the import API takes up to about 10 MB);
-  use a Volume for large outputs.
-
-On Databricks compute, where `/Volumes` and `/Workspace` are mounted, the file is copied there
-directly instead: no API call and no sign-in, with the job's own access. The same report works
-outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databricks job or cluster.
-
-Takes `if_exists` (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
-`overwrite=false` refuses a taken name in the same step.
 
 ## Guide notes
 

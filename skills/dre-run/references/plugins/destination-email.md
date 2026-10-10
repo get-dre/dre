@@ -51,6 +51,67 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### Email
+
+#### Notes
+
+Sends the output as attachments on one email over SMTP. If a report produces several files, they
+all go on the same message.
+
+Profile fields: `host`, `port` (587 for `starttls`, 465 for `implicit`, 25 for `none`), `tls`
+(`starttls` by default, `implicit` or `none`), `username` and `password`, and `from`
+(`reports@example.com` or `"Reports <reports@example.com>"`). Optional fields:
+- `to`, `cc`, `bcc`: default recipients.
+- `max_attachment_mb`: default 20.
+- `tls_accept_invalid_certs`: allows a self-signed server certificate.
+
+Destination options:
+
+| Option | Meaning |
+|---|---|
+| `to`, `cc`, `bcc` | An address, a comma-separated string or a list. Each one replaces the profile's default. |
+| `subject` | Default `Report: <file names>`. |
+| `body` | Plain text. Default `Attached: <file names>`. |
+| `attachment_name` | Renames the attachment. Only allowed when the output is a single file. |
+
+```yaml
+destination:
+  - profile: finance_mail
+    to: ["{{ var('client') }}-finance@example.com"]
+    bcc: archive@example.com
+    subject: "Monthly report {{ run.date.iso }}"
+    body: "Attached is this month's report for {{ var('client') }}."
+```
+
+The plugin checks the email before it connects. It fails without sending anything when there are
+no recipients, an address is invalid, an option is unknown, or the attachments exceed
+`max_attachment_mb`. The password is never logged.
+
+**Email always attaches the file.** DRE can't send a link instead of the file, and it doesn't
+create download links (no presigned URLs). Most mail servers cap a message at 20–25 MB, so a
+bigger output can't go by email. Deliver it to object storage or another destination, and tell
+people where it is yourself; a location written into `body` only helps readers who can already
+open it. In a list of destinations an email entry still attaches the output, so an oversized
+output fails that entry (the others are delivered) and the run fails.
+
+**Messages** (email 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the message is the
+email: an HTML body with a plain-text alternative, and the subject is `subject:`, else the
+message's title. `body:` doesn't apply. `attach: [<output>]` on the entry attaches those
+outputs' files, under the same `max_attachment_mb` check, so one email carries the headline and
+the workbook:
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    destination:
+      - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
+```
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -130,68 +191,9 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
-
-### email
-
-Sends the output as attachments on one email over SMTP. If a report produces several files, they
-all go on the same message.
-
-Profile fields: `host`, `port` (587 for `starttls`, 465 for `implicit`, 25 for `none`), `tls`
-(`starttls` by default, `implicit` or `none`), `username` and `password`, and `from`
-(`reports@example.com` or `"Reports <reports@example.com>"`). Optional fields:
-- `to`, `cc`, `bcc`: default recipients.
-- `max_attachment_mb`: default 20.
-- `tls_accept_invalid_certs`: allows a self-signed server certificate.
-
-Destination options:
-
-| Option | Meaning |
-|---|---|
-| `to`, `cc`, `bcc` | An address, a comma-separated string or a list. Each one replaces the profile's default. |
-| `subject` | Default `Report: <file names>`. |
-| `body` | Plain text. Default `Attached: <file names>`. |
-| `attachment_name` | Renames the attachment. Only allowed when the output is a single file. |
-
-```yaml
-destination:
-  - profile: finance_mail
-    to: ["{{ var('client') }}-finance@example.com"]
-    bcc: archive@example.com
-    subject: "Monthly report {{ run.date.iso }}"
-    body: "Attached is this month's report for {{ var('client') }}."
-```
-
-The plugin checks the email before it connects. It fails without sending anything when there are
-no recipients, an address is invalid, an option is unknown, or the attachments exceed
-`max_attachment_mb`. The password is never logged.
-
-**Email always attaches the file.** DRE can't send a link instead of the file, and it doesn't
-create download links (no presigned URLs). Most mail servers cap a message at 20–25 MB, so a
-bigger output can't go by email. Deliver it to object storage or another destination, and tell
-people where it is yourself; a location written into `body` only helps readers who can already
-open it. In a list of destinations an email entry still attaches the output, so an oversized
-output fails that entry (the others are delivered) and the run fails.
-
-**Messages** (email 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the message is the
-email: an HTML body with a plain-text alternative, and the subject is `subject:`, else the
-message's title. `body:` doesn't apply. `attach: [<output>]` on the entry attaches those
-outputs' files, under the same `max_attachment_mb` check, so one email carries the headline and
-the workbook:
-
-```yaml
-output:
-  - name: workbook
-    format: xlsx
-    queries: [detail]
-  - name: headline
-    format: message
-    queries: [headline]
-    destination:
-      - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
-```
 
 ## Guide notes
 

@@ -57,7 +57,9 @@ None: a source's settings are its profile fields.
 
 ## From the plugin docs
 
-### snowflake
+### Snowflake
+
+#### Notes
 
 An alpha: `snowflake` is published as 1.0.0 pre-releases (`1.0.0-alpha.N`), which `dre deps`
 installs while there's no stable release. It hasn't yet run against a real Snowflake account.

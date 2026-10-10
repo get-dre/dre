@@ -41,7 +41,9 @@ None: a source's settings are its profile fields.
 
 ## From the plugin docs
 
-### postgres
+### PostgreSQL
+
+#### Notes
 
 | Field | Notes |
 |---|---|
@@ -94,10 +96,10 @@ connections:
           host_key_fingerprint: "SHA256:..."   # or known_hosts_path
 ```
 
-The `ssh:` block takes the same settings as the [`sftp`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#sftp) destination: `host`, `port`
+The `ssh:` block takes the same settings as the [`sftp`](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md) destination: `host`, `port`
 (22), `username`, and `password`, `private_key_path` or `private_key` (+
 `private_key_passphrase`), or `use_agent: true`, and `allow_rsa_keys` (see
-[RSA keys](https://github.com/get-dre/dre/blob/master/docs/plugins.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
+[RSA keys](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
 `~/.ssh/known_hosts`) or a pinned `host_key_fingerprint`, and an unknown or changed key is
 refused (there's no `accept_unknown_host` here). The error for an unknown key prints its
 fingerprint, ready to pin. `connect_timeout` covers the whole way, SSH included, and errors say

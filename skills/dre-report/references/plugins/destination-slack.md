@@ -40,6 +40,69 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### Slack
+
+#### Notes
+
+Uploads the output to a Slack channel, or to one person's DM, as a single post with a message.
+If a report produces several files, they all go in the same post.
+
+The profile holds `token`, a bot token (`xoxb-...`), which is never logged. It can also hold a
+default `channel`, and `api_url` (default `https://slack.com/api`) for a proxy. Destination options:
+
+| Option | Meaning |
+|---|---|
+| `channel` | A channel ID (`C0123ABCD`) or `#name`. A name is looked up among the channels the bot can see. |
+| `user` | A user ID (`U0123ABCD`). The file goes to the bot's DM with that person. |
+| `message` | The post's text. |
+
+Give exactly one of `channel` or `user`. If you give neither, the profile's `channel` is used.
+
+```yaml
+destination:
+  - profile: team_slack
+    channel: "#finance-reports"
+    message: "Monthly report for {{ var('client') }} ({{ run.date.iso }})"
+```
+
+Slack app setup: create an app, add a bot user, install it to the workspace, and use its bot
+token. Bot scopes:
+- `files:write`: always needed.
+- `channels:read` and `groups:read`: needed to post to a `#name`.
+- `im:write` and `chat:write`: needed for `user`.
+
+A DM also needs the app's Messages tab turned on (App Home > Show Tabs > Messages Tab). With it
+off, Slack accepts a file for the DM and then silently drops it, so before uploading the plugin
+checks that the DM accepts messages. The check posts nothing, and if the tab is off the delivery
+fails and says what to change.
+
+The bot must be a member of the channel. Invite it with `/invite @your-bot`.
+
+**Messages** (slack 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the post is the
+message itself: the title in bold, then the text in Slack's formatting, sent with
+`chat.postMessage` (scope `chat:write`) to the same `channel` or `user`. `message:` isn't used.
+Slack's recommended maximum is 4,000 characters: a longer message is posted cut short, with a
+note and the full message attached as its `.md` file (scope `files:write`). `attach: [<output>]`
+on the entry uploads those outputs' files in the same post, with the message as its text.
+
+```yaml
+output:
+  - name: workbook
+    format: xlsx
+    queries: [detail]
+  - name: headline
+    format: message
+    queries: [headline]
+    text: "Revenue yesterday: **{{ results.headline.value | currency('EUR') }}**"
+    destination:
+      - {profile: team_slack, channel: "#finance", attach: [workbook]}
+```
+
+If Slack rate-limits a call or answers 503, the plugin tries again after Slack's `Retry-After`
+(at most 60 seconds), up to `retries` times (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). Errors such
+as a rejected token, a missing scope, or the bot not being in the channel are reported with what
+to fix. The delivered location is the uploaded files' permalinks.
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -119,70 +182,9 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
-
-### slack
-
-Uploads the output to a Slack channel, or to one person's DM, as a single post with a message.
-If a report produces several files, they all go in the same post.
-
-The profile holds `token`, a bot token (`xoxb-...`), which is never logged. It can also hold a
-default `channel`, and `api_url` (default `https://slack.com/api`) for a proxy. Destination options:
-
-| Option | Meaning |
-|---|---|
-| `channel` | A channel ID (`C0123ABCD`) or `#name`. A name is looked up among the channels the bot can see. |
-| `user` | A user ID (`U0123ABCD`). The file goes to the bot's DM with that person. |
-| `message` | The post's text. |
-
-Give exactly one of `channel` or `user`. If you give neither, the profile's `channel` is used.
-
-```yaml
-destination:
-  - profile: team_slack
-    channel: "#finance-reports"
-    message: "Monthly report for {{ var('client') }} ({{ run.date.iso }})"
-```
-
-Slack app setup: create an app, add a bot user, install it to the workspace, and use its bot
-token. Bot scopes:
-- `files:write`: always needed.
-- `channels:read` and `groups:read`: needed to post to a `#name`.
-- `im:write` and `chat:write`: needed for `user`.
-
-A DM also needs the app's Messages tab turned on (App Home > Show Tabs > Messages Tab). With it
-off, Slack accepts a file for the DM and then silently drops it, so before uploading the plugin
-checks that the DM accepts messages. The check posts nothing, and if the tab is off the delivery
-fails and says what to change.
-
-The bot must be a member of the channel. Invite it with `/invite @your-bot`.
-
-**Messages** (slack 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the post is the
-message itself: the title in bold, then the text in Slack's formatting, sent with
-`chat.postMessage` (scope `chat:write`) to the same `channel` or `user`. `message:` isn't used.
-Slack's recommended maximum is 4,000 characters: a longer message is posted cut short, with a
-note and the full message attached as its `.md` file (scope `files:write`). `attach: [<output>]`
-on the entry uploads those outputs' files in the same post, with the message as its text.
-
-```yaml
-output:
-  - name: workbook
-    format: xlsx
-    queries: [detail]
-  - name: headline
-    format: message
-    queries: [headline]
-    text: "Revenue yesterday: **{{ results.headline.value | currency('EUR') }}**"
-    destination:
-      - {profile: team_slack, channel: "#finance", attach: [workbook]}
-```
-
-If Slack rate-limits a call or answers 503, the plugin tries again after Slack's `Retry-After`
-(at most 60 seconds), up to `retries` times (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). Errors such
-as a rejected token, a missing scope, or the bot not being in the channel are reported with what
-to fix. The delivered location is the uploaded files' permalinks.
 
 ## Guide notes
 

@@ -49,6 +49,46 @@ Set in the report's `output.destination` entry.
 
 ## From the plugin docs
 
+### SFTP
+
+#### Notes
+
+`host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
+(+ `private_key_passphrase`). `private_key` is the key's text, for when it can't be a file (a CI
+secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line with literal `\n`
+gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
+checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
+`host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host` is true.
+With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
+pipe on Windows) instead of a password or key file, so the key never enters DRE.
+Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
+see [Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
+write (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugin-postgres.md)
+source's `ssh:` block takes the same settings.
+
+#### RSA keys
+
+RSA private keys sign through the `rsa` crate, which has a known timing weakness
+([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
+release yet. This applies to `sftp` and to the `postgres` source's `ssh:` tunnel, and only to
+RSA keys DRE reads itself (`private_key_path`, `private_key`). Ed25519 and ECDSA keys, passwords
+and `use_agent: true` don't use it.
+
+The practical risk is low: an attack needs precise timings of many signatures, and DRE signs once
+per connection, a few times a run. So DRE keeps RSA keys working and warns once per run.
+`allow_rsa_keys` changes that:
+
+| Value | What happens |
+|---|---|
+| unset | RSA keys work, with a warning naming the advisory. |
+| `true` | RSA keys work without the warning: you've read this, and the key is only for a server you trust (a bank's SFTP server that accepts nothing else, say). |
+| `false` | RSA keys are refused, with what to do instead: for teams that want them blocked. |
+
+To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
+(its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
+Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no
@@ -128,7 +168,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#email)).
+  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
@@ -173,44 +213,6 @@ Replacing a file already there: SFTP's rename can't replace one, so DRE removes 
 before the rename (a moment with no file at that name); an FTP server's rename usually replaces it
 in one step. Object stores (`s3`, `gcs`, `azure_blob`) and Databricks Volumes and Workspace files
 only show a file once its upload completes, so they need no temporary name.
-
-### sftp
-
-`host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
-(+ `private_key_passphrase`). `private_key` is the key's text, for when it can't be a file (a CI
-secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line with literal `\n`
-gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
-checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
-`host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
-`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host` is true.
-With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
-pipe on Windows) instead of a password or key file, so the key never enters DRE.
-Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
-see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
-write (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#postgres)
-source's `ssh:` block takes the same settings.
-
-#### RSA keys
-
-RSA private keys sign through the `rsa` crate, which has a known timing weakness
-([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
-release yet. This applies to `sftp` and to the `postgres` source's `ssh:` tunnel, and only to
-RSA keys DRE reads itself (`private_key_path`, `private_key`). Ed25519 and ECDSA keys, passwords
-and `use_agent: true` don't use it.
-
-The practical risk is low: an attack needs precise timings of many signatures, and DRE signs once
-per connection, a few times a run. So DRE keeps RSA keys working and warns once per run.
-`allow_rsa_keys` changes that:
-
-| Value | What happens |
-|---|---|
-| unset | RSA keys work, with a warning naming the advisory. |
-| `true` | RSA keys work without the warning: you've read this, and the key is only for a server you trust (a bank's SFTP server that accepts nothing else, say). |
-| `false` | RSA keys are refused, with what to do instead: for teams that want them blocked. |
-
-To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
-(its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
-Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
 
 ## Guide notes
 
