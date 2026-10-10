@@ -121,16 +121,19 @@ impl Rules {
         };
         let mut r = base;
         if let Some(v) = get("if_exists", &mut warnings) {
-            r.if_exists = v
-                .as_str()
-                .and_then(IfExists::parse)
-                .ok_or_else(|| format!("`if_exists` must be one of `overwrite`, `error`, `number`, got {v}"))?;
+            r.if_exists = v.as_str().and_then(IfExists::parse).ok_or_else(|| {
+                format!("`if_exists` must be one of `overwrite`, `error`, `number`, got {v}")
+            })?;
         }
         if let Some(v) = get("atomic", &mut warnings) {
-            r.atomic = v.as_bool().ok_or_else(|| format!("`atomic` must be true or false, got {v}"))?;
+            r.atomic = v
+                .as_bool()
+                .ok_or_else(|| format!("`atomic` must be true or false, got {v}"))?;
         }
         if let Some(v) = get("temp_dir", &mut warnings) {
-            let s = v.as_str().ok_or_else(|| format!("`temp_dir` must be a path, got {v}"))?;
+            let s = v
+                .as_str()
+                .ok_or_else(|| format!("`temp_dir` must be a path, got {v}"))?;
             r.temp_dir = Some(s.to_string()).filter(|s| !s.is_empty());
         }
         if let Some(v) = get("retries", &mut warnings) {
@@ -159,7 +162,10 @@ pub fn parse_duration(v: &Value) -> Result<Duration, String> {
             .ok_or_else(bad);
     }
     let s = v.as_str().ok_or_else(bad)?.trim();
-    let (num, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(s.len()));
+    let (num, unit) = s.split_at(
+        s.find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(s.len()),
+    );
     let n: f64 = num.parse().map_err(|_| bad())?;
     let secs = match unit.trim() {
         "" | "s" => n,
@@ -186,9 +192,12 @@ pub fn connection_fields() -> Vec<ConnectionField> {
         )
         .default("60s")
         .manual(),
-        ConnectionField::new("retries", "how many times to try again after a temporary error (0: never)")
-            .default(DEFAULT_RETRIES)
-            .manual(),
+        ConnectionField::new(
+            "retries",
+            "how many times to try again after a temporary error (0: never)",
+        )
+        .default(DEFAULT_RETRIES)
+        .manual(),
     ]
 }
 
@@ -308,7 +317,12 @@ impl From<DeliveryError> for PluginError {
 }
 
 /// Deliver `local` to `remote` under `rules`, sleeping between retries.
-pub fn deliver(store: &mut dyn Store, local: &Path, remote: &str, rules: &Rules) -> Result<Delivered, DeliveryError> {
+pub fn deliver(
+    store: &mut dyn Store,
+    local: &Path,
+    remote: &str,
+    rules: &Rules,
+) -> Result<Delivered, DeliveryError> {
     deliver_with(store, local, remote, rules, &mut std::thread::sleep)
 }
 
@@ -374,7 +388,11 @@ fn backoff(attempt: u32) -> Duration {
 fn try_once(store: &mut dyn Store, local: &Path, remote: &str, rules: &Rules) -> Result<String, StoreError> {
     let caps = store.caps();
     let candidates = |i: u32| numbered(remote, i);
-    let limit = if rules.if_exists == IfExists::Number { 1000 } else { 1 };
+    let limit = if rules.if_exists == IfExists::Number {
+        1000
+    } else {
+        1
+    };
     if rules.atomic && !caps.visible_when_complete {
         let temp = temp_path(remote, rules.temp_dir.as_deref());
         if let Err(e) = store.write(local, &temp, false) {
@@ -474,9 +492,8 @@ fn io_failed(what: &str, path: &str, e: std::io::Error) -> StoreError {
 
 fn make_parent(path: &str) -> Result<(), StoreError> {
     match Path::new(path).parent() {
-        Some(p) if !p.as_os_str().is_empty() => std::fs::create_dir_all(p).map_err(|e| {
-            StoreError::Failed(format!("can't create {}: {e}", p.display()))
-        }),
+        Some(p) if !p.as_os_str().is_empty() => std::fs::create_dir_all(p)
+            .map_err(|e| StoreError::Failed(format!("can't create {}: {e}", p.display()))),
         _ => Ok(()),
     }
 }
@@ -556,7 +573,8 @@ mod tests {
             self.caps
         }
         fn write(&mut self, local: &Path, remote: &str, exclusive: bool) -> Result<(), StoreError> {
-            self.log.push(format!("write {remote}{}", if exclusive { " excl" } else { "" }));
+            self.log
+                .push(format!("write {remote}{}", if exclusive { " excl" } else { "" }));
             if self.flaky > 0 {
                 self.flaky -= 1;
                 return Err(StoreError::temporary("connection reset"));
@@ -568,14 +586,20 @@ mod tests {
             Ok(())
         }
         fn rename(&mut self, from: &str, to: &str, replace: bool) -> Result<(), StoreError> {
-            self.log.push(format!("rename {from} {to}{}", if replace { " replace" } else { "" }));
+            self.log.push(format!(
+                "rename {from} {to}{}",
+                if replace { " replace" } else { "" }
+            ));
             if std::mem::take(&mut self.break_rename) {
                 return Err(StoreError::Failed("connection dropped".into()));
             }
             if !replace && self.files.contains_key(to) {
                 return Err(StoreError::Exists);
             }
-            let v = self.files.remove(from).ok_or(StoreError::Failed("no such file".into()))?;
+            let v = self
+                .files
+                .remove(from)
+                .ok_or(StoreError::Failed("no such file".into()))?;
             self.files.insert(to.into(), v);
             Ok(())
         }
@@ -625,7 +649,13 @@ mod tests {
         };
         s.files.insert("out/r.xlsx".into(), "old".into());
         run(&mut s, &rules(IfExists::Overwrite, true)).unwrap();
-        assert_eq!(s.log, ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx replace"]);
+        assert_eq!(
+            s.log,
+            [
+                "write out/.r.xlsx.dre-part",
+                "rename out/.r.xlsx.dre-part out/r.xlsx replace"
+            ]
+        );
         assert_eq!(s.files.keys().collect::<Vec<_>>(), ["out/r.xlsx"]);
         assert_eq!(s.files["out/r.xlsx"], "new");
     }
@@ -670,13 +700,21 @@ mod tests {
             assert_eq!(s.files.len(), 1, "atomic={atomic}: {:?}", s.files);
             assert_eq!(s.files["out/r.xlsx"], "old");
             let pe = PluginError::from(e);
-            assert_eq!((pe.kind, pe.code.as_deref()), (ErrorKind::Delivery, Some("file-exists")));
+            assert_eq!(
+                (pe.kind, pe.code.as_deref()),
+                (ErrorKind::Delivery, Some("file-exists"))
+            );
         }
     }
 
     #[test]
     fn number_keeps_both_files() {
-        for (atomic, caps) in [(false, all_caps()), (true, all_caps()), (false, Caps::default()), (true, Caps::default())] {
+        for (atomic, caps) in [
+            (false, all_caps()),
+            (true, all_caps()),
+            (false, Caps::default()),
+            (true, Caps::default()),
+        ] {
             let mut s = Fake {
                 caps,
                 ..Fake::default()
@@ -705,7 +743,10 @@ mod tests {
             ..Fake::default()
         };
         let mut waits = Vec::new();
-        let d = deliver_with(&mut s, Path::new("new"), "r.csv", &Rules::default(), &mut |w| waits.push(w)).unwrap();
+        let d = deliver_with(&mut s, Path::new("new"), "r.csv", &Rules::default(), &mut |w| {
+            waits.push(w)
+        })
+        .unwrap();
         assert_eq!(d.attempts, 3);
         assert_eq!(waits.len(), 2);
         assert!(waits[0] < waits[1]);
@@ -716,8 +757,10 @@ mod tests {
         let e = deliver_with(&mut s, Path::new("new"), "r.csv", &Rules::default(), &mut |_| {}).unwrap_err();
         assert_eq!(e.attempts, 4);
         assert!(e.message.contains("after 4 tries"), "{e}");
-        let mut no_retry = Rules::default();
-        no_retry.retries = 0;
+        let no_retry = Rules {
+            retries: 0,
+            ..Rules::default()
+        };
         let mut s = Fake {
             flaky: 1,
             ..Fake::default()
@@ -767,7 +810,14 @@ mod tests {
 
     #[test]
     fn durations_take_units_or_seconds() {
-        for (v, secs) in [(json!("30s"), 30.0), (json!("5m"), 300.0), (json!("1h"), 3600.0), (json!("1500ms"), 1.5), (json!(45), 45.0), (json!("7"), 7.0)] {
+        for (v, secs) in [
+            (json!("30s"), 30.0),
+            (json!("5m"), 300.0),
+            (json!("1h"), 3600.0),
+            (json!("1500ms"), 1.5),
+            (json!(45), 45.0),
+            (json!("7"), 7.0),
+        ] {
             assert_eq!(parse_duration(&v).unwrap(), Duration::from_secs_f64(secs), "{v}");
         }
         for v in [json!("soon"), json!("5 days"), json!(-1), json!(true)] {
