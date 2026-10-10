@@ -298,6 +298,9 @@ pub struct ResultSetMeta {
     /// output's `autofit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autofit: Option<bool>,
+    /// The query entry's `style` (xlsx), over the output's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<crate::style::SheetStyle>,
 }
 
 /// One entry of a `columns:` map.
@@ -317,6 +320,9 @@ pub struct ColumnOptions {
     /// The column's width (xlsx), over the tab's and output's `autofit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<ColumnWidth>,
+    /// How the column's data cells look (xlsx), over the tab's and output's `style`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<crate::style::CellStyle>,
 }
 
 /// A column width: sized from the content, or a number of characters.

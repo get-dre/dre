@@ -26,6 +26,7 @@ fn meta(query: &str, name: &str) -> ResultSetMeta {
         header: None,
         columns: Default::default(),
         autofit: None,
+        style: None,
     }
 }
 
@@ -387,4 +388,33 @@ fn template_sheets_keep_their_widths_unless_the_tab_or_a_column_says() {
         "`Client 0` fits in the minimum, plus room"
     );
     assert_eq!(width(&book, 3).map(f64::floor), Some(20.0));
+}
+
+#[test]
+fn a_column_style_applies_to_its_cells_in_a_template() {
+    let mut m = meta("accounts", "Accounts");
+    m.columns = dre_protocol::options::parse_columns(
+        &json!({"balance": {"style": {"bold": true, "fill": "#FFF2CC"}}}),
+    )
+    .0;
+    let (_d, book) = fill(
+        vec![(m, accounts(3)), (meta("count_q", "Count"), count(3))],
+        standard_bindings(),
+    )
+    .unwrap();
+    for cell in ["C5", "C7"] {
+        let st = book
+            .sheet_by_name("Summary")
+            .unwrap()
+            .cell(cell)
+            .unwrap()
+            .style()
+            .clone();
+        assert!(st.font().is_some_and(|f| f.bold()), "{cell}");
+        assert_eq!(
+            st.background_color().map(|c| c.argb_str()).as_deref(),
+            Some("FFFFF2CC"),
+            "{cell}"
+        );
+    }
 }

@@ -29,6 +29,7 @@ Set in the report's `output:` block.
 | `max_rows_per_sheet` | integer | no | `1000000` | min 1.0, max 1048575.0 | rows per sheet before continuing on `Name (2)`; Excel's limit less a header |
 | `columns` | map | no |  |  | per column name, on any sheet: `{format: <Excel number format>, formula: "={a}*{b}", total: sum}`; a query entry's `columns` wins |
 | `autofit` | boolean | no | `true` |  | size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win |
+| `style` | map | no |  |  | how sheets look: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell; a query entry's `style` and a column's win |
 | `totals_label` | string | no | `Total` |  | text in the first column of a totals row, when that column has no total |
 | `date_format` | string | no | `yyyy-mm-dd` |  | Excel number format for date columns |
 | `datetime_format` | string | no | `yyyy-mm-dd hh:mm:ss` |  | Excel number format for timestamp columns |
@@ -69,6 +70,46 @@ A column's `width` wins over its tab's `autofit`, which wins over the output's. 
 `auto` or a number of characters from 1 to 255; a fixed width is used as it is. In a template,
 sheets keep the template's own widths unless the tab sets `autofit: true` or a column sets a
 `width`.
+
+#### Styles
+
+`style` sets how sheets look, at three levels: the output (every sheet), a query entry (that tab)
+and a column (its data cells). A tab's style merges over the output's, key by key, and a
+column's over both. Without any, sheets look as they always have: a bold header, a bold totals row
+with a thin top border, nothing else.
+
+```yaml
+queries:
+  - query: sales
+    style: {banded_rows: false}          # this tab without bands
+    columns:
+      net: {format: "#,##0.00", style: {bold: true, font_color: "#C00000", align: right}}
+output:
+  format: xlsx
+  style:
+    font: {name: Calibri, size: 11}
+    header: {bold: true, fill: "#1F4E78", font_color: "#FFFFFF"}
+    banded_rows: "#F2F2F2"               # every other data row; false turns it off
+    borders: thin                        # around every cell of the table
+    totals: {fill: "#DDEBF7"}
+```
+
+| Key | Where | Value |
+|---|---|---|
+| `bold`, `italic`, `underline` | any | `true` or `false` |
+| `font` | any | `{name: Calibri, size: 11}` (either key) |
+| `font_color`, `fill` | any | a colour, `"#RRGGBB"` |
+| `align` | any | `left`, `center`, `right` |
+| `border` | any | `none`, `thin`, `medium`, around the cell |
+| `header`, `totals` | output, tab | the cell keys above, for the header and totals rows |
+| `banded_rows` | output, tab | the fill of every other data row, or `false` |
+| `borders` | output, tab | `none`, `thin`, `medium`, around every cell of the table |
+
+Cell keys on an output or tab apply to every data cell. A column's `fill` wins over the band.
+Styled cells are written even when empty, so a band or border has no gaps. In a template, the
+template's formatting stays, and only a column's `style` is applied over it, on the cells DRE
+fills. `dre validate` rejects an unknown key, a colour that isn't `"#RRGGBB"` and any other bad
+value.
 
 #### Column formats
 
@@ -192,7 +233,7 @@ format_options:
 | `csv`, `delimited` | `delimiter`, `quote`, `quoting`, `header`, `line_ending`, `encoding`, `null`, `byte_order_mark` |
 | `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
-| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-widths)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`columns`; `template` |
+| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-widths)), `style` (see [Styles](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or

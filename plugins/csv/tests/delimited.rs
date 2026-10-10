@@ -66,6 +66,7 @@ fn write(format: &str, options: Value, batches: Vec<RecordBatch>) -> Result<Vec<
         header: None,
         columns: Default::default(),
         autofit: None,
+        style: None,
     };
     p.write_begin(path.to_str().unwrap(), "csv", options, vec![meta], None)
         .unwrap();

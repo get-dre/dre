@@ -349,7 +349,7 @@ fn remove_general(s: &str) -> String {
 }
 
 /// The keys a column may set in a `columns:` map.
-pub const COLUMN_OPTION_KEYS: &[&str] = &["format", "formula", "total", "width"];
+pub const COLUMN_OPTION_KEYS: &[&str] = &["format", "formula", "total", "width", "style"];
 
 /// The functions a `total:` can name, and the Excel function each writes.
 pub const TOTAL_FUNCTIONS: &[(&str, &str)] = &[
@@ -496,6 +496,11 @@ pub fn parse_columns(
                     },
                     None => errs.push(format!("column `{name}`: `formula` must be a string")),
                 },
+                "style" => {
+                    let (s, e) = crate::style::parse_cell(val);
+                    errs.extend(e.into_iter().map(|e| format!("column `{name}`: `style`: {e}")));
+                    col.style = Some(s);
+                }
                 "width" => match val {
                     Value::String(s) if s == "auto" => {
                         col.width = Some(crate::msg::ColumnWidth::Auto(crate::msg::AutoWidth::Auto))

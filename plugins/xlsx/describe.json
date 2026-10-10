@@ -35,6 +35,12 @@
         "default": true
       },
       {
+        "name": "style",
+        "type": "map",
+        "description": "how sheets look: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell; a query entry's `style` and a column's win",
+        "required": false
+      },
+      {
         "name": "totals_label",
         "type": "string",
         "description": "text in the first column of a totals row, when that column has no total",

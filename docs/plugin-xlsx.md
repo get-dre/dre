@@ -27,6 +27,7 @@ Set in a report's `output:` (or `format_options.xlsx` in `dre_project.yml`).
 | `max_rows_per_sheet` | integer | `1000000` | Rows per sheet before continuing on `Name (2)`; Excel's limit less a header. |
 | `columns` | map |  | Per column name, on any sheet: `{format: <Excel number format>, formula: "={a}*{b}", total: sum}`; a query entry's `columns` wins. |
 | `autofit` | boolean | `true` | Size each column from its content (at most 60 characters); a query entry's `autofit` and a column's `width` win. |
+| `style` | map |  | How sheets look: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell; a query entry's `style` and a column's win. |
 | `totals_label` | string | `Total` | Text in the first column of a totals row, when that column has no total. |
 | `date_format` | string | `yyyy-mm-dd` | Excel number format for date columns. |
 | `datetime_format` | string | `yyyy-mm-dd hh:mm:ss` | Excel number format for timestamp columns. |
@@ -65,6 +66,46 @@ A column's `width` wins over its tab's `autofit`, which wins over the output's. 
 `auto` or a number of characters from 1 to 255; a fixed width is used as it is. In a template,
 sheets keep the template's own widths unless the tab sets `autofit: true` or a column sets a
 `width`.
+
+## Styles
+
+`style` sets how sheets look, at three levels: the output (every sheet), a query entry (that tab)
+and a column (its data cells). A tab's style merges over the output's, key by key, and a
+column's over both. Without any, sheets look as they always have: a bold header, a bold totals row
+with a thin top border, nothing else.
+
+```yaml
+queries:
+  - query: sales
+    style: {banded_rows: false}          # this tab without bands
+    columns:
+      net: {format: "#,##0.00", style: {bold: true, font_color: "#C00000", align: right}}
+output:
+  format: xlsx
+  style:
+    font: {name: Calibri, size: 11}
+    header: {bold: true, fill: "#1F4E78", font_color: "#FFFFFF"}
+    banded_rows: "#F2F2F2"               # every other data row; false turns it off
+    borders: thin                        # around every cell of the table
+    totals: {fill: "#DDEBF7"}
+```
+
+| Key | Where | Value |
+|---|---|---|
+| `bold`, `italic`, `underline` | any | `true` or `false` |
+| `font` | any | `{name: Calibri, size: 11}` (either key) |
+| `font_color`, `fill` | any | a colour, `"#RRGGBB"` |
+| `align` | any | `left`, `center`, `right` |
+| `border` | any | `none`, `thin`, `medium`, around the cell |
+| `header`, `totals` | output, tab | the cell keys above, for the header and totals rows |
+| `banded_rows` | output, tab | the fill of every other data row, or `false` |
+| `borders` | output, tab | `none`, `thin`, `medium`, around every cell of the table |
+
+Cell keys on an output or tab apply to every data cell. A column's `fill` wins over the band.
+Styled cells are written even when empty, so a band or border has no gaps. In a template, the
+template's formatting stays, and only a column's `style` is applied over it, on the cells DRE
+fills. `dre validate` rejects an unknown key, a colour that isn't `"#RRGGBB"` and any other bad
+value.
 
 ## Column formats
 

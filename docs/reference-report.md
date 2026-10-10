@@ -50,6 +50,7 @@ A query with settings, instead of just its name.
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
+| `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
 
 ## `queries[].columns.<name>`
 
@@ -60,7 +61,36 @@ Settings for one column of an xlsx tab.
 | `format` | string |  | The Excel number format of the column, e.g. `#,##0.00` or `dd/mm/yyyy`. See the xlsx column formats in the plugins reference. |
 | `formula` | string |  | An Excel formula for each row of this column; `{name}` stands for that column's cell on the same row, e.g. `=ROUND({qty}*{unit_price},2)`. The SQL selects a placeholder column where the formula goes. |
 | `total` | string |  | Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`. |
+| `style` | map |  | How the column's data cells look: `bold`, `italic`, `underline`, `font` (`{name, size}`), `font_color`, `fill` (`"#RRGGBB"`), `align` (`left`, `center`, `right`), `border` (`none`, `thin`, `medium`). Over the tab's and output's `style`. |
 | `width` | any or number |  | The column's width: `auto` (sized from its content, at most 60 characters) or a number of characters. Over the tab's and output's `autofit`. |
+
+## `queries[].style`
+
+How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `header` | map |  | Cell keys for the header row (default: bold). |
+| `totals` | map |  | Cell keys for the totals row (default: bold, a thin top border). |
+| `banded_rows` | string or any |  | The fill of every other data row, `"#RRGGBB"`, or `false`. |
+| `borders` | `none` or `thin` or `medium` |  | A border around every cell of the table. |
+| `bold` | boolean |  | Bold text in every data cell. |
+| `italic` | boolean |  | Italic text in every data cell. |
+| `underline` | boolean |  | Underlined text in every data cell. |
+| `font` | map (see below) |  | The font: `{name: Calibri, size: 11}`. |
+| `font_color` | string |  | The text colour, `"#RRGGBB"`. |
+| `fill` | string |  | The background colour, `"#RRGGBB"`. |
+| `align` | `left` or `center` or `right` |  | Horizontal alignment. |
+| `border` | `none` or `thin` or `medium` |  | A border around each data cell. |
+
+## `queries[].style.font`
+
+The font: `{name: Calibri, size: 11}`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `name` | string |  | The font's name. |
+| `size` | number |  | The size in points. |
 
 ## `output[]`
 

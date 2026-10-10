@@ -198,14 +198,12 @@ pub fn excel_value(a: &dyn Array, i: usize, column: &str) -> Option<Excel> {
 /// Writes cells, keeping one Excel format object per distinct code.
 pub struct CellWriter {
     cache: HashMap<String, Format>,
-    totals: HashMap<Option<String>, Format>,
 }
 
 impl CellWriter {
     pub fn new() -> CellWriter {
         CellWriter {
             cache: HashMap::new(),
-            totals: HashMap::new(),
         }
     }
 
@@ -220,25 +218,10 @@ impl CellWriter {
                         .or_insert_with(|| Format::new().set_num_format(code))
                         .clone(),
                     explicit: c.is_explicit(),
+                    blanks: false,
                 })
             })
             .collect()
-    }
-
-    /// A totals row cell's format: bold, a thin top border, and the column's number format.
-    pub fn totals_format(&mut self, code: Option<&str>) -> Format {
-        self.totals
-            .entry(code.map(str::to_string))
-            .or_insert_with(|| {
-                let f = Format::new()
-                    .set_bold()
-                    .set_border_top(rust_xlsxwriter::FormatBorder::Thin);
-                match code {
-                    Some(c) => f.set_num_format(c),
-                    None => f,
-                }
-            })
-            .clone()
     }
 
     /// Write value `v` (from [`excel_value`] on a column of type `t`) at `(row, col)` with the
@@ -267,6 +250,9 @@ impl CellWriter {
             return Ok(());
         }
         let Some(v) = v else {
+            if let Some(s) = style.filter(|s| s.blanks) {
+                ws.write_blank(row, col, &s.format)?;
+            }
             return Ok(());
         };
         match (v, fmt) {
@@ -299,11 +285,13 @@ impl CellWriter {
     }
 }
 
-/// A column's number format, and whether YAML asked for it.
+/// A column's number format (and `style`), and whether YAML asked for the number format.
 #[derive(Clone)]
 pub struct ColumnStyle {
     pub format: Format,
     pub explicit: bool,
+    /// Styled cells (a fill, borders) are written even when empty, so the look has no holes.
+    pub blanks: bool,
 }
 
 /// Cast every column to one of the handful of types `CellWriter` writes natively.

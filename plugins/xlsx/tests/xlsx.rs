@@ -24,6 +24,7 @@ fn meta(name: &str, anchor: Option<&str>, header: Option<bool>) -> ResultSetMeta
         header,
         columns: Default::default(),
         autofit: None,
+        style: None,
     }
 }
 
@@ -351,4 +352,101 @@ fn a_column_width_beats_the_tab_which_beats_the_output() {
     assert_eq!(widths(&path, "Off", 3), [Some(30.0), Some(14.0), None]);
     assert_eq!(widths(&path, "On", 3), [Some(30.0), Some(11.0), Some(60.0)]);
     assert_eq!(widths(&path, "Plain", 3), [Some(30.0), None, None]);
+}
+
+/// What a cell looks like, read back: (bold, font colour, fill, left border, horizontal align).
+fn look(path: &Path, sheet: &str, cell: &str) -> (bool, String, String, String, String) {
+    let book = umya_spreadsheet::reader::xlsx::read(path).unwrap();
+    let ws = book.sheet_by_name(sheet).unwrap();
+    let Some(c) = ws.cell(cell) else {
+        return (false, String::new(), String::new(), String::new(), String::new());
+    };
+    let st = c.style();
+    let bold = st.font().is_some_and(|f| f.bold());
+    let color = st.font().map(|f| f.color().argb_str()).unwrap_or_default();
+    let fill = st.background_color().map(|c| c.argb_str()).unwrap_or_default();
+    let border = st
+        .borders()
+        .map(|b| b.left().border_style().to_string())
+        .unwrap_or_default();
+    let align = st
+        .alignment()
+        .map(|a| format!("{:?}", a.horizontal()))
+        .unwrap_or_default();
+    (bold, color, fill, border, align)
+}
+
+#[test]
+fn styles_layer_from_output_to_tab_to_column() {
+    let rows = RecordBatch::try_from_iter([
+        (
+            "region",
+            Arc::new(StringArray::from(vec!["A", "B", "C"])) as ArrayRef,
+        ),
+        (
+            "net",
+            Arc::new(Float64Array::from(vec![Some(1.0), None, Some(3.0)])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let mut styled = meta("Styled", None, None);
+    // As core passes a query entry's settings: parsed.
+    styled.columns = dre_protocol::options::parse_columns(
+        &json!({"net": {"total": "sum", "style": {"bold": true, "font_color": "#C00000", "align": "right"}}}),
+    )
+    .0;
+    let mut plain = meta("Plain", None, None);
+    plain.style = Some(dre_protocol::style::parse_sheet(&json!({"banded_rows": false})).0);
+    let (_d, path) = write(
+        json!({"style": {
+            "header": {"fill": "#1F4E78", "font_color": "#FFFFFF"},
+            "banded_rows": "#F2F2F2",
+            "borders": "thin",
+            "totals": {"fill": "#DDEBF7"}
+        }}),
+        vec![(styled, vec![rows.clone()]), (plain, vec![rows])],
+    );
+    // Header: bold by default, plus the output's fill and colour, and the table's borders.
+    assert_eq!(
+        look(&path, "Styled", "A1"),
+        (
+            true,
+            "FFFFFFFF".into(),
+            "FF1F4E78".into(),
+            "thin".into(),
+            String::new()
+        )
+    );
+    // Banding on every other data row; a column's own style on its cells, empty ones too.
+    assert_eq!(look(&path, "Styled", "A2").2, "");
+    assert_eq!(look(&path, "Styled", "A3").2, "FFF2F2F2");
+    assert_eq!(
+        look(&path, "Styled", "B3"),
+        (
+            true,
+            "FFC00000".into(),
+            "FFF2F2F2".into(),
+            "thin".into(),
+            "Right".into()
+        )
+    );
+    // Totals: bold with the output's fill.
+    let t = look(&path, "Styled", "B5");
+    assert!(t.0 && t.2 == "FFDDEBF7", "{t:?}");
+    // The tab turned banding off; the rest is inherited.
+    assert_eq!(look(&path, "Plain", "A3").2, "");
+    assert_eq!(look(&path, "Plain", "A3").3, "thin");
+}
+
+#[test]
+fn bad_styles_are_refused_by_validate() {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let errs = p
+        .validate(json!({"style": {"banded_rows": "grey", "header": {"bold": "yes"}}, "columns": {"net": {"style": {"fill": "red"}}}})
+            .as_object()
+            .unwrap()
+            .clone())
+        .unwrap();
+    assert_eq!(errs.len(), 3, "{errs:?}");
 }

@@ -201,6 +201,10 @@
                 "type": "string",
                 "description": "Puts a total under the column: one of `sum`, `count`, `average`, `min`, `max`, or a formula such as `=SUM({net:*})`."
               },
+              "style": {
+                "type": "object",
+                "description": "How the column's data cells look: `bold`, `italic`, `underline`, `font` (`{name, size}`), `font_color`, `fill` (`\"#RRGGBB\"`), `align` (`left`, `center`, `right`), `border` (`none`, `thin`, `medium`). Over the tab's and output's `style`."
+              },
               "width": {
                 "description": "The column's width: `auto` (sized from its content, at most 60 characters) or a number of characters. Over the tab's and output's `autofit`.",
                 "oneOf": [
@@ -224,6 +228,94 @@
         "autofit": {
           "type": "boolean",
           "description": "Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on."
+        },
+        "style": {
+          "type": "object",
+          "description": "How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page.",
+          "properties": {
+            "header": {
+              "type": "object",
+              "description": "Cell keys for the header row (default: bold)."
+            },
+            "totals": {
+              "type": "object",
+              "description": "Cell keys for the totals row (default: bold, a thin top border)."
+            },
+            "banded_rows": {
+              "description": "The fill of every other data row, `\"#RRGGBB\"`, or `false`.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^#?[0-9A-Fa-f]{6}$"
+                },
+                {
+                  "const": false
+                }
+              ]
+            },
+            "borders": {
+              "enum": [
+                "none",
+                "thin",
+                "medium"
+              ],
+              "description": "A border around every cell of the table."
+            },
+            "bold": {
+              "type": "boolean",
+              "description": "Bold text in every data cell."
+            },
+            "italic": {
+              "type": "boolean",
+              "description": "Italic text in every data cell."
+            },
+            "underline": {
+              "type": "boolean",
+              "description": "Underlined text in every data cell."
+            },
+            "font": {
+              "type": "object",
+              "description": "The font: `{name: Calibri, size: 11}`.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The font's name."
+                },
+                "size": {
+                  "type": "number",
+                  "description": "The size in points."
+                }
+              },
+              "additionalProperties": false
+            },
+            "font_color": {
+              "type": "string",
+              "description": "The text colour, `\"#RRGGBB\"`.",
+              "pattern": "^#?[0-9A-Fa-f]{6}$"
+            },
+            "fill": {
+              "type": "string",
+              "description": "The background colour, `\"#RRGGBB\"`.",
+              "pattern": "^#?[0-9A-Fa-f]{6}$"
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ],
+              "description": "Horizontal alignment."
+            },
+            "border": {
+              "enum": [
+                "none",
+                "thin",
+                "medium"
+              ],
+              "description": "A border around each data cell."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

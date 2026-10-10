@@ -63,6 +63,8 @@ struct Collected {
     widths: Vec<Option<dre_protocol::msg::ColumnWidth>>,
     /// The tab's `autofit`: a template sheet keeps its own widths unless it's set.
     autofit: bool,
+    /// Each column's `style` (the tab's, else the output's), over the template's formatting.
+    styles: Vec<Option<dre_protocol::style::CellStyle>>,
 }
 
 pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>> {
@@ -104,7 +106,18 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
                     .or_else(|| fmts.output().get(n).and_then(|c| c.width))
             })
             .collect();
+        let styles = names
+            .iter()
+            .map(|n| {
+                rs.meta
+                    .columns
+                    .get(n)
+                    .and_then(|c| c.style.clone())
+                    .or_else(|| fmts.output().get(n).and_then(|c| c.style.clone()))
+            })
+            .collect();
         results.push(Collected {
+            styles,
             widths,
             autofit: rs.meta.autofit.unwrap_or(false),
             query: rs.meta.query.clone(),
@@ -359,6 +372,20 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
     }
     if n > 1 {
         extend_formulas(book, &sheet_name, first, first + n - 1);
+    }
+    // A column's `style` on its data cells, over the template's formatting.
+    {
+        let ws = sheet(book, &sheet_name)?;
+        for (k, &ci) in cols.iter().enumerate() {
+            if let Some(style) = &res.styles[ci] {
+                for row in 0..n.max(1) {
+                    crate::styles::apply_template(
+                        ws.cell_mut((u32::from(c0) + 1 + k as u32, first + row)),
+                        style,
+                    );
+                }
+            }
+        }
     }
     // Widths only where the tab or a column asks: otherwise the template's own stay.
     let block_widths: Vec<_> = cols.iter().map(|&ci| res.widths[ci]).collect();

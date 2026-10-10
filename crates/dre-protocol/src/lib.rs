@@ -29,6 +29,7 @@ pub mod msg;
 pub mod options;
 pub mod plugin;
 pub mod sessions;
+pub mod style;
 pub mod util;
 
 /// This crate's version (its own, not DRE's); the fixture plugins report it.
