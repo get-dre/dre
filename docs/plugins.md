@@ -105,7 +105,8 @@ connections:
 
 The `ssh:` block takes the same settings as the [`sftp`](#sftp) destination: `host`, `port`
 (22), `username`, and `password`, `private_key_path` or `private_key` (+
-`private_key_passphrase`); the bastion's host key is checked against `known_hosts_path` (default
+`private_key_passphrase`), or `use_agent: true`, and `allow_rsa_keys` (see
+[RSA keys](#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
 `~/.ssh/known_hosts`) or a pinned `host_key_fingerprint`, and an unknown or changed key is
 refused (there's no `accept_unknown_host` here). The error for an unknown key prints its
 fingerprint, ready to pin. `connect_timeout` covers the whole way, SSH included, and errors say
@@ -749,10 +750,34 @@ gets its line breaks back. Set `private_key_path` or `private_key`, not both. Th
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
 `~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
+pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
 see [above](#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
 write (see [above](#a-file-already-at-the-path)). The [`postgres`](#postgres)
 source's `ssh:` block takes the same settings.
+
+#### RSA keys
+
+RSA private keys sign through the `rsa` crate, which has a known timing weakness
+([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
+release yet. This applies to `sftp` and to the `postgres` source's `ssh:` tunnel, and only to
+RSA keys DRE reads itself (`private_key_path`, `private_key`). Ed25519 and ECDSA keys, passwords
+and `use_agent: true` don't use it.
+
+The practical risk is low: an attack needs precise timings of many signatures, and DRE signs once
+per connection, a few times a run. So DRE keeps RSA keys working and warns once per run.
+`allow_rsa_keys` changes that:
+
+| Value | What happens |
+|---|---|
+| unset | RSA keys work, with a warning naming the advisory. |
+| `true` | RSA keys work without the warning: you've read this, and the key is only for a server you trust (a bank's SFTP server that accepts nothing else, say). |
+| `false` | RSA keys are refused, with what to do instead: for teams that want them blocked. |
+
+To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
+(its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
+Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
 
 ### `ftp`
 

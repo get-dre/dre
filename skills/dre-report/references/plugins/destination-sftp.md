@@ -28,6 +28,8 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `private_key_path` | no | no |  | private key file (instead of a password) |
 | `private_key` | no | yes |  | the private key's text, e.g. from env_var() (instead of private_key_path) |
 | `host_key_fingerprint` | no | no |  | pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used) |
+| `use_agent` | no | no |  | sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file |
+| `allow_rsa_keys` | no | no |  | false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |
@@ -178,10 +180,34 @@ gets its line breaks back. Set `private_key_path` or `private_key`, not both. Th
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
 `~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
+pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
 see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
 write (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#postgres)
 source's `ssh:` block takes the same settings.
+
+#### RSA keys
+
+RSA private keys sign through the `rsa` crate, which has a known timing weakness
+([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
+release yet. This applies to `sftp` and to the `postgres` source's `ssh:` tunnel, and only to
+RSA keys DRE reads itself (`private_key_path`, `private_key`). Ed25519 and ECDSA keys, passwords
+and `use_agent: true` don't use it.
+
+The practical risk is low: an attack needs precise timings of many signatures, and DRE signs once
+per connection, a few times a run. So DRE keeps RSA keys working and warns once per run.
+`allow_rsa_keys` changes that:
+
+| Value | What happens |
+|---|---|
+| unset | RSA keys work, with a warning naming the advisory. |
+| `true` | RSA keys work without the warning: you've read this, and the key is only for a server you trust (a bank's SFTP server that accepts nothing else, say). |
+| `false` | RSA keys are refused, with what to do instead: for teams that want them blocked. |
+
+To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
+(its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
+Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
 
 ## Guide notes
 

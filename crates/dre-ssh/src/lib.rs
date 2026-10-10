@@ -26,6 +26,42 @@ pub type Session = client::Handle<HostCheck>;
 enum Auth {
     Key(Arc<PrivateKey>),
     Password(String),
+    /// `use_agent: true`: the SSH agent signs (`SSH_AUTH_SOCK`), so the key never enters DRE.
+    Agent,
+}
+
+/// RSA keys sign with the `rsa` crate, which has a timing side channel (RUSTSEC-2023-0071) and no
+/// fixed release yet. The advice, for the warning and the refusal.
+const RSA_ADVICE: &str = "RSA private keys use code with a known timing weakness (RUSTSEC-2023-0071); \
+the practical risk is low, as DRE signs only once per connection. To move off RSA, make an Ed25519 \
+key (`ssh-keygen -t ed25519`) and add its public key on the server, or sign through your SSH agent \
+with `use_agent: true`. `allow_rsa_keys: true` keeps the RSA key without this warning";
+
+/// Whether the RSA warning has been given (once per run of the plugin).
+static RSA_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Refuse an RSA key with `allow_rsa_keys: false`; warn once when it's unset.
+fn check_rsa(key: &PrivateKey, allow: Option<bool>, prefix: &str) -> Result<()> {
+    if !matches!(key.algorithm(), russh::keys::Algorithm::Rsa { .. }) {
+        return Ok(());
+    }
+    match allow {
+        Some(false) => Err(format!(
+            "the private key is an RSA key, and `{prefix}allow_rsa_keys: false` refuses RSA keys. \
+             {RSA_ADVICE}"
+        )
+        .into()),
+        Some(true) => {
+            dre_protocol::log::debug!("using an RSA private key (`allow_rsa_keys: true`)");
+            Ok(())
+        }
+        None => {
+            if !RSA_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                dre_protocol::log::warn!("{RSA_ADVICE}.");
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Where to connect, as whom, and which host key to trust.
@@ -57,6 +93,16 @@ pub fn auth_fields() -> Vec<ConnectionField> {
             "host_key_fingerprint",
             "pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used)",
         ),
+        ConnectionField::new(
+            "use_agent",
+            "sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file",
+        )
+        .manual(),
+        ConnectionField::new(
+            "allow_rsa_keys",
+            "false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning",
+        )
+        .manual(),
     ]
 }
 
@@ -99,7 +145,22 @@ impl Ssh {
         };
         let username = required("username")?;
         let passphrase = conn_str(c, "private_key_passphrase");
+        let flag = |key: &str| match c.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(b)) => Ok(Some(*b)),
+            Some(v) => Err(format!("`{prefix}{key}` must be true or false, got {v}")),
+        };
+        let allow_rsa = flag("allow_rsa_keys")?;
+        let use_agent = flag("use_agent")?.unwrap_or(false);
+        let key_given = conn_str(c, "private_key_path").is_some() || conn_str(c, "private_key").is_some();
+        if use_agent && key_given {
+            return Err(format!(
+                "set `{prefix}use_agent` or a private key (`{prefix}private_key_path`, `{prefix}private_key`), not both"
+            )
+            .into());
+        }
         let auth = match (conn_str(c, "private_key_path"), conn_str(c, "private_key")) {
+            _ if use_agent => Auth::Agent,
             (Some(_), Some(_)) => {
                 return Err(
                     format!("set `{prefix}private_key_path` or `{prefix}private_key`, not both").into(),
@@ -117,12 +178,15 @@ impl Ssh {
                 Some(pw) => Auth::Password(pw.to_string()),
                 None => {
                     return Err(format!(
-                        "set `{prefix}password`, `{prefix}private_key_path` or `{prefix}private_key`"
+                        "set `{prefix}password`, `{prefix}private_key_path`, `{prefix}private_key` or `{prefix}use_agent: true`"
                     )
                     .into());
                 }
             },
         };
+        if let Auth::Key(key) = &auth {
+            check_rsa(key, allow_rsa, prefix)?;
+        }
         Ok(Ssh {
             host,
             port,
@@ -195,6 +259,14 @@ impl Ssh {
                     .map_err(dropped)?
             }
             Auth::Password(pw) => session.authenticate_password(user, pw).await.map_err(dropped)?,
+            Auth::Agent => {
+                if agent_sign_in(&mut session, user).await.map_err(fail)? {
+                    return Ok(session);
+                }
+                return Err(fail(format!(
+                    "{host}:{port} accepted none of the SSH agent's keys for `{user}`"
+                )));
+            }
         };
         if !auth.success() {
             return Err(fail(format!(
@@ -203,6 +275,46 @@ impl Ssh {
         }
         Ok(session)
     }
+}
+
+/// Sign in with each of the SSH agent's keys in turn; whether one was accepted. The agent
+/// signs, so the private key (RSA included) never enters DRE.
+async fn agent_sign_in(session: &mut Session, user: &str) -> std::result::Result<bool, String> {
+    #[cfg(unix)]
+    let mut agent = russh::keys::agent::client::AgentClient::connect_env()
+        .await
+        .map_err(|e| format!("can't reach the SSH agent (`use_agent: true`; is SSH_AUTH_SOCK set?): {e}"))?;
+    #[cfg(windows)]
+    let mut agent =
+        russh::keys::agent::client::AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
+            .await
+            .map_err(|e| format!("can't reach the OpenSSH agent (`use_agent: true`): {e}"))?;
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|e| format!("can't list the SSH agent's keys: {e}"))?;
+    if identities.is_empty() {
+        return Err("the SSH agent holds no keys (`ssh-add` adds one)".into());
+    }
+    let hash = session
+        .best_supported_rsa_hash()
+        .await
+        .map_err(|e| e.to_string())?
+        .flatten();
+    for id in identities {
+        let key = id.public_key().into_owned();
+        let hash = matches!(key.algorithm(), russh::keys::Algorithm::Rsa { .. })
+            .then_some(hash)
+            .flatten();
+        let r = session
+            .authenticate_publickey_with(user, key, hash, &mut agent)
+            .await
+            .map_err(|e| format!("the SSH agent couldn't sign: {e}"))?;
+        if r.success() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn home_known_hosts() -> PathBuf {

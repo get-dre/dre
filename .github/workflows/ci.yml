@@ -131,9 +131,12 @@ jobs:
         run: |
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/id_test"
           echo "DRE_TEST_SFTP_KEY=$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
+          ssh-keygen -q -t ecdsa -N "" -f "$RUNNER_TEMP/id_ecdsa"
+          echo "DRE_TEST_SFTP_ECDSA_KEY=$RUNNER_TEMP/id_ecdsa" >> "$GITHUB_ENV"
           docker run -d -p 4443:4443 mirror.gcr.io/fsouza/fake-gcs-server:latest@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef -scheme http -port 4443 \
             -public-host localhost:4443 -external-url http://localhost:4443
           docker run -d -p 2222:22 -v "$RUNNER_TEMP/id_test.pub:/home/dre/.ssh/keys/id_test.pub:ro" \
+            -v "$RUNNER_TEMP/id_ecdsa.pub:/home/dre/.ssh/keys/id_ecdsa.pub:ro" \
             mirror.gcr.io/atmoz/sftp:latest@sha256:0960390462a4441dbb63698d7c185b76a41ffcee7b78ff4adf275f3e66f9c475 dre:dre-pass:1001::upload
           docker run -d -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:latest@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
             azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
