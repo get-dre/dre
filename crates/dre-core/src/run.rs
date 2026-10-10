@@ -1147,7 +1147,7 @@ impl<'a> BindingRun<'a> {
                     self.label()
                 ));
             }
-            match self.runs.migrate_legacy() {
+            match self.runs.migrate_legacy(self.started_at) {
                 Ok(Some(id)) => self.ui.step(
                     Level::Debug,
                     "Moved",

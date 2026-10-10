@@ -215,8 +215,9 @@ impl BindingRuns {
     /// Move a folder from before run folders (outputs and `run_results.json` straight in the
     /// Binding's folder) into `runs/<started>-legacy/` and make it current, so its drift history
     /// and results carry over. Call it holding the lock. Returns the new run id, if there was
-    /// anything to move.
-    pub fn migrate_legacy(&self) -> std::io::Result<Option<String>> {
+    /// anything to move. `before` is the new run's start: the legacy run is named for an earlier
+    /// time, so it always sorts (and is pruned) as older.
+    pub fn migrate_legacy(&self, before: DateTime<Utc>) -> std::io::Result<Option<String>> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return Ok(None);
         };
@@ -238,7 +239,8 @@ impl BindingRuns {
         let started = std::fs::metadata(self.dir.join("run_results.json"))
             .and_then(|m| m.modified())
             .map(DateTime::<Utc>::from)
-            .unwrap_or_else(|_| Utc::now());
+            .unwrap_or(before)
+            .min(before - chrono::Duration::seconds(1));
         let id = format!("{}-legacy", started.format("%Y%m%dT%H%M%SZ"));
         let to = self.run_dir(&id);
         std::fs::create_dir_all(&to)?;
@@ -410,12 +412,12 @@ mod tests {
         std::fs::create_dir_all(r.dir()).unwrap();
         std::fs::write(r.dir().join("daily.csv"), "a\n").unwrap();
         std::fs::write(r.dir().join("run_results.json"), "{}").unwrap();
-        let id = r.migrate_legacy().unwrap().unwrap();
+        let id = r.migrate_legacy(Utc::now()).unwrap().unwrap();
         assert!(id.ends_with("-legacy"));
         assert_eq!(r.current().as_deref(), Some(id.as_str()));
         assert!(r.run_dir(&id).join("daily.csv").is_file());
         assert!(!r.dir().join("daily.csv").exists());
-        assert_eq!(r.migrate_legacy().unwrap(), None);
+        assert_eq!(r.migrate_legacy(Utc::now()).unwrap(), None);
     }
 
     #[test]
