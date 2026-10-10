@@ -656,7 +656,7 @@ mod tests {
         assert_eq!(
             errs,
             vec![
-                "column `b`: unknown key `fromat`; expected `format`, `formula`, `total`",
+                "column `b`: unknown key `fromat`; expected `format`, `formula`, `total`, `width`, `style`",
                 "column `c` must be a map of options like `{format: \"#,##0.00\"}`",
                 "column `d`: format `\"x` has an unclosed `\"` quote",
             ]
