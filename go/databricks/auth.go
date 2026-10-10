@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -230,7 +231,7 @@ func (o *oauth) bearer() (string, error) {
 	if o.sessionKey != "" {
 		// Best effort: a session that can't be saved only means signing in again next time.
 		if err := storeSession(o.sessionKey, fresh); err != nil {
-			fmt.Fprintf(os.Stderr, "couldn't save the Databricks session in %s: %v\n", sessionsPath(), err)
+			slog.Warn(fmt.Sprintf("couldn't save the Databricks session in %s: %v", sessionsPath(), err))
 		}
 	}
 	return fresh.access, nil
@@ -304,7 +305,7 @@ func (o *oauth) signIn() (*tokens, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintln(os.Stderr, "Signed in to Databricks.")
+	slog.Info("Signed in to Databricks.")
 	return t, nil
 }
 
@@ -417,7 +418,7 @@ func waitForCode(lns []net.Listener, state string) (string, error) {
 
 // announce shows the sign-in URL and opens the browser; tests replace it to play the browser.
 var announce = func(authURL string) {
-	fmt.Fprintf(os.Stderr, "Sign in to Databricks in your browser. If it doesn't open, visit:\n%s\n", authURL)
+	slog.Info(fmt.Sprintf("Sign in to Databricks in your browser. If it doesn't open, visit: %s", authURL))
 	openBrowser(authURL)
 }
 

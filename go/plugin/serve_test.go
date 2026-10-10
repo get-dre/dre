@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -43,7 +45,10 @@ type fakeDB struct {
 	ran    []string
 	loaded []string
 	closed bool
+	stop   chan struct{}
 }
+
+func (f *fakeDB) Cancel() { close(f.stop) }
 
 var idSchema = arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
 
@@ -72,6 +77,22 @@ func (f *fakeDB) Run(sql string, fn func(plugin.Result) error) error {
 		col := array.NewNull(2)
 		defer col.Release()
 		return fn(&fakeResult{schema: s, recs: []arrow.Record{array.NewRecord(s, []arrow.Array{col}, 2)}})
+	}
+	switch sql {
+	case "wait":
+		// Runs until cancelled.
+		select {
+		case <-f.stop:
+			return errors.New("statement cancelled")
+		case <-time.After(20 * time.Second):
+			return fn(nil)
+		}
+	case "log":
+		slog.Info("hello", "attempt", 2)
+		plugin.Progress("reading", 1, 2)
+		return fn(nil)
+	case "coded":
+		return &plugin.Error{Kind: "auth", Code: "bad-token", Message: "the token was refused"}
 	}
 	return errors.New("syntax error")
 }
@@ -116,7 +137,7 @@ func pkg(db *fakeDB, delivered *[]string) plugin.Package {
 }
 
 func start(t *testing.T) (*plugintest.Conversation, *fakeDB) {
-	db := &fakeDB{}
+	db := &fakeDB{stop: make(chan struct{})}
 	p := pkg(db, &[]string{})
 	return plugintest.Start(t, p, p.Roles[0]), db
 }
@@ -205,6 +226,10 @@ func TestExecuteStreamsResultsWithinTheRowLimit(t *testing.T) {
 	c.Send(map[string]any{"type": "execute", "sql": "bad sql"})
 	plugintest.ExpectError(t, c.Reply(), "syntax error")
 	c.Send(map[string]any{"type": "check", "sql": "select 1"})
+	// The check's note is logged (at debug: shown with -v).
+	if r := c.Reply(); r["type"] != "log" || r["level"] != "debug" || r["message"] != "would scan 10 bytes" {
+		t.Fatalf("%v", r)
+	}
 	if r := c.Reply(); r["type"] != "ok" {
 		t.Fatalf("%v", r)
 	}
@@ -252,7 +277,7 @@ func TestMalformedFramesAndVersionMismatchExit(t *testing.T) {
 	}
 	c, _ = start(t)
 	c.Send(map[string]any{"type": "hello", "min_version": 5, "max_version": 6, "core_version": "x"})
-	if r := c.Reply(); r["type"] != "version_mismatch" || r["max_version"] != 0.0 {
+	if r := c.Reply(); r["type"] != "version_mismatch" || r["max_version"] != 1.0 {
 		t.Fatalf("%v", r)
 	}
 	if code := <-c.Code; code != 1 {
@@ -286,7 +311,7 @@ func TestFramesRoundTripAndRejectBadLengths(t *testing.T) {
 }
 
 func TestHelloServesThePluginCoreAsksFor(t *testing.T) {
-	db := &fakeDB{}
+	db := &fakeDB{stop: make(chan struct{})}
 	p := pkg(db, &[]string{})
 	if p.RoleFor("/x/dre-destination-fake.exe").ID() != "destination/fake" || p.RoleFor("dre-plugin-fake").ID() != "source/fake" {
 		t.Fatal("RoleFor")
@@ -325,5 +350,45 @@ func TestTheDestinationDeliversOneFile(t *testing.T) {
 	plugintest.ExpectError(t, c.Reply(), "needs a path")
 	if fmt.Sprint(delivered) != "[/a -> b]" {
 		t.Fatalf("%v", delivered)
+	}
+}
+
+func TestProtocolOneIdsLogsErrorsAndCancel(t *testing.T) {
+	c, _ := start(t)
+	c.Hello()
+	c.Send(map[string]any{"type": "open", "id": 1, "connection": map[string]any{}, "read_only": false})
+	if r := c.Reply(); r["type"] != "ok" || r["id"] != 1.0 {
+		t.Fatalf("open: %v", r)
+	}
+	// A cancel for a request that isn't running is ignored.
+	c.Send(map[string]any{"type": "cancel", "id": 99})
+	c.Send(map[string]any{"type": "execute", "id": 2, "sql": "log"})
+	if r := c.Reply(); r["type"] != "log" || r["id"] != 2.0 || r["level"] != "info" || r["message"] != "hello" ||
+		fmt.Sprint(r["fields"]) != "map[attempt:2]" {
+		t.Fatalf("log: %v", r)
+	}
+	if r := c.Reply(); r["type"] != "progress" || r["done"] != 1.0 || r["total"] != 2.0 || r["message"] != "reading" {
+		t.Fatalf("progress: %v", r)
+	}
+	if r := c.Reply(); r["type"] != "no_result" || r["id"] != 2.0 {
+		t.Fatalf("execute: %v", r)
+	}
+	c.Send(map[string]any{"type": "execute", "id": 3, "sql": "coded"})
+	if r := c.Reply(); r["type"] != "error" || r["kind"] != "auth" || r["code"] != "fake/bad-token" || r["id"] != 3.0 {
+		t.Fatalf("coded: %v", r)
+	}
+	c.Send(map[string]any{"type": "execute", "id": 4, "sql": "wait"})
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	c.Send(map[string]any{"type": "cancel", "id": 4})
+	if r := c.Reply(); r["type"] != "error" || r["kind"] != "cancelled" || r["id"] != 4.0 {
+		t.Fatalf("cancel: %v", r)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("the cancel took too long")
+	}
+	c.Send(map[string]any{"type": "describe", "id": 5})
+	if r := c.Reply(); r["type"] != "describe" || r["id"] != 5.0 {
+		t.Fatalf("after cancel: %v", r)
 	}
 }

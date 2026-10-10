@@ -101,7 +101,7 @@ func (c *Conversation) Hello() map[string]any {
 	c.t.Helper()
 	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 3, "core_version": "test"})
 	r := c.Reply()
-	if r["type"] != "hello" || r["protocol_version"] != 0.0 {
+	if r["type"] != "hello" || r["protocol_version"] != float64(plugin.ProtocolMax) {
 		c.t.Fatalf("hello: %v", r)
 	}
 	return r

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -374,5 +374,5 @@ func first(conn map[string]any, keys ...string) string {
 }
 
 func debugf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	slog.Debug(fmt.Sprintf(format, args...))
 }
