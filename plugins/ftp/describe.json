@@ -1,0 +1,117 @@
+{
+  "destination/ftp": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "host",
+        "description": "FTP server",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "port",
+        "description": "port",
+        "required": false,
+        "secret": false,
+        "default": 21,
+        "kind": "integer"
+      },
+      {
+        "name": "username",
+        "description": "user name",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "password",
+        "description": "password",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "tls",
+        "description": "none or explicit (FTPS)",
+        "required": false,
+        "secret": false,
+        "default": "none",
+        "kind": "string",
+        "choices": [
+          "none",
+          "explicit"
+        ]
+      },
+      {
+        "name": "passive",
+        "description": "passive mode (default true)",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "tls_accept_invalid_certs",
+        "description": "accept a self-signed server certificate",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      },
+      {
+        "name": "atomic",
+        "type": "boolean",
+        "description": "upload under a temporary name, then rename, so no half-written file appears",
+        "required": false,
+        "default": true
+      },
+      {
+        "name": "temp_dir",
+        "type": "string",
+        "description": "where the temporary file goes (on the same server), for receivers that pick up any new file",
+        "required": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "destination/google_chat": {
+    "capabilities": [
+      "message",
+      "message_only",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "webhook_url",
+        "description": "the space's webhook URL (keep it secret)",
+        "required": true,
+        "secret": true
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [],
+    "message_limit": 4000
+  }
+}

@@ -299,5 +299,36 @@ class Sync(unittest.TestCase):
             self.assertEqual(sorted(skills.diff_tree(pa, pb)), ["f.md", "g.md"])
 
 
+class ReferenceCliTest(unittest.TestCase):
+    MD = """## Global options
+
+| Option | Default | Description |
+|---|---|---|
+| `-v, --verbose` |  | x |
+
+## `dre run`
+
+| Option | Default | Description |
+|---|---|---|
+| `-s, --select <SELECTOR>` |  | x |
+
+## `dre plugin`
+
+## `dre plugin list`
+
+| Option | Default | Description |
+|---|---|---|
+| `--json` |  | x |
+"""
+
+    def test_commands_flags_and_values_from_the_reference(self):
+        cli = skills.ReferenceCli(self.MD)
+        self.assertIsNone(cli.check(["run", "-s", "daily", "-v"]))
+        self.assertIsNone(cli.check(["plugin", "list", "--json"]))
+        self.assertIsNone(cli.check(["--version"]))
+        self.assertIn("isn't a dre command", cli.check(["plugin", "frob"]))
+        self.assertIn("has no `--json` option", cli.check(["run", "--json"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,35 @@
+{
+  "source/duckdb": {
+    "capabilities": [
+      "check",
+      "load",
+      "read_only",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "path",
+        "description": "DuckDB database file (relative to the project), or :memory:",
+        "required": false,
+        "secret": false,
+        "default": ":memory:"
+      },
+      {
+        "name": "threads",
+        "description": "number of threads DuckDB may use",
+        "required": false,
+        "secret": false,
+        "kind": "integer"
+      },
+      {
+        "name": "memory_limit",
+        "description": "DuckDB memory limit, e.g. 4GB",
+        "required": false,
+        "secret": false
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "\""
+  }
+}

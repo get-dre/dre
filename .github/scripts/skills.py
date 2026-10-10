@@ -2,8 +2,8 @@
 """Build and check the agent skills in skills/.
 
     skills.py sync                                  inline the shared snippets, copy the practices
-    skills.py generate --plugins-dir DIR            write the plugin references from `describe`
-    skills.py check --dre BIN --plugins-dir DIR     every CI check (changes nothing)
+    skills.py generate                              write the plugin references from describe.json
+    skills.py check                                 every CI check (changes nothing)
     skills.py release-check <tag>                   a `skills-v<version>` tag matches the skills
     skills.py release-notes <tag>                   the release's notes
     skills.py serves-latest <tag>                   exit 0 if the release moves `skills-latest`
@@ -30,7 +30,6 @@ import os
 import pathlib
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -302,11 +301,45 @@ def command_problems(cli, rel, md):
             for tokens in dre_mentions(md) for err in [cli.check(tokens)] if err]
 
 
-def built_cli(dre):
-    def help_for(path):
-        return subprocess.run([dre, *path, "--help"], capture_output=True, text=True, check=True).stdout
+class ReferenceCli(Cli):
+    """`dre`'s commands and flags, read from docs/cli-reference.md (generated from the CLI
+    definitions and checked by the `cli_reference` test), so no `dre` needs building."""
 
-    return Cli(help_for)
+    def __init__(self, md):
+        self.nodes = {}
+        commands, current, global_flags = {}, None, (set(), set())
+        for line in md.splitlines():
+            m = re.match(r"^## `dre(?: ([a-z ][a-z0-9 -]*))?`$", line)
+            if m:
+                current = tuple((m.group(1) or "").split())
+                commands[current] = (set(), set())
+                continue
+            if line.startswith("## Global options"):
+                current = "global"
+                continue
+            if line.startswith("#"):
+                current = None
+                continue
+            row = re.match(r"^\| `([^`]+)` \|", line)
+            if current is None or not row:
+                continue
+            flags, valued = global_flags if current == "global" else commands[current]
+            for part in row.group(1).split(", "):
+                name = part.split(" ")[0]
+                if name.startswith("-"):
+                    flags.add(name)
+                    if "<" in part:
+                        valued.add(name)
+        for path, (flags, valued) in commands.items():
+            subs = {c[len(path)] for c in commands if len(c) == len(path) + 1 and c[:len(path)] == path}
+            self.nodes[path] = (subs, flags | global_flags[0] | {"-h", "--help"}, valued | global_flags[1])
+        root = self.nodes.setdefault((), (set(), set(), set()))
+        root[0].update(c[0] for c in commands if len(c) == 1)
+        root[1].update(global_flags[0] | {"-h", "--help", "-V", "--version"})
+        root[2].update(global_flags[1])
+
+    def node(self, path):
+        return self.nodes.get(tuple(path), (set(), {"-h", "--help"}, set()))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -380,59 +413,17 @@ def plugins():
     return [(package, p) for package, about in PACKAGES.items() for p in about["provides"]]
 
 
-def _frame(msg):
-    body = b"J" + json.dumps(msg).encode()
-    return struct.pack(">I", len(body)) + body
-
-
-def _read_frame(stream):
-    head = stream.read(4)
-    if len(head) < 4:
-        raise RuntimeError("the plugin closed its output")
-    body = stream.read(struct.unpack(">I", head)[0])
-    if body[:1] != b"J":
-        raise RuntimeError("the plugin sent a data frame to `describe`")
-    return json.loads(body[1:])
-
-
-def describe(executable, plugin):
-    """A plugin's `describe` reply, over the plugin protocol (docs/protocol.md)."""
-    log = tempfile.TemporaryFile()
-    p = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
-    try:
-        p.stdin.write(_frame({"type": "hello", "min_version": 0, "max_version": 0, "core_version": "skills",
-                              "plugin": plugin}))
-        p.stdin.flush()
-        hello = _read_frame(p.stdout)
-        if hello.get("type") != "hello":
-            raise RuntimeError(f"{executable} answered hello with {hello}")
-        p.stdin.write(_frame({"type": "describe"}))
-        p.stdin.flush()
-        reply = _read_frame(p.stdout)
-        if reply.get("type") != "describe":
-            raise RuntimeError(f"{executable} answered describe with {reply}")
-        return reply
-    except (OSError, RuntimeError) as e:
-        log.seek(0)
-        raise RuntimeError(f"{executable} ({plugin}): {e}; its log: {log.read().decode(errors='replace')[-500:]}")
-    finally:
-        try:
-            p.stdin.close()
-        except OSError:
-            pass
-        p.wait(timeout=30)
-        log.close()
-
-
-def describe_all(plugins_dir):
+def describe_files(root=ROOT):
+    """Every first-party plugin's `describe` reply, from its package's committed describe.json
+    (written from the built plugins and checked by the `describe_json` test)."""
     out = {}
-    for package, plugin in plugins():
-        exe = pathlib.Path(plugins_dir) / f"dre-plugin-{package}"
-        if not exe.exists() and pathlib.Path(str(exe) + ".exe").exists():
-            exe = pathlib.Path(str(exe) + ".exe")
-        if not exe.exists():
-            raise SystemExit(f"no {exe}: build the plugins first (cargo build --workspace --bins, and each package in go/)")
-        out[plugin] = describe(exe, plugin)
+    for package, about in PACKAGES.items():
+        path = root / about.get("go", f"plugins/{package}") / "describe.json"
+        replies = json.loads(path.read_text())
+        for plugin in about["provides"]:
+            if plugin not in replies:
+                raise SystemExit(f"{path} has no `{plugin}`: run the describe_json test with DRE_UPDATE_DESCRIBE=1")
+            out[plugin] = replies[plugin]
     return out
 
 
@@ -603,7 +594,7 @@ def skills_version(root):
     return json.loads((root / "skills/.claude-plugin/plugin.json").read_text())["version"]
 
 
-def check(root, dre, replies):
+def check(root, replies):
     problems = []
     skills_root = root / "skills"
     version = skills_version(root)
@@ -645,7 +636,7 @@ def check(root, dre, replies):
     practices = defined_practices((root / PRACTICES).read_text())
     # Core's own: the `local` destination and the `message` format.
     known = {p.split("/")[1] for _, p in plugins()} | {"local", "message"}
-    cli = built_cli(dre)
+    cli = ReferenceCli((root / "docs/cli-reference.md").read_text())
     for path in sorted(skills_root.rglob("*.md")):
         rel = path.relative_to(root).as_posix()
         md = path.read_text()
@@ -729,11 +720,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("sync")
-    g = sub.add_parser("generate")
-    g.add_argument("--plugins-dir", required=True)
-    c = sub.add_parser("check")
-    c.add_argument("--dre", required=True)
-    c.add_argument("--plugins-dir", required=True)
+    sub.add_parser("generate")
+    sub.add_parser("check")
     r = sub.add_parser("release-check")
     r.add_argument("tag")
     n = sub.add_parser("release-notes")
@@ -750,9 +738,9 @@ def main():
     elif a.cmd == "sync":
         sync(ROOT)
     elif a.cmd == "generate":
-        generate(ROOT, describe_all(a.plugins_dir))
+        generate(ROOT, describe_files())
     else:
-        problems = (check(ROOT, a.dre, describe_all(a.plugins_dir)) if a.cmd == "check"
+        problems = (check(ROOT, describe_files()) if a.cmd == "check"
                     else release_check(ROOT, a.tag))
         for p in problems:
             print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p)

@@ -1,0 +1,281 @@
+{
+  "destination/s3": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "bucket",
+        "description": "default bucket (or use s3://bucket/... paths)",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "region",
+        "description": "AWS region, e.g. ap-southeast-2",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "access_key_id",
+        "description": "access key id (leave empty to use the ambient credential chain)",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "secret_access_key",
+        "description": "secret access key",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "session_token",
+        "description": "temporary session token",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "profile",
+        "description": "a profile from the AWS config files",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "endpoint",
+        "description": "an S3-compatible store's URL",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "allow_http",
+        "description": "allow a plain-HTTP endpoint",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      }
+    ]
+  },
+  "destination/gcs": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "bucket",
+        "description": "default bucket (or use gs://bucket/... paths)",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "service_account_key_path",
+        "description": "service-account key file (empty: application default credentials)",
+        "required": false,
+        "secret": false,
+        "kind": "path"
+      },
+      {
+        "name": "service_account_key",
+        "description": "the service-account key's JSON text",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "endpoint",
+        "description": "an emulator's URL",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      }
+    ]
+  },
+  "destination/azure_blob": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "account_name",
+        "description": "storage account name",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "container",
+        "description": "default container (or use az://container/... paths)",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "connection_string",
+        "description": "connection string (or set sas_token / access_key)",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "sas_token",
+        "description": "a SAS token",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "access_key",
+        "description": "the account's access key",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "use_managed_identity",
+        "description": "sign in as the machine's managed identity",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "use_azure_cli",
+        "description": "sign in with the `az login` session",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "endpoint",
+        "description": "an emulator's URL",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      }
+    ]
+  }
+}

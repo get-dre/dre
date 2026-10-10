@@ -1,0 +1,214 @@
+{
+  "source/databricks": {
+    "capabilities": [
+      "check",
+      "load",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "host",
+        "description": "workspace host, e.g. adb-123.4.azuredatabricks.net",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "http_path",
+        "description": "the SQL warehouse's HTTP path, e.g. /sql/1.0/warehouses/abc",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "auth_type",
+        "description": "pat (a token) or oauth (browser sign-in; with client_id and client_secret, a service principal)",
+        "required": false,
+        "secret": false,
+        "default": "pat",
+        "same_as_source": "databricks",
+        "choices": [
+          "auto",
+          "pat",
+          "token",
+          "oauth"
+        ]
+      },
+      {
+        "name": "token",
+        "description": "personal access token, for auth_type pat",
+        "required": false,
+        "secret": true,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "client_id",
+        "description": "OAuth client; a service principal's application ID (browser sign-in defaults to databricks-cli)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "client_secret",
+        "description": "service principal OAuth secret",
+        "required": false,
+        "secret": true,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "catalog",
+        "description": "default catalog",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "schema",
+        "description": "default schema",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "profile",
+        "description": "a ~/.databrickscfg profile to sign in with (auth_type auto)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true
+      },
+      {
+        "name": "scopes",
+        "description": "OAuth scopes",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true
+      },
+      {
+        "name": "redirect_port",
+        "description": "the localhost port browser sign-in redirects to (default 8020)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "retry_timeout",
+        "description": "seconds to keep waiting while a stopped warehouse starts (default 900)",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "same_as_source": "databricks",
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "`"
+  },
+  "destination/databricks": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "host",
+        "description": "workspace host, e.g. adb-123.4.azuredatabricks.net",
+        "required": true,
+        "secret": false,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "auth_type",
+        "description": "pat (a token) or oauth (browser sign-in; with client_id and client_secret, a service principal)",
+        "required": false,
+        "secret": false,
+        "default": "pat",
+        "same_as_source": "databricks",
+        "choices": [
+          "auto",
+          "pat",
+          "token",
+          "oauth"
+        ]
+      },
+      {
+        "name": "token",
+        "description": "personal access token, for auth_type pat",
+        "required": false,
+        "secret": true,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "client_id",
+        "description": "OAuth client; a service principal's application ID (browser sign-in defaults to databricks-cli)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "client_secret",
+        "description": "service principal OAuth secret",
+        "required": false,
+        "secret": true,
+        "same_as_source": "databricks"
+      },
+      {
+        "name": "profile",
+        "description": "a ~/.databrickscfg profile to sign in with (auth_type auto)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true
+      },
+      {
+        "name": "scopes",
+        "description": "OAuth scopes",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true
+      },
+      {
+        "name": "redirect_port",
+        "description": "the localhost port browser sign-in redirects to (default 8020)",
+        "required": false,
+        "secret": false,
+        "same_as_source": "databricks",
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "same_as_source": "databricks",
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      }
+    ]
+  }
+}

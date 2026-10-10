@@ -1,0 +1,148 @@
+{
+  "destination/sftp": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "host",
+        "description": "SFTP server",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "port",
+        "description": "port",
+        "required": false,
+        "secret": false,
+        "default": 22,
+        "kind": "integer"
+      },
+      {
+        "name": "username",
+        "description": "user name",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "accept_unknown_host",
+        "description": "trust a host missing from known_hosts",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "password",
+        "description": "password (or set private_key_path)",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "private_key_path",
+        "description": "private key file (instead of a password)",
+        "required": false,
+        "secret": false,
+        "kind": "path"
+      },
+      {
+        "name": "private_key_passphrase",
+        "description": "the private key's passphrase",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "known_hosts_path",
+        "description": "known_hosts file (default ~/.ssh/known_hosts)",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "path"
+      },
+      {
+        "name": "private_key",
+        "description": "the private key's text, e.g. from env_var() (instead of private_key_path)",
+        "required": false,
+        "secret": true,
+        "manual": true
+      },
+      {
+        "name": "host_key_fingerprint",
+        "description": "pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used)",
+        "required": false,
+        "secret": false
+      },
+      {
+        "name": "use_agent",
+        "description": "sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "allow_rsa_keys",
+        "description": "false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      }
+    ],
+    "option_fields": [
+      {
+        "name": "if_exists",
+        "type": "string",
+        "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
+        "default": "overwrite",
+        "choices": [
+          "overwrite",
+          "error",
+          "number"
+        ]
+      },
+      {
+        "name": "atomic",
+        "type": "boolean",
+        "description": "upload under a temporary name, then rename, so no half-written file appears",
+        "required": false,
+        "default": true
+      },
+      {
+        "name": "temp_dir",
+        "type": "string",
+        "description": "where the temporary file goes (on the same server), for receivers that pick up any new file",
+        "required": false
+      }
+    ]
+  }
+}
