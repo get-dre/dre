@@ -6,6 +6,7 @@
 
 use std::io::Read;
 use std::path::Path;
+use std::time::Duration;
 
 use dre_protocol::{
     Kind, PluginId, package_executable_name, parse_executable_name, parse_package_executable_name,
@@ -164,33 +165,180 @@ fn is_github(url: &str) -> bool {
     url.starts_with("https://github.com/") || url.starts_with(&format!("{}/", github_api()))
 }
 
+/// Download `url` (or read a local path or `file://` URL). Downloads give up on a connection
+/// after 30s and on a response that sends nothing for [`http_timeout`] (no total limit, so a
+/// slow but healthy download finishes), and are tried 3 times on connection errors, timeouts,
+/// 429 (honouring `Retry-After`) and 5xx.
 pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
     if url.starts_with("http://") || url.starts_with("https://") {
-        let mut req = ureq::get(url).header("User-Agent", "dre");
-        if is_github(url) {
-            // A release asset's API URL answers with its metadata unless asked for the file.
-            let accept = if url.contains("/releases/assets/") {
-                "application/octet-stream"
-            } else {
-                "application/vnd.github+json"
-            };
-            req = req.header("Accept", accept);
-            if let Ok(t) = std::env::var("GITHUB_TOKEN")
-                && !t.is_empty()
-            {
-                req = req.header("Authorization", &format!("Bearer {t}"));
-            }
-        }
-        let mut resp = req.call().map_err(|e| format!("can't download {url}: {e}"))?;
-        let mut body = Vec::new();
-        resp.body_mut()
-            .as_reader()
-            .read_to_end(&mut body)
-            .map_err(|e| format!("can't download {url}: {e}"))?;
-        return Ok(body);
+        return fetch_http(url, http_timeout(), &mut std::thread::sleep);
     }
     let path = url.strip_prefix("file://").unwrap_or(url);
     std::fs::read(path).map_err(|e| format!("can't read {path}: {e}"))
+}
+
+/// How long to wait for a connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Seconds a download may receive nothing, by default.
+pub const DEFAULT_HTTP_TIMEOUT: u64 = 60;
+const ATTEMPTS: u32 = 3;
+
+static PROJECT_HTTP_TIMEOUT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// `flags: http_timeout` from the project being run (set once, when it loads).
+pub fn set_project_http_timeout(secs: u64) {
+    let _ = PROJECT_HTTP_TIMEOUT.set(secs);
+}
+
+/// How long a download may receive nothing: `DRE_HTTP_TIMEOUT`, else the project's
+/// `flags: http_timeout`, else 60 seconds.
+pub fn http_timeout() -> Duration {
+    let env = crate::settings::env(crate::settings::HTTP_TIMEOUT).and_then(|v| v.trim().parse::<u64>().ok());
+    Duration::from_secs(
+        env.or_else(|| PROJECT_HTTP_TIMEOUT.get().copied())
+            .filter(|s| *s > 0)
+            .unwrap_or(DEFAULT_HTTP_TIMEOUT),
+    )
+}
+
+/// Why one try failed.
+enum Try {
+    /// Trying again may work; `after` is the server's `Retry-After`.
+    Again {
+        why: String,
+        after: Option<Duration>,
+    },
+    Fail(String),
+}
+
+fn fetch_http(url: &str, idle: Duration, sleep: &mut dyn FnMut(Duration)) -> Result<Vec<u8>, String> {
+    let mut attempt = 1;
+    loop {
+        match fetch_once(url, idle) {
+            Ok(body) => return Ok(body),
+            Err(Try::Again { after, .. }) if attempt < ATTEMPTS => {
+                let wait = after.unwrap_or_else(|| backoff(attempt));
+                sleep(wait);
+                attempt += 1;
+            }
+            Err(Try::Again { why, .. }) => {
+                return Err(format!(
+                    "can't download {url}: {why} (after {ATTEMPTS} tries). If the network is slow, raise the \
+                     timeout with DRE_HTTP_TIMEOUT or `flags: http_timeout:` in dre_project.yml (seconds, \
+                     default {DEFAULT_HTTP_TIMEOUT}); to run without downloading, install plugins ahead of \
+                     time with `dre deps` or point DRE_PLUGINS_DIR at installed ones"
+                ));
+            }
+            Err(Try::Fail(why)) => return Err(format!("can't download {url}: {why}")),
+        }
+    }
+}
+
+/// About 1s, then 4s, give or take a quarter.
+fn backoff(attempt: u32) -> Duration {
+    let base = 4f64.powi(attempt as i32 - 1);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    Duration::from_secs_f64(base * (0.75 + f64::from(nanos % 1000) / 2000.0))
+}
+
+fn fetch_once(url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .timeout_recv_response(Some(idle))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut req = agent.get(url).header("User-Agent", "dre");
+    if is_github(url) {
+        // A release asset's API URL answers with its metadata unless asked for the file.
+        let accept = if url.contains("/releases/assets/") {
+            "application/octet-stream"
+        } else {
+            "application/vnd.github+json"
+        };
+        req = req.header("Accept", accept);
+        if let Ok(t) = std::env::var("GITHUB_TOKEN")
+            && !t.is_empty()
+        {
+            req = req.header("Authorization", &format!("Bearer {t}"));
+        }
+    }
+    let resp = req.call().map_err(|e| match e {
+        ureq::Error::Timeout(_) => Try::Again {
+            why: format!("no answer for {}s", idle.as_secs()),
+            after: None,
+        },
+        ureq::Error::Io(_)
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::HostNotFound
+        | ureq::Error::Protocol(_) => Try::Again {
+            why: e.to_string(),
+            after: None,
+        },
+        e => Try::Fail(e.to_string()),
+    })?;
+    let status = resp.status().as_u16();
+    if status == 429 || (500..600).contains(&status) {
+        let after = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(|s| Duration::from_secs(s.min(120)));
+        return Err(Try::Again {
+            why: format!("HTTP {status}"),
+            after,
+        });
+    }
+    if !(200..300).contains(&status) {
+        return Err(Try::Fail(format!("HTTP {status}")));
+    }
+    read_with_idle_timeout(resp.into_body().into_reader(), idle)
+}
+
+/// Read `r` to the end, failing if no bytes arrive for `idle`. The read runs on a helper thread so
+/// a stalled connection can't block the caller; it ends with the process if it never returns.
+fn read_with_idle_timeout(
+    mut r: impl std::io::Read + Send + 'static,
+    idle: Duration,
+) -> Result<Vec<u8>, Try> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<std::io::Result<Vec<u8>>>(4);
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let chunk = match r.read(&mut buf) {
+                Ok(0) => Ok(Vec::new()),
+                Ok(n) => Ok(buf[..n].to_vec()),
+                Err(e) => Err(e),
+            };
+            let done = !matches!(&chunk, Ok(c) if !c.is_empty());
+            if tx.send(chunk).is_err() || done {
+                return;
+            }
+        }
+    });
+    let mut body = Vec::new();
+    loop {
+        match rx.recv_timeout(idle) {
+            Ok(Ok(c)) if c.is_empty() => return Ok(body),
+            Ok(Ok(c)) => body.extend_from_slice(&c),
+            Ok(Err(e)) => {
+                return Err(Try::Again {
+                    why: e.to_string(),
+                    after: None,
+                });
+            }
+            Err(_) => {
+                return Err(Try::Again {
+                    why: format!("no data for {}s", idle.as_secs()),
+                    after: None,
+                });
+            }
+        }
+    }
 }
 
 impl Index {
@@ -872,6 +1020,83 @@ pub fn install_linked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A local HTTP server answering each connection with the next of `replies` (raw bytes;
+    /// `None`: accept and say nothing), keeping every connection open. Returns its URL and a count of connections.
+    fn serve(replies: Vec<Option<&'static str>>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/index.json", listener.local_addr().unwrap());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = count.clone();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for (mut conn, reply) in listener.incoming().flatten().zip(replies) {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = std::io::Read::read(&mut conn, &mut buf);
+                if let Some(r) = reply {
+                    let _ = conn.write_all(r.as_bytes());
+                }
+                // Keep it open: the client decides when it's done.
+                held.push(conn);
+            }
+            std::thread::sleep(Duration::from_secs(30));
+            drop(held);
+        });
+        (url, count)
+    }
+
+    const OK: &str = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}";
+    const UNAVAILABLE: &str =
+        "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+
+    fn get(url: &str, waits: &mut Vec<Duration>) -> Result<Vec<u8>, String> {
+        fetch_http(url, Duration::from_millis(500), &mut |w| waits.push(w))
+    }
+
+    #[test]
+    fn a_server_that_never_answers_times_out_after_three_tries() {
+        let (url, count) = serve(vec![None, None, None]);
+        let mut waits = Vec::new();
+        let e = get(&url, &mut waits).unwrap_err();
+        assert!(
+            e.contains("no answer") && e.contains("after 3 tries") && e.contains("DRE_HTTP_TIMEOUT"),
+            "{e}"
+        );
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(waits.len(), 2);
+        assert!(waits[0] < waits[1]);
+    }
+
+    #[test]
+    fn a_body_that_stalls_times_out() {
+        let stall = "HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\n{\"partial";
+        let (url, _) = serve(vec![Some(stall), Some(stall), Some(stall)]);
+        let e = get(&url, &mut Vec::new()).unwrap_err();
+        assert!(e.contains("no data for"), "{e}");
+    }
+
+    #[test]
+    fn server_errors_are_retried_then_succeed() {
+        let (url, count) = serve(vec![Some(UNAVAILABLE), Some(OK)]);
+        assert_eq!(get(&url, &mut Vec::new()).unwrap(), b"{}");
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn retry_after_is_honoured_and_a_404_is_not_retried() {
+        let busy = "HTTP/1.1 429 Too Many Requests\r\nretry-after: 7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        let (url, _) = serve(vec![Some(busy), Some(OK)]);
+        let mut waits = Vec::new();
+        get(&url, &mut waits).unwrap();
+        assert_eq!(waits, [Duration::from_secs(7)]);
+        let missing = "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        let (url, count) = serve(vec![Some(missing), Some(OK)]);
+        let e = get(&url, &mut Vec::new()).unwrap_err();
+        assert!(e.contains("HTTP 404") && !e.contains("tries"), "{e}");
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn default_registry_lives_under_get_dre() {

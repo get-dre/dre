@@ -1,0 +1,4 @@
+exit: 0
+  Profiles  $CASE/no-profiles/profiles.yml (from --profiles-dir, not found)
+    Target  dev (default)
+Validation passed: 0 errors, 0 warnings

@@ -38,6 +38,7 @@ For editor autocomplete and validation, add this as the first line of the file (
 | `week_start` | `monday` or `sunday` | `monday` | The first day of the week for `run.date` week arithmetic. |
 | `week_numbering` | `iso` or `us` | `iso` | How weeks are numbered: ISO 8601 or US style. |
 | `reports` | map (see below) |  | Folder config: settings for the report folders, by folder name, nested to match the folders under `reports/`. |
+| `flags` | map (see below) |  | How DRE itself behaves, as in dbt's `flags:`. Each flag has a `DRE_` environment variable that wins over it. |
 | `target_path` | string |  | Where DRE writes its generated files (compiled SQL, run outputs, the manifest). Default: `target/` in the project. `--target-path` and `DRE_TARGET_PATH` override it. |
 | `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
 | `sources` | map, as in [the sources reference](reference-sources.md) |  | dbt-style source declarations (see the sources schema). May be written in any project YAML file. |
@@ -63,6 +64,14 @@ Folder config: settings for the report folders, by folder name, nested to match 
 | `+vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
 | `+timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
 | `+locale` | string |  | The `locale:` for reports in this folder; a report's own wins. See `locale` in dre_project.yml. |
+
+## `flags`
+
+How DRE itself behaves, as in dbt's `flags:`. Each flag has a `DRE_` environment variable that wins over it.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `http_timeout` | integer | `60` | Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it. |
 
 ## `plugins[]`
 

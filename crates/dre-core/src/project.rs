@@ -92,6 +92,7 @@ pub const PROJECT_KEYS: &[&str] = &[
     "vars",
     "run_query_max_rows",
     "lookup_inline_max_rows",
+    "flags",
     "dispatch",
     "mask_secrets",
     "timezone",
@@ -1136,6 +1137,7 @@ impl Loader {
                 DEFAULT_RUN_QUERY_MAX_ROWS
             }
         };
+        self.parse_flags(&file, pf.flags);
         let dispatch = self.parse_dispatch(&yf.display, pf.dispatch);
         match pf.format_options {
             None | Some(de::Located { value: Loose::Ok(None), .. }) => {}
@@ -1385,6 +1387,46 @@ impl Loader {
     }
 
     /// `dispatch: [{macro_namespace: dre_utils, search_order: [my_project, dre_utils]}]`.
+    /// `flags:`: settings for DRE itself. Each takes effect where it's used (downloads read
+    /// `http_timeout`).
+    fn parse_flags(&mut self, file: &Option<PathBuf>, v: Option<de::Located<Loose<config::project::Flags>>>) {
+        let flags = match v {
+            None => return,
+            Some(de::Located {
+                value: Loose::Ok(f), ..
+            }) => f,
+            Some(v) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    v.line(),
+                    "`flags` must be a map",
+                );
+                return;
+            }
+        };
+        for k in &flags.unknown.0 {
+            self.diags.error(
+                Code::UnknownKey,
+                file.clone(),
+                Some(k.line),
+                format!("unknown key `flags.{}`; flags are: http_timeout", k.name),
+            );
+        }
+        match flags.http_timeout {
+            None => {}
+            Some(de::Located {
+                value: Loose::Ok(n), ..
+            }) if n > 0 => crate::manager::set_project_http_timeout(n),
+            Some(v) => self.diags.error(
+                Code::InvalidField,
+                file.clone(),
+                v.line(),
+                "`flags.http_timeout` must be a positive whole number of seconds",
+            ),
+        }
+    }
+
     fn parse_dispatch(&mut self, file: &Path, v: Option<config::project::DispatchList>) -> DispatchOrder {
         let mut out = DispatchOrder::new();
         let Some(v) = v else { return out };
