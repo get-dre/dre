@@ -638,10 +638,11 @@ pub fn cli_var_value(s: &str) -> Json {
     }
     if int {
         let digits = t.trim_start_matches(['-', '+']);
-        if !digits.is_empty() && !(digits.len() > 1 && digits.starts_with('0')) {
-            if let Ok(n) = t.parse::<i64>() {
-                return Json::from(n);
-            }
+        if !digits.is_empty()
+            && !(digits.len() > 1 && digits.starts_with('0'))
+            && let Ok(n) = t.parse::<i64>()
+        {
+            return Json::from(n);
         }
         return Json::String(s.to_string());
     }
@@ -657,20 +658,20 @@ pub fn cli_var_value(s: &str) -> Json {
         && float.chars().filter(|c| *c == '.').count() <= 1
         && !float.starts_with("00")
         && !(float.starts_with('0') && float.len() > 1 && float.as_bytes()[1].is_ascii_digit());
-    if is_float && (float.contains('.') || float.contains(['e', 'E'])) {
-        if let Ok(f) = t.parse::<f64>() {
-            if let Some(n) = serde_json::Number::from_f64(f) {
-                return Json::Number(n);
-            }
-        }
+    if is_float
+        && (float.contains('.') || float.contains(['e', 'E']))
+        && let Ok(f) = t.parse::<f64>()
+        && let Some(n) = serde_json::Number::from_f64(f)
+    {
+        return Json::Number(n);
     }
     let quoted = (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
         || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2);
     let flow = (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('{') && t.ends_with('}'));
-    if quoted || flow {
-        if let Ok(v) = serde_saphyr::from_str::<Json>(t) {
-            return v;
-        }
+    if (quoted || flow)
+        && let Ok(v) = serde_saphyr::from_str::<Json>(t)
+    {
+        return v;
     }
     Json::String(s.to_string())
 }
