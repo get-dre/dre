@@ -46,6 +46,8 @@ import (
 	"time"
 
 	"github.com/databricks/databricks-sdk-go/config"
+
+	"github.com/get-dre/dre/go/plugin"
 )
 
 const (
@@ -528,19 +530,7 @@ func storeSessionAt(path, key string, session map[string]any) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return plugin.WriteFileAtomic(path, b, 0o600)
 }
 
 // lockFile takes the lock file and returns its release. Better to write unlocked than to fail a

@@ -99,7 +99,7 @@ pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
     let p = version_dir.join(MANIFEST);
-    std::fs::write(&p, serde_json::to_string_pretty(m).unwrap())
+    crate::fs::write_atomic(&p, serde_json::to_string_pretty(m).unwrap().as_bytes())
         .map_err(|e| format!("can't write {}: {e}", p.display()))
 }
 

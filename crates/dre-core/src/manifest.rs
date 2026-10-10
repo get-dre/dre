@@ -13,7 +13,6 @@
 //! renaming or re-typing a field, or changing what one means, bumps it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -796,25 +795,15 @@ pub fn render(doc: &Json) -> String {
     crate::secrets::to_json_pretty(doc).unwrap() + "\n"
 }
 
-/// Write `project`'s manifest atomically (a temp file in the target folder, then a rename).
-/// Returns the SHA-256 of the bytes written.
+/// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of
+/// the bytes written.
 pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String> {
     let text = render(&build(project, errors));
     let dir = &project.target_dir;
     crate::target::ensure(dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let dst = dir.join(FILE);
-    let tmp = dir.join(format!(".{FILE}.{}.tmp", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, &dst)
-    };
-    if let Err(e) = write() {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("can't write {}: {e}", dst.display()));
-    }
+    crate::fs::write_atomic(&dst, text.as_bytes())
+        .map_err(|e| format!("can't write {}: {e}", dst.display()))?;
     Ok(hex(&Sha256::digest(text.as_bytes())))
 }
 

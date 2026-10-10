@@ -516,7 +516,7 @@ fn swap(dir: &Path, exe: &Path, binary: &[u8], receipt: Option<&[u8]>) -> Result
         std::fs::rename(&tmp, exe).map_err(|e| cleanup(denied(&e)))?;
     }
     if let Some(r) = receipt {
-        let _ = std::fs::write(exe.with_file_name(RECEIPT), r);
+        let _ = dre_core::fs::write_atomic(&exe.with_file_name(RECEIPT), r);
     }
     Ok(())
 }

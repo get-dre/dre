@@ -2288,7 +2288,7 @@ impl<'a> BindingRun<'a> {
         if prev != original {
             let protected =
                 serde_json::to_string_pretty(&prev).expect("serializing a serde_json::Value cannot fail");
-            if let Err(error) = std::fs::write(&path, protected) {
+            if let Err(error) = crate::fs::write_atomic(&path, protected.as_bytes()) {
                 self.ui.warn(&format!(
                     "can't protect the existing schema snapshot at {}: {error}; continuing without rewriting it",
                     path.display()
@@ -2307,9 +2307,9 @@ impl<'a> BindingRun<'a> {
             crate::schema::redact(&mut snapshot);
             snapshot
         });
-        std::fs::write(
-            self.schema_dir.join("last_success.json"),
-            serde_json::to_string_pretty(&snapshot)?,
+        crate::fs::write_atomic(
+            &self.schema_dir.join("last_success.json"),
+            serde_json::to_string_pretty(&snapshot)?.as_bytes(),
         )
     }
 

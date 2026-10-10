@@ -127,3 +127,167 @@ mod tests {
         assert_eq!(percent_encode("a b/c", false), "a%20b%2Fc");
     }
 }
+
+/// Write `bytes` to `path` so that a reader, or a crash, sees either the old file or the new one,
+/// never a part: write a temporary file (`.<name>.<pid>.<random>.tmp`) in the same folder, flush
+/// it to disk, rename it over `path`, then flush the folder (Unix; a folder that can't be
+/// flushed, such as some network mounts, is logged at debug and ignored). For DRE's durable
+/// state (`run_results.json`, the drift snapshot, the manifest, `dre.lock`, sessions), not report
+/// outputs.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_mode(path, bytes, None)
+}
+
+/// [`write_atomic`], creating the file with Unix permissions `mode` (e.g. `0o600` for secrets).
+pub fn write_atomic_mode(path: &std::path::Path, bytes: &[u8], mode: Option<u32>) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    };
+    let name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other(format!("{} has no file name", path.display())))?
+        .to_string_lossy();
+    let tmp = dir.join(format!(".{name}.{}.{}.tmp", std::process::id(), random_suffix()));
+    let write = || -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        if let Some(m) = mode {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(m);
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+        let mut f = opts.open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    if let Err(e) = std::fs::File::open(&dir).and_then(|d| d.sync_all()) {
+        crate::log::debug!("can't flush the folder {}: {e}", dir.display());
+    }
+    Ok(())
+}
+
+/// Four characters that differ between calls, for temporary file names.
+fn random_suffix() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let mut n = nanos
+        ^ COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_mul(2_654_435_761);
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+    (0..4)
+        .map(|_| {
+            let c = ALPHABET[(n % 32) as usize] as char;
+            n /= 32;
+            c
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod atomic_tests {
+    use super::*;
+
+    #[test]
+    fn writes_replace_whole_files_and_leave_no_temporary_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("run_results.json");
+        write_atomic(&p, b"{\"a\":1}").unwrap();
+        write_atomic(&p, b"{\"a\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"a\":2}");
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["run_results.json"]);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_old_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x.json");
+        std::fs::write(&p, "old").unwrap();
+        // The target is a folder: the rename fails, the temporary file goes.
+        let folder = dir.path().join("sub");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("keep"), "").unwrap();
+        assert!(write_atomic(&folder, b"new").is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "old");
+        let tmp = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            })
+            .count();
+        assert_eq!(tmp, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mode_is_applied() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.json");
+        write_atomic_mode(&p, b"{}", Some(0o600)).unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    /// A process killed while writing leaves the old file or a new one, whole.
+    #[test]
+    fn a_killed_writer_never_leaves_a_partial_file() {
+        if let Some(path) = std::env::var_os("DRE_ATOMIC_CHILD") {
+            // The child: write big files forever.
+            let path = std::path::PathBuf::from(path);
+            for i in 0u64.. {
+                let body = format!("{{\"n\":{i},\"pad\":\"{}\"}}", "x".repeat(1 << 20));
+                write_atomic(&path, body.as_bytes()).unwrap();
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        write_atomic(&path, b"{\"n\":-1}").unwrap();
+        for _ in 0..5 {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "util::atomic_tests::a_killed_writer_never_leaves_a_partial_file",
+                    "--nocapture",
+                ])
+                .env("DRE_ATOMIC_CHILD", &path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&text).expect("a whole JSON file");
+            assert!(v["n"].is_i64());
+        }
+    }
+
+    #[test]
+    fn suffixes_differ() {
+        assert_ne!(random_suffix(), random_suffix());
+    }
+}

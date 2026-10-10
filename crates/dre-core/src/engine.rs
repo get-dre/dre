@@ -202,8 +202,8 @@ impl RunStore {
         results: &crate::run_results::RunResults,
     ) -> std::io::Result<()> {
         std::fs::create_dir_all(run_dir)?;
-        std::fs::write(
-            run_dir.join("run_results.json"),
+        crate::fs::write_atomic(
+            &run_dir.join("run_results.json"),
             (crate::secrets::to_json_pretty(results)? + "\n").as_bytes(),
         )
     }
