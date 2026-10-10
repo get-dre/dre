@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod cli_reference;
+mod exit;
 mod init;
 mod ls;
 mod output;
@@ -277,6 +278,9 @@ struct ValidateArgs {
     /// Compile (and with --live, check) one Set instead of every Set.
     #[arg(long)]
     set: Option<String>,
+    /// Treat warnings as errors: exit 1 when there are any.
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Args)]
@@ -314,13 +318,13 @@ fn main() -> ExitCode {
             "DRE_TIMEZONE"
         };
         printer.error(&format!("{from}: {e}"));
-        return ExitCode::from(2);
+        return exit::not_started();
     }
     if project_args.is_some()
         && let Err(e) = run_at()
     {
         printer.error(&e);
-        return ExitCode::from(2);
+        return exit::not_started();
     }
     match cli.command {
         Command::Explain(a) => explain(&a.code),
@@ -360,13 +364,13 @@ fn explain(code: &str) -> ExitCode {
             c.explanation(),
             dre_core::codes::REFERENCE_URL
         );
-        return ExitCode::SUCCESS;
+        return exit::ok();
     }
     if let Some((plugin, _)) = code.split_once('/') {
         println!(
             "`{code}` is a code of the `{plugin}` plugin; see its page in the plugins reference: https://getdre.com/docs/plugins/"
         );
-        return ExitCode::SUCCESS;
+        return exit::ok();
     }
     let near: Vec<&str> = dre_core::codes::Code::ALL
         .iter()
@@ -385,7 +389,7 @@ fn explain(code: &str) -> ExitCode {
         )
     };
     eprintln!("error: no code `{code}`{hint}");
-    ExitCode::from(2)
+    exit::not_started()
 }
 
 fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
@@ -425,7 +429,8 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
     if let Some(w) = targets.as_ref().and_then(dre_core::run::RunTargets::mismatch) {
         diags.warning(Code::TargetMismatch, None, None, w);
     }
-    let ok = !diags.has_errors();
+    // `--strict`: warnings count as errors.
+    let ok = !diags.has_errors() && !(a.strict && diags.warning_count() > 0);
     if a.json {
         let out = serde_json::json!({
             "ok": ok,
@@ -481,15 +486,19 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
             plural(w)
         );
     }
+    if project.is_none() {
+        // No project to check: missing or unreadable dre_project.yml.
+        return exit::not_started();
+    }
     if !ok {
-        return ExitCode::FAILURE;
+        return exit::failed();
     }
     if a.live
         && let Some(project) = project
     {
         return validate_live(&project, selector, a.set, &a.project, printer.clone());
     }
-    ExitCode::SUCCESS
+    exit::ok()
 }
 
 /// Compiles quietly, collecting what each Binding would do.
@@ -585,21 +594,21 @@ fn compile_for_validate(
 /// `dre compile`: render the selection into target/compiled/ and list the files.
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     };
     printer.log_to(&project.root);
     // Compiling only needs the source plugin for templates that query; with installing off, a
     // missing plugin is reported by the Binding that needs it.
     if !a.project.no_auto_install && !plugins::ensure(&project, true, false, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(&project, &a.project, &mut diags);
     if !report_diags(&diags, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
         selector: selection(&a.select, &a.selector),
@@ -671,7 +680,7 @@ fn plugin_list() -> ExitCode {
     let found = dre_core::plugins::discover(&dir);
     if found.is_empty() {
         println!("No plugin packages installed in {}", dir.display());
-        return ExitCode::SUCCESS;
+        return exit::ok();
     }
     let quiet: dre_protocol::host::LogSink = std::sync::Arc::new(|_, _| {});
     let mut rows = vec![[
@@ -715,7 +724,7 @@ fn plugin_list() -> ExitCode {
             .collect();
         println!("{}", line.join("  ").trim_end());
     }
-    ExitCode::SUCCESS
+    exit::ok()
 }
 
 /// Load and validate the project; print problems. `None` when it can't run.
@@ -841,17 +850,17 @@ pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> 
 fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     use std::io::IsTerminal;
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     };
     printer.log_to(&project.root);
     for s in project.settings.lines() {
         printer.detail(output::Tone::Note, "Setting", &s);
     }
     if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
     let run_timeout = match dre_core::settings::flag_or_env(
@@ -865,7 +874,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
                 printer.error(&format!(
                     "{from} must be a duration such as `2h` or `90m`, or seconds"
                 ));
-                return ExitCode::from(2);
+                return exit::not_started();
             }
         },
         None => project.run_timeout,
@@ -876,7 +885,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         dre_core::options::check(&project, false, &mut diags);
     }
     if !report_diags(&diags, &printer) {
-        return ExitCode::FAILURE;
+        return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
         selector: selection(&a.select, &a.selector),
@@ -902,7 +911,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         && !project.schedules.iter().any(|e| &e.name == name)
     {
         printer.error(&dre_core::run::unknown_schedule(&project, name));
-        return ExitCode::from(2);
+        return exit::not_started();
     }
     // Each Binding records its own date, in its own timezone; this line only logs the request.
     let date = opts
@@ -959,29 +968,29 @@ fn clean(a: CleanArgs) -> ExitCode {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+            return exit::not_started();
         }
     };
     let shown = dre_core::slash(t.dir.strip_prefix(root).unwrap_or(&t.dir));
     match dre_core::target::clean_dir(root, &t) {
         Ok(dre_core::target::Cleaned::Removed) => {
             eprintln!("Removed {}/", shown.display());
-            ExitCode::SUCCESS
+            exit::ok()
         }
         Ok(dre_core::target::Cleaned::Missing) => {
             eprintln!("Nothing to clean: no {}/ directory", shown.display());
-            ExitCode::SUCCESS
+            exit::ok()
         }
         Err(e) => {
             eprintln!("error: {e}");
-            ExitCode::FAILURE
+            exit::failed()
         }
     }
 }
 
 fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
     if !plugins::sync_packages(&a.project_dir, printer) {
-        return ExitCode::FAILURE;
+        return exit::failed();
     }
     let opts = LoadOptions {
         profiles_dir: a.profiles_dir,
@@ -992,7 +1001,7 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         for d in diags.sorted() {
             printer.diag(d);
         }
-        return ExitCode::FAILURE;
+        return exit::not_started();
     };
     if plugins::ensure(&project, true, true, printer) {
         printer.line(
@@ -1004,9 +1013,9 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
                 project.packages.len()
             ),
         );
-        ExitCode::SUCCESS
+        exit::ok()
     } else {
-        ExitCode::FAILURE
+        exit::failed()
     }
 }
 

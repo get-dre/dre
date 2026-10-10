@@ -90,7 +90,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         Ok(w) => w,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(2);
+            return crate::exit::not_started();
         }
     };
     let opts = LoadOptions {
@@ -112,7 +112,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
                 eprintln!("{d}");
             }
             eprintln!("error: the project has errors; fix them first (see `dre validate`)");
-            return ExitCode::FAILURE;
+            return crate::exit::not_started();
         }
     };
     dre_core::secrets::set_enabled(project.mask_secrets);
@@ -128,7 +128,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         Ok(d) => d,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     if text {
@@ -144,7 +144,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
     } else {
         print!("{}", dre_core::manifest::render(&doc));
     }
-    ExitCode::SUCCESS
+    crate::exit::ok()
 }
 
 /// An error about profiles.yml or the profiles a project names, which listing schedules doesn't

@@ -1,4 +1,4 @@
-exit: 1
+exit: 2
 --- stdout
 --- stderr
 error[invalid-schedule]: schedules.yml:1: invalid cron `0 25 * * *`: hour field `25` has `25` outside 0-23

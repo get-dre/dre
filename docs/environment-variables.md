@@ -2,7 +2,7 @@
 title: "Environment variables"
 description: "Every DRE_* variable and what it does."
 section: reference
-position: 13
+position: 14
 ---
 
 # Environment variables
@@ -30,4 +30,4 @@ position: 13
 
 ---
 
-**Previous:** [Error codes reference](reference-error-codes.md) · **Next:** [The manifest and `run_results.json`](manifest.md)
+**Previous:** [Exit codes](exit-codes.md) · **Next:** [The manifest and `run_results.json`](manifest.md)

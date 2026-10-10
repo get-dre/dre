@@ -62,6 +62,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 - [dependencies.yml reference](reference-dependencies.md): Every key of dependencies.yml: plugin packages and macro packages.
 - [Lookup config reference](reference-lookups.md): Every key of a lookup's config file.
 - [Error codes reference](reference-error-codes.md): Every code DRE reports, what it means and how to fix it.
+- [Exit codes](exit-codes.md): What each dre exit code means, so a scheduler knows whether to retry, alert or stop.
 - [Environment variables](environment-variables.md): Every DRE_* variable and what it does.
 - [The manifest and `run_results.json`](manifest.md): The project manifest and the per-run results file, with the manifest JSON Schema.
 

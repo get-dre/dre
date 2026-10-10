@@ -298,7 +298,7 @@ Airflow, Dagster and Databricks Jobs all do), and you cancel one at the terminal
 - the Binding that was running is recorded as `cancelled` in its `run_results.json`, with the
   error code [`run-cancelled`](reference-error-codes.md#run-cancelled); Bindings that hadn't started
   don't run;
-- the exit code is **130** after Ctrl-C and **143** after a termination signal (on Windows,
+- the [exit code](exit-codes.md) is **130** after Ctrl-C and **143** after a termination signal (on Windows,
   Ctrl-Break, closing the console, logging off or shutting down count as termination). A second
   Ctrl-C stops at once.
 

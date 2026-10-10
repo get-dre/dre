@@ -9,7 +9,7 @@ position: 1
 
 <!-- Generated from the CLI definitions by crates/dre-cli/src/cli_reference.rs. Edit the code, not this page. -->
 
-Every `dre` command and flag. `dre <command> --help` prints the same text. When a run fails, its exit code comes from the kind of the [error code](reference-error-codes.md) it reports. Settings that also come from the environment are listed with their variable; every variable is on the [environment variables](environment-variables.md) page.
+Every `dre` command and flag. `dre <command> --help` prints the same text. Every command exits with one of the documented [exit codes](exit-codes.md); each problem it reports has an [error code](reference-error-codes.md). Settings that also come from the environment are listed with their variable; every variable is on the [environment variables](environment-variables.md) page.
 
 ## Global options
 
@@ -48,6 +48,7 @@ dre validate [OPTIONS] [SELECTOR]...
 | `--json` |  | Emit machine-readable JSON instead of text. |
 | `--live` |  | After the offline checks, connect to each Binding's source and check every rendered statement without executing it (EXPLAIN or the dialect's equivalent). |
 | `--set <SET>` |  | Compile (and with --live, check) one Set instead of every Set. |
+| `--strict` |  | Treat warnings as errors: exit 1 when there are any. |
 
 Example:
 

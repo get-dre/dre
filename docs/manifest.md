@@ -2,7 +2,7 @@
 title: "The manifest and `run_results.json`"
 description: "The project manifest and the per-run results file, with the manifest JSON Schema."
 section: reference
-position: 14
+position: 15
 ---
 
 # The manifest and `run_results.json`
@@ -207,7 +207,7 @@ table, and `dre ls --resource-type source` lists the declared sources, flagging 
 [Sources](sources.md#listing-sources)). `--target` and `--var` resolve them as a run would.
 `--output json` prints a document in the manifest's shape holding only the matching reports and
 Bindings (and, with `--schedule`, that schedule). Data goes to stdout and messages to stderr; a
-selector or schedule that matches nothing exits non-zero. `dre ls` needs no connection or
+selector or schedule that matches nothing exits 2 (see [exit codes](exit-codes.md)). `dre ls` needs no connection or
 `profiles.yml` and writes nothing.
 
 `dre validate --json` includes the same document under `"project"`.
