@@ -202,8 +202,9 @@ func TestTheAuthenticatorPicksTheSignIn(t *testing.T) {
 }
 
 func TestDbtFieldsAreAcceptedAndTyposRefused(t *testing.T) {
-	if _, err := open(map[string]any{"account": "a", "user": "u", "pasword": "p"}); err == nil || !strings.Contains(err.Error(), "`pasword`") {
-		t.Fatalf("%v", err)
+	// A typo warns (the SDK checks before open); dbt-only keys are accepted.
+	if _, warns := plugin.CheckConnection(sourceRole, map[string]any{"account": "a", "user": "u", "pasword": "p", "threads": 4.0}, nil); len(warns) != 1 || !strings.Contains(warns[0], "did you mean `password`") {
+		t.Fatalf("%v", warns)
 	}
 	cfg, err := config(map[string]any{"account": "a", "user": "u", "password": "p", "query_tag": "dre", "connect_retries": 2.0, "client_session_keep_alive": true})
 	if err != nil || *cfg.Params["query_tag"] != "dre" || cfg.MaxRetryCount != 2 || !cfg.ServerSessionKeepAlive {

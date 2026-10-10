@@ -3135,7 +3135,7 @@ fn render_json(renderer: &Renderer, file: &Path, v: &Json) -> Result<Json, Rende
 }
 
 /// Render `env_var()` (and only that) inside a profile output's string fields.
-fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String, Json>, String> {
+pub(crate) fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String, Json>, String> {
     let mut env = minijinja::Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
     env.add_function("env_var", |name: String, default: Option<String>| -> Result<String, minijinja::Error> {

@@ -42,6 +42,7 @@ impl Destination for Slack {
                 .required()
                 .secret(),
             ConnectionField::new("channel", "default channel ID (C0123) or #name"),
+            ConnectionField::new("api_url", "Slack's API URL, for a proxy").manual(),
         ]
         .into_iter()
         .chain(delivery::connection_fields())

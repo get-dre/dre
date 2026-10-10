@@ -20,6 +20,7 @@
 pub use log;
 
 pub mod conformance;
+pub mod connection;
 pub mod delivery;
 pub mod frame;
 pub mod host;

@@ -22,7 +22,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | Field | Required | Secret | Default | Description |
 |---|---|---|---|---|
 | `method` | no | no | `oauth` | how to sign in: oauth (gcloud application-default credentials), service-account (a key file), service-account-json, oauth-secrets or external-oauth-wif |
-| `project` | yes | no |  | the Google Cloud project to read from (dbt's `database` also works) |
+| `project` | no | no |  | the Google Cloud project to read from (dbt's `database` also works); required, checked by the plugin |
 | `dataset` | no | no |  | default dataset for unqualified table names (dbt's `schema` also works) |
 | `location` | no | no |  | where jobs run, e.g. US, EU or europe-west2 |
 | `keyfile` | no | no |  | path to a service account key file, for method service-account |

@@ -47,6 +47,15 @@ pub enum Request {
     Validate {
         options: Map<String, Value>,
     },
+    /// Source or destination (protocol 1): check a profile entry's connection settings without
+    /// connecting: the declared fields' generic checks, then the plugin's own rules. Keys in
+    /// `unresolved` (an unset `env_var()`) arrive as `null` and count as set, unchecked. Replies
+    /// `validated`, with `warnings` for unknown keys.
+    ValidateConnection {
+        connection: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unresolved: Vec<String>,
+    },
     /// Source: open a session. All later `execute`/`check` requests run on it.
     Open {
         connection: Map<String, Value>,
@@ -143,6 +152,9 @@ pub enum Response {
     /// Every problem with the options, each a sentence naming the key; empty when they're fine.
     Validated {
         errors: Vec<String>,
+        /// Problems that don't stop a run (an unknown key); `validate_connection` only.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
     },
     Ok {},
     /// A result set follows as Arrow frames, ended by `result_end`.
@@ -320,6 +332,28 @@ pub struct ConnectionField {
     /// prompted field (a key given as text instead of a file) and nested blocks (`ssh:`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub manual: bool,
+    /// What the value must be, checked by `validate_connection` (and `dre init` as you type).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<FieldKind>,
+    /// The only values it may take (`dre init` offers them as a choice).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+/// What a connection field's value must be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    String,
+    /// A whole number, or a string of one (`port: "5432"`).
+    Integer,
+    Boolean,
+    /// A file that must exist; a leading `~/` is the home directory.
+    Path,
+    /// `30s`, `2m`, `1h`, or seconds.
+    Duration,
+    /// A block of settings (`ssh:`), checked by the plugin's own rules.
+    Map,
 }
 
 impl ConnectionField {
@@ -332,7 +366,18 @@ impl ConnectionField {
             default: None,
             same_as_source: None,
             manual: false,
+            kind: None,
+            choices: Vec::new(),
         }
+    }
+    pub fn kind(mut self, kind: FieldKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+    pub fn choices(mut self, choices: &[&str]) -> Self {
+        self.choices = choices.iter().map(|c| c.to_string()).collect();
+        self.kind.get_or_insert(FieldKind::String);
+        self
     }
     pub fn required(mut self) -> Self {
         self.required = true;

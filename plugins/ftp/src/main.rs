@@ -10,7 +10,7 @@
 use std::net::ToSocketAddrs;
 use std::path::Path;
 
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{
     About, Delivery, Destination, PluginError, Result, conn_bool, conn_required, conn_str, serve_destination,
 };
@@ -306,10 +306,23 @@ impl Destination for Ftp {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "FTP server").required(),
-            ConnectionField::new("port", "port").default(21),
+            ConnectionField::new("port", "port")
+                .default(21)
+                .kind(FieldKind::Integer),
             ConnectionField::new("username", "user name").required(),
             ConnectionField::new("password", "password").secret(),
-            ConnectionField::new("tls", "none or explicit (FTPS)").default("none"),
+            ConnectionField::new("tls", "none or explicit (FTPS)")
+                .default("none")
+                .choices(&["none", "explicit"]),
+            ConnectionField::new("passive", "passive mode (default true)")
+                .kind(FieldKind::Boolean)
+                .manual(),
+            ConnectionField::new(
+                "tls_accept_invalid_certs",
+                "accept a self-signed server certificate",
+            )
+            .kind(FieldKind::Boolean)
+            .manual(),
         ]
         .into_iter()
         .chain(delivery::connection_fields())

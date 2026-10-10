@@ -388,7 +388,7 @@ fn prefer_falls_back_to_plain_text_and_require_refuses_it() {
     let e = try_open(conn(json!({"sslmode": "require"}))).err().unwrap();
     assert!(e.contains("does not support TLS"), "{e}");
     let e = try_open(conn(json!({"sslmode": "sometimes"}))).err().unwrap();
-    assert!(e.contains("unknown `sslmode` `sometimes`"), "{e}");
+    assert!(e.contains("`sslmode` must be one of `disable`, `prefer`"), "{e}");
 }
 
 /// Settings for Postgres at `db.internal`, reachable only through the bastion

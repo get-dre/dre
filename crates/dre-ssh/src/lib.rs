@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dre_protocol::delivery::{Retry, is_connection_error};
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{Result, conn_str};
 use russh::client;
 use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
@@ -82,7 +82,17 @@ pub struct Ssh {
 pub fn auth_fields() -> Vec<ConnectionField> {
     vec![
         ConnectionField::new("password", "password (or set private_key_path)").secret(),
-        ConnectionField::new("private_key_path", "private key file (instead of a password)"),
+        ConnectionField::new("private_key_path", "private key file (instead of a password)")
+            .kind(FieldKind::Path),
+        ConnectionField::new("private_key_passphrase", "the private key's passphrase")
+            .secret()
+            .manual(),
+        ConnectionField::new(
+            "known_hosts_path",
+            "known_hosts file (default ~/.ssh/known_hosts)",
+        )
+        .kind(FieldKind::Path)
+        .manual(),
         ConnectionField::new(
             "private_key",
             "the private key's text, e.g. from env_var() (instead of private_key_path)",
@@ -97,11 +107,13 @@ pub fn auth_fields() -> Vec<ConnectionField> {
             "use_agent",
             "sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file",
         )
+        .kind(FieldKind::Boolean)
         .manual(),
         ConnectionField::new(
             "allow_rsa_keys",
             "false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning",
         )
+        .kind(FieldKind::Boolean)
         .manual(),
     ]
 }
@@ -317,6 +329,15 @@ async fn agent_sign_in(session: &mut Session, user: &str) -> std::result::Result
     Ok(false)
 }
 
+/// The SSH settings' problems a static check can find (both a key file and key text, a key
+/// that can't be read, no way to sign in), for a plugin's `validate_connection`. No network.
+pub fn check_settings(c: &Map<String, Value>, prefix: &str) -> Vec<String> {
+    match Ssh::from_settings(c, prefix) {
+        Ok(_) => Vec::new(),
+        Err(e) => vec![e.to_string()],
+    }
+}
+
 fn home_known_hosts() -> PathBuf {
     std::env::home_dir()
         .unwrap_or_default()
@@ -498,7 +519,10 @@ mod tests {
         );
         assert_eq!(e, "set `ssh.private_key_path` or `ssh.private_key`, not both");
         let e = err(settings(json!({})), "");
-        assert_eq!(e, "set `password`, `private_key_path` or `private_key`");
+        assert_eq!(
+            e,
+            "set `password`, `private_key_path`, `private_key` or `use_agent: true`"
+        );
         let e = err(json!({"host": "h"}).as_object().unwrap().clone(), "ssh.");
         assert_eq!(e, "the profile output needs a `ssh.username` field");
         let e = err(settings(json!({"password": "x", "port": 70000})), "ssh.");

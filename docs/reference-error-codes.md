@@ -173,6 +173,12 @@ A cell reference isn't valid.
 
 Cells are written like `A1` or `AB12`.
 
+### invalid-connection-setting
+
+A profile entry's connection setting is wrong.
+
+The entry's plugin checked its settings without connecting: a required field is missing, a value has the wrong form or isn't one of the allowed values, or two settings can't go together. The message names the setting; fix it in `profiles.yml`.
+
 ### invalid-destination-option
 
 A destination option is wrong.
@@ -490,6 +496,12 @@ Workspace files (`/Workspace/...`) have shown flushing and rename problems, so D
 The target path can't be written.
 
 DRE couldn't create or write the target folder (permissions, a read-only mount, a full disk). The message has the reason.
+
+### unknown-connection-key
+
+A profile entry has a key its plugin doesn't take.
+
+The key is ignored, so a misspelt one does nothing. The message suggests the nearest known key. `dre validate --strict` makes it an error.
 
 ### unknown-default-set
 

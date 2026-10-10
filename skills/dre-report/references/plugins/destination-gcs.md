@@ -23,6 +23,8 @@ Never write a secret's value: use `env_var()` (SEC-3).
 |---|---|---|---|---|
 | `bucket` | no | no |  | default bucket (or use gs://bucket/... paths) |
 | `service_account_key_path` | no | no |  | service-account key file (empty: application default credentials) |
+| `service_account_key` | no | yes |  | the service-account key's JSON text |
+| `endpoint` | no | no |  | an emulator's URL |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |

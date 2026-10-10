@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
-use crate::msg::ConnectionField;
+use crate::msg::{ConnectionField, FieldKind};
 use crate::options::{OptionField, OptionType};
 use crate::plugin::{ErrorKind, PluginError};
 
@@ -194,18 +194,21 @@ pub fn connection_fields() -> Vec<ConnectionField> {
             "how long to wait for a connection (`30s`, `2m`, or seconds)",
         )
         .default("30s")
+        .kind(FieldKind::Duration)
         .manual(),
         ConnectionField::new(
             "timeout",
             "how long a read or write may make no progress before it fails",
         )
         .default("60s")
+        .kind(FieldKind::Duration)
         .manual(),
         ConnectionField::new(
             "retries",
             "how many times to try again after a temporary error (0: never)",
         )
         .default(DEFAULT_RETRIES)
+        .kind(FieldKind::Integer)
         .manual(),
     ]
 }

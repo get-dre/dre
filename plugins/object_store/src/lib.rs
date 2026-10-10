@@ -25,7 +25,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use dre_protocol::delivery::{self, Caps, Rules, Store, StoreError, deliver};
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::options::OptionField;
 use dre_protocol::plugin::{
     About, Delivery, Destination, Plugin, PluginError, Result, conn_bool, conn_str, serve_package,
@@ -112,9 +112,10 @@ fn build(
     let client = ClientOptions::new()
         .with_connect_timeout(rules.connect_timeout)
         .with_timeout(rules.timeout);
-    // The shared delivery rules retry (and log it), so object_store's own retries are off.
+    // object_store tries a failed request again itself (a part of a large upload, say), up to
+    // `retries` times; the shared delivery rules then try the whole upload again, and log it.
     let no_retry = RetryConfig {
-        max_retries: 0,
+        max_retries: rules.retries as usize,
         ..Default::default()
     };
     Ok(match kind {
@@ -321,22 +322,49 @@ impl Destination for ObjectStoreDestination {
                 )
                 .secret(),
                 ConnectionField::new("secret_access_key", "secret access key").secret(),
+                ConnectionField::new("session_token", "temporary session token")
+                    .secret()
+                    .manual(),
+                ConnectionField::new("profile", "a profile from the AWS config files").manual(),
+                ConnectionField::new("endpoint", "an S3-compatible store's URL").manual(),
+                ConnectionField::new("allow_http", "allow a plain-HTTP endpoint")
+                    .kind(FieldKind::Boolean)
+                    .manual(),
             ],
             Kind::Gcs => vec![
                 ConnectionField::new("bucket", "default bucket (or use gs://bucket/... paths)"),
                 ConnectionField::new(
                     "service_account_key_path",
                     "service-account key file (empty: application default credentials)",
-                ),
+                )
+                .kind(FieldKind::Path),
+                ConnectionField::new("service_account_key", "the service-account key's JSON text")
+                    .secret()
+                    .manual(),
+                ConnectionField::new("endpoint", "an emulator's URL").manual(),
             ],
             Kind::Azure => vec![
-                ConnectionField::new("account_name", "storage account name").required(),
+                ConnectionField::new("account_name", "storage account name"),
                 ConnectionField::new("container", "default container (or use az://container/... paths)"),
                 ConnectionField::new(
                     "connection_string",
                     "connection string (or set sas_token / access_key)",
                 )
                 .secret(),
+                ConnectionField::new("sas_token", "a SAS token").secret().manual(),
+                ConnectionField::new("access_key", "the account's access key")
+                    .secret()
+                    .manual(),
+                ConnectionField::new(
+                    "use_managed_identity",
+                    "sign in as the machine's managed identity",
+                )
+                .kind(FieldKind::Boolean)
+                .manual(),
+                ConnectionField::new("use_azure_cli", "sign in with the `az login` session")
+                    .kind(FieldKind::Boolean)
+                    .manual(),
+                ConnectionField::new("endpoint", "an emulator's URL").manual(),
             ],
         };
         fields.extend(delivery::connection_fields());
@@ -350,6 +378,14 @@ impl Destination for ObjectStoreDestination {
             .into_iter()
             .filter(|f| f.name == "if_exists")
             .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        if self.kind == Kind::Azure && !c.contains_key("account_name") && !c.contains_key("connection_string")
+        {
+            return vec!["`account_name` is required (or a `connection_string`)".into()];
+        }
+        Vec::new()
     }
 
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {

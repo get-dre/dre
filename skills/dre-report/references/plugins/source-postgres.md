@@ -25,9 +25,12 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `port` | no | no | `5432` | server port |
 | `user` | yes | no |  | user name |
 | `password` | no | yes |  | password |
-| `database` | yes | no |  | database name |
+| `database` | no | no |  | database name |
+| `dbname` | no | no |  | libpq's name for `database` |
 | `sslmode` | no | no | `prefer` | disable, prefer, require, verify-ca or verify-full |
+| `sslrootcert` | no | no |  | CA certificate for verify-ca and verify-full |
 | `schema` | no | no |  | schema to put first on the search path |
+| `role` | no | no |  | SET ROLE after connecting |
 | `ssh` | no | yes |  | reach the server through an SSH bastion (a block of settings) |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |

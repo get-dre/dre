@@ -24,8 +24,11 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `host` | yes | no |  | SFTP server |
 | `port` | no | no | `22` | port |
 | `username` | yes | no |  | user name |
+| `accept_unknown_host` | no | no |  | trust a host missing from known_hosts |
 | `password` | no | yes |  | password (or set private_key_path) |
 | `private_key_path` | no | no |  | private key file (instead of a password) |
+| `private_key_passphrase` | no | yes |  | the private key's passphrase |
+| `known_hosts_path` | no | no |  | known_hosts file (default ~/.ssh/known_hosts) |
 | `private_key` | no | yes |  | the private key's text, e.g. from env_var() (instead of private_key_path) |
 | `host_key_fingerprint` | no | no |  | pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used) |
 | `use_agent` | no | no |  | sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file |
@@ -179,7 +182,7 @@ secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line wi
 gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
-`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host` is true.
 With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
 pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:

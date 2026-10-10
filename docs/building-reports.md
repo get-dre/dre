@@ -17,6 +17,7 @@ dre run                  # run every report; output lands in target/run/ (one fo
 dre run monthly --preview 50       # sample 50 rows, never delivered
 dre run -s tag:regulatory --set all  # every regulatory report, for every Set
 dre validate --live      # check every statement against the database without running it
+dre validate --all-targets  # also check the settings of every profile entry, used or not
 dre ls --schedule close_monthly    # list the Bindings a schedule runs (--output json for tools)
 dre clean                # remove the target folder
 dre system update        # update DRE itself

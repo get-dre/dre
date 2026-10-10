@@ -300,6 +300,10 @@ struct ValidateArgs {
     /// Treat warnings as errors: exit 1 when there are any.
     #[arg(long)]
     strict: bool,
+    /// Check the connection settings of every entry in profiles.yml, not only the entries the
+    /// selected reports would use with these flags.
+    #[arg(long)]
+    all_targets: bool,
 }
 
 #[derive(Args)]
@@ -449,6 +453,30 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
     };
     if let Some(w) = targets.as_ref().and_then(dre_core::run::RunTargets::mismatch) {
         diags.warning(Code::TargetMismatch, None, None, w);
+    }
+    // Each profile entry's settings, checked by its plugin without connecting: the entries the
+    // run would use, or with `--all-targets` every entry.
+    if let Some(p) = &project {
+        let entries = if a.all_targets {
+            dre_core::options::all_entries(p)
+        } else {
+            targets
+                .iter()
+                .flat_map(|t| &t.profiles)
+                .filter(|u| u.deliver)
+                .map(|u| {
+                    let role = if u.role == "connection" {
+                        dre_core::profiles::Role::Connection
+                    } else {
+                        dre_core::profiles::Role::Destination
+                    };
+                    (role, u.profile.clone(), u.target.clone())
+                })
+                .collect()
+        };
+        if a.all_targets || !diags.has_errors() {
+            dre_core::options::check_connections(p, &entries, &mut diags);
+        }
     }
     // `--strict`: warnings count as errors.
     let ok = !diags.has_errors() && !(a.strict && diags.warning_count() > 0);

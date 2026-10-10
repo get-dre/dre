@@ -23,6 +23,7 @@ Never write a secret's value: use `env_var()` (SEC-3).
 |---|---|---|---|---|
 | `token` | yes | yes |  | bot token (xoxb-...) |
 | `channel` | no | no |  | default channel ID (C0123) or #name |
+| `api_url` | no | no |  | Slack's API URL, for a proxy |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |
@@ -128,7 +129,7 @@ Uploads the output to a Slack channel, or to one person's DM, as a single post w
 If a report produces several files, they all go in the same post.
 
 The profile holds `token`, a bot token (`xoxb-...`), which is never logged. It can also hold a
-default `channel`. Destination options:
+default `channel`, and `api_url` (default `https://slack.com/api`) for a proxy. Destination options:
 
 | Option | Meaning |
 |---|---|

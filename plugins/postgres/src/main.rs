@@ -34,7 +34,7 @@ use arrow::util::display::{ArrayFormatter, FormatOptions};
 use bytes::Bytes;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use dre_protocol::delivery::{self, Retry, retry};
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
 use dre_ssh::Ssh;
@@ -631,19 +631,28 @@ impl Source for Postgres {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "server host name").default("localhost"),
-            ConnectionField::new("port", "server port").default(5432),
+            ConnectionField::new("port", "server port")
+                .default(5432)
+                .kind(FieldKind::Integer),
             ConnectionField::new("user", "user name").required(),
             ConnectionField::new("password", "password").secret(),
-            ConnectionField::new("database", "database name").required(),
+            ConnectionField::new("database", "database name"),
+            ConnectionField::new("dbname", "libpq's name for `database`").manual(),
             ConnectionField::new("sslmode", "disable, prefer, require, verify-ca or verify-full")
-                .default("prefer"),
+                .default("prefer")
+                .choices(&["disable", "prefer", "require", "verify-ca", "verify-full"]),
+            ConnectionField::new("sslrootcert", "CA certificate for verify-ca and verify-full")
+                .kind(FieldKind::Path)
+                .manual(),
             ConnectionField::new("schema", "schema to put first on the search path"),
+            ConnectionField::new("role", "SET ROLE after connecting").manual(),
             // A secret, so templates can't read the block (it may hold a key or a password).
             ConnectionField::new(
                 "ssh",
                 "reach the server through an SSH bastion (a block of settings)",
             )
             .secret()
+            .kind(FieldKind::Map)
             .manual(),
         ]
         .into_iter()
@@ -655,6 +664,17 @@ impl Source for Postgres {
                 .filter(|f| f.name != "timeout"),
         )
         .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        let mut errors = Vec::new();
+        if !c.contains_key("database") && !c.contains_key("dbname") {
+            errors.push("`database` is required".to_string());
+        }
+        if let Some(Value::Object(ssh)) = c.get("ssh") {
+            errors.extend(dre_ssh::check_settings(ssh, "ssh."));
+        }
+        errors
     }
 
     fn open(&mut self, c: &Map<String, Value>, read_only: bool) -> Result<()> {

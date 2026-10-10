@@ -29,6 +29,10 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `client_secret` | no | yes |  | service principal OAuth secret |
 | `catalog` | no | no |  | default catalog |
 | `schema` | no | no |  | default schema |
+| `profile` | no | no |  | a ~/.databrickscfg profile to sign in with (auth_type auto) |
+| `scopes` | no | no |  | OAuth scopes |
+| `redirect_port` | no | no |  | the localhost port browser sign-in redirects to (default 8020) |
+| `retry_timeout` | no | no |  | seconds to keep waiting while a stopped warehouse starts (default 900) |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload |
 
 ## Report options

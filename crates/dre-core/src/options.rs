@@ -259,3 +259,158 @@ pub fn local_option_errors(options: &serde_json::Map<String, serde_json::Value>)
         options,
     )
 }
+
+/// One profile entry to check: its role, profile and entry (target) name.
+pub type EntryRef = (Role, String, String);
+
+/// Every entry of every profile, for `dre validate --all-targets`.
+pub fn all_entries(project: &Project) -> Vec<EntryRef> {
+    let mut out = Vec::new();
+    for (role, profiles) in [
+        (Role::Connection, &project.profiles.connections),
+        (Role::Destination, &project.profiles.destinations),
+    ] {
+        for (name, p) in profiles {
+            for target in p.targets.keys() {
+                out.push((role, name.clone(), target.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// Ask each entry's plugin to check its connection settings without connecting (the protocol's
+/// `validate_connection`). A value from an unset `env_var()` is reported once as an
+/// `unset-env-var` warning (CI often validates without secrets) and sent unresolved, so it isn't
+/// reported again as missing.
+pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Diagnostics) {
+    let log: LogSink = Arc::new(|_, _| {});
+    let file = project.profiles.file.clone();
+    let mut unset_reported = std::collections::BTreeSet::new();
+    // Plugin -> the entries it checks, so each plugin starts once.
+    let mut by_plugin: BTreeMap<(PluginKind, String), Vec<&EntryRef>> = BTreeMap::new();
+    for e in entries {
+        let (role, profile, target) = e;
+        let Some(t) = project
+            .profiles
+            .get(*role, profile)
+            .and_then(|p| p.targets.get(target))
+        else {
+            continue;
+        };
+        if t.kind == LOCAL_TYPE {
+            continue;
+        }
+        let kind = match role {
+            Role::Connection => PluginKind::Source,
+            Role::Destination => PluginKind::Destination,
+        };
+        by_plugin.entry((kind, t.kind.clone())).or_default().push(e);
+    }
+    for ((kind, name), entries) in by_plugin {
+        // A missing plugin is reported by the plugin checks.
+        let Ok(plugin) = find_plugin(project, kind, &name) else {
+            continue;
+        };
+        let mut p = match plugin.start(log.clone(), Some(&project.root)) {
+            Ok(p) => p,
+            Err(e) => {
+                diags.warning(
+                    Code::OptionsUnchecked,
+                    file.clone(),
+                    None,
+                    format!("can't check the settings of {kind} `{name}`: {e}"),
+                );
+                continue;
+            }
+        };
+        for (role, profile, target) in entries {
+            let t = &project.profiles.get(*role, profile).unwrap().targets[target];
+            let line = project.profiles.line_of(*role, profile);
+            let at = format!("{} `{profile}` (entry `{target}`)", role.as_str());
+            // Values with an unset `env_var()` go unresolved; the rest are rendered as for a run.
+            let mut known = t.clone();
+            let mut unresolved = Vec::new();
+            for (k, v) in &t.fields {
+                let unset: Vec<String> = unset_env_vars(v);
+                if unset.is_empty() {
+                    continue;
+                }
+                known.fields.insert(k.clone(), Value::Null);
+                unresolved.push(k.clone());
+                for var in unset {
+                    // A warning: CI often validates without the secrets a run needs.
+                    if unset_reported.insert(var.clone()) {
+                        diags.warning(
+                            Code::UnsetEnvVar,
+                            file.clone(),
+                            line,
+                            format!(
+                                "{at}: `env_var('{var}')`: environment variable `{var}` is not set and no default is given; `dre run` will need it"
+                            ),
+                        );
+                    }
+                }
+            }
+            let rendered = match crate::run::render_connection(&known) {
+                Ok(r) => r,
+                Err(e) => {
+                    diags.error(
+                        Code::InvalidConnectionSetting,
+                        file.clone(),
+                        line,
+                        format!("{at}: {e}"),
+                    );
+                    continue;
+                }
+            };
+            match p.validate_connection(rendered, unresolved) {
+                Ok((errors, warnings)) => {
+                    for e in errors {
+                        diags.error(
+                            Code::InvalidConnectionSetting,
+                            file.clone(),
+                            line,
+                            format!("{at}: {e}"),
+                        );
+                    }
+                    for w in warnings {
+                        diags.warning(
+                            Code::UnknownConnectionKey,
+                            file.clone(),
+                            line,
+                            format!("{at}: {w}"),
+                        );
+                    }
+                }
+                Err(e) => {
+                    diags.warning(
+                        Code::OptionsUnchecked,
+                        file.clone(),
+                        line,
+                        format!(
+                            "{at}: {kind} `{name}` {} couldn't check its settings ({e}); run `dre plugin update {kind}/{name}`",
+                            p.info().version
+                        ),
+                    );
+                    break;
+                }
+            }
+        }
+        let _ = p.close();
+    }
+}
+
+/// The variables of `env_var()` calls without a default that aren't set, anywhere in `v`.
+fn unset_env_vars(v: &Value) -> Vec<String> {
+    match v {
+        Value::String(s) if crate::preflight::is_templated(s) => crate::preflight::calls(s)
+            .into_iter()
+            .filter(|c| c.func == "env_var" && !c.has_default && std::env::var_os(&c.name).is_none())
+            .map(|c| c.name)
+            .collect(),
+        Value::Array(a) => a.iter().flat_map(unset_env_vars).collect(),
+        Value::Object(o) => o.values().flat_map(unset_env_vars).collect(),
+        _ => Vec::new(),
+    }
+}

@@ -35,9 +35,6 @@ type session struct {
 }
 
 func open(conn map[string]any) (*session, error) {
-	if err := plugin.Unknown(conn, fields, append(aliases, dbtOnly...)...); err != nil {
-		return nil, err
-	}
 	project := first(conn, "project", "database")
 	if project == "" {
 		return nil, fmt.Errorf("the profile output needs a `project` field (dbt's `database`)")

@@ -36,9 +36,12 @@ Every plugin:
 3. **Validates a config block** (`validate`): checks one block of options and replies with every
    problem found, without connecting or writing anything. `dre validate` and `dre run` send every
    block the project gives the plugin before anything runs.
-4. **Does its one job**: a source runs statements (`open`, `execute`, and optionally `check` and
+4. **Checks its connection settings** (`validate_connection`, sources and destinations): a
+   profile entry's settings, without connecting. `dre validate` sends it for every entry the run
+   would use (every entry with `--all-targets`).
+5. **Does its one job**: a source runs statements (`open`, `execute`, and optionally `check` and
    `load`); a format writes files (`write`); a destination delivers them (`deliver`).
-5. **Closes cleanly** on `close` or at the end of its input.
+6. **Closes cleanly** on `close` or at the end of its input.
 
 The config block a plugin owns:
 
@@ -59,7 +62,12 @@ In Rust, the `dre_protocol::plugin` SDK does all of this. A plugin implements on
 allowed values, bounds, default, description), and adds any rule a declaration can't express in
 `validate()`. The SDK answers `describe` and `validate` from those declarations, advertises
 `validate`, and checks the options again before every `write` and `deliver`, so plugin code only
-sees options that passed. The conformance suite checks every part of the interface.
+sees options that passed. Connection fields declare a `kind` and `choices` the same way, and
+`validate_connection()` adds rules about several fields; the SDK runs those checks for
+`validate_connection` and again before `open` and every `deliver`, so `dre validate` and
+`dre run` give the same message. The Go module does the same (`Field.Kind`, `Field.Choices`,
+`Role.ValidateConnection`, `Role.Accepts`). The conformance suite checks every part of the
+interface.
 
 ### Delivery rules in the SDKs
 
@@ -255,8 +263,9 @@ The SDKs bridge each language's logging: in Rust the `log` crate (re-exported as
 
 | Request | Reply |
 |---|---|
-| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source","manual"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\""}` |
+| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source","manual","kind","choices"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\""}` |
 | `{"type":"validate","options":{…}}` | `{"type":"validated","errors":["…"]}` |
+| `{"type":"validate_connection","connection":{…},"unresolved":["…"]}` (sources, destinations) | `{"type":"validated","errors":["…"],"warnings":["…"]}` |
 | `{"type":"close"}` | `{"type":"ok"}`, then the plugin exits 0 |
 
 `describe` lists the fields a `profiles.yml` target of this plugin's type accepts. `dre init`
@@ -288,6 +297,18 @@ each a sentence naming the key; `errors` is empty when the block is fine. The pl
 connect, read or write anything. A destination's string values may still hold Jinja
 (`{{ … }}`, `{% … %}`), which core renders only before `deliver`: such a value is checked for
 presence only.
+
+`validate_connection` (protocol 1) checks a profile entry's connection settings and replies
+`validated` without connecting, resolving names or opening files beyond checking one exists.
+First the generic checks from `connection_fields`: a `required` field missing (one with a
+`default` never is), a value of the wrong `kind` (`string`, `integer` (a number or a string of
+one), `boolean`, `path` (a file that exists; `~/` is the home directory), `duration`, `map`), a
+string not in `choices`. A key no field declares is a **warning**, with the nearest field's
+name; it never stops a run. Then the plugin's own rules about several fields. Keys listed in
+`unresolved` (their `env_var()` is unset, which core reports itself) arrive as `null`: they
+count as set, but aren't checked. Messages name fields, never values, and the SDK redacts any
+`secret` field's value from them. The same checks run before `open` and `deliver`: errors fail
+the request (kind `config`), warnings are sent as `log` messages.
 
 When stdin closes, the plugin exits.
 

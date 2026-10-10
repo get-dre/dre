@@ -794,11 +794,31 @@ impl PluginProcess {
         }
     }
 
+    /// Check a profile entry's connection settings without connecting (protocol 1): the errors
+    /// and the warnings. `unresolved` keys (an unset `env_var()`) are sent as `null`.
+    pub fn validate_connection(
+        &mut self,
+        mut connection: Map<String, Value>,
+        unresolved: Vec<String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        for k in &unresolved {
+            connection.insert(k.clone(), Value::Null);
+        }
+        self.send(&Request::ValidateConnection {
+            connection,
+            unresolved,
+        })?;
+        match self.recv_json("a validated reply")? {
+            Response::Validated { errors, warnings } => Ok((errors, warnings)),
+            other => Err(self.unexpected("a validated reply", &Incoming::Json(other))),
+        }
+    }
+
     /// Check a config block of options (needs `validate`); returns every problem found.
     pub fn validate(&mut self, options: Map<String, Value>) -> Result<Vec<String>> {
         self.send(&Request::Validate { options })?;
         match self.recv_json("a validate reply")? {
-            Response::Validated { errors } => Ok(errors),
+            Response::Validated { errors, .. } => Ok(errors),
             other => Err(self.unexpected("a validate reply", &Incoming::Json(other))),
         }
     }

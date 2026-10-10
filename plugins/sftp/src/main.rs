@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use dre_protocol::delivery::{self, Caps, Retry, Rules, Store, StoreError, deliver};
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::options::OptionField;
 use dre_protocol::plugin::{About, Delivery, Destination, PluginError, Result, conn_bool, serve_destination};
 use dre_ssh::Ssh;
@@ -243,13 +243,22 @@ impl Destination for Sftp {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "SFTP server").required(),
-            ConnectionField::new("port", "port").default(22),
+            ConnectionField::new("port", "port")
+                .default(22)
+                .kind(FieldKind::Integer),
             ConnectionField::new("username", "user name").required(),
+            ConnectionField::new("accept_unknown_host", "trust a host missing from known_hosts")
+                .kind(FieldKind::Boolean)
+                .manual(),
         ]
         .into_iter()
         .chain(dre_ssh::auth_fields())
         .chain(delivery::connection_fields())
         .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        dre_ssh::check_settings(c, "")
     }
 
     /// `if_exists`, `atomic` and `temp_dir` (the shared delivery rules).

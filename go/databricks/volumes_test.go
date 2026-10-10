@@ -149,10 +149,10 @@ func TestTheDestinationRoleSpeaksTheProtocol(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 	c.Send(map[string]any{"type": "describe"})
-	if names := plugintest.FieldNames(c.Reply()); names != "host,auth_type,token,client_id,client_secret,retries" {
+	if names := plugintest.FieldNames(c.Reply()); names != "host,auth_type,token,client_id,client_secret,profile,scopes,redirect_port,retries" {
 		t.Fatalf("%v", names)
 	}
-	c.Send(map[string]any{"type": "deliver", "local_path": "/x", "remote_path": "/Volumes/c/s/v/x", "connection": map[string]any{}, "options": map[string]any{"to": "x"}})
+	c.Send(map[string]any{"type": "deliver", "local_path": "/x", "remote_path": "/Volumes/c/s/v/x", "connection": map[string]any{"host": "h"}, "options": map[string]any{"to": "x"}})
 	plugintest.ExpectError(t, c.Reply(), "unknown option `to` for destination `databricks`; expected one of if_exists")
 	c.Send(map[string]any{"type": "validate", "options": map[string]any{"to": "x"}})
 	if r := c.Reply(); r["type"] != "validated" || len(r["errors"].([]any)) != 1 {

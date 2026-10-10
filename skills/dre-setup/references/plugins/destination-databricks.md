@@ -26,6 +26,9 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `token` | no | yes |  | personal access token, for auth_type pat |
 | `client_id` | no | no |  | OAuth client; a service principal's application ID (browser sign-in defaults to databricks-cli) |
 | `client_secret` | no | yes |  | service principal OAuth secret |
+| `profile` | no | no |  | a ~/.databrickscfg profile to sign in with (auth_type auto) |
+| `scopes` | no | no |  | OAuth scopes |
+| `redirect_port` | no | no |  | the localhost port browser sign-in redirects to (default 8020) |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload |
 
 ## Report options
@@ -150,7 +153,8 @@ name free. Put a date or a period in delivery paths so different runs don't coll
 ### databricks
 
 Unity Catalog Volumes and workspace files, chosen by the path. `host` and the same sign-in fields
-as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`), so one set of
+as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`, `profile`, `scopes`,
+`redirect_port`), so one set of
 credentials, and one OAuth session per workspace, serves both. It's the same program as the
 source.
 

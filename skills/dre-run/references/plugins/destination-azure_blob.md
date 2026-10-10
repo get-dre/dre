@@ -21,9 +21,14 @@ Never write a secret's value: use `env_var()` (SEC-3).
 
 | Field | Required | Secret | Default | Description |
 |---|---|---|---|---|
-| `account_name` | yes | no |  | storage account name |
+| `account_name` | no | no |  | storage account name |
 | `container` | no | no |  | default container (or use az://container/... paths) |
 | `connection_string` | no | yes |  | connection string (or set sas_token / access_key) |
+| `sas_token` | no | yes |  | a SAS token |
+| `access_key` | no | yes |  | the account's access key |
+| `use_managed_identity` | no | no |  | sign in as the machine's managed identity |
+| `use_azure_cli` | no | no |  | sign in with the `az login` session |
+| `endpoint` | no | no |  | an emulator's URL |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |
@@ -150,7 +155,7 @@ name free. Put a date or a period in delivery paths so different runs don't coll
 ### azure_blob
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
-`use_managed_identity: true`, or `use_azure_cli: true` (the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+`use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
 Takes `if_exists` (see [above](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
 
 ## Guide notes

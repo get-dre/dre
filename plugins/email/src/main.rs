@@ -15,7 +15,7 @@ use std::str::FromStr;
 
 use dre_protocol::delivery::{Retry, retry};
 use dre_protocol::markdown;
-use dre_protocol::msg::ConnectionField;
+use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::options::{OptionField, OptionType, is_template};
 use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_bool, conn_required, conn_str, serve_destination,
@@ -36,8 +36,11 @@ impl Destination for Email {
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new("host", "SMTP server host").required(),
-            ConnectionField::new("port", "SMTP port (587 for starttls, 465 for implicit TLS)"),
-            ConnectionField::new("tls", "starttls, implicit or none").default("starttls"),
+            ConnectionField::new("port", "SMTP port (587 for starttls, 465 for implicit TLS)")
+                .kind(FieldKind::Integer),
+            ConnectionField::new("tls", "starttls, implicit or none")
+                .default("starttls")
+                .choices(&["starttls", "implicit", "none"]),
             ConnectionField::new("username", "SMTP username"),
             ConnectionField::new("password", "SMTP password").secret(),
             ConnectionField::new("from", "sender address, e.g. \"Reports <reports@example.com>\"").required(),
@@ -93,6 +96,14 @@ impl Destination for Email {
                 addresses(v, k).err().map(|e| e.to_string())
             })
             .collect()
+    }
+
+    fn validate_connection(&self, c: &Map<String, Value>) -> Vec<String> {
+        match (c.contains_key("username"), c.contains_key("password")) {
+            (true, false) => vec!["`username` is set but `password` isn't".into()],
+            (false, true) => vec!["`password` is set but `username` isn't".into()],
+            _ => Vec::new(),
+        }
     }
 
     fn deliver_message(&mut self, d: &Delivery, m: &dre_protocol::msg::Message) -> Result<String> {

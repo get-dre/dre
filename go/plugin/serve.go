@@ -70,6 +70,11 @@ type Field struct {
 	Default      any    `json:"default,omitempty"`
 	SameAsSource string `json:"same_as_source,omitempty"`
 	Manual       bool   `json:"manual,omitempty"`
+	// Kind is what the value must be: string, integer, boolean, path (a file that exists),
+	// duration or map. Checked by validate_connection and before open and deliver.
+	Kind string `json:"kind,omitempty"`
+	// Choices are the only values it may take.
+	Choices []string `json:"choices,omitempty"`
 }
 
 // OptionField mirrors the protocol's `describe` entry for one option a report's config block
@@ -101,6 +106,14 @@ type Role struct {
 	Deliver func(local, remote string, conn, opts map[string]any) (string, error)
 	// Cancel, when set, stops a running delivery (see Canceller).
 	Cancel func()
+	// Accepts are keys taken without being declared in Fields (dbt's other names, dbt-only
+	// keys), so they don't warn as unknown.
+	Accepts []string
+	// ValidateConnection, when set, checks what Fields can't express (two keys that can't go
+	// together), each a sentence naming the field, never its value. Static: no network. Run by
+	// validate_connection, and before Open and Deliver. A value set through an unset env_var()
+	// arrives as nil.
+	ValidateConnection func(conn map[string]any) []string
 }
 
 // ID is the role as the protocol writes a plugin: `<kind>/<name>`.
@@ -566,6 +579,31 @@ func oneOf(choices []string) string {
 }
 
 func (s *server) handle(t string, req map[string]json.RawMessage) error {
+	if t == "validate_connection" {
+		var r struct {
+			Connection map[string]any `json:"connection"`
+			Unresolved []string       `json:"unresolved"`
+		}
+		if json.Unmarshal(mustObject(req), &r) != nil || r.Connection == nil {
+			return fmt.Errorf("unsupported request `validate_connection`")
+		}
+		errs, warns := CheckConnection(s.role, r.Connection, r.Unresolved)
+		s.send(map[string]any{"type": "validated", "errors": errs, "warnings": warns})
+		return nil
+	}
+	// The same checks before connecting: errors stop it, warnings are logged.
+	if (t == "open" && s.role.Kind == "source") || (t == "deliver" && s.role.Kind == "destination") {
+		var conn map[string]any
+		if json.Unmarshal(req["connection"], &conn) == nil && conn != nil {
+			errs, warns := CheckConnection(s.role, conn, nil)
+			for _, w := range warns {
+				slog.Warn(w)
+			}
+			if len(errs) > 0 {
+				return &Error{Kind: "config", Message: strings.Join(errs, "; ")}
+			}
+		}
+	}
 	if t == "validate" {
 		var r struct {
 			Options map[string]any `json:"options"`

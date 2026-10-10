@@ -296,6 +296,12 @@ codes! {
     InvalidDestinationOption = "invalid-destination-option", Config,
         "A destination option is wrong.",
         "An `output.destination` entry has a bad value for one of its options (`attach:` naming no output, a plugin's option of the wrong type). The message names the option.";
+    InvalidConnectionSetting = "invalid-connection-setting", Config,
+        "A profile entry's connection setting is wrong.",
+        "The entry's plugin checked its settings without connecting: a required field is missing, a value has the wrong form or isn't one of the allowed values, or two settings can't go together. The message names the setting; fix it in `profiles.yml`.";
+    UnknownConnectionKey = "unknown-connection-key", Config,
+        "A profile entry has a key its plugin doesn't take.",
+        "The key is ignored, so a misspelt one does nothing. The message suggests the nearest known key. `dre validate --strict` makes it an error.";
     InvalidTemplate = "invalid-template", Config,
         "An xlsx template binding is wrong.",
         "`output.template` needs a `file:`, and each binding a `sheet:` with either a table block (`query`, optional `anchor`, `columns`) or a single cell (`cell` with `value`, or `query` + `column`).";

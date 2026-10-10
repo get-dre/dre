@@ -26,6 +26,8 @@ Never write a secret's value: use `env_var()` (SEC-3).
 | `username` | yes | no |  | user name |
 | `password` | no | yes |  | password |
 | `tls` | no | no | `none` | none or explicit (FTPS) |
+| `passive` | no | no |  | passive mode (default true) |
+| `tls_accept_invalid_certs` | no | no |  | accept a self-signed server certificate |
 | `connect_timeout` | no | no | `30s` | how long to wait for a connection (`30s`, `2m`, or seconds) |
 | `timeout` | no | no | `60s` | how long a read or write may make no progress before it fails |
 | `retries` | no | no | `3` | how many times to try again after a temporary error (0: never) |

@@ -312,6 +312,13 @@ pub trait Source {
     fn identifier_quote(&self) -> Option<&'static str> {
         None
     }
+    /// Rules the declared [`Source::connection_fields`] can't express (two keys that can't go
+    /// together, a value's form), each a sentence naming the field, never its value. Static:
+    /// no network. Run by `validate_connection` and before `open`.
+    /// A value set through an unset `env_var()` arrives as `null`.
+    fn validate_connection(&self, _connection: &Map<String, Value>) -> Vec<String> {
+        Vec::new()
+    }
     fn open(&mut self, connection: &Map<String, Value>, read_only: bool) -> Result<()>;
     /// Run one statement. `row_limit` is a hint; the SDK enforces it either way.
     fn execute(&mut self, sql: &str, row_limit: Option<u64>, out: &mut dyn ResultSink) -> Result<()>;
@@ -477,6 +484,12 @@ pub trait Destination {
     /// Problems the declared [`Destination::options`] can't catch, each a sentence naming the key.
     /// Only called on options whose declared types already passed.
     fn validate(&self, _options: &Map<String, Value>) -> Vec<String> {
+        Vec::new()
+    }
+    /// Rules the declared [`Destination::connection_fields`] can't express, each a sentence
+    /// naming the field, never its value. Static: no network. Run by `validate_connection` and
+    /// before every delivery.
+    fn validate_connection(&self, _connection: &Map<String, Value>) -> Vec<String> {
         Vec::new()
     }
     /// Deliver `local` to `remote` (rendered by core); return where it landed. Enough for a
@@ -831,6 +844,34 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
     }
 }
 
+/// The declared fields' generic checks, then the plugin's own rules (when the generic ones
+/// passed), with secret values redacted.
+fn check_connection(
+    h: &Handler<'_>,
+    name: &str,
+    connection: &Map<String, Value>,
+    unresolved: &[String],
+) -> Result<crate::connection::Checked> {
+    let (kind, fields) = match h {
+        Handler::Source(s) => (Kind::Source, s.connection_fields()),
+        Handler::Destination(d) => (Kind::Destination, d.connection_fields()),
+        Handler::Format(_) => return Err("a format has no connection settings".into()),
+    };
+    let mut c = crate::connection::check(kind, name, &fields, connection, unresolved);
+    if c.errors.is_empty() {
+        // An unresolved value arrives as `null`: set, but not known (a rule about two keys
+        // going together checks `contains_key`).
+        c.errors = match h {
+            Handler::Source(s) => s.validate_connection(connection),
+            Handler::Destination(d) => d.validate_connection(connection),
+            Handler::Format(_) => Vec::new(),
+        };
+    }
+    c.errors = crate::connection::redact(c.errors, &fields, connection);
+    c.warnings = crate::connection::redact(c.warnings, &fields, connection);
+    Ok(c)
+}
+
 fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out: &mut Output) -> Result<()> {
     if let Request::Describe {} = req {
         let connection_fields = match h {
@@ -857,8 +898,31 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
     if let Request::Validate { options } = req {
         out.send(&Response::Validated {
             errors: h.check(name, &options),
+            warnings: Vec::new(),
         });
         return Ok(());
+    }
+    if let Request::ValidateConnection {
+        connection,
+        unresolved,
+    } = req
+    {
+        let c = check_connection(h, name, &connection, &unresolved)?;
+        out.send(&Response::Validated {
+            errors: c.errors,
+            warnings: c.warnings,
+        });
+        return Ok(());
+    }
+    // The same checks before connecting: errors stop it, warnings are logged.
+    if let Request::Open { connection, .. } | Request::Deliver { connection, .. } = &req {
+        let c = check_connection(h, name, connection, &[])?;
+        for w in &c.warnings {
+            crate::log::warn!("{w}");
+        }
+        if !c.errors.is_empty() {
+            return Err(PluginError::new(ErrorKind::Config, c.errors.join("; ")).into());
+        }
     }
     let checked = match &req {
         Request::Write { options, .. } | Request::Deliver { options, .. } => h.checked(name, options),

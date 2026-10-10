@@ -738,7 +738,7 @@ Uploads use GCS's resumable protocol. Takes `if_exists` (see [above](#a-file-alr
 ### `azure_blob`
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
-`use_managed_identity: true`, or `use_azure_cli: true` (the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
+`use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
 Takes `if_exists` (see [above](#a-file-already-at-the-path)).
 
 ### `sftp`
@@ -749,7 +749,7 @@ secret: `private_key: "{{ env_var('SFTP_KEY') }}"`); a key stored on one line wi
 gets its line breaks back. Set `private_key_path` or `private_key`, not both. The host key is
 checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 `host_key_fingerprint` (`SHA256:...`). In `private_key_path` and `known_hosts_path`, a leading
-`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host: true`.
+`~/` is your home directory. Unknown hosts are refused unless `accept_unknown_host` is true.
 With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
 pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
@@ -795,7 +795,8 @@ rename; FTP can't do both in one step (see [above](#a-file-already-at-the-path))
 ### `databricks`
 
 Unity Catalog Volumes and workspace files, chosen by the path. `host` and the same sign-in fields
-as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`), so one set of
+as the `databricks` source (`auth_type`, `token`, `client_id`, `client_secret`, `profile`, `scopes`,
+`redirect_port`), so one set of
 credentials, and one OAuth session per workspace, serves both. It's the same program as the
 source.
 
@@ -887,7 +888,7 @@ Uploads the output to a Slack channel, or to one person's DM, as a single post w
 If a report produces several files, they all go in the same post.
 
 The profile holds `token`, a bot token (`xoxb-...`), which is never logged. It can also hold a
-default `channel`. Destination options:
+default `channel`, and `api_url` (default `https://slack.com/api`) for a proxy. Destination options:
 
 | Option | Meaning |
 |---|---|
