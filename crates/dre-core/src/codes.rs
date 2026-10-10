@@ -42,10 +42,17 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// The exit code a failure of this kind ends `dre` with. Every failure exits 1 for now (a
-    /// usage error found by the argument parser, 2).
+    /// The exit code a failure of this kind ends a command with when it stops the command from
+    /// starting: 2 for a usage, config, plugin or refusal problem (fix it; retrying won't help),
+    /// 124 for a timeout, 130 for a cancel, else 1. A failure while a run is under way exits 1
+    /// whatever its kind (see `dre_core::run::RunSummary::exit_code`).
     pub fn exit_code(self) -> u8 {
-        1
+        match self {
+            Kind::Usage | Kind::Config | Kind::Plugin | Kind::Refused => 2,
+            Kind::TimedOut => 124,
+            Kind::Cancelled => 130,
+            Kind::Connection | Kind::Auth | Kind::Query | Kind::Delivery | Kind::Internal => 1,
+        }
     }
 
     pub fn as_str(self) -> &'static str {

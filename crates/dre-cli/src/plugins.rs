@@ -109,7 +109,7 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
         Ok(x) => x,
         Err(e) => {
             printer.error(&e);
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     let project = project_at(&project_dir);
@@ -126,20 +126,20 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
             "Local",
             &format!("plugin package `{name}` is used from {path}; there's nothing to install"),
         );
-        return ExitCode::SUCCESS;
+        return crate::exit::ok();
     }
     let index = match Index::for_source(&source, &name) {
         Ok(i) => i,
         Err(e) => {
             printer.error(&e);
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     let package = match package(&index, &name) {
         Ok(p) => p,
         Err(e) => {
             printer.error(&e);
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     let source_key = source.lock_key();
@@ -152,7 +152,7 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
                 printer.error(&format!(
                     "`{c}` contradicts the project's declared constraint `{d}` for `{name}`"
                 ));
-                return ExitCode::FAILURE;
+                return crate::exit::failed();
             }
             dre_core::constraints::combine(&[d, c])
         }
@@ -173,7 +173,7 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
             "no version of the plugin package `{name}` matches `{req}` for {}",
             manager::platform()
         ));
-        return ExitCode::FAILURE;
+        return crate::exit::failed();
     };
     let dir = dre_core::plugins::plugins_dir(project.as_ref().map(|p| p.root.as_path()));
     let installed = if source.is_default() {
@@ -200,7 +200,7 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
                 l.plugins.insert(name.clone(), locked);
                 if let Err(e) = l.save(&p.root) {
                     printer.error(&e);
-                    return ExitCode::FAILURE;
+                    return crate::exit::failed();
                 }
                 printer.line(
                     Tone::Note,
@@ -208,11 +208,11 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
                     &format!("dre.lock pins `{name}` to {}", version.version),
                 );
             }
-            ExitCode::SUCCESS
+            crate::exit::ok()
         }
         Err(e) => {
             printer.error(&e);
-            ExitCode::FAILURE
+            crate::exit::failed()
         }
     }
 }
@@ -224,7 +224,7 @@ pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode
             Ok(v) => (i.to_string(), Some(v)),
             Err(e) => {
                 printer.error(&format!("`{v}` isn't an exact version: {e}"));
-                return ExitCode::FAILURE;
+                return crate::exit::failed();
             }
         },
         None => (spec.clone(), None),
@@ -238,7 +238,7 @@ pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode
         .collect();
     if targets.is_empty() {
         printer.error(&format!("no installed plugin package matches `{spec}`"));
-        return ExitCode::FAILURE;
+        return crate::exit::failed();
     }
     for t in &targets {
         let r = match &t.version {
@@ -247,7 +247,7 @@ pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode
         };
         if let Err(e) = r {
             printer.error(&format!("can't remove {}: {e}", t.path.display()));
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
         let v = t
             .version
@@ -269,10 +269,10 @@ pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode
             lock.plugins.remove(&name);
             if let Err(e) = lock.save(&p.root) {
                 printer.error(&e);
-                return ExitCode::FAILURE;
+                return crate::exit::failed();
             }
             printer.line(Tone::Note, "Unlocked", "removed the pin from dre.lock");
         }
     }
-    ExitCode::SUCCESS
+    crate::exit::ok()
 }

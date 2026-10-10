@@ -160,11 +160,11 @@ pub fn new(dir: PathBuf, profile: String, source: String, printer: &Printer) -> 
                 &format!("{} ({} files)", dir.display(), files.len()),
             );
             printer.line(Tone::Note, "Next", &format!("cd {} && dre run", dir.display()));
-            ExitCode::SUCCESS
+            crate::exit::ok()
         }
         Err(e) => {
             printer.error(&e);
-            ExitCode::FAILURE
+            crate::exit::failed()
         }
     }
 }
@@ -488,10 +488,10 @@ fn add_profile(
 /// `dre init`.
 pub fn init(profiles_dir: Option<PathBuf>, printer: &Printer) -> ExitCode {
     match init_inner(profiles_dir, printer, std::io::stdin().lock()) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => crate::exit::ok(),
         Err(e) => {
             printer.error(&e);
-            ExitCode::FAILURE
+            crate::exit::failed()
         }
     }
 }

@@ -1,4 +1,4 @@
-exit: 1
+exit: 2
 --- stdout
 --- stderr
 error[schedule-needs-anchor]: schedules.yml:2: schedule `every_no_start`: `every` needs `starting` (its first date): it counts from it, so its occurrences would depend on when you look

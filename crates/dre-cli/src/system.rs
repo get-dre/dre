@@ -112,7 +112,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             printer.error(&format!("can't find the running dre: {e}"));
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     let install = detect(&exe);
@@ -126,7 +126,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
              on Windows, unpack dre-<version>-windows-<arch>.zip from https://github.com/{REPO}/releases",
             exe.display()
         ));
-        return ExitCode::FAILURE;
+        return crate::exit::failed();
     }
     let current = current_version();
     let releases = match manager::github_releases(REPO) {
@@ -135,7 +135,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
             printer.error(&format!(
                 "can't reach GitHub Releases to check for a newer dre: {e}. Nothing was changed."
             ));
-            return ExitCode::FAILURE;
+            return crate::exit::failed();
         }
     };
     let wanted = match &a.version {
@@ -147,7 +147,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
                     printer.error(&format!(
                         "there's no dre release {v}; see https://github.com/{REPO}/releases"
                     ));
-                    return ExitCode::FAILURE;
+                    return crate::exit::failed();
                 }
             }
         }
@@ -155,7 +155,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
             Some(r) => r,
             None => {
                 printer.error(&format!("no release of {REPO} found on GitHub Releases"));
-                return ExitCode::FAILURE;
+                return crate::exit::failed();
             }
         },
     };
@@ -182,15 +182,15 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
             }
         }
         return if a.check || same {
-            ExitCode::SUCCESS
+            crate::exit::ok()
         } else {
-            ExitCode::FAILURE
+            crate::exit::failed()
         };
     }
     // A direct install.
     if same {
         println!("{}", up_to_date(&current, a.version.is_some()));
-        return ExitCode::SUCCESS;
+        return crate::exit::ok();
     }
     if a.check {
         if newer || a.version.is_some() {
@@ -203,12 +203,12 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
         } else {
             println!("dre {current} is the latest version");
         }
-        return ExitCode::SUCCESS;
+        return crate::exit::ok();
     }
     if !newer && a.version.is_none() {
         // Running something newer than any release (a pre-release build of the next one).
         println!("dre {current} is the latest version");
-        return ExitCode::SUCCESS;
+        return crate::exit::ok();
     }
     match replace(&exe, wanted) {
         Ok(()) => {
@@ -219,11 +219,11 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
                 wanted.tag
             );
             println!("Plugins aren't updated; run `dre plugin update <plugin>` in a project to update them.");
-            ExitCode::SUCCESS
+            crate::exit::ok()
         }
         Err(e) => {
             printer.error(&format!("{e}. Your existing dre ({current}) is untouched."));
-            ExitCode::FAILURE
+            crate::exit::failed()
         }
     }
 }

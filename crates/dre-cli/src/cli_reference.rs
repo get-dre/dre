@@ -38,8 +38,9 @@ pub fn page(mut cli: Command) -> String {
         "---\ntitle: \"CLI reference\"\ndescription: \"Every dre command, subcommand and flag, with defaults and environment variables.\"\nsection: reference\nposition: 1\n---\n\n\
          # CLI reference\n\n\
          <!-- Generated from the CLI definitions by crates/dre-cli/src/cli_reference.rs. Edit the code, not this page. -->\n\n\
-         Every `dre` command and flag. `dre <command> --help` prints the same text. When a run fails, \
-         its exit code comes from the kind of the [error code](reference-error-codes.md) it reports. \
+         Every `dre` command and flag. `dre <command> --help` prints the same text. Every command \
+         exits with one of the documented [exit codes](exit-codes.md); each problem it reports has an \
+         [error code](reference-error-codes.md). \
          Settings that also come from the environment are listed with their variable; every \
          variable is on the [environment variables](environment-variables.md) page.\n",
     );

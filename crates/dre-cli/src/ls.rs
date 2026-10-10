@@ -78,7 +78,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         for d in diags.sorted() {
             eprintln!("{d}");
         }
-        return ExitCode::FAILURE;
+        return crate::exit::not_started();
     };
     dre_core::secrets::set_enabled(project.mask_secrets);
     if a.resource_type == ResourceType::Source {
@@ -88,7 +88,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         Ok(found) => found,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+            return crate::exit::not_started();
         }
     };
     match a.output {
@@ -99,7 +99,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         }
         LsOutput::Text => print!("{}", dre_core::secrets::mask(&table(&reports))),
     }
-    ExitCode::SUCCESS
+    crate::exit::ok()
 }
 
 type Selected<'a> = (Vec<(&'a Report, Vec<&'a Binding>)>, Vec<String>);
@@ -179,7 +179,7 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
             eprintln!(
                 "error: with --resource-type source, select with `source:<source>` or `source:<source>.<table>`, not `{t}`"
             );
-            return ExitCode::FAILURE;
+            return crate::exit::not_started();
         };
         let (s, tb) = match sel.split_once('.') {
             Some((s, tb)) => (s.to_string(), Some(tb.to_string())),
@@ -188,11 +188,11 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
         match project.sources.get(&s) {
             None => {
                 eprintln!("error: no source `{s}`");
-                return ExitCode::FAILURE;
+                return crate::exit::not_started();
             }
             Some(def) if tb.as_ref().is_some_and(|t| def.table(t).is_none()) => {
                 eprintln!("error: source `{s}` has no table `{}`", tb.unwrap());
-                return ExitCode::FAILURE;
+                return crate::exit::not_started();
             }
             _ => wanted.push((s, tb)),
         }
@@ -253,7 +253,7 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
             print!("{}", dre_core::secrets::mask(&columns(rows)));
         }
     }
-    ExitCode::SUCCESS
+    crate::exit::ok()
 }
 
 /// Rows of cells, left-aligned in columns.

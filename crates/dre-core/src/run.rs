@@ -278,13 +278,19 @@ impl RunSummary {
             })
     }
 
-    /// The exit code: 130 or 143 for a cancelled run, else 0, else the one the failure's kind
-    /// has.
+    /// The exit code (see docs/exit-codes.md): 130, 143 or 124 for a cancelled or timed-out run;
+    /// 2 when nothing ran because the selection or a profile is wrong; 1 when a Binding failed;
+    /// else 0.
     pub fn exit_code(&self) -> u8 {
         if let Some(r) = self.cancelled {
             return r.exit_code();
         }
-        self.error_code().map_or(0, |c| c.kind().exit_code())
+        if self.error.is_some() {
+            // Nothing ran: the selection or a profile is wrong.
+            return self.error_code().map_or(2, |c| c.kind().exit_code());
+        }
+        // The run happened; a failed Binding exits 1 whatever its kind.
+        if self.failed() { 1 } else { 0 }
     }
 }
 
