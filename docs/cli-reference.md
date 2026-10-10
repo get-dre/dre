@@ -85,6 +85,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--dry-run` |  | Render SQL into target/compiled/ and stop; no report query is executed. |
 | `--preview [<ROWS>]` |  | Execute with a row limit (default 100); output stays in target/ and is never delivered. |
 | `--accept-schema-change` |  | Deliver even if the output schema changed since the last successful run, and accept the new schema. Snapshots live in the target path, so a fresh CI runner has no history unless `--target-path` (or DRE_TARGET_PATH) points at a folder that persists. |
+| `--timeout <DURATION>` |  | Stop the run if it takes longer than this: a duration such as `2h` or `90m`, or seconds (default: $DRE_RUN_TIMEOUT, then `flags: run_timeout` in dre_project.yml; off without any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124. |
 
 Example:
 

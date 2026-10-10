@@ -42,6 +42,17 @@ A destination entry's keys other than `profile` and `path` are the plugin's opti
 plugin checks them the same way formats do, against the destination profile's entry for the
 run's target. A value holding Jinja is checked once it's rendered, at delivery.
 
+Every destination that talks to a server takes two timeouts in its profile entry, as durations
+(`30s`, `5m`) or seconds:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `connect_timeout` | `30s` | How long to wait for a connection. |
+| `timeout` | `60s` | How long a request may make no progress (the server sends or accepts nothing) before it fails. For object stores, how long one request may take; large files go up in parts. |
+
+There's no limit on how long a whole upload takes as long as it keeps moving. To bound a whole
+run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`).
+
 ### Several destinations
 
 `output.destination` takes one destination or a list. Each entry names a profile, an optional

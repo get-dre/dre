@@ -10,11 +10,12 @@
 
 use std::time::Duration;
 
+use dre_protocol::delivery::{Rules, timeout_fields};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
 use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// The longest text posted, in characters: Google Chat takes 4,096.
 const MESSAGE_LIMIT: u64 = 4_000;
@@ -31,6 +32,9 @@ impl Destination for GoogleChat {
                 .required()
                 .secret(),
         ]
+        .into_iter()
+        .chain(timeout_fields())
+        .collect()
     }
 
     fn message_limit(&self) -> Option<u64> {
@@ -52,7 +56,7 @@ impl Destination for GoogleChat {
             );
         }
         let text = format!("{title}\n{text}");
-        post(url, &json!({ "text": text }))?;
+        post(url, &json!({ "text": text }), &d.connection)?;
         Ok("google_chat space (webhook)".into())
     }
 
@@ -65,10 +69,12 @@ const FILES_REFUSED: &str = "the google_chat destination only takes messages; de
 
 /// POST the message; retry once on 429. Errors never include the URL, which holds the key and
 /// token.
-fn post(url: &str, payload: &Value) -> Result<()> {
+fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<()> {
+    let (rules, _) = Rules::from_settings(Rules::default(), connection, &Map::new(), &[])?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(60)))
+        .timeout_connect(Some(rules.connect_timeout))
+        .timeout_recv_response(Some(rules.timeout))
         .build()
         .into();
     let body = payload.to_string();

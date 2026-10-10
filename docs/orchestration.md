@@ -302,6 +302,21 @@ Airflow, Dagster and Databricks Jobs all do), and you cancel one at the terminal
   Ctrl-Break, closing the console, logging off or shutting down count as termination). A second
   Ctrl-C stops at once.
 
+### A timeout for the whole run
+
+A run can also be given a time limit, so a stuck query or upload never holds a scheduled slot
+forever: `dre run --timeout 2h`, `DRE_RUN_TIMEOUT=2h`, or in `dre_project.yml`:
+
+```yaml
+flags:
+  run_timeout: 2h
+```
+
+It's off by default. When it runs out, the run stops the same way: the running Binding is recorded
+as `timed_out` ([`run-timed-out`](reference-error-codes.md#run-timed-out)), the rest don't run, and
+`dre` exits **124**. Plugins have their own connection timeouts too (`connect_timeout`,
+`timeout`; see each plugin).
+
 ## What DRE does and doesn't do
 
 `dre schedule ls` is pure computation: the same project and window always give the same document,

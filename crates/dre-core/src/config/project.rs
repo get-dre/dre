@@ -96,6 +96,10 @@ pub struct Flags {
     /// Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it.
     #[schemars(range(min = 1), extend("default" = 60))]
     pub http_timeout: Option<Located<Loose<u64>>>,
+    /// How long a `dre run` may take before it's stopped (as for a termination signal; its Bindings are recorded as `timed_out` and `dre` exits 124): a duration such as `2h` or `90m`, or seconds. Off by default. `dre run --timeout` and `DRE_RUN_TIMEOUT` override it.
+    #[schemars(schema_with = "duration")]
+    #[serde(default)]
+    pub run_timeout: Option<Located<Loose<serde_json::Value>>>,
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub unknown: UnknownKeys,
@@ -170,6 +174,15 @@ fn output_ref(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 pub(super) fn sources_ref(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"$ref": "sources.schema.json#/properties/sources"})
+}
+
+fn duration(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "oneOf": [
+            {"type": "string", "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*(ms|s|m|h)?\\s*$"},
+            {"type": "number", "minimum": 0}
+        ]
+    })
 }
 
 fn any_map(_: &mut schemars::SchemaGenerator) -> schemars::Schema {

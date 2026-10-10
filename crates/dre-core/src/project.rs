@@ -192,6 +192,9 @@ pub struct Project {
     pub default_set: Option<String>,
     pub vars: JsonMap<String, Json>,
     pub run_query_max_rows: u64,
+    /// `flags: run_timeout`: how long a run may take (off when unset).
+    #[serde(skip)]
+    pub run_timeout: Option<std::time::Duration>,
     /// `format_options:`: per format, defaults under every output of that format.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub format_options: BTreeMap<String, JsonMap<String, Json>>,
@@ -1137,7 +1140,7 @@ impl Loader {
                 DEFAULT_RUN_QUERY_MAX_ROWS
             }
         };
-        self.parse_flags(&file, pf.flags);
+        let run_timeout = self.parse_flags(&file, pf.flags);
         let dispatch = self.parse_dispatch(&yf.display, pf.dispatch);
         match pf.format_options {
             None | Some(de::Located { value: Loose::Ok(None), .. }) => {}
@@ -1238,6 +1241,7 @@ impl Loader {
             default_set,
             vars,
             run_query_max_rows,
+            run_timeout,
             reports: Vec::new(),
             sets: BTreeMap::new(),
             plugins: Vec::new(),
@@ -1386,12 +1390,15 @@ impl Loader {
         None
     }
 
-    /// `dispatch: [{macro_namespace: dre_utils, search_order: [my_project, dre_utils]}]`.
     /// `flags:`: settings for DRE itself. Each takes effect where it's used (downloads read
-    /// `http_timeout`).
-    fn parse_flags(&mut self, file: &Option<PathBuf>, v: Option<de::Located<Loose<config::project::Flags>>>) {
+    /// `http_timeout`); returns `run_timeout`.
+    fn parse_flags(
+        &mut self,
+        file: &Option<PathBuf>,
+        v: Option<de::Located<Loose<config::project::Flags>>>,
+    ) -> Option<std::time::Duration> {
         let flags = match v {
-            None => return,
+            None => return None,
             Some(de::Located {
                 value: Loose::Ok(f), ..
             }) => f,
@@ -1402,7 +1409,7 @@ impl Loader {
                     v.line(),
                     "`flags` must be a map",
                 );
-                return;
+                return None;
             }
         };
         for k in &flags.unknown.0 {
@@ -1410,7 +1417,10 @@ impl Loader {
                 Code::UnknownKey,
                 file.clone(),
                 Some(k.line),
-                format!("unknown key `flags.{}`; flags are: http_timeout", k.name),
+                format!(
+                    "unknown key `flags.{}`; flags are: http_timeout, run_timeout",
+                    k.name
+                ),
             );
         }
         match flags.http_timeout {
@@ -1425,8 +1435,36 @@ impl Loader {
                 "`flags.http_timeout` must be a positive whole number of seconds",
             ),
         }
+        let v = flags.run_timeout?;
+        let line = v.line();
+        let parsed = match v.value {
+            Loose::Ok(v) => dre_protocol::delivery::parse_duration(&v),
+            _ => Err("must be a duration such as `2h` or `90m`, or seconds".to_string()),
+        };
+        match parsed {
+            Ok(d) if !d.is_zero() => Some(d),
+            Ok(_) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    line,
+                    "`flags.run_timeout` must be more than zero",
+                );
+                None
+            }
+            Err(e) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    line,
+                    format!("`flags.run_timeout` {e}"),
+                );
+                None
+            }
+        }
     }
 
+    /// `dispatch: [{macro_namespace: dre_utils, search_order: [my_project, dre_utils]}]`.
     fn parse_dispatch(&mut self, file: &Path, v: Option<config::project::DispatchList>) -> DispatchOrder {
         let mut out = DispatchOrder::new();
         let Some(v) = v else { return out };

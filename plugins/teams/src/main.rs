@@ -11,11 +11,12 @@
 
 use std::time::Duration;
 
+use dre_protocol::delivery::{Rules, timeout_fields};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
 use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// The longest text posted, in characters: well inside Teams' 28 KB card limit.
 const MESSAGE_LIMIT: u64 = 15_000;
@@ -35,6 +36,9 @@ impl Destination for Teams {
             .required()
             .secret(),
         ]
+        .into_iter()
+        .chain(timeout_fields())
+        .collect()
     }
 
     fn message_limit(&self) -> Option<u64> {
@@ -52,7 +56,7 @@ impl Destination for Teams {
                 "the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
             );
         }
-        post(url, &card(&m.title, &text))?;
+        post(url, &card(&m.title, &text), &d.connection)?;
         Ok("teams channel (webhook)".into())
     }
 
@@ -103,10 +107,12 @@ fn card(title: &str, text: &str) -> Value {
 }
 
 /// POST the card; retry once on 429. Errors never include the URL, which is a credential.
-fn post(url: &str, payload: &Value) -> Result<()> {
+fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<()> {
+    let (rules, _) = Rules::from_settings(Rules::default(), connection, &Map::new(), &[])?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(60)))
+        .timeout_connect(Some(rules.connect_timeout))
+        .timeout_recv_response(Some(rules.timeout))
         .build()
         .into();
     let body = payload.to_string();

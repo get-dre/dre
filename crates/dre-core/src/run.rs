@@ -252,7 +252,7 @@ impl RunSummary {
             || self
                 .outcomes
                 .iter()
-                .any(|o| matches!(o.status, Status::Error | Status::Cancelled))
+                .any(|o| matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut))
     }
 
     /// The code of what failed first: why nothing ran, else the first failed Binding's.
@@ -266,9 +266,16 @@ impl RunSummary {
         }
         self.outcomes
             .iter()
-            .find(|o| matches!(o.status, Status::Error | Status::Cancelled))
+            .find(|o| matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut))
             .map(|o| o.error_code.clone().unwrap_or(ErrorCode::Core(Code::RunFailed)))
-            .or_else(|| self.cancelled.map(|_| ErrorCode::Core(Code::RunCancelled)))
+            .or_else(|| {
+                self.cancelled.map(|r| {
+                    ErrorCode::Core(match r {
+                        crate::engine::CancelReason::Timeout => Code::RunTimedOut,
+                        _ => Code::RunCancelled,
+                    })
+                })
+            })
     }
 
     /// The exit code: 130 or 143 for a cancelled run, else 0, else the one the failure's kind
@@ -999,10 +1006,12 @@ impl<'a> BindingRun<'a> {
 
     /// Fail once the run is cancelled, so no further statement, file or delivery starts.
     fn not_cancelled(&self) -> Result<(), Fail> {
-        if self.opts.cancel.is_cancelled() {
-            Err(Fail::new(Code::RunCancelled, "the run was cancelled"))
-        } else {
-            Ok(())
+        match self.opts.cancel.reason() {
+            None => Ok(()),
+            Some(crate::engine::CancelReason::Timeout) => {
+                Err(Fail::new(Code::RunTimedOut, "the run timed out"))
+            }
+            Some(_) => Err(Fail::new(Code::RunCancelled, "the run was cancelled")),
         }
     }
 
@@ -1032,15 +1041,21 @@ impl<'a> BindingRun<'a> {
         let result = self.run_inner();
         // A Binding that fails after the run was cancelled was stopped by it (a plugin's
         // cancelled reply, or a check between steps).
-        let result = match result {
-            Err(e) if self.opts.cancel.is_cancelled() && e.code != Code::RunCancelled => Err(Fail::new(
-                Code::RunCancelled,
-                format!("the run was cancelled: {}", e.message),
-            )),
-            r => r,
+        let stopped =
+            matches!(&result, Err(e) if e.code == Code::RunCancelled || e.code == Code::RunTimedOut);
+        let result = match (result, self.opts.cancel.reason()) {
+            (Err(e), Some(reason)) if !stopped => {
+                let (code, what) = match reason {
+                    crate::engine::CancelReason::Timeout => (Code::RunTimedOut, "timed out"),
+                    _ => (Code::RunCancelled, "was cancelled"),
+                };
+                Err(Fail::new(code, format!("the run {what}: {}", e.message)))
+            }
+            (r, _) => r,
         };
         let status = match (&result, dry, self.opts.live_check) {
             (Err(e), _, _) if e.code == Code::RunCancelled => Status::Cancelled,
+            (Err(e), _, _) if e.code == Code::RunTimedOut => Status::TimedOut,
             (Err(_), _, _) => Status::Error,
             (Ok(()), _, true) => Status::Checked,
             (Ok(()), true, _) => Status::DryRun,

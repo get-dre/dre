@@ -16,6 +16,7 @@ position: 13
 | `DRE_TARGET_PATH` | Where DRE writes its generated files (default: `target/` in the project). `--target-path` overrides it; it overrides `target_path:` in `dre_project.yml`. |
 | `GITHUB_TOKEN` | Sent to GitHub by `dre system update` and `github:` plugin sources (private repositories, rate limits). |
 | `DRE_HTTP_TIMEOUT` | Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (default 60; 3 tries in all, on connection errors, timeouts, 429 and 5xx). Connecting gives up after 30 seconds. It wins over `flags: http_timeout` in `dre_project.yml`. New in 0.4. |
+| `DRE_RUN_TIMEOUT` | How long a `dre run` may take before it's stopped (its Bindings recorded as `timed_out`, exit code 124): a duration such as `2h` or `90m`, or seconds. `--timeout` overrides it; it overrides `flags: run_timeout`. Off by default. New in 0.4. |
 | `DRE_GITHUB_API_URL` | The GitHub API for `github:` plugin sources and `dre system update` (GitHub Enterprise, a mirror). |
 | `DRE_RUN_DATE` | The run date (`YYYY-MM-DD`) behind `run.date`, instead of today. It wins over `DRE_RUN_AT`'s date. |
 | `DRE_RUN_AT` | The instant a run was scheduled for (RFC 3339, e.g. `2026-09-01T06:00:00Z`). It becomes `run.now` and `run.scheduled_at`, gives `run.date` (that instant's date in the run's timezone) when `DRE_RUN_DATE` isn't set, and is recorded as `scheduled_at` in `run_results.json`. `dre schedule ls` puts it in every occurrence's command. |

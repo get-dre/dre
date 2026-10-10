@@ -5,11 +5,12 @@
 //! trusted: it's checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 //! `host_key_fingerprint` (`SHA256:...`, as `ssh-keygen -lf` prints it). Unknown hosts are
 //! refused unless `accept_unknown_host: true`. Missing remote directories are created. The SSH
-//! settings and checks are shared with the postgres tunnel (`dre-ssh`).
+//! settings and checks are shared with the postgres tunnel (`dre-ssh`). `connect_timeout` (30s)
+//! and `timeout` (60s without progress) bound the connection.
 
 use std::path::Path;
-use std::time::Duration;
 
+use dre_protocol::delivery::{Rules, timeout_fields};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::plugin::{About, Destination, Result, conn_bool, serve_destination};
 use dre_ssh::Ssh;
@@ -23,11 +24,12 @@ struct Sftp;
 async fn upload(local: &Path, remote: &str, c: &Map<String, Value>) -> Result<String> {
     let mut ssh = Ssh::from_settings(c, "")?;
     ssh.accept_unknown = conn_bool(c, "accept_unknown_host").unwrap_or(false);
+    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
     let config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(300)),
+        inactivity_timeout: Some(rules.timeout),
         ..Default::default()
     };
-    let session = ssh.connect(config, Duration::from_secs(30)).await?;
+    let session = ssh.connect(config, rules.connect_timeout).await?;
     let (user, host, port) = (&ssh.username, &ssh.host, ssh.port);
     let channel = session.channel_open_session().await?;
     channel.request_subsystem(true, "sftp").await?;
@@ -87,6 +89,7 @@ impl Destination for Sftp {
         ]
         .into_iter()
         .chain(dre_ssh::auth_fields())
+        .chain(timeout_fields())
         .collect()
     }
 
