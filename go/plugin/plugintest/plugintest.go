@@ -20,6 +20,8 @@ type Conversation struct {
 	in   *io.PipeWriter
 	out  *bufio.Reader
 	Code chan int
+	// Logs holds the `log` and `progress` messages Reply skipped, in order.
+	Logs []map[string]any
 }
 
 // Start serves p as role.
@@ -67,8 +69,20 @@ func FrameBytes(tag byte, body []byte) []byte {
 	return append(out, body...)
 }
 
-// Reply reads one JSON reply.
+// Reply reads one JSON reply, keeping any `log` and `progress` messages before it in Logs.
 func (c *Conversation) Reply() map[string]any {
+	c.t.Helper()
+	for {
+		m := c.Message()
+		if t := m["type"]; t != "log" && t != "progress" {
+			return m
+		}
+		c.Logs = append(c.Logs, m)
+	}
+}
+
+// Message reads the next JSON message, whatever it is.
+func (c *Conversation) Message() map[string]any {
 	c.t.Helper()
 	f, err := plugin.ReadFrame(c.out)
 	if err != nil {
@@ -101,7 +115,7 @@ func (c *Conversation) Hello() map[string]any {
 	c.t.Helper()
 	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 3, "core_version": "test"})
 	r := c.Reply()
-	if r["type"] != "hello" || r["protocol_version"] != 0.0 {
+	if r["type"] != "hello" || r["protocol_version"] != float64(plugin.ProtocolMax) {
 		c.t.Fatalf("hello: %v", r)
 	}
 	return r

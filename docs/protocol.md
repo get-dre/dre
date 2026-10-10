@@ -1,11 +1,11 @@
 ---
-title: "DRE plugin protocol, version 0"
+title: "DRE plugin protocol, version 1"
 description: "How a plugin talks to DRE, for writing a plugin in any language."
 sidebar:
   order: 18
 ---
 
-# DRE plugin protocol, version 0
+# DRE plugin protocol, version 1
 
 Every source, format and destination in DRE is a plugin, served by a separate executable that
 DRE core starts and talks to over stdin and stdout. Plugins ship in packages: one executable can
@@ -88,7 +88,7 @@ Core looks in the project's `dre_deps/plugins` (or `DRE_PLUGINS_DIR`), in two la
 |---|---|---|
 | stdin | core → plugin | frames |
 | stdout | plugin → core | frames, and nothing else |
-| stderr | plugin → core | free-form UTF-8 log lines, shown in core's log and quoted in errors; a line starting `info: ` is shown to the person without `-v` (e.g. while waiting for a warehouse to start), and one starting `warning: ` is shown as a warning (e.g. a message cut short to fit the service) |
+| stderr | plugin → core | free-form UTF-8 lines: what a plugin can't send as a `log` message (a panic, a native driver's output). Core keeps them in its log file at warn, shows them with `-v`, and quotes the last ones when a plugin crashes. Plugins log through [`log` messages](#logs-and-progress) instead. |
 
 A plugin must never write anything but frames to stdout.
 
@@ -118,14 +118,14 @@ reports it and stops.
 The first message core sends is `hello`, naming the plugin it wants served:
 
 ```json
-{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "…",
+{"type": "hello", "min_version": 1, "max_version": 1, "core_version": "…",
  "plugin": "destination/s3"}
 ```
 
 The plugin picks the highest protocol version both sides support and replies as that plugin:
 
 ```json
-{"type": "hello", "protocol_version": 0, "kind": "destination", "name": "s3",
+{"type": "hello", "protocol_version": 1, "kind": "destination", "name": "s3",
  "version": "1.2.0", "capabilities": ["validate"],
  "provides": ["destination/s3", "destination/gcs", "destination/azure_blob"]}
 ```
@@ -164,14 +164,74 @@ Capabilities:
 
 ## Requests and replies
 
-Every request gets exactly one reply. Any request may be answered with an error:
+Every request gets exactly one reply. Core sends one request at a time and waits for its reply,
+except for `cancel`.
+
+### Request ids
+
+Every message after the handshake carries an `id`: core numbers its requests (1, 2, …), and the
+reply, and every message that belongs to the request, carries the request's id. That includes the
+messages core streams as part of a request (`result_set_end`, `finish`) and the ones the plugin
+streams back (`result`, `result_end`, `log`, `progress`). Arrow data frames have no id: they
+belong to the request whose messages surround them.
 
 ```json
-{"type": "error", "message": "human-readable explanation"}
+{"type": "execute", "id": 7, "sql": "select 1"}
+{"type": "result", "id": 7, "columns": ["1"]}
 ```
+
+A `log` message sent between requests has no id. A reply whose id isn't the running request's is
+a protocol error.
+
+### Errors
+
+Any request may be answered with an error:
+
+```json
+{"type": "error", "id": 7, "message": "human-readable explanation",
+ "kind": "auth", "code": "postgres/password-refused"}
+```
+
+- `kind` is one of `config`, `plugin`, `refused`, `connection`, `auth`, `query`, `delivery`,
+  `internal`, `cancelled` and `timed_out`, the kinds of DRE's
+  [error codes](reference-error-codes.md). It decides whether trying again can help.
+- `code` names the problem, namespaced by the plugin (`<plugin>/<slug>`), and is recorded in
+  `run_results.json`.
+- Both are optional. Without a `code`, core reports the failure under its own code for the step
+  (`query-failed`, `delivery-failed`, …). A `code` without a `kind` counts as `internal`.
 
 After an error reply the plugin keeps serving. Unknown request types, and requests meant for
 another plugin kind, are answered with `error`.
+
+### Cancel
+
+```json
+{"type": "cancel", "id": 7}
+```
+
+`cancel` asks the plugin to stop request 7. It has no reply of its own: the request replies
+`error` with kind `cancelled`, or its usual reply if it finished first. A plugin reads stdin while
+a request runs so that it sees `cancel` at once, and stops what it can (a query on the server, a
+loop between batches). A cancel for a request that isn't running, or has already been answered,
+is ignored. A request cancelled before the plugin started it is answered `cancelled` without
+running. End of input while a request runs means core has gone: the plugin stops the request too.
+
+### Logs and progress
+
+```json
+{"type": "log", "id": 7, "level": "info", "message": "waiting for the warehouse to start",
+ "fields": {"elapsed_s": 30}}
+{"type": "progress", "id": 7, "message": "uploading", "done": 3, "total": 10}
+```
+
+A plugin may send `log` and `progress` messages at any time while a request runs, before its
+reply. `level` is `error`, `warn`, `info`, `debug` or `trace`. Core shows `info` to the person,
+`warn` and `error` as warnings, and keeps `debug` and `trace` for `-v` and the log file. `fields`
+(optional) is structured context; never put secrets in it. `progress` is optional: `message`,
+`done` and `total` are each optional, and core shows the latest.
+
+The SDKs bridge each language's logging: in Rust the `log` crate (re-exported as
+`dre_protocol::log`; records from the plugin's dependencies are kept for `-v`), in Go `log/slog`.
 
 ### All kinds
 
@@ -377,6 +437,12 @@ only messages or only files. Older plugins, which advertise neither, keep workin
 
 ## Versioning
 
+Version 1 added request ids, `cancel`, `log`, `progress` and the error `kind` and `code`. Core
+0.4 requires version 1; a plugin that only speaks version 0 is refused with a message naming
+`dre plugin update <package>`. The SDKs speak versions 0 and 1, so a plugin built on them still
+works with core 0.3: on version 0 they send no ids and log to stderr with the prefixes core 0.3
+shows (`info: `, `warning: `).
+
 The protocol version is a single integer. Core and plugins release independently, so each side
 states the range it supports and the handshake picks the highest common version. Adding a new
 optional field to a message does not change the version; anything else does.
@@ -384,7 +450,8 @@ optional field to a message does not change the version; anything else does.
 ## Conformance
 
 `dre_protocol::conformance::run(path)` checks a plugin binary. It covers the handshake and
-identity, refusal of an unsupported version, `describe` (and, for a source, that it gives a
+identity, speaking versions 0 and 1, refusal of an unsupported version, request ids on replies,
+ignoring a `cancel` for a request that isn't running, `describe` (and, for a source, that it gives a
 one-character `identifier_quote`), error replies for unknown and wrong-kind
 requests, `validate` (advertised, answered, and refusing an option the plugin doesn't declare),
 behaviour on a malformed frame, and a clean exit on `close` and on end of input. For a

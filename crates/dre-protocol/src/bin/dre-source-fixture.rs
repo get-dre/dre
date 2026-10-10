@@ -2,6 +2,8 @@
 //! the misbehaving modes selected by `DRE_FIXTURE_MODE`:
 //!
 //! - `old_protocol`: answers the handshake claiming only versions 7..=9
+//! - `protocol_zero`: answers the handshake claiming only version 0, as a plugin from before
+//!   protocol 1 does
 //! - `garbage`: writes bytes that aren't a frame
 //! - `silent`: never answers
 //! - `die`: logs to stderr and exits 5 at start
@@ -15,7 +17,10 @@
 //! stands in for a destination on the same platform (`dre init` tests).
 //!
 //! SQL it understands: `rows N` (N rows of `n`, batches of 3), `none`, `fail`, `crash`,
-//! `log <text>`, `log_prefix <text>`, `panic`. `check` accepts anything except `bad`.
+//! `log <text>`, `log_prefix <text>`, `panic`, `sleep N` (up to N seconds, until cancelled; the
+//! cancel hook logs `fixture: cancel hook`), `slog <text>` (a `log` message at info, with a
+//! field), `progress` (two progress messages), `coded` (an error with kind `auth` and code
+//! `bad-token`). `check` accepts anything except `bad`.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -23,7 +28,10 @@ use std::sync::Arc;
 use arrow::array::{Int64Array, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
 use dre_protocol::msg::ConnectionField;
-use dre_protocol::plugin::{About, Destination, Plugin, ResultSink, Source, serve_package, serve_source};
+use dre_protocol::msg::LogLevel;
+use dre_protocol::plugin::{
+    About, Destination, ErrorKind, Plugin, PluginError, ResultSink, Source, serve_package, serve_source,
+};
 use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS};
 use serde_json::{Map, Value};
 
@@ -102,6 +110,32 @@ impl Source for Fixture {
                 eprintln!("{}", arg.chars().take(20).collect::<String>());
                 out.no_result(None)
             }
+            "sleep" => {
+                let secs: u64 = arg.parse()?;
+                dre_protocol::plugin::on_cancel(|| log::warn!("fixture: cancel hook"));
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+                while std::time::Instant::now() < deadline {
+                    if dre_protocol::plugin::cancelled() {
+                        return Err("fixture: stopped".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                out.no_result(None)
+            }
+            "slog" => {
+                let mut fields = Map::new();
+                fields.insert("attempt".into(), Value::from(2));
+                dre_protocol::plugin::log_fields(LogLevel::Info, arg, fields);
+                out.no_result(None)
+            }
+            "progress" => {
+                dre_protocol::plugin::progress(Some("reading"), Some(1), Some(2));
+                dre_protocol::plugin::progress(Some("reading"), Some(2), Some(2));
+                out.no_result(None)
+            }
+            "coded" => Err(PluginError::new(ErrorKind::Auth, "the token was refused")
+                .code("bad-token")
+                .into()),
             "crash" => std::process::exit(3),
             "panic" => panic!("fixture panic"),
             _ => Err(format!("fixture can't run `{sql}`").into()),
@@ -119,15 +153,16 @@ impl Source for Fixture {
 
 fn main() {
     match std::env::var("DRE_FIXTURE_MODE").as_deref() {
-        Ok("old_protocol") => {
+        Ok(mode @ ("old_protocol" | "protocol_zero")) => {
+            let (min_version, max_version) = if mode == "old_protocol" { (7, 9) } else { (0, 0) };
             let mut stdin = std::io::stdin();
             let _ = dre_protocol::frame::read_frame(&mut stdin);
             let mut out = std::io::stdout();
             let _ = dre_protocol::frame::write_json(
                 &mut out,
                 &dre_protocol::msg::Response::VersionMismatch {
-                    min_version: 7,
-                    max_version: 9,
+                    min_version,
+                    max_version,
                 },
             );
             std::process::exit(1);

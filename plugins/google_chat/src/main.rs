@@ -47,8 +47,8 @@ impl Destination for GoogleChat {
         let room = (MESSAGE_LIMIT as usize).saturating_sub(title.chars().count() + 1);
         let (text, cut) = markdown::fit(&m.text, room, CUT_MARKER, markdown::to_google_chat);
         if cut {
-            eprintln!(
-                "warning: the message is over the google_chat limit of {MESSAGE_LIMIT} characters; it was cut short"
+            dre_protocol::log::warn!(
+                "the message is over the google_chat limit of {MESSAGE_LIMIT} characters; it was cut short"
             );
         }
         let text = format!("{title}\n{text}");
@@ -94,7 +94,7 @@ fn post(url: &str, payload: &Value) -> Result<()> {
                     .and_then(|v| v.trim().parse::<u64>().ok())
                     .unwrap_or(1);
                 if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    eprintln!("Google Chat rate-limited the post; retrying in {wait}s");
+                    dre_protocol::log::debug!("Google Chat rate-limited the post; retrying in {wait}s");
                     std::thread::sleep(Duration::from_secs(wait));
                     continue;
                 }

@@ -89,8 +89,8 @@ impl Destination for Slack {
         let text = format!("{title}\n{text}");
         let mut files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
         if cut {
-            eprintln!(
-                "warning: the message is over Slack's {MESSAGE_LIMIT} characters; posting it cut short with the full message attached"
+            dre_protocol::log::warn!(
+                "the message is over Slack's {MESSAGE_LIMIT} characters; posting it cut short with the full message attached"
             );
             files.push(m.path.clone().into());
         }
@@ -278,7 +278,7 @@ impl Api {
                     .and_then(|v| v.trim().parse::<u64>().ok())
                     .unwrap_or(1);
                 if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    eprintln!("Slack rate-limited {method}; retrying in {wait}s");
+                    dre_protocol::log::debug!("Slack rate-limited {method}; retrying in {wait}s");
                     std::thread::sleep(Duration::from_secs(wait));
                     continue;
                 }

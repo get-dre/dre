@@ -48,8 +48,8 @@ impl Destination for Teams {
         let url = conn_required(&d.connection, "webhook_url")?;
         let (text, cut) = markdown::fit(&m.text, MESSAGE_LIMIT as usize, CUT_MARKER, markdown::to_teams);
         if cut {
-            eprintln!(
-                "warning: the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
+            dre_protocol::log::warn!(
+                "the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
             );
         }
         post(url, &card(&m.title, &text))?;
@@ -127,7 +127,7 @@ fn post(url: &str, payload: &Value) -> Result<()> {
                     .and_then(|v| v.trim().parse::<u64>().ok())
                     .unwrap_or(1);
                 if attempt == 0 && wait <= MAX_RETRY_WAIT {
-                    eprintln!("Teams rate-limited the post; retrying in {wait}s");
+                    dre_protocol::log::debug!("Teams rate-limited the post; retrying in {wait}s");
                     std::thread::sleep(Duration::from_secs(wait));
                     continue;
                 }

@@ -52,7 +52,7 @@ fn handshake_reports_identity_and_capabilities() {
     let info = p.info();
     assert_eq!(
         (info.kind, info.name.as_str(), info.protocol_version),
-        (Kind::Source, "fixture", 0)
+        (Kind::Source, "fixture", 1)
     );
     assert!(p.has(CAP_SESSIONS));
 }
@@ -123,7 +123,107 @@ fn a_failed_open_is_reported() {
 fn an_incompatible_version_names_both_ranges() {
     let err = start_mode("old_protocol", Duration::from_secs(10)).err().unwrap();
     let msg = err.to_string();
-    assert!(msg.contains("7..=9") && msg.contains("0..=0"), "{msg}");
+    assert!(msg.contains("7..=9") && msg.contains("0..=1"), "{msg}");
+}
+
+#[test]
+fn a_protocol_zero_plugin_is_told_to_update() {
+    let mut p =
+        PluginProcess::spawn_env(fixture(), quiet(), &[("DRE_FIXTURE_MODE", "protocol_zero")]).unwrap();
+    let err = p
+        .handshake(
+            (dre_protocol::CORE_MIN_VERSION, MAX_VERSION),
+            Duration::from_secs(10),
+        )
+        .err()
+        .unwrap();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("0..=0") && msg.contains("update the plugin"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn the_sdk_still_speaks_protocol_zero_to_an_older_core() {
+    let mut p = PluginProcess::spawn(fixture(), quiet()).unwrap();
+    p.handshake((0, 0), Duration::from_secs(10)).unwrap();
+    assert_eq!(p.info().protocol_version, 0);
+    p.open(Map::new(), false).unwrap();
+    let (_, values) = collect(&mut p, "rows 2", None);
+    assert_eq!(values, vec![0, 1]);
+}
+
+fn recording() -> (LogSink, Arc<Mutex<Vec<String>>>) {
+    let lines = Arc::new(Mutex::new(Vec::new()));
+    let l = lines.clone();
+    let sink: LogSink = Arc::new(move |_, line| l.lock().unwrap().push(line.to_string()));
+    (sink, lines)
+}
+
+#[test]
+fn log_and_progress_messages_reach_the_log_sink() {
+    let (sink, lines) = recording();
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    p.execute("slog hello there", None, |_, _| Ok(())).unwrap();
+    p.execute("progress", None, |_, _| Ok(())).unwrap();
+    let lines = lines.lock().unwrap().clone();
+    assert!(
+        lines.contains(&"info: hello there attempt=2".to_string()),
+        "{lines:?}"
+    );
+    assert!(lines.contains(&"info: reading (2/2)".to_string()), "{lines:?}");
+}
+
+#[test]
+fn an_error_carries_its_kind_and_namespaced_code() {
+    let mut p = opened();
+    match p.execute("coded", None, |_, _| Ok(())).unwrap_err() {
+        HostError::Plugin {
+            kind, code, message, ..
+        } => {
+            assert_eq!(kind.as_deref(), Some("auth"));
+            assert_eq!(code.as_deref(), Some("fixture/bad-token"));
+            assert_eq!(message, "the token was refused");
+        }
+        e => panic!("{e:?}"),
+    }
+    // Uncoded errors stay plain.
+    match p.execute("fail", None, |_, _| Ok(())).unwrap_err() {
+        HostError::Plugin { kind, code, .. } => assert_eq!((kind, code), (None, None)),
+        e => panic!("{e:?}"),
+    }
+}
+
+#[test]
+fn a_cancelled_request_replies_cancelled_and_the_session_survives() {
+    let (sink, lines) = recording();
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    let canceller = p.canceller();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(canceller.cancel());
+    });
+    let started = std::time::Instant::now();
+    let err = p.execute("sleep 20", None, |_, _| Ok(())).unwrap_err();
+    t.join().unwrap();
+    assert!(started.elapsed() < Duration::from_secs(10));
+    match err {
+        HostError::Plugin { kind, .. } => assert_eq!(kind.as_deref(), Some("cancelled")),
+        e => panic!("{e:?}"),
+    }
+    assert!(
+        lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l == "warning: fixture: cancel hook")
+    );
+    // The next request runs normally.
+    let (_, values) = collect(&mut p, "rows 1", None);
+    assert_eq!(values, vec![0]);
 }
 
 #[test]

@@ -194,7 +194,9 @@ impl Plan {
         let (subject, body, html) = match m {
             Some(m) => {
                 if o.contains_key("body") {
-                    eprintln!("warning: `body` doesn't apply to a message output: the message is the body");
+                    dre_protocol::log::warn!(
+                        "`body` doesn't apply to a message output: the message is the body"
+                    );
                 }
                 let html = m
                     .html

@@ -1,6 +1,11 @@
 // Package plugin serves DRE's plugin protocol (docs/protocol.md) for the Go plugin packages:
 // framing, the handshake, describe, validate, the request loop, and the error and exit rules.
 //
+// From protocol 1, every reply carries its request's id; stdin is read on a goroutine so a
+// `cancel` reaches a running request (see Cancelled and Canceller); log with log/slog (Serve
+// sends the default logger's records to core as `log` messages) and report Progress; return an
+// *Error to give core a failure's kind and code.
+//
 // A package lists its roles. A source role opens a Session, which runs statements on one
 // database session; a destination role delivers a file. Everything else (sign-in, the driver,
 // the dialect) stays in the package. Results are normalised to DRE's type rule on the way out
@@ -12,14 +17,19 @@ package plugin
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -28,8 +38,27 @@ import (
 
 const (
 	ProtocolMin = 0
-	ProtocolMax = 0
+	ProtocolMax = 1
 )
+
+// Error is a failure with its kind (one of the protocol's error kinds: config, plugin, refused,
+// connection, auth, query, delivery, internal, cancelled, timed_out) and, optionally, a code.
+// The code is namespaced by the plugin on the way out (`bad-token` is sent as
+// `databricks/bad-token`).
+type Error struct {
+	Kind    string
+	Code    string
+	Message string
+}
+
+func (e *Error) Error() string { return e.Message }
+
+// Canceller is implemented by a Session (or set as a Role's Cancel) that can stop a running
+// request on the server, such as cancelling a statement. It's called on the stdin goroutine
+// while the request runs.
+type Canceller interface {
+	Cancel()
+}
 
 // Field mirrors the protocol's `describe` entry for one profile field.
 type Field struct {
@@ -54,6 +83,8 @@ type Role struct {
 	Open func(conn map[string]any) (Session, error)
 	// Deliver sends one local file to remote, returning where it landed.
 	Deliver func(local, remote string, conn map[string]any) (string, error)
+	// Cancel, when set, stops a running delivery (see Canceller).
+	Cancel func()
 }
 
 // ID is the role as the protocol writes a plugin: `<kind>/<name>`.
@@ -116,11 +147,152 @@ type Result interface {
 type server struct {
 	pkg     Package
 	role    Role
-	in      *bufio.Reader
+	frames  chan frameOrErr
+	outMu   sync.Mutex
 	out     *bufio.Writer
 	db      Session
 	greeted bool
+	// version is the protocol version settled on (0 until hello).
+	version atomic.Int32
+	// current is the running request's id (0: none); cancelled the last one core cancelled.
+	current   atomic.Uint64
+	cancelled atomic.Uint64
+	dbMu      sync.Mutex
 }
+
+type frameOrErr struct {
+	f   Frame
+	err error
+}
+
+// active is the server Serve is running, for Cancelled, Progress and the slog handler.
+var active atomic.Pointer[server]
+
+// Cancelled reports whether core has cancelled the request running now. Long loops check it
+// between steps.
+func Cancelled() bool {
+	s := active.Load()
+	if s == nil {
+		return false
+	}
+	cur := s.current.Load()
+	return cur != 0 && s.cancelled.Load() == cur
+}
+
+// Progress tells core how far a long request has got (protocol 1; logged at info before).
+func Progress(message string, done, total int64) {
+	s := active.Load()
+	if s == nil {
+		return
+	}
+	if s.version.Load() == 0 {
+		fmt.Fprintf(os.Stderr, "info: %s (%d/%d)\n", message, done, total)
+		return
+	}
+	m := map[string]any{"type": "progress", "done": done, "total": total}
+	if message != "" {
+		m["message"] = message
+	}
+	s.send(m)
+}
+
+// next is the next frame core sent, read by readInput.
+func (s *server) next() (Frame, error) {
+	fe, ok := <-s.frames
+	if !ok {
+		return Frame{}, ErrEOF
+	}
+	return fe.f, fe.err
+}
+
+// readInput reads stdin into s.frames, acting on `cancel` at once instead of queueing it behind
+// the request it cancels. End of input cancels the running request too: core has gone.
+func (s *server) readInput(in *bufio.Reader) {
+	defer close(s.frames)
+	for {
+		f, err := ReadFrame(in)
+		if err != nil {
+			s.cancel(s.current.Load())
+			s.frames <- frameOrErr{err: err}
+			return
+		}
+		if f.Tag == TagJSON {
+			var m struct {
+				Type string `json:"type"`
+				ID   uint64 `json:"id"`
+			}
+			if json.Unmarshal(f.Body, &m) == nil && m.Type == "cancel" {
+				s.cancel(m.ID)
+				continue
+			}
+		}
+		s.frames <- frameOrErr{f: f}
+	}
+}
+
+// cancel marks request id cancelled, and asks the session or role to stop it if it's running.
+func (s *server) cancel(id uint64) {
+	s.cancelled.Store(id)
+	if id == 0 || s.current.Load() != id {
+		return
+	}
+	s.dbMu.Lock()
+	db := s.db
+	s.dbMu.Unlock()
+	if c, ok := db.(Canceller); ok {
+		c.Cancel()
+	}
+	if s.role.Cancel != nil {
+		s.role.Cancel()
+	}
+}
+
+// slogHandler sends log records to core: `log` messages from protocol 1, stderr lines with the
+// prefixes core shows before.
+type slogHandler struct {
+	attrs []slog.Attr
+}
+
+func (h slogHandler) Enabled(_ context.Context, l slog.Level) bool { return l >= slog.LevelDebug }
+
+func (h slogHandler) Handle(_ context.Context, r slog.Record) error {
+	s := active.Load()
+	level := "debug"
+	switch {
+	case r.Level >= slog.LevelError:
+		level = "error"
+	case r.Level >= slog.LevelWarn:
+		level = "warn"
+	case r.Level >= slog.LevelInfo:
+		level = "info"
+	}
+	fields := map[string]any{}
+	add := func(a slog.Attr) bool {
+		fields[a.Key] = a.Value.Resolve().Any()
+		return true
+	}
+	for _, a := range h.attrs {
+		add(a)
+	}
+	r.Attrs(add)
+	if s == nil || s.version.Load() == 0 {
+		prefix := map[string]string{"error": "warning: ", "warn": "warning: ", "info": "info: "}[level]
+		fmt.Fprintln(os.Stderr, prefix+r.Message)
+		return nil
+	}
+	m := map[string]any{"type": "log", "level": level, "message": r.Message}
+	if len(fields) > 0 {
+		m["fields"] = fields
+	}
+	s.send(m)
+	return nil
+}
+
+func (h slogHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return slogHandler{attrs: append(append([]slog.Attr{}, h.attrs...), as...)}
+}
+
+func (h slogHandler) WithGroup(string) slog.Handler { return h }
 
 // exitCode ends Serve with a process exit code.
 type exitCode int
@@ -128,7 +300,12 @@ type exitCode int
 // Serve speaks the protocol on stdin and stdout as role until core closes, and returns the
 // process exit code.
 func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
-	s := &server{pkg: p, role: r, in: bufio.NewReader(stdin), out: bufio.NewWriter(stdout)}
+	s := &server{pkg: p, role: r, frames: make(chan frameOrErr, 16), out: bufio.NewWriter(stdout)}
+	go s.readInput(bufio.NewReader(stdin))
+	active.Store(s)
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slogHandler{}))
+	defer slog.SetDefault(prev)
 	defer func() {
 		if p := recover(); p != nil {
 			if c, ok := p.(exitCode); ok {
@@ -136,12 +313,13 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "plugin panicked: %v\n%s", p, debug.Stack())
-			s.send(map[string]any{"type": "error", "message": fmt.Sprintf("plugin panicked: %v", p)})
+			s.send(map[string]any{"type": "error", "kind": "internal", "message": fmt.Sprintf("plugin panicked: %v", p)})
 			code = 101
 		}
 	}()
 	for {
-		f, err := ReadFrame(s.in)
+		s.current.Store(0)
+		f, err := s.next()
 		if err == ErrEOF {
 			s.closeDB()
 			return 0
@@ -160,6 +338,9 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 			s.send(errorMsg("unsupported request `?`"))
 			continue
 		}
+		var id uint64
+		_ = json.Unmarshal(req["id"], &id)
+		s.current.Store(id)
 		t := str(req["type"])
 		if t == "hello" {
 			s.hello(req)
@@ -174,17 +355,53 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 			s.send(map[string]any{"type": "ok"})
 			return 0
 		}
+		if Cancelled() {
+			// Cancelled before it started: it never runs.
+			s.send(s.errorReply(errors.New("cancelled before it started")))
+			continue
+		}
 		if err := s.handle(t, req); err != nil {
-			s.send(errorReply(err))
+			s.send(s.errorReply(err))
 		}
 	}
 }
 
-func (s *server) send(v any) {
-	if err := WriteJSON(s.out, v); err != nil {
+// send writes one message; from protocol 1 it carries the running request's id.
+func (s *server) send(v map[string]any) {
+	if id := s.current.Load(); id != 0 && s.version.Load() >= 1 {
+		v["id"] = id
+	}
+	s.outMu.Lock()
+	err := WriteJSON(s.out, v)
+	s.outMu.Unlock()
+	if err != nil {
 		// Core has gone; nothing left to talk to.
 		panic(exitCode(1))
 	}
+}
+
+// errorReply is the `error` reply for a failed request: kind `cancelled` if core cancelled
+// it, else an *Error's kind and code, else the message alone.
+func (s *server) errorReply(err error) map[string]any {
+	m := errorReply(err)
+	var e *Error
+	switch {
+	case Cancelled():
+		m["kind"] = "cancelled"
+	case errors.As(err, &e):
+		m["message"] = e.Message
+		if e.Kind != "" {
+			m["kind"] = e.Kind
+		}
+		if e.Code != "" {
+			code := e.Code
+			if !strings.Contains(code, "/") {
+				code = s.role.Name + "/" + code
+			}
+			m["code"] = code
+		}
+	}
+	return m
 }
 
 func (s *server) sendRecord(rec arrow.Record) error {
@@ -192,13 +409,18 @@ func (s *server) sendRecord(rec arrow.Record) error {
 	if err != nil {
 		return err
 	}
-	if err := WriteFrame(s.out, TagArrow, b); err != nil {
+	s.outMu.Lock()
+	err = WriteFrame(s.out, TagArrow, b)
+	s.outMu.Unlock()
+	if err != nil {
 		panic(exitCode(1))
 	}
 	return nil
 }
 
 func (s *server) closeDB() {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
 	if s.db != nil {
 		s.db.Close()
 		s.db = nil
@@ -233,6 +455,7 @@ func (s *server) hello(req map[string]json.RawMessage) {
 		}
 	}
 	s.greeted = true
+	s.version.Store(int32(hi))
 	s.send(map[string]any{
 		"type": "hello", "protocol_version": hi, "kind": s.role.Kind, "name": s.role.Name,
 		"version": s.pkg.Version, "capabilities": s.role.Capabilities, "provides": provides,
@@ -282,7 +505,9 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		if err != nil {
 			return err
 		}
+		s.dbMu.Lock()
 		s.db = db
+		s.dbMu.Unlock()
 		s.send(map[string]any{"type": "ok"})
 		return nil
 	case "execute":
@@ -309,7 +534,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 			return err
 		}
 		if note != "" {
-			fmt.Fprintln(os.Stderr, note)
+			slog.Debug(note)
 		}
 		s.send(map[string]any{"type": "ok"})
 		return nil
@@ -462,7 +687,7 @@ func (s *server) stream(res Result, rowLimit *int64) error {
 
 // load reads the rows core streams after `load` and hands them to the session.
 func (s *server) load(name string) error {
-	first, err := ReadFrame(s.in)
+	first, err := s.next()
 	if err != nil {
 		return err
 	}
@@ -480,7 +705,7 @@ func (s *server) load(name string) error {
 	}()
 	// Read to result_set_end before anything can fail, so the stream stays in step.
 	for {
-		f, err := ReadFrame(s.in)
+		f, err := s.next()
 		if err != nil {
 			return err
 		}

@@ -1,25 +1,273 @@
 //! The plugin SDK: implement one of [`Source`], [`Format`] or [`Destination`] and call the
 //! matching `serve_*` function from `main`. The SDK owns stdin/stdout, the handshake, framing,
-//! error replies and panics; plugins log with `eprintln!`.
+//! request ids, error replies and panics.
 //!
 //! Formats and destinations declare their options (`options()`) and add any rule a declaration
 //! can't express (`validate()`). The SDK checks a config block against both on `validate` and
 //! before every `write` and `deliver`, so plugin code only sees options that passed.
+//!
+//! - **Logging:** use the `log` crate (`log::info!`, `log::warn!`), or [`log`] for a message with
+//!   fields; the SDK sends them to core as `log` messages. The plugin's own records keep their
+//!   level; its dependencies' are shown only with `-v`. Long requests may report [`progress`].
+//! - **Errors:** return a [`PluginError`] to give core the problem's kind and code; any other
+//!   error is sent as a plain message.
+//! - **Cancellation:** stdin is read on a background thread while a request runs. On `cancel`
+//!   (or when core goes away) [`cancelled`] turns true and the hook set with [`on_cancel`] runs,
+//!   e.g. to cancel a query on the server.
 
-use std::io::{BufReader, BufWriter, Read, Stdout};
+use std::io::{BufReader, BufWriter, Stdout};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use serde_json::{Map, Value};
 
 use crate::frame::{self, Frame, FrameError};
-use crate::msg::{ConnectionField, Request, Response, ResultSetMeta};
+use crate::msg::{ConnectionField, Envelope, LogLevel, Request, Response, ResultSetMeta};
 use crate::options::{self, OptionField};
 use crate::{CAP_VALIDATE, Kind, MAX_VERSION, MIN_VERSION, PluginId};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// What kind of problem a [`PluginError`] is (the kinds of DRE's error-code registry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// The settings are wrong.
+    Config,
+    /// The plugin itself misbehaved.
+    Plugin,
+    /// Refused something unsafe.
+    Refused,
+    /// A connection couldn't be made; trying again may work.
+    Connection,
+    /// Credentials were refused.
+    Auth,
+    /// A query failed on the database.
+    Query,
+    /// A file or message couldn't be delivered.
+    Delivery,
+    /// Something unexpected: a bug.
+    Internal,
+    Cancelled,
+    TimedOut,
+}
+
+impl ErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorKind::Config => "config",
+            ErrorKind::Plugin => "plugin",
+            ErrorKind::Refused => "refused",
+            ErrorKind::Connection => "connection",
+            ErrorKind::Auth => "auth",
+            ErrorKind::Query => "query",
+            ErrorKind::Delivery => "delivery",
+            ErrorKind::Internal => "internal",
+            ErrorKind::Cancelled => "cancelled",
+            ErrorKind::TimedOut => "timed_out",
+        }
+    }
+}
+
+/// An error with its kind and, optionally, a code. The SDK namespaces the code by the plugin
+/// (`host-key-mismatch` is sent as `sftp/host-key-mismatch`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginError {
+    pub kind: ErrorKind,
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl PluginError {
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> PluginError {
+        PluginError {
+            kind,
+            code: None,
+            message: message.into(),
+        }
+    }
+
+    pub fn code(mut self, code: impl Into<String>) -> PluginError {
+        self.code = Some(code.into());
+        self
+    }
+}
+
+impl std::fmt::Display for PluginError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PluginError {}
+
+/// The SDK's process-wide state, shared by the request loop, the stdin reader, and logging
+/// from any thread.
+struct Shared {
+    out: Mutex<BufWriter<Stdout>>,
+    /// The protocol version settled on (0 until the handshake).
+    version: AtomicU32,
+    /// The request running now (0: none).
+    current: AtomicU64,
+    /// The last request core cancelled (0: none).
+    cancelled: AtomicU64,
+    hook: Mutex<Option<CancelHook>>,
+    /// The plugin being served, for namespacing its error codes.
+    name: OnceLock<String>,
+}
+
+type CancelHook = Arc<dyn Fn() + Send + Sync>;
+
+fn shared() -> &'static Shared {
+    static SHARED: OnceLock<Shared> = OnceLock::new();
+    SHARED.get_or_init(|| Shared {
+        out: Mutex::new(BufWriter::new(std::io::stdout())),
+        version: AtomicU32::new(0),
+        current: AtomicU64::new(0),
+        cancelled: AtomicU64::new(0),
+        hook: Mutex::new(None),
+        name: OnceLock::new(),
+    })
+}
+
+/// Whether core has cancelled the request running now. Long loops check it between steps.
+pub fn cancelled() -> bool {
+    let s = shared();
+    let current = s.current.load(Ordering::SeqCst);
+    current != 0 && s.cancelled.load(Ordering::SeqCst) == current
+}
+
+/// Run `hook` when core cancels a request, on the stdin reader's thread, while the request is
+/// still running on the main one (e.g. ask the server to cancel the query). Replaces any hook
+/// set before. The request then fails, and the SDK replies with kind `cancelled`.
+pub fn on_cancel(hook: impl Fn() + Send + Sync + 'static) {
+    *shared().hook.lock().unwrap() = Some(Arc::new(hook));
+}
+
+/// Cancel request `id`: remembered, so a request cancelled before it starts never runs, and
+/// the hook runs if it's running now.
+fn cancel(id: u64) {
+    let s = shared();
+    s.cancelled.store(id, Ordering::SeqCst);
+    if id != 0 && s.current.load(Ordering::SeqCst) == id {
+        let hook = s.hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+}
+
+/// Send a log message to core, with structured `fields` (never secrets).
+pub fn log_fields(level: LogLevel, message: &str, fields: Map<String, Value>) {
+    let s = shared();
+    if s.version.load(Ordering::SeqCst) == 0 {
+        // Protocol 0 has no `log` message: stderr, with the prefixes core 0.3 shows.
+        let prefix = match level {
+            LogLevel::Error | LogLevel::Warn => "warning: ",
+            LogLevel::Info => "info: ",
+            LogLevel::Debug | LogLevel::Trace => "",
+        };
+        eprintln!("{prefix}{message}");
+        return;
+    }
+    send(&Response::Log {
+        level,
+        message: message.to_string(),
+        fields,
+    });
+}
+
+/// Send a log message to core.
+pub fn log(level: LogLevel, message: &str) {
+    log_fields(level, message, Map::new())
+}
+
+/// Tell core how far a long request has got; it shows the latest.
+pub fn progress(message: Option<&str>, done: Option<u64>, total: Option<u64>) {
+    if shared().version.load(Ordering::SeqCst) == 0 {
+        if let Some(m) = message {
+            log(LogLevel::Info, m);
+        }
+        return;
+    }
+    send(&Response::Progress {
+        message: message.map(str::to_string),
+        done,
+        total,
+    });
+}
+
+/// Bridges the `log` crate to `log` messages.
+struct FrameLogger;
+
+impl ::log::Log for FrameLogger {
+    fn enabled(&self, m: &::log::Metadata) -> bool {
+        m.level() <= ::log::Level::Debug
+    }
+
+    fn log(&self, r: &::log::Record) {
+        if !self.enabled(r.metadata()) {
+            return;
+        }
+        let level = match r.level() {
+            ::log::Level::Error => LogLevel::Error,
+            ::log::Level::Warn => LogLevel::Warn,
+            ::log::Level::Info => LogLevel::Info,
+            ::log::Level::Debug => LogLevel::Debug,
+            ::log::Level::Trace => LogLevel::Trace,
+        };
+        // A dependency's records (a driver, an HTTP client) are for `-v` only.
+        let level = if r.target().starts_with("dre") {
+            level
+        } else {
+            level.max(LogLevel::Debug)
+        };
+        log(level, &r.args().to_string());
+    }
+
+    fn flush(&self) {}
+}
+
+/// Write one reply or streamed message, with the running request's id from protocol 1.
+fn send(r: &Response) {
+    let s = shared();
+    let id = match s.version.load(Ordering::SeqCst) {
+        0 => None,
+        _ => Some(s.current.load(Ordering::SeqCst)).filter(|id| *id != 0),
+    };
+    let mut out = s.out.lock().unwrap();
+    if frame::write_json(&mut *out, &Envelope::new(id, r)).is_err() {
+        // Core has gone; nothing left to talk to.
+        std::process::exit(1);
+    }
+}
+
+/// The `error` reply for a failed request: kind `cancelled` if core cancelled it, else the
+/// kind and code of a [`PluginError`], else the message alone.
+fn error_reply(e: &Error) -> Response {
+    if cancelled() {
+        return Response::Error {
+            message: e.to_string(),
+            kind: Some("cancelled".into()),
+            code: None,
+        };
+    }
+    match e.downcast_ref::<PluginError>() {
+        Some(pe) => Response::Error {
+            message: pe.message.clone(),
+            kind: Some(pe.kind.as_str().into()),
+            code: pe.code.as_ref().map(|c| match shared().name.get() {
+                Some(name) if !c.contains('/') => format!("{name}/{c}"),
+                _ => c.clone(),
+            }),
+        },
+        None => Response::error(e.to_string()),
+    }
+}
 
 /// Identity reported in the handshake.
 #[derive(Debug, Clone)]
@@ -261,13 +509,18 @@ pub trait Destination {
     }
 }
 
+/// The frames core sends, read on a background thread (see [`read_stdin`]).
 pub struct Input {
-    r: BufReader<Box<dyn Read>>,
+    rx: Receiver<std::result::Result<Frame, FrameError>>,
 }
 
 impl Input {
+    fn next(&mut self) -> std::result::Result<Frame, FrameError> {
+        self.rx.recv().unwrap_or(Err(FrameError::Eof))
+    }
+
     fn read(&mut self) -> Result<Frame> {
-        frame::read_frame(&mut self.r).map_err(|e| -> Error {
+        self.next().map_err(|e| -> Error {
             match e {
                 FrameError::Eof => "core closed the connection".into(),
                 e => e.to_string().into(),
@@ -276,21 +529,39 @@ impl Input {
     }
 }
 
-struct Output {
-    w: BufWriter<Stdout>,
+/// Read stdin into `tx`, acting on `cancel` at once rather than queueing it behind the request
+/// it cancels. End of input cancels the running request too: core has gone.
+fn read_stdin(tx: Sender<std::result::Result<Frame, FrameError>>) {
+    let mut r = BufReader::new(std::io::stdin());
+    loop {
+        let f = frame::read_frame(&mut r);
+        match &f {
+            Ok(Frame::Json(v)) if v.get("type").and_then(Value::as_str) == Some("cancel") => {
+                cancel(v.get("id").and_then(Value::as_u64).unwrap_or(0));
+                continue;
+            }
+            Err(_) => cancel(shared().current.load(Ordering::SeqCst)),
+            Ok(_) => {}
+        }
+        let stop = f.is_err();
+        if tx.send(f).is_err() || stop {
+            break;
+        }
+    }
 }
+
+/// Writes replies and result data (see [`send`]).
+struct Output;
 
 impl Output {
     fn send(&mut self, r: &Response) {
-        if frame::write_json(&mut self.w, r).is_err() {
-            // Core has gone; nothing left to talk to.
-            std::process::exit(1);
-        }
+        send(r)
     }
 
     fn batch(&mut self, b: &RecordBatch) -> Result<()> {
         let ipc = frame::encode_batch(b)?;
-        frame::write_arrow(&mut self.w, &ipc).map_err(|_| -> Error { "core closed the connection".into() })
+        let mut out = shared().out.lock().unwrap();
+        frame::write_arrow(&mut *out, &ipc).map_err(|_| -> Error { "core closed the connection".into() })
     }
 }
 
@@ -384,12 +655,13 @@ impl Plugin {
 /// wants; without one, the first is served.
 pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     assert!(!plugins.is_empty(), "a package serves at least one plugin");
-    let mut input = Input {
-        r: BufReader::new(Box::new(std::io::stdin())),
-    };
-    let mut out = Output {
-        w: BufWriter::new(std::io::stdout()),
-    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || read_stdin(tx));
+    let mut input = Input { rx };
+    let mut out = Output;
+    if ::log::set_logger(&FrameLogger).is_ok() {
+        ::log::set_max_level(::log::LevelFilter::Debug);
+    }
     let provides: Vec<PluginId> = plugins.iter().map(Plugin::id).collect();
     let chosen = loop {
         let req = match next_request(&mut input, &mut out) {
@@ -403,9 +675,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
             ..
         } = req
         else {
-            out.send(&Response::Error {
-                message: "the first request must be `hello`".into(),
-            });
+            out.send(&Response::error("the first request must be `hello`"));
             continue;
         };
         let Some(chosen) = negotiate((min_version, max_version), (MIN_VERSION, MAX_VERSION)) else {
@@ -421,14 +691,16 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
                 Some(i) => i,
                 None => {
                     let list: Vec<String> = provides.iter().map(|p| p.to_string()).collect();
-                    out.send(&Response::Error {
-                        message: format!("this executable provides {}, not {want}", list.join(", ")),
-                    });
+                    out.send(&Response::error(format!(
+                        "this executable provides {}, not {want}",
+                        list.join(", ")
+                    )));
                     std::process::exit(1);
                 }
             },
         };
         let (about, h) = plugins[i].handler();
+        let _ = shared().name.set(about.name.to_string());
         out.send(&Response::Hello {
             protocol_version: chosen,
             kind: h.kind(),
@@ -446,6 +718,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
                 Vec::new()
             },
         });
+        shared().version.store(chosen, Ordering::SeqCst);
         break i;
     };
     let (about, h) = plugins[chosen].handler();
@@ -454,14 +727,12 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
 
 /// The next request, or `None` after answering one that can't be read. Exits at end of input.
 fn next_request(input: &mut Input, out: &mut Output) -> Option<Request> {
-    let frame = match frame::read_frame(&mut input.r) {
+    let frame = match input.next() {
         Ok(f) => f,
         Err(FrameError::Eof) => std::process::exit(0),
         Err(e) => {
             eprintln!("{e}");
-            out.send(&Response::Error {
-                message: e.to_string(),
-            });
+            out.send(&Response::error(e.to_string()));
             std::process::exit(2);
         }
     };
@@ -470,16 +741,12 @@ fn next_request(input: &mut Input, out: &mut Output) -> Option<Request> {
             Ok(r) => Some(r),
             Err(_) => {
                 let t = v.get("type").and_then(Value::as_str).unwrap_or("?").to_string();
-                out.send(&Response::Error {
-                    message: format!("unsupported request `{t}`"),
-                });
+                out.send(&Response::error(format!("unsupported request `{t}`")));
                 None
             }
         },
         Frame::Arrow(_) => {
-            out.send(&Response::Error {
-                message: "unexpected Arrow frame".into(),
-            });
+            out.send(&Response::error("unexpected Arrow frame"));
             None
         }
     }
@@ -488,7 +755,7 @@ fn next_request(input: &mut Input, out: &mut Output) -> Option<Request> {
 /// Serve requests after the handshake.
 fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> ! {
     loop {
-        let frame = match frame::read_frame(&mut input.r) {
+        let frame = match input.next() {
             Ok(f) => f,
             Err(FrameError::Eof) => {
                 if let Handler::Source(src) = &mut h {
@@ -498,34 +765,34 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
             }
             Err(e) => {
                 eprintln!("{e}");
-                out.send(&Response::Error {
-                    message: e.to_string(),
-                });
+                out.send(&Response::error(e.to_string()));
                 std::process::exit(2);
             }
         };
+        let s = shared();
+        let id = match &frame {
+            Frame::Json(v) => v.get("id").and_then(Value::as_u64).unwrap_or(0),
+            Frame::Arrow(_) => 0,
+        };
+        s.current.store(id, Ordering::SeqCst);
         let req = match frame {
             Frame::Json(v) => match serde_json::from_value::<Request>(v.clone()) {
                 Ok(r) => r,
                 Err(_) => {
                     let t = v.get("type").and_then(Value::as_str).unwrap_or("?").to_string();
-                    out.send(&Response::Error {
-                        message: format!("unsupported request `{t}`"),
-                    });
+                    out.send(&Response::error(format!("unsupported request `{t}`")));
+                    s.current.store(0, Ordering::SeqCst);
                     continue;
                 }
             },
             Frame::Arrow(_) => {
-                out.send(&Response::Error {
-                    message: "unexpected Arrow frame".into(),
-                });
+                out.send(&Response::error("unexpected Arrow frame"));
                 continue;
             }
         };
         if let Request::Hello { .. } = req {
-            out.send(&Response::Error {
-                message: "`hello` was already answered".into(),
-            });
+            out.send(&Response::error("`hello` was already answered"));
+            s.current.store(0, Ordering::SeqCst);
             continue;
         }
         if let Request::Close {} = req {
@@ -535,14 +802,17 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
             out.send(&Response::Ok {});
             std::process::exit(0);
         }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            handle(&mut h, name, req, &mut input, &mut out)
-        }));
+        // Cancelled before it started: it never runs.
+        let result = if cancelled() {
+            Ok(Err("cancelled before it started".into()))
+        } else {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle(&mut h, name, req, &mut input, &mut out)
+            }))
+        };
         match result {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => out.send(&Response::Error {
-                message: e.to_string(),
-            }),
+            Ok(Err(e)) => out.send(&error_reply(&e)),
             Err(p) => {
                 let msg = p
                     .downcast_ref::<String>()
@@ -551,10 +821,13 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
                     .unwrap_or_else(|| "unknown panic".into());
                 out.send(&Response::Error {
                     message: format!("plugin panicked: {msg}"),
+                    kind: Some("internal".into()),
+                    code: None,
                 });
                 std::process::exit(101);
             }
         }
+        s.current.store(0, Ordering::SeqCst);
     }
 }
 
@@ -687,9 +960,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             // A failed write is reported at once, so core can stop streaming; this is the
             // request's one reply.
             if let Err(e) = &written {
-                out.send(&Response::Error {
-                    message: e.to_string(),
-                });
+                out.send(&error_reply(e));
             }
             // Consume whatever the format didn't read (after an error, possibly the rest of a
             // result set), so the stream stays in sync.

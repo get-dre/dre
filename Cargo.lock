@@ -1976,7 +1976,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-csv"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-duckdb"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-email"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dre-protocol",
  "lettre",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-fixed_width"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2022,7 +2022,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-ftp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dre-protocol",
  "rustls",
@@ -2034,7 +2034,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-google_chat"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "dre-protocol",
  "serde_json",
@@ -2044,7 +2044,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-object_store"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -2064,7 +2064,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-parquet"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-postgres"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "arrow 59.3.0",
  "bytes",
@@ -2095,7 +2095,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-sftp"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dre-protocol",
  "dre-ssh",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-slack"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dre-protocol",
  "form_urlencoded",
@@ -2118,7 +2118,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-teams"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "dre-protocol",
  "serde_json",
@@ -2128,7 +2128,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-xlsx"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "arrow 59.3.0",
  "calamine",
@@ -2144,9 +2144,10 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arrow 59.3.0",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -363,8 +363,8 @@ func waiting(what string) (stop func()) {
 			case <-done:
 				return
 			case <-t.C:
-				fmt.Fprintf(os.Stderr, "info: waiting for %s to answer (%d s; a stopped warehouse takes a few minutes to start)\n",
-					what, int(time.Since(start).Seconds()))
+				slog.Info(fmt.Sprintf("waiting for %s to answer (%d s; a stopped warehouse takes a few minutes to start)",
+					what, int(time.Since(start).Seconds())))
 			}
 		}
 	}()

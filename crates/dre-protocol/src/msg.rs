@@ -1,10 +1,29 @@
-//! Control messages. Every JSON frame is an object with a `type` field.
+//! Control messages. Every JSON frame is an object with a `type` field. From protocol 1, every
+//! message after the handshake also carries the `id` of the request it belongs to ([`Envelope`]).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub use crate::options::OptionField;
 use crate::{Kind, PluginId};
+
+/// A message with the id of the request it belongs to. Core numbers its requests; every reply,
+/// and every message streamed as part of a request (`result_set_end`, `finish`, `result`,
+/// `result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither
+/// does anything a protocol 0 peer sends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Envelope<T> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    #[serde(flatten)]
+    pub body: T,
+}
+
+impl<T> Envelope<T> {
+    pub fn new(id: Option<u64>, body: T) -> Envelope<T> {
+        Envelope { id, body }
+    }
+}
 
 /// Core → plugin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +101,10 @@ pub enum Request {
     },
     /// End the conversation; the plugin exits 0.
     Close {},
+    /// Protocol 1: stop the request whose id the envelope carries. It has no reply of its own:
+    /// the request replies `error` with kind `cancelled`, or its usual reply if it finished
+    /// first. A cancel for a request that isn't running is ignored.
+    Cancel {},
 }
 
 /// Plugin → core.
@@ -150,9 +173,71 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         warning: Option<String>,
     },
+    /// The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,
+    /// namespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has
+    /// neither): without a `code`, core reports the failure under its own code for the step;
+    /// a `code` without a `kind` counts as `internal`.
     Error {
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
     },
+    /// Protocol 1: a log line, while a request runs (with its id) or between requests.
+    Log {
+        level: LogLevel,
+        message: String,
+        /// Structured context (`{"attempt": 2}`); never secrets.
+        #[serde(default, skip_serializing_if = "Map::is_empty")]
+        fields: Map<String, Value>,
+    },
+    /// Protocol 1, optional: how far a long request has got. Core shows it when present.
+    Progress {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        done: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        total: Option<u64>,
+    },
+}
+
+impl Response {
+    /// An `error` reply with only a message.
+    pub fn error(message: impl Into<String>) -> Response {
+        Response::Error {
+            message: message.into(),
+            kind: None,
+            code: None,
+        }
+    }
+}
+
+/// The kinds an `error` reply may give, from DRE's error-code registry.
+pub const ERROR_KINDS: &[&str] = &[
+    "config",
+    "plugin",
+    "refused",
+    "connection",
+    "auth",
+    "query",
+    "delivery",
+    "internal",
+    "cancelled",
+    "timed_out",
+];
+
+/// How important a `log` message is. Core shows `info` and above to the person, and keeps
+/// `debug` and `trace` for `-v` and the log file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
 }
 
 /// A rendered message, as `deliver` carries it.
