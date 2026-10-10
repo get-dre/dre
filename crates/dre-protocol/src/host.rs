@@ -597,6 +597,26 @@ impl PluginProcess {
         }
     }
 
+    /// The next frame's JSON as sent, with nothing skipped or checked (conformance tests).
+    pub fn recv_raw(&mut self, timeout: Duration) -> Result<Value> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(Ok(Frame::Json(v))) => Ok(v),
+            Ok(Ok(Frame::Arrow(_))) => Err(HostError::Malformed {
+                plugin: self.label.clone(),
+                message: "Arrow data where a JSON message was expected".into(),
+            }),
+            Ok(Err(FrameError::Malformed(m))) => Err(HostError::Malformed {
+                plugin: self.label.clone(),
+                message: m,
+            }),
+            Err(RecvTimeoutError::Timeout) => Err(HostError::Timeout {
+                plugin: self.label.clone(),
+                waiting_for: "a message",
+            }),
+            _ => Err(self.crashed()),
+        }
+    }
+
     fn recv_any(&mut self, timeout: Option<Duration>, waiting_for: &'static str) -> Result<Incoming> {
         let got = match timeout {
             _ if self.early.is_some() => self.early.take(),

@@ -143,6 +143,49 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
     );
 
     check(
+        "protocol 0 is still spoken, for an older core",
+        (|| {
+            let p = start_versions(path, asked, env, (0, 0)).map_err(|e| e.to_string())?;
+            match p.info().protocol_version {
+                0 => p.close().map_err(|e| e.to_string()),
+                v => Err(format!("offered only version 0, the plugin chose {v}")),
+            }
+        })(),
+    );
+
+    check(
+        "protocol 1 is spoken",
+        (|| {
+            let p = start(path).map_err(|e| e.to_string())?;
+            match p.info().protocol_version {
+                v if v >= 1 => p.close().map_err(|e| e.to_string()),
+                v => Err(format!("offered versions up to {MAX_VERSION}, the plugin chose {v}")),
+            }
+        })(),
+    );
+
+    check(
+        "replies carry the request's id, and a cancel for a request that isn't running is ignored",
+        (|| {
+            let mut p = start(path).map_err(|e| e.to_string())?;
+            p.write_raw(&frame_json(r#"{"type":"cancel","id":999}"#))
+                .map_err(|e| e.to_string())?;
+            for (req, want) in [
+                (r#"{"type":"describe","id":41}"#, "describe"),
+                (r#"{"type":"frobnicate","id":42}"#, "error"),
+            ] {
+                p.write_raw(&frame_json(req)).map_err(|e| e.to_string())?;
+                let v = p.recv_raw(TIMEOUT).map_err(|e| e.to_string())?;
+                let id = req[req.len() - 3..req.len() - 1].parse::<u64>().unwrap();
+                if v["type"] != want || v["id"] != id {
+                    return Err(format!("sent {req}, expected a `{want}` reply with id {id}, got {v}"));
+                }
+            }
+            p.close().map_err(|e| e.to_string())
+        })(),
+    );
+
+    check(
         "describe is answered",
         (|| {
             let mut p = start(path).map_err(|e| e.to_string())?;
