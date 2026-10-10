@@ -447,26 +447,9 @@ jobs:
         run: python3 .github/scripts/build_wheels.py --dist dist --version "${TAG#v}" --out wheels
 
       - name: Smoke test the Linux wheel
-        run: |
-          python3 -m venv /tmp/venv
-          /tmp/venv/bin/pip install -q wheels/*manylinux*_x86_64.whl
-          /tmp/venv/bin/dre --version
-          /tmp/venv/bin/python -m dre_cli plugin list
-          # The wheel's receipt makes this a pip-managed install (--check changes nothing).
-          GITHUB_TOKEN="${{ github.token }}" /tmp/venv/bin/dre system update --check | tee /tmp/check.txt
-          grep -q "installed with pip" /tmp/check.txt
-          # The wheel holds no plugins: a project's are downloaded from the registry on demand.
-          p="$RUNNER_TEMP/smoke"
-          mkdir -p "$p/reports/r" && cd "$p"
-          printf 'name: smoke\ndefault_profile: warehouse\n' > dre_project.yml
-          printf 'plugins:\n  - duckdb\n  - csv\n' > dependencies.yml
-          printf 'sources:\n  warehouse:\n    target: dev\n    targets:\n      dev: {type: duckdb, path: ":memory:"}\n' > profiles.yml
-          printf "select 1 as n, 'a' as s\n" > reports/r/numbers.sql
-          printf 'queries: [numbers]\noutput: {format: csv}\n' > reports/r/r.yml
-          # Progress ("Installed  plugin package ...") goes to stderr.
-          /tmp/venv/bin/dre run 2>&1 | tee /tmp/run.txt
-          grep -q "Installed  plugin package \`duckdb\`" /tmp/run.txt
-          grep -q '^1,a' target/run/r/default/r.csv  # CRLF line endings, as RFC 4180 has them
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: .github/scripts/smoke_wheel.sh
 
       - name: Attach the wheels to the release
         if: env.DRY_RUN != 'true'
@@ -481,7 +464,8 @@ jobs:
   # upload through Trusted Publishing).
   attest-wheels:
     name: Wheel SBOMs and provenance
-    needs: [pypi]
+    needs: [pypi, release-wheels]
+    if: always() && (needs.pypi.result == 'success' || needs.release-wheels.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -535,14 +519,25 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.tag != 'registry' && !inputs.dry_run
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The wheels attached to the release; when there are none (their build failed after the
+      # release was published), built here from the release's archives, tested and attached.
       - name: Download the release's wheels
         run: |
           mkdir wheels
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'dre_cli-*.whl' -D wheels
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'dre_cli-*.whl' -D wheels || true
+          if ! ls wheels/*.whl >/dev/null 2>&1; then
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "dre-${TAG#v}-*" -D dist
+            python3 .github/scripts/build_wheels.py --dist dist --version "${TAG#v}" --out wheels
+            GITHUB_TOKEN="$GH_TOKEN" .github/scripts/smoke_wheel.sh
+            gh release upload "$TAG" wheels/*.whl -R "$GITHUB_REPOSITORY"
+          fi
           ls -l wheels
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
