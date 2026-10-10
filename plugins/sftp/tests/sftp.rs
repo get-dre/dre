@@ -29,7 +29,9 @@ fn deliver_with(remote: &str, conn: Value, options: Value, bytes: &[u8]) -> Resu
     std::fs::write(&local, bytes).unwrap();
     let log: LogSink = Arc::new(|_, _| {});
     let mut p = PluginProcess::start(bin(), log).unwrap();
-    let (Value::Object(c), Value::Object(o)) = (conn, options) else { panic!() };
+    let (Value::Object(c), Value::Object(o)) = (conn, options) else {
+        panic!()
+    };
     let file = dre_protocol::msg::DeliveryFile {
         local_path: local.to_str().unwrap().to_string(),
         remote_path: Some(remote.to_string()),
@@ -199,9 +201,21 @@ fn uploads_under_a_temporary_name_replacing_a_file_already_there() {
     deliver("upload/atomic/r.csv", conn.clone(), b"one").unwrap();
     deliver("upload/atomic/r.csv", conn.clone(), b"two").unwrap();
     // The temporary file in another folder on the same server.
-    deliver_with("upload/atomic/s.csv", conn.clone(), json!({"temp_dir": "../staging"}), b"three").unwrap();
+    deliver_with(
+        "upload/atomic/s.csv",
+        conn.clone(),
+        json!({"temp_dir": "../staging"}),
+        b"three",
+    )
+    .unwrap();
     // Straight to the final name.
-    deliver_with("upload/atomic/t.csv", conn.clone(), json!({"atomic": false}), b"four").unwrap();
+    deliver_with(
+        "upload/atomic/t.csv",
+        conn.clone(),
+        json!({"atomic": false}),
+        b"four",
+    )
+    .unwrap();
     // Options are checked.
     let err = deliver_with("upload/atomic/u.csv", conn, json!({"atomic": "yes"}), b"x").unwrap_err();
     assert!(err.contains("atomic"), "{err}");

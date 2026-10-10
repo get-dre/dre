@@ -255,5 +255,10 @@ pub fn local_options() -> Vec<dre_protocol::options::OptionField> {
 
 /// Every problem with a `local` destination entry's options.
 pub fn local_option_errors(options: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
-    dre_protocol::options::check(dre_protocol::Kind::Destination, LOCAL_TYPE, &local_options(), options)
+    dre_protocol::options::check(
+        dre_protocol::Kind::Destination,
+        LOCAL_TYPE,
+        &local_options(),
+        options,
+    )
 }

@@ -113,8 +113,14 @@ impl Store for SftpStore<'_> {
                     }
                     // SFTP's rename won't replace: remove the old file, then rename (a short
                     // window with no file at `to`).
-                    self.sftp.remove_file(to).await.map_err(|e| failed("replace", to, e))?;
-                    self.sftp.rename(from, to).await.map_err(|e| failed("rename to", to, e))
+                    self.sftp
+                        .remove_file(to)
+                        .await
+                        .map_err(|e| failed("replace", to, e))?;
+                    self.sftp
+                        .rename(from, to)
+                        .await
+                        .map_err(|e| failed("rename to", to, e))
                 }
             }
         })
@@ -129,14 +135,22 @@ impl Store for SftpStore<'_> {
     fn delete(&mut self, remote: &str) -> std::result::Result<(), StoreError> {
         self.rt.block_on(async {
             if self.sftp.try_exists(remote).await.unwrap_or(false) {
-                self.sftp.remove_file(remote).await.map_err(|e| failed("remove", remote, e))?;
+                self.sftp
+                    .remove_file(remote)
+                    .await
+                    .map_err(|e| failed("remove", remote, e))?;
             }
             Ok(())
         })
     }
 }
 
-fn upload(local: &Path, remote: &str, c: &Map<String, Value>, options: &Map<String, Value>) -> Result<String> {
+fn upload(
+    local: &Path,
+    remote: &str,
+    c: &Map<String, Value>,
+    options: &Map<String, Value>,
+) -> Result<String> {
     let mut ssh = Ssh::from_settings(c, "")?;
     ssh.accept_unknown = conn_bool(c, "accept_unknown_host").unwrap_or(false);
     let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
@@ -161,7 +175,9 @@ fn upload(local: &Path, remote: &str, c: &Map<String, Value>, options: &Map<Stri
     let delivered = deliver(&mut store, local, remote, &rules).map_err(PluginError::from)?;
     rt.block_on(async {
         let _ = store.sftp.close().await;
-        let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        let _ = session
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await;
     });
     Ok(format!(
         "sftp://{user}@{host}:{port}/{}",
@@ -194,7 +210,10 @@ impl Destination for Sftp {
         let [f] = d.files.as_slice() else {
             return Err("sftp takes one file per delivery".into());
         };
-        let remote = f.remote.as_deref().ok_or("sftp needs `output.destination.path`")?;
+        let remote = f
+            .remote
+            .as_deref()
+            .ok_or("sftp needs `output.destination.path`")?;
         upload(&f.local, remote, &d.connection, &d.options)
     }
 }

@@ -120,7 +120,12 @@ impl ServerCertVerifier for AcceptAny {
     }
 }
 
-fn upload(local: &Path, remote: &str, c: &Map<String, Value>, options: &Map<String, Value>) -> Result<String> {
+fn upload(
+    local: &Path,
+    remote: &str,
+    c: &Map<String, Value>,
+    options: &Map<String, Value>,
+) -> Result<String> {
     let host = conn_required(c, "host")?;
     let port: u16 = match c.get("port") {
         Some(Value::Number(n)) => n.as_u64().unwrap_or(21) as u16,
@@ -205,7 +210,10 @@ impl Store for FtpStore {
         self.make_parents(remote);
         let mut f = std::fs::File::open(local)
             .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
-        self.ftp.put_file(remote, &mut f).map(|_| ()).map_err(|e| failed("upload to", remote, e))
+        self.ftp
+            .put_file(remote, &mut f)
+            .map(|_| ())
+            .map_err(|e| failed("upload to", remote, e))
     }
 
     fn rename(&mut self, from: &str, to: &str, replace: bool) -> std::result::Result<(), StoreError> {

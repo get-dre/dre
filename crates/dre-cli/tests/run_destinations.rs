@@ -253,7 +253,7 @@ fn a_misspelt_key_on_a_destination_without_options_is_an_error_not_ignored() {
 }
 
 #[test]
-fn a_plugin_without_options_refuses_them() {
+fn a_plugin_refuses_options_it_doesnt_declare() {
     // The SFTP plugin declares no options, so the SDK refuses any before connecting.
     let (p, _rec) = project(
         "queries: [q]\noutput:\n  destination: {profile: box, path: /in/daily.csv, pasth: x}\n",
@@ -267,7 +267,7 @@ fn a_plugin_without_options_refuses_them() {
     p.write("dependencies.yml", "plugins: [duckdb, csv, fixture, sftp]\n");
     p.dre("run", &["daily"])
         .failed()
-        .says("destination `box`: the `sftp` destination takes no options, but got `pasth`");
+        .says("destination `box`: unknown option `pasth` for destination `sftp`");
 }
 
 #[test]
@@ -304,7 +304,11 @@ fn the_local_destination_writes_under_a_temporary_name_then_renames() {
     );
     p.dre("run", &["daily"]).ok();
     assert!(p.path("out/daily.csv").is_file());
-    assert_eq!(std::fs::read_dir(p.path("staging")).unwrap().count(), 0, "the temporary file moved in");
+    assert_eq!(
+        std::fs::read_dir(p.path("staging")).unwrap().count(),
+        0,
+        "the temporary file moved in"
+    );
     p.write(
         "reports/ops/daily/daily.yml",
         "queries: [q]\noutput:\n  destination: {profile: inbox, path: out/daily.csv, atomic: false}\n",

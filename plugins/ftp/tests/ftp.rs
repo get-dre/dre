@@ -23,7 +23,9 @@ fn deliver_with(remote: &str, conn: Value, options: Value, bytes: &[u8]) -> Resu
     std::fs::write(&local, bytes).unwrap();
     let log: LogSink = Arc::new(|_, _| {});
     let mut p = PluginProcess::start(bin(), log).unwrap();
-    let (Value::Object(c), Value::Object(o)) = (conn, options) else { panic!() };
+    let (Value::Object(c), Value::Object(o)) = (conn, options) else {
+        panic!()
+    };
     let file = dre_protocol::msg::DeliveryFile {
         local_path: local.to_str().unwrap().to_string(),
         remote_path: Some(remote.to_string()),
@@ -99,6 +101,12 @@ fn uploads_under_a_temporary_name_replacing_a_file_already_there() {
     let conn = json!({"host": host, "port": port, "username": "dre", "password": "dre-pass"});
     deliver("atomic/r.csv", conn.clone(), b"one").unwrap();
     deliver("atomic/r.csv", conn.clone(), b"two").unwrap();
-    deliver_with("atomic/s.csv", conn.clone(), json!({"temp_dir": "../staging"}), b"three").unwrap();
+    deliver_with(
+        "atomic/s.csv",
+        conn.clone(),
+        json!({"temp_dir": "../staging"}),
+        b"three",
+    )
+    .unwrap();
     deliver_with("atomic/t.csv", conn, json!({"atomic": false}), b"four").unwrap();
 }
