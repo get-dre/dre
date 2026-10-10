@@ -306,6 +306,8 @@ fn the_manifest_is_the_same_wherever_the_target_path_is() {
     );
 }
 
+// Databricks compute is Linux: on Windows `/Workspace/...` would be a folder on drive C.
+#[cfg(unix)]
 #[test]
 fn databricks_workspace_files_are_warned_about() {
     let p = project();
