@@ -36,9 +36,18 @@ fn record(reason: CancelReason) {
     COUNT.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Catch the signals, and time the run when `timeout` is set: cancel `cancel` on the first
-/// signal or when the timeout runs out, for the rest of the process.
-pub fn watch(cancel: CancelToken, timeout: Option<Duration>) {
+/// The run's timeout in milliseconds (0: none), set once it's known (see [`set_timeout`]).
+static TIMEOUT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Time the run: cancel it when `timeout` (counted from [`watch`]) runs out.
+pub fn set_timeout(timeout: Option<Duration>) {
+    TIMEOUT_MS.store(timeout.map_or(0, |t| t.as_millis().max(1) as u64), Ordering::SeqCst);
+}
+
+/// Catch the signals from now on, for the rest of the process: cancel `cancel` on the first one
+/// or when the timeout set with [`set_timeout`] runs out. Call it first thing, so a signal that
+/// arrives while the project loads isn't lost.
+pub fn watch(cancel: CancelToken) {
     install();
     let started = Instant::now();
     std::thread::spawn(move || {
@@ -47,6 +56,8 @@ pub fn watch(cancel: CancelToken, timeout: Option<Duration>) {
         let mut killed = false;
         loop {
             std::thread::sleep(Duration::from_millis(50));
+            let ms = TIMEOUT_MS.load(Ordering::SeqCst);
+            let timeout = (ms > 0).then(|| Duration::from_millis(ms));
             if first.is_none()
                 && let Some(t) = timeout
                 && started.elapsed() >= t

@@ -849,6 +849,9 @@ pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> 
 
 fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     use std::io::IsTerminal;
+    // Signals from the start: one that arrives while the project loads still cancels the run.
+    let cancel = dre_core::engine::CancelToken::new();
+    signals::watch(cancel.clone());
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
         return exit::not_started();
     }
@@ -905,7 +908,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         live_check: false,
         schedule: a.schedule,
         manifest_checksum,
-        cancel: dre_core::engine::CancelToken::new(),
+        cancel,
     };
     if let Some(name) = &opts.schedule
         && !project.schedules.iter().any(|e| &e.name == name)
@@ -924,7 +927,12 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     params["target_path"] = serde_json::json!(project.target_dir);
     printer.log_params(&params);
     printer.detail(output::Tone::Note, "Profiles", &profiles_line(&project.profiles));
-    signals::watch(opts.cancel.clone(), run_timeout);
+    signals::set_timeout(run_timeout);
+    if let Some(reason) = opts.cancel.reason() {
+        // Cancelled before anything ran.
+        printer.error("the run was cancelled before it started");
+        return ExitCode::from(reason.exit_code());
+    }
     let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
