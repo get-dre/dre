@@ -87,6 +87,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--preview [<ROWS>]` |  | Execute with a row limit (default 100); output stays in target/ and is never delivered. |
 | `--accept-schema-change` |  | Deliver even if the output schema changed since the last successful run, and accept the new schema. Snapshots live in the target path, so a fresh CI runner has no history unless `--target-path` (or DRE_TARGET_PATH) points at a folder that persists. |
 | `--timeout <DURATION>` |  | Stop the run if it takes longer than this: a duration such as `2h` or `90m`, or seconds (default: $DRE_RUN_TIMEOUT, then `flags: run_timeout` in dre_project.yml; off without any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124. |
+| `--keep-runs <N>` |  | How many runs of each report and Set to keep in the target path, the current one included (default: $DRE_KEEP_RUNS, then `flags: keep_runs` in dre_project.yml, then 1). |
 
 Example:
 
@@ -135,6 +136,8 @@ dre clean [OPTIONS]
 | Option | Default | Description |
 |---|---|---|
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--prune` |  | Don't delete the folder: only remove the runs beyond `keep_runs` (and unfinished ones) from every report and Set, keeping each current run. |
+| `--keep-runs <N>` |  | With --prune, keep this many runs of each (default: $DRE_KEEP_RUNS, then `flags: keep_runs`, then 1). |
 | `--target-path <PATH>` |  | The folder to clean (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). Only a folder DRE created is deleted. Environment: `DRE_TARGET_PATH`. |
 
 Example:

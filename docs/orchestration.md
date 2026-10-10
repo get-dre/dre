@@ -283,6 +283,16 @@ WHEN NOT MATCHED THEN INSERT (key, project, schedule, fires_at, run_date, defini
   VALUES (s.key, s.project, s.schedule, s.fires_at, s.run_date, s.definition_hash, s.argv, s.env, 'pending');
 ```
 
+## Keep a history of runs
+
+On a server, keep the last few runs of each report so you can see exactly what was sent and when
+(`dre history <report>` lists them; see [the target path](target-path.md)):
+
+```yaml
+flags:
+  keep_runs: 30
+```
+
 ## Cancelling a run
 
 Orchestrators cancel a job by sending it a termination signal (SIGTERM; Docker, Kubernetes,

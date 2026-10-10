@@ -1143,7 +1143,7 @@ impl Loader {
                 DEFAULT_RUN_QUERY_MAX_ROWS
             }
         };
-        let run_timeout = self.parse_flags(&file, pf.flags);
+        let (run_timeout, keep_runs) = self.parse_flags(&file, pf.flags);
         let dispatch = self.parse_dispatch(&yf.display, pf.dispatch);
         match pf.format_options {
             None | Some(de::Located { value: Loose::Ok(None), .. }) => {}
@@ -1244,7 +1244,7 @@ impl Loader {
             default_set,
             vars,
             run_query_max_rows,
-            keep_runs: 1,
+            keep_runs,
             run_timeout,
             reports: Vec::new(),
             sets: BTreeMap::new(),
@@ -1400,9 +1400,9 @@ impl Loader {
         &mut self,
         file: &Option<PathBuf>,
         v: Option<de::Located<Loose<config::project::Flags>>>,
-    ) -> Option<std::time::Duration> {
+    ) -> (Option<std::time::Duration>, usize) {
         let flags = match v {
-            None => return None,
+            None => return (None, 1),
             Some(de::Located {
                 value: Loose::Ok(f), ..
             }) => f,
@@ -1413,7 +1413,7 @@ impl Loader {
                     v.line(),
                     "`flags` must be a map",
                 );
-                return None;
+                return (None, 1);
             }
         };
         for k in &flags.unknown.0 {
@@ -1422,7 +1422,7 @@ impl Loader {
                 file.clone(),
                 Some(k.line),
                 format!(
-                    "unknown key `flags.{}`; flags are: http_timeout, run_timeout",
+                    "unknown key `flags.{}`; flags are: http_timeout, keep_runs, run_timeout",
                     k.name
                 ),
             );
@@ -1439,13 +1439,30 @@ impl Loader {
                 "`flags.http_timeout` must be a positive whole number of seconds",
             ),
         }
-        let v = flags.run_timeout?;
+        let keep_runs = match flags.keep_runs {
+            None => 1,
+            Some(de::Located {
+                value: Loose::Ok(n), ..
+            }) if n > 0 => n as usize,
+            Some(v) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    v.line(),
+                    "`flags.keep_runs` must be a whole number of 1 or more",
+                );
+                1
+            }
+        };
+        let Some(v) = flags.run_timeout else {
+            return (None, keep_runs);
+        };
         let line = v.line();
         let parsed = match v.value {
             Loose::Ok(v) => dre_protocol::delivery::parse_duration(&v),
             _ => Err("must be a duration such as `2h` or `90m`, or seconds".to_string()),
         };
-        match parsed {
+        let run_timeout = match parsed {
             Ok(d) if !d.is_zero() => Some(d),
             Ok(_) => {
                 self.diags.error(
@@ -1465,7 +1482,8 @@ impl Loader {
                 );
                 None
             }
-        }
+        };
+        (run_timeout, keep_runs)
     }
 
     /// `dispatch: [{macro_namespace: dre_utils, search_order: [my_project, dre_utils]}]`.

@@ -2,3 +2,4 @@ name: acme_reports
 flags:
   http_timeout: 120
   run_timeout: 2h
+  keep_runs: 30

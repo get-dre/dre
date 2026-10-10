@@ -31,6 +31,8 @@ pub const RUN_AT: &str = "DRE_RUN_AT";
 pub const HTTP_TIMEOUT: &str = "DRE_HTTP_TIMEOUT";
 /// How long a run may take: `--timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`.
 pub const RUN_TIMEOUT: &str = "DRE_RUN_TIMEOUT";
+/// How many runs of each Binding to keep: `--keep-runs`, `DRE_KEEP_RUNS`, `flags: keep_runs`.
+pub const KEEP_RUNS: &str = "DRE_KEEP_RUNS";
 /// How many lines `dre.log` keeps: `DRE_LOG_MAX_LINES`.
 pub const LOG_MAX_LINES: &str = "DRE_LOG_MAX_LINES";
 

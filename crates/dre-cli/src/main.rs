@@ -142,6 +142,10 @@ struct RunArgs {
     /// any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124.
     #[arg(long, value_name = "DURATION")]
     timeout: Option<String>,
+    /// How many runs of each report and Set to keep in the target path, the current one included
+    /// (default: $DRE_KEEP_RUNS, then `flags: keep_runs` in dre_project.yml, then 1).
+    #[arg(long, value_name = "N")]
+    keep_runs: Option<String>,
 }
 
 #[derive(Args)]
@@ -149,6 +153,14 @@ struct CleanArgs {
     /// Project directory (default: the current directory).
     #[arg(long, default_value = ".")]
     project_dir: PathBuf,
+    /// Don't delete the folder: only remove the runs beyond `keep_runs` (and unfinished ones)
+    /// from every report and Set, keeping each current run.
+    #[arg(long)]
+    prune: bool,
+    /// With --prune, keep this many runs of each (default: $DRE_KEEP_RUNS, then `flags:
+    /// keep_runs`, then 1).
+    #[arg(long, value_name = "N", requires = "prune")]
+    keep_runs: Option<String>,
     /// The folder to clean (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml,
     /// then target/). Only a folder DRE created is deleted.
     #[arg(long, value_name = "PATH")]
@@ -891,6 +903,14 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         },
         None => project.run_timeout,
     };
+    // `--keep-runs`, else `DRE_KEEP_RUNS`, else `flags: keep_runs`.
+    let keep_runs = match keep_runs_setting(a.keep_runs.as_deref()) {
+        Ok(k) => k,
+        Err(e) => {
+            printer.error(&e);
+            return exit::not_started();
+        }
+    };
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(&project, &a.project, &mut diags);
     if !diags.has_errors() {
@@ -918,6 +938,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         schedule: a.schedule,
         manifest_checksum,
         cancel,
+        keep_runs,
     };
     if let Some(name) = &opts.schedule
         && !project.schedules.iter().any(|e| &e.name == name)
@@ -988,6 +1009,34 @@ fn clean(a: CleanArgs) -> ExitCode {
             return exit::not_started();
         }
     };
+    if a.prune {
+        let keep = match keep_runs_setting(a.keep_runs.as_deref()) {
+            Ok(Some(k)) => k,
+            Ok(None) => {
+                dre_core::target::project_flag_u64(root, "keep_runs").map_or(1, |k| k.max(1) as usize)
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return exit::not_started();
+            }
+        };
+        let mut removed = 0;
+        for report in std::fs::read_dir(t.dir.join("run"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            for binding in std::fs::read_dir(report.path()).into_iter().flatten().flatten() {
+                if binding.path().is_dir() {
+                    removed += dre_core::runs::BindingRuns::new(&binding.path())
+                        .prune(keep)
+                        .len();
+                }
+            }
+        }
+        eprintln!("Removed {removed} run(s); kept the last {keep} of each report and Set");
+        return exit::ok();
+    }
     let shown = dre_core::slash(t.dir.strip_prefix(root).unwrap_or(&t.dir));
     match dre_core::target::clean_dir(root, &t) {
         Ok(dre_core::target::Cleaned::Removed) => {
@@ -1002,6 +1051,18 @@ fn clean(a: CleanArgs) -> ExitCode {
             eprintln!("error: {e}");
             exit::failed()
         }
+    }
+}
+
+/// `--keep-runs`, else `DRE_KEEP_RUNS` (the project's `flags: keep_runs` is the caller's
+/// fallback).
+fn keep_runs_setting(flag: Option<&str>) -> Result<Option<usize>, String> {
+    match dre_core::settings::flag_or_env(flag, "--keep-runs", dre_core::settings::KEEP_RUNS) {
+        None => Ok(None),
+        Some((v, from)) => match v.trim().parse::<usize>() {
+            Ok(n) if n > 0 => Ok(Some(n)),
+            _ => Err(format!("{from} must be a whole number of 1 or more, got `{v}`")),
+        },
     }
 }
 
