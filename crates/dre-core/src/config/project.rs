@@ -96,6 +96,9 @@ pub struct Flags {
     /// Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it.
     #[schemars(range(min = 1), extend("default" = 60))]
     pub http_timeout: Option<Located<Loose<u64>>>,
+    /// How many runs of each report and Set to keep in `target/run/` (any status; the current run always stays). Runs beyond it are removed after each run. Recommended on servers and anything scheduled (an audit trail of what was sent), mindful of file sizes. `dre run --keep-runs` and `DRE_KEEP_RUNS` override it.
+    #[schemars(range(min = 1), extend("default" = 1))]
+    pub keep_runs: Option<Located<Loose<u64>>>,
     /// How long a `dre run` may take before it's stopped (as for a termination signal; its Bindings are recorded as `timed_out` and `dre` exits 124): a duration such as `2h` or `90m`, or seconds. Off by default. `dre run --timeout` and `DRE_RUN_TIMEOUT` override it.
     #[schemars(schema_with = "duration")]
     #[serde(default)]

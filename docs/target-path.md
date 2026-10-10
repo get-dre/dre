@@ -54,7 +54,21 @@ target/run/<report>/<set or default>/
 
 A run id is the run's UTC start time and four random characters. `dre history <report>` lists a
 report's runs and which is current; `dre history <report> --latest --path` prints the folder
-with the latest files, for scripts. Only the latest run is kept for now.
+with the latest files, for scripts.
+
+By default only the latest run is kept. To keep a history (an audit trail of exactly what was
+sent, and when), set how many runs of each report and Set to keep, of any status; the current run
+always stays:
+
+```yaml
+flags:
+  keep_runs: 30
+```
+
+`dre run --keep-runs` and `DRE_KEEP_RUNS` override it. Older runs are removed after each run, and
+`dre clean --prune` removes them without deleting anything else (`dre clean` alone deletes the
+whole folder). Recommended on servers and anything scheduled; mind the size of large xlsx or
+parquet outputs.
 
 So several runs can share one target path safely:
 

@@ -3,3 +3,4 @@ flags:
   http_timeout: 0
   threads: 4
   run_timeout: soon
+  keep_runs: 0

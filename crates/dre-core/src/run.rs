@@ -71,6 +71,8 @@ pub struct RunOptions {
     pub manifest_checksum: Option<String>,
     /// Stops the run: no further Binding, statement or delivery starts once it's cancelled.
     pub cancel: CancelToken,
+    /// `--keep-runs` or `DRE_KEEP_RUNS`: above `flags: keep_runs`.
+    pub keep_runs: Option<usize>,
 }
 
 impl RunOptions {
@@ -1200,7 +1202,10 @@ impl<'a> BindingRun<'a> {
                     rel(&self.project.root, &self.run_dir).display()
                 ));
             }
-            for id in self.runs.prune(self.project.keep_runs) {
+            for id in self
+                .runs
+                .prune(self.opts.keep_runs.unwrap_or(self.project.keep_runs))
+            {
                 self.ui.step(Level::Debug, "Removed", &format!("run {id}"), None);
             }
         }

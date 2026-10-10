@@ -236,6 +236,12 @@
           "default": 60,
           "minimum": 1
         },
+        "keep_runs": {
+          "type": "integer",
+          "description": "How many runs of each report and Set to keep in `target/run/` (any status; the current run always stays). Runs beyond it are removed after each run. Recommended on servers and anything scheduled (an audit trail of what was sent), mindful of file sizes. `dre run --keep-runs` and `DRE_KEEP_RUNS` override it.",
+          "default": 1,
+          "minimum": 1
+        },
         "run_timeout": {
           "description": "How long a `dre run` may take before it's stopped (as for a termination signal; its Bindings are recorded as `timed_out` and `dre` exits 124): a duration such as `2h` or `90m`, or seconds. Off by default. `dre run --timeout` and `DRE_RUN_TIMEOUT` override it.",
           "oneOf": [

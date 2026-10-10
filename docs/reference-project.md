@@ -72,6 +72,7 @@ How DRE itself behaves, as in dbt's `flags:`. Each flag has a `DRE_` environment
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `http_timeout` | integer | `60` | Seconds a download (the plugin registry, a plugin package, a DRE update) may receive nothing before it's tried again (3 tries in all). `DRE_HTTP_TIMEOUT` overrides it. |
+| `keep_runs` | integer | `1` | How many runs of each report and Set to keep in `target/run/` (any status; the current run always stays). Runs beyond it are removed after each run. Recommended on servers and anything scheduled (an audit trail of what was sent), mindful of file sizes. `dre run --keep-runs` and `DRE_KEEP_RUNS` override it. |
 | `run_timeout` | string or number |  | How long a `dre run` may take before it's stopped (as for a termination signal; its Bindings are recorded as `timed_out` and `dre` exits 124): a duration such as `2h` or `90m`, or seconds. Off by default. `dre run --timeout` and `DRE_RUN_TIMEOUT` override it. |
 
 ## `plugins[]`

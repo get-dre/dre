@@ -199,6 +199,14 @@ pub fn project_value(root: &Path) -> Option<String> {
     v.get(KEY)?.as_str().map(str::to_string)
 }
 
+/// `flags.<key>` in `root`'s dre_project.yml as a number, read without loading the project.
+pub fn project_flag_u64(root: &Path, key: &str) -> Option<u64> {
+    let text = std::fs::read_to_string(root.join(PROJECT_FILE)).ok()?;
+    let v = crate::config::node::parse(&text).ok()?;
+    let j = v.get("flags")?.get(key)?.to_json();
+    j.as_u64().or_else(|| j.as_str()?.trim().parse().ok())
+}
+
 /// Create the target folder (with its parents) if needed. Only a folder DRE creates gets the
 /// ownership marker that lets `dre clean` delete it.
 pub fn ensure(dir: &Path) -> std::io::Result<()> {
