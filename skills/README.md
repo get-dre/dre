@@ -17,7 +17,9 @@ undo; and never ask for, repeat or store a password, token or key.
 | `dre-upgrade` | Checks for updates to `dre` and to these skills, and applies the ones you choose. The only skill that uses the network. |
 
 Each skill checks your installed `dre` against the versions it supports before doing anything,
-and warns if they don't match.
+and warns if they don't match. How-to answers start from a bundled docs index, open the relevant
+local page, and cite its heading. Every standalone skill includes the docs, including the
+glossary when present, so lookup works offline and matches its supported DRE range.
 
 ## Install
 
@@ -78,6 +80,8 @@ only its own folder. Content shared between skills is therefore written once and
 | Source | Copied to |
 |---|---|
 | `shared/contract.md`, `shared/secrets.md`, `shared/version-check.md` | each `SKILL.md`, between its `<!-- BEGIN shared/... -->` and `<!-- END shared/... -->` markers |
+| `docs/sections.json` and each page's title, description and inline terms/options | `<skill>/references/docs-index.md`, generated |
+| `docs/*.md` and `docs/sections.json` | `<skill>/references/docs/`, generated; local page links stay offline |
 | [`docs/practices.md`](../docs/practices.md) | `<skill>/references/practices.md` |
 | each plugin's `describe` reply (its package's `describe.json`), its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
 

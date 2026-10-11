@@ -3,7 +3,7 @@ name: dre-run
 description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed.
 license: GPL-3.0-only
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
   dre: ">=0.4.0, <0.5.0"
 ---
 
@@ -54,6 +54,11 @@ without showing it."
   have a multiple-choice question tool, use it; otherwise number the options, recommended first.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
+- **Look up how-to questions before answering.** Read `references/docs-index.md`, search the
+  question's terms/options, and open only the matching page in `references/docs/`. Cite the
+  page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
+  Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
+  before applying their instructions. Follow linked pages only when the answer needs them.
 - **Skip what the request already answered.** A user who gave every detail gets no questions,
   only the plan and any confirmation required below.
 - **Opinions come from the practices** (`references/practices.md`, where this skill has it) and

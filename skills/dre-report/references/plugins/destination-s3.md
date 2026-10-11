@@ -45,7 +45,7 @@ Set in the report's `output.destination` entry.
 
 ### Amazon S3
 
-#### Notes
+##### Notes
 
 `bucket`, `region`, and `access_key_id` + `secret_access_key` (+ `session_token`). Leave the keys
 out to use AWS's default credential chain, the same as the AWS CLI: environment variables, the
@@ -54,8 +54,39 @@ shared config and credentials files (the profile named by `profile:`, else `AWS_
 is honoured, and with no credentials anywhere the delivery fails at once, listing what it tried.
 The region comes from `region:`, else the AWS config. `endpoint` and `allow_http` point it at
 S3-compatible stores. Paths are `s3://bucket/key`, or a bare key in `bucket`. Takes `if_exists`
-(see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)); the S3-compatible store must support conditional
+(see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)); the S3-compatible store must support conditional
 writes for `error` and `number`.
+
+##### Deliver a dated finance export
+
+Use S3 for a shared archive or a downstream data pipeline. After signing in with the AWS
+credential chain, add a profile and a destination to the
+[monthly finance report](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/):
+
+```yaml
+#### profiles.yml
+destinations:
+  archive:
+    targets:
+      dev: {deliver: false}
+      prod: {type: s3, bucket: finance-reports, region: ap-southeast-2}
+```
+
+```yaml
+#### within the report's output
+destination:
+  profile: archive
+  path: "s3://finance-reports/monthly/{{ run.date.yyyymm }}.xlsx"
+  if_exists: error
+```
+
+Preview first, then `dre validate <report> --target prod` to check the profile and path.
+`s3/file-exists` means the destination already holds that file; use another dated path or
+deliberately choose `overwrite`. `delivery-failed` with an authorization error needs access to
+the bucket and key prefix, not more retries. For an S3-compatible service, set its `endpoint`;
+`allow_http` is only needed for a plain-HTTP endpoint.
+See [delivery behavior](../docs/plugins.md#a-file-already-at-the-path),
+[destination keys](../docs/reference-report.md#outputdestination), and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -122,7 +153,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -136,7 +167,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

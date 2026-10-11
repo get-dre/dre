@@ -53,7 +53,7 @@ Set in the report's `output.destination` entry.
 
 ### Email
 
-#### Notes
+##### Notes
 
 Sends the output as attachments on one email over SMTP. If a report produces several files, they
 all go on the same message.
@@ -94,7 +94,7 @@ people where it is yourself; a location written into `body` only helps readers w
 open it. In a list of destinations an email entry still attaches the output, so an oversized
 output fails that entry (the others are delivered) and the run fails.
 
-**Messages** (email 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the message is the
+**Messages** (email 1.1.0): for a [`message`](../docs/plugins.md#the-message-format) output, the message is the
 email: an HTML body with a plain-text alternative, and the subject is `subject:`, else the
 message's title. `body:` doesn't apply. `attach: [<output>]` on the entry attaches those
 outputs' files, under the same `max_attachment_mb` check, so one email carries the headline and
@@ -111,6 +111,37 @@ output:
     destination:
       - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
 ```
+
+##### Configure the sender before adding recipients
+
+Use email for a workbook that recipients need as an attachment. Starting with the complete
+[monthly finance report](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/), configure the SMTP identity separately:
+
+```yaml
+#### profiles.yml
+destinations:
+  finance_mail:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: email
+        host: smtp.example.com
+        port: 587
+        tls: starttls
+        username: reports@example.com
+        password: "{{ env_var('DRE_SECRET_SMTP_PASSWORD') }}"
+        from: "Reports <reports@example.com>"
+        to: finance@example.com
+        max_attachment_mb: 20
+```
+
+The destination example above overrides those default recipients; omitted recipient options
+keep their profile defaults. Preview locally, then validate with `--target prod` before a real send.
+`invalid-destination-option` identifies bad addresses or options; `delivery-failed` can mean SMTP
+authentication, server policy or an oversized attachment. Lower row counts or deliver a large
+file to storage instead. `attachment_name` applies only to a single-file output.
+See [messages](../docs/messages.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -177,7 +208,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -191,7 +222,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
