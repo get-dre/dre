@@ -78,7 +78,7 @@ fails and says what to change.
 
 The bot must be a member of the channel. Invite it with `/invite @your-bot`.
 
-**Messages** (slack 1.1.0): for a [`message`](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) output, the post is the
+**Messages** (slack 1.1.0): for a [`message`](../docs/plugins.md#the-message-format) output, the post is the
 message itself: the title in bold, then the text in Slack's formatting, sent with
 `chat.postMessage` (scope `chat:write`) to the same `channel` or `user`. `message:` isn't used.
 Slack's recommended maximum is 4,000 characters: a longer message is posted cut short, with a
@@ -99,7 +99,7 @@ output:
 ```
 
 If Slack rate-limits a call or answers 503, the plugin tries again after Slack's `Retry-After`
-(at most 60 seconds), up to `retries` times (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). Errors such
+(at most 60 seconds), up to `retries` times (see [Tries again](../docs/plugins.md#tries-again)). Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what
 to fix. The delivered location is the uploaded files' permalinks.
 
@@ -168,7 +168,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -182,7 +182,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

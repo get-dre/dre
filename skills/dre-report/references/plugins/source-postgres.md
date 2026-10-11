@@ -53,7 +53,7 @@ None: a source's settings are its profile fields.
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
-| `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). |
+| `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](../docs/plugins.md#tries-again)). |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |
@@ -96,10 +96,10 @@ connections:
           host_key_fingerprint: "SHA256:..."   # or known_hosts_path
 ```
 
-The `ssh:` block takes the same settings as the [`sftp`](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md) destination: `host`, `port`
+The `ssh:` block takes the same settings as the [`sftp`](../docs/plugin-sftp.md) destination: `host`, `port`
 (22), `username`, and `password`, `private_key_path` or `private_key` (+
 `private_key_passphrase`), or `use_agent: true`, and `allow_rsa_keys` (see
-[RSA keys](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
+[RSA keys](../docs/plugin-sftp.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
 `~/.ssh/known_hosts`) or a pinned `host_key_fingerprint`, and an unknown or changed key is
 refused (there's no `accept_unknown_host` here). The error for an unknown key prints its
 fingerprint, ready to pin. `connect_timeout` covers the whole way, SSH included, and errors say

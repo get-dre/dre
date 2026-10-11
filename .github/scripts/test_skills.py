@@ -330,5 +330,60 @@ class ReferenceCliTest(unittest.TestCase):
         self.assertIn("has no `--json` option", cli.check(["run", "--json"]))
 
 
+class BundledDocs(unittest.TestCase):
+    def test_plugin_references_link_to_local_pages_and_original_anchors(self):
+        self.assertEqual(skills._relink("[A](#options) [B](plugins.md#destinations) [C](https://example.com)",
+                                       "plugin-sftp.md"),
+                         "[A](../docs/plugin-sftp.md#options) [B](../docs/plugins.md#destinations) "
+                         "[C](https://example.com)")
+
+    def fixture(self, root):
+        (root / "docs").mkdir()
+        (root / "docs/sections.json").write_text(
+            '{"sections": [{"id": "use", "title": "Use DRE", "description": "Reports"}]}')
+        (root / "docs/README.md").write_text("# Docs\n[Glossary](glossary.md)\n")
+        for position, name in enumerate(("start", "glossary"), 1):
+            (root / "docs" / f"{name}.md").write_text(
+                f"---\ntitle: {name}\ndescription: Learn {name}\nsection: use\nposition: {position}\n---\n"
+                f"# {name}\nUse `if_exists` and `--preview`. [Glossary](glossary.md#terms)\n"
+                "[Repository](../README.md)\n```yaml\nvalue: `example_value`\n```\n")
+        (root / "skills/test").mkdir(parents=True)
+        (root / "skills/test/SKILL.md").write_text("# Test\n")
+
+    def test_deterministic_index_search_terms_and_section_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self.fixture(root)
+            index = skills.docs_index(root)
+            self.assertEqual(index, skills.docs_index(root))
+            self.assertLess(index.index("docs/start.md"), index.index("docs/glossary.md"))
+            self.assertIn("Learn glossary", index)
+            self.assertIn("`if_exists`", index)
+            self.assertIn("`--preview`", index)
+            self.assertNotIn("example_value", index)
+
+    def test_bundle_links_drift_and_removed_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self.fixture(root)
+            skills.bundle_docs(root)
+            references = root / "skills/test/references"
+            self.assertEqual(skills.docs_link_problems(references), [])
+            self.assertIn("https://github.com/get-dre/dre/blob/master/README.md",
+                          (references / "docs/start.md").read_text())
+            with tempfile.TemporaryDirectory() as snapshot:
+                old = pathlib.Path(snapshot) / "references"
+                skills.shutil.copytree(references, old)
+                source = root / "docs/start.md"
+                source.write_text(source.read_text().replace("Learn start", "Changed description"))
+                skills.bundle_docs(root)
+                self.assertEqual(skills.diff_tree(old, references), ["docs-index.md", "docs/start.md"])
+            (references / "docs/stale.md").write_text("obsolete")
+            skills.bundle_docs(root)
+            self.assertFalse((references / "docs/stale.md").exists())
+            (references / "docs/glossary.md").unlink()
+            self.assertTrue(skills.docs_link_problems(references))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -63,8 +63,8 @@ checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
 pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
-see [Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
-write (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugin-postgres.md)
+see [Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
+write (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](../docs/plugin-postgres.md)
 source's `ssh:` block takes the same settings.
 
 #### RSA keys
@@ -154,7 +154,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -168,7 +168,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

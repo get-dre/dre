@@ -55,9 +55,9 @@ Paths are relative to the folder the login starts in; a leading `/` means the se
 which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
 connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
 Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
-[Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
+[Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
 server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
-rename; FTP can't do both in one step (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+rename; FTP can't do both in one step (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
 
 ### Destinations
 
@@ -124,7 +124,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -138,7 +138,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 
