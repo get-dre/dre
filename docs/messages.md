@@ -8,7 +8,7 @@ position: 4
 # Messages
 
 The complete [headline project](../examples/slack-headline/) includes query SQL, output YAML,
-attachments and profiles. The [report reference](reference-report.md) lists shared keys;
+conditional sending and profiles. The [report reference](reference-report.md) lists shared keys;
 the [glossary](glossary.md#message) defines message versus file output.
 
 Many people who depend on a report never open the file: they want yesterday's revenue, how
