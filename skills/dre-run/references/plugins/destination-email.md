@@ -53,7 +53,7 @@ Set in the report's `output.destination` entry.
 
 ### Email
 
-#### Notes
+##### Notes
 
 Sends the output as attachments on one email over SMTP. If a report produces several files, they
 all go on the same message.
@@ -111,6 +111,37 @@ output:
     destination:
       - {profile: finance_mail, to: finance@example.com, attach: [workbook]}
 ```
+
+##### Configure the sender before adding recipients
+
+Use email for a workbook that recipients need as an attachment. Starting with the complete
+[monthly finance report](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/), configure the SMTP identity separately:
+
+```yaml
+#### profiles.yml
+destinations:
+  finance_mail:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: email
+        host: smtp.example.com
+        port: 587
+        tls: starttls
+        username: reports@example.com
+        password: "{{ env_var('DRE_SECRET_SMTP_PASSWORD') }}"
+        from: "Reports <reports@example.com>"
+        to: finance@example.com
+        max_attachment_mb: 20
+```
+
+The destination example above overrides those default recipients; omitted recipient options
+keep their profile defaults. Preview locally, then validate with `--target prod` before a real send.
+`invalid-destination-option` identifies bad addresses or options; `delivery-failed` can mean SMTP
+authentication, server policy or an oversized attachment. Lower row counts or deliver a large
+file to storage instead. `attachment_name` applies only to a single-file output.
+See [messages](../docs/messages.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 

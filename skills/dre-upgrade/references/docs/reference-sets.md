@@ -19,6 +19,8 @@ For editor autocomplete and validation, add this as the first line of the file (
 # yaml-language-server: $schema=https://getdre.com/schemas/v0.4/sets.schema.json
 ```
 
+For copyable examples and common errors, see [Report variants](project-configuration.md#change-one-report-variant). The [glossary](glossary.md) defines DRE's terms.
+
 The file maps names to entries; each entry has these keys.
 
 ## Keys

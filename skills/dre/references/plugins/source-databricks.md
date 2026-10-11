@@ -155,6 +155,25 @@ outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databrick
 Takes `if_exists` (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
 `overwrite=false` refuses a taken name in the same step.
 
+#### Verify a warehouse, then add report SQL
+
+The dev profile above is a minimal browser-authenticated warehouse connection. Copy the
+[tutorial](https://github.com/get-dre/dre/blob/master/examples/tutorial/) structure, declare `databricks`, and start the result query
+with `select 1 as connection_check`. `dre validate --live <report>` validates its statement;
+`dre run <report> --preview 5` checks the formatted output without uploading it.
+
+For a realistic workbook, adapt [monthly finance](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) to existing
+warehouse tables and replace any DuckDB-specific SQL. A Volume destination on that
+workbook needs `destination: {profile: lakehouse, path: /Volumes/main/reporting/reports/monthly.xlsx}`
+under its output, and a matching destination target entry.
+
+`connection-failed` needs the workspace host, warehouse HTTP path and warehouse permission
+checked. A browser login cannot run unattended; configure the job's supported identity.
+`delivery-failed` on a Volume needs access to that catalog, schema and volume, even when SQL
+warehouse queries succeed. `missing-target-entry` means the connection or destination lacks
+the selected target. See [profiles](../docs/reference-profiles.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md), and [target](../docs/glossary.md#target).
+
 ### Types from warehouses
 
 Every warehouse source (`databricks`, `bigquery`, `snowflake`) sends the same kinds of value the

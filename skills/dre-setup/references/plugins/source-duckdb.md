@@ -33,7 +33,7 @@ None: a source's settings are its profile fields.
 
 ### DuckDB
 
-#### Notes
+##### Notes
 
 | Field | Notes |
 |---|---|
@@ -41,6 +41,48 @@ None: a source's settings are its profile fields.
 | `threads`, `memory_limit` | Passed to DuckDB. |
 
 Capabilities: `sessions`, `read_only`, `check` (via `EXPLAIN`).
+
+##### Run without a database server
+
+Use DuckDB for local examples, SQL over files and reproducible report tests. A memory database
+exists for one connection session; use a file path for tables that must survive runs.
+
+```yaml
+#### profiles.yml
+connections:
+  warehouse:
+    targets:
+      dev: {type: duckdb, path: ":memory:"}
+```
+
+```yaml
+#### dre_project.yml
+name: local_reports
+default_profile: warehouse
+```
+
+```sql
+-- reports/check/check.sql
+select 'local' as environment, 42 as row_count
+```
+
+```yaml
+#### reports/check/check.yml; also declare csv in dependencies.yml
+queries: [check]
+output: {format: csv}
+```
+
+`dre run check --preview 5` writes a local sample. The complete
+[tutorial project](https://github.com/get-dre/dre/blob/master/examples/tutorial/) includes dependencies and every file.
+For a real file-backed report, set `path: reporting.duckdb` relative to the project root.
+`threads` controls DuckDB work as well as Binding concurrency; `memory_limit: 1GB` bounds
+DuckDB's memory, not the xlsx writer's memory.
+
+`connection-failed` can mean another process holds the database file; close its writer and retry.
+`query-failed` on a missing table in `:memory:` means this session has not created or loaded it.
+Put setup SQL before the result query, using `tab: false`. See [connections](../docs/connections.md),
+[report keys](../docs/reference-report.md), [error codes](../docs/reference-error-codes.md), and
+[source plugin](../docs/glossary.md#source-plugin).
 
 ## Guide notes
 

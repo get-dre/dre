@@ -97,6 +97,32 @@ A 9 picture is right-aligned and zero-filled, as in COBOL; `align` and `pad` sti
 writes the last digit 0–9 as `{`, `A`–`I` for positive numbers and `}`, `J`–`R` for negative
 ones. Packed decimal (`COMP-3`) is binary, not text, and isn't supported.
 
+#### Verify the receiving system's layout
+
+Use fixed-width output for a receiver with a documented record layout, not for a spreadsheet.
+Start with the complete [bank-file example](https://github.com/get-dre/dre/blob/master/examples/bank-file/), which includes input SQL
+and a layout. It demonstrates generic fixed-width records; it is not a certified bank format.
+For a minimal record whose SQL returns `account` and `amount`:
+
+```yaml
+output:
+  format: fixed_width
+  columns:
+    - {name: account, width: 8}
+    - {name: amount, width: 10, decimals: 2, align: right}
+```
+
+Run a preview, then check record length and representative negative, null and overlong values.
+Widths count characters, not encoded bytes: a UTF-8 accented character can use more than one
+byte. Choose the required encoding before comparing a byte-based specification.
+
+The actual line-break failure says `the value contains a line break, which would split the record`
+and names the row and column. Use `line_breaks: replace` only if the receiver allows spaces there.
+A number that exceeds its field width is an error even with `truncate: true`; increase width or
+fix the amount rather than truncating its digits. An invalid layout is `invalid-output-option`.
+See [output keys](../docs/reference-report.md#output), [error codes](../docs/reference-error-codes.md) and
+[format](../docs/glossary.md#format).
+
 ### Formats
 
 Each format plugin declares and checks its own options: `dre validate` and `dre run` send every

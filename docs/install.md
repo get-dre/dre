@@ -109,4 +109,4 @@ See [CLI reference](cli-reference.md), [getting started](getting-started.md),
 
 ---
 
-**Previous:** [Getting started](getting-started.md) · **Next:** [Concepts](concepts.md)
+**Previous:** [Getting started](getting-started.md) · **Next:** [Your first report in 10 minutes](first-report.md)

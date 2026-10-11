@@ -50,4 +50,4 @@ See [CLI reference](cli-reference.md#dre-system-update),
 
 ---
 
-**Previous:** [The manifest and `run_results.json`](manifest.md) · **Next:** [New in 0.4](new-in-0.4.md)
+**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.4](new-in-0.4.md)

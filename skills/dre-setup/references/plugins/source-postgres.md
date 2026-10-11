@@ -110,6 +110,34 @@ A connection error names the server (`host:port/database`). On macOS the plugin 
 TLS stack: TLS 1.2 at most, and with `verify-ca`/`verify-full` a server certificate valid for more
 than 825 days is rejected (Apple's limit), so issue server certificates for 825 days or less.
 
+#### Check the connection before porting a report
+
+For a minimal direct connection, use:
+
+```yaml
+connections:
+  warehouse:
+    targets:
+      dev:
+        type: postgres
+        host: localhost
+        user: reporting
+        database: analytics
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+```
+
+Copy the [tutorial project's](https://github.com/get-dre/dre/blob/master/examples/tutorial/) report structure, declare `postgres`,
+and start with `select 1 as connection_check` before replacing the SQL with business queries.
+Run `dre validate --live <report>` to check SQL without executing it. Adapt the complete
+[monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) after loading its sample data into Postgres;
+replace any DuckDB-specific SQL with PostgreSQL equivalents.
+
+`invalid-connection-setting` means the profile shape needs fixing before connecting.
+`connection-failed` names the server: check host, port, credentials and TLS. `query-failed`
+on a relation checks database/schema names and the reporting role's permissions.
+See [connection reference](../docs/reference-profiles.md), [error codes](../docs/reference-error-codes.md),
+and [connection](../docs/glossary.md#connection).
+
 ## Guide notes
 
 - Sign-in: Postgres has no sign-in that stores nothing, so `password` is always

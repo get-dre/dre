@@ -232,4 +232,4 @@ See [Templates](templates.md). Secret fields stay unreadable everywhere.
 
 ---
 
-**Previous:** [DRE practices](practices.md) · **Next:** [Sources](sources.md)
+**Previous:** [Tested examples](examples.md) · **Next:** [Sources](sources.md)

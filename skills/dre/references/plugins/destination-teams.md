@@ -59,6 +59,20 @@ links and bullets. Teams has no destination options. A message over 15,000 chara
 short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
 warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](../docs/plugins.md#tries-again)).
 
+##### Adapt a headline to Teams
+
+Start with the complete [headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/). Add `teams` to its
+dependencies, use the profile above, and replace the headline destination with
+`destination: {profile: finance_teams}`. Add `dev: {deliver: false}` beside the prod profile
+entry to keep local runs quiet. Run `dre run <report> --preview 5` to inspect the message.
+
+`invalid-destination-option` on `attach` means Teams takes messages only; remove attachments
+and put a storage link in the text. `delivery-failed` after the workflow was removed needs a
+new webhook URL set through the environment variable. A truncated message needs shorter text;
+the warning is not a delivery failure. See [messages](../docs/messages.md),
+[destination keys](../docs/reference-report.md#outputdestination), [error codes](../docs/reference-error-codes.md)
+and [message](../docs/glossary.md#message).
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no

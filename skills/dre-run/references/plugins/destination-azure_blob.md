@@ -45,11 +45,44 @@ Set in the report's `output.destination` entry.
 
 ### Azure Blob Storage
 
-#### Notes
+##### Notes
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
 `use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
 Takes `if_exists` (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
+
+##### Archive a workbook with an Azure identity
+
+Use Azure Blob for report files alongside Azure data. For local work after `az login`, add:
+
+```yaml
+#### profiles.yml
+destinations:
+  archive:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: azure_blob
+        account_name: financereports
+        container: monthly
+        use_azure_cli: true
+```
+
+```yaml
+#### within the monthly finance report's output
+destination:
+  profile: archive
+  path: "az://monthly/{{ run.date.yyyymm }}.xlsx"
+  if_exists: error
+```
+
+Adapt the complete [monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) and preview before
+delivery. On an Azure runner, use `use_managed_identity: true` instead of a local CLI session.
+Choose one authentication method; do not combine it with account keys or a connection string.
+`azure_blob/file-exists` means a previous delivery owns the path; `delivery-failed` with denied
+access needs storage permissions for the chosen identity. The account and container must already exist.
+See [destination keys](../docs/reference-report.md#outputdestination),
+[delivery behavior](../docs/plugins.md#destinations) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 

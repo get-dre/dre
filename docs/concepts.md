@@ -2,7 +2,7 @@
 title: "Concepts"
 description: "Reports, Sets, Bindings, templates, lookups, plugins, delivery, logs, verification and selecting."
 section: get-started
-position: 3
+position: 4
 ---
 
 # Concepts
@@ -68,4 +68,4 @@ New to a term? The [glossary](glossary.md) defines DRE's vocabulary and differen
 
 ---
 
-**Previous:** [Install](install.md) · **Next:** [Build and run reports](building-reports.md)
+**Previous:** [Your first report in 10 minutes](first-report.md) · **Next:** [Build and run reports](building-reports.md)

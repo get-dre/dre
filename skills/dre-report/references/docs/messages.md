@@ -7,6 +7,10 @@ position: 4
 
 # Messages
 
+The complete [headline project](https://github.com/get-dre/dre/blob/master/examples/slack-headline/) includes query SQL, output YAML,
+attachments and profiles. The [report reference](reference-report.md) lists shared keys;
+the [glossary](glossary.md#message) defines message versus file output.
+
 Many people who depend on a report never open the file: they want yesterday's revenue, how
 many payments failed, whether the month closed. A `message` output turns a report's query
 results into a short headline, a title plus a few lines of text, and posts it to Slack, Microsoft
@@ -133,6 +137,12 @@ the data shows it. Alerting on whether a run succeeded belongs to your orchestra
 Platform.
 
 ## Before sending
+
+`invalid-output-option` identifies a malformed message template or a query name absent from
+the output. `invalid-destination-option` can identify `attach` naming no file output, or a
+message-only destination that cannot accept it. A runtime `render-failed` often means the
+message expects a non-null first row; aggregate in SQL or handle `none` explicitly.
+See [error codes](reference-error-codes.md) and preview after repairing the cause.
 
 - `dre validate` checks every template compiles, that `results.<x>` names one of the output's
   queries and `outputs.<x>` another output, and that a file output or `attach:` doesn't go to a

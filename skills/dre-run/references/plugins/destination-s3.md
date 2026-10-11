@@ -45,7 +45,7 @@ Set in the report's `output.destination` entry.
 
 ### Amazon S3
 
-#### Notes
+##### Notes
 
 `bucket`, `region`, and `access_key_id` + `secret_access_key` (+ `session_token`). Leave the keys
 out to use AWS's default credential chain, the same as the AWS CLI: environment variables, the
@@ -56,6 +56,37 @@ The region comes from `region:`, else the AWS config. `endpoint` and `allow_http
 S3-compatible stores. Paths are `s3://bucket/key`, or a bare key in `bucket`. Takes `if_exists`
 (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)); the S3-compatible store must support conditional
 writes for `error` and `number`.
+
+##### Deliver a dated finance export
+
+Use S3 for a shared archive or a downstream data pipeline. After signing in with the AWS
+credential chain, add a profile and a destination to the
+[monthly finance report](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/):
+
+```yaml
+#### profiles.yml
+destinations:
+  archive:
+    targets:
+      dev: {deliver: false}
+      prod: {type: s3, bucket: finance-reports, region: ap-southeast-2}
+```
+
+```yaml
+#### within the report's output
+destination:
+  profile: archive
+  path: "s3://finance-reports/monthly/{{ run.date.yyyymm }}.xlsx"
+  if_exists: error
+```
+
+Preview first, then `dre validate <report> --target prod` to check the profile and path.
+`s3/file-exists` means the destination already holds that file; use another dated path or
+deliberately choose `overwrite`. `delivery-failed` with an authorization error needs access to
+the bucket and key prefix, not more retries. For an S3-compatible service, set its `endpoint`;
+`allow_http` is only needed for a plain-HTTP endpoint.
+See [delivery behavior](../docs/plugins.md#a-file-already-at-the-path),
+[destination keys](../docs/reference-report.md#outputdestination), and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 

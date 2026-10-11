@@ -278,4 +278,4 @@ existence does not mean the report passed. See [CLI reference](cli-reference.md)
 
 ---
 
-**Previous:** [Environment variables](environment-variables.md) · **Next:** [Updating DRE](updating.md)
+**Previous:** [Environment variables](environment-variables.md) · **Next:** [Glossary](glossary.md)

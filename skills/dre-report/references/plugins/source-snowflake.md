@@ -120,6 +120,23 @@ with the `s3`, `gcs` or `azure_blob` destination; there's no Snowflake stage des
 
 The package is written in Go, on Snowflake's official Go driver (`gosnowflake`).
 
+#### Test the chosen role and warehouse
+
+The dev profile above shows a browser-authenticated connection. Use the
+[tutorial](https://github.com/get-dre/dre/blob/master/examples/tutorial/) project structure with `snowflake` declared and
+`select 1 as connection_check` as its result SQL. `dre validate --live <report>` checks the
+statement before a preview run. Adapt the [monthly finance workbook](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/)
+to Snowflake tables and dialect after that; replace any DuckDB-specific SQL.
+These are configuration recipes, not a claim that the alpha has been live-tested on Snowflake.
+
+`invalid-connection-setting` needs the profile repaired before connecting. `connection-failed`
+can mean an account identifier or sign-in method mismatch; a scheduler needs a noninteractive
+identity rather than `externalbrowser`. `query-failed` with a missing current schema needs
+`database` and `schema` set for lookup loading, or fully qualified table names. Check that
+`role` can use `warehouse` and read the data. See [profiles](../docs/reference-profiles.md),
+[error codes](../docs/reference-error-codes.md), [connection](../docs/glossary.md#connection) and
+[lookup](../docs/glossary.md#lookup).
+
 ### Types from warehouses
 
 Every warehouse source (`databricks`, `bigquery`, `snowflake`) sends the same kinds of value the

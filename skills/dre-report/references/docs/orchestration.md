@@ -7,6 +7,10 @@ position: 3
 
 # Orchestration recipe
 
+The [regional reports project](https://github.com/get-dre/dre/blob/master/examples/regional-reports/) supplies concrete schedules and
+Bindings to use with this recipe. See [CLI reference](cli-reference.md#dre-schedule-ls) and
+the [schedule](glossary.md#schedule), [firing](glossary.md#firing) and [Binding](glossary.md#binding) terms.
+
 DRE works out *when* schedules fire ([`dre schedule ls`](schedule-ls.md)); running them on time is
 your orchestrator's job. This page sets that up with a database table and three small files:
 

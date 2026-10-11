@@ -7,6 +7,12 @@ position: 1
 
 # DRE plugin protocol, version 1
 
+For a complete implementation, read the first-party [CSV format](https://github.com/get-dre/dre/blob/master/plugins/csv/src/lib.rs)
+and its [entry point](https://github.com/get-dre/dre/blob/master/plugins/csv/src/main.rs); its integration tests live in
+[`plugins/csv/tests`](https://github.com/get-dre/dre/blob/master/plugins/csv/tests/). The example requests below are minimal wire
+messages, not a substitute for the framing and handshake. The
+[glossary](glossary.md) defines plugin packages, formats and destinations.
+
 Every source, format and destination in DRE is a plugin, served by a separate executable that
 DRE core starts and talks to over stdin and stdout. Plugins ship in packages: one executable can
 serve several plugins (the `databricks` package is a source and a destination; `object_store`

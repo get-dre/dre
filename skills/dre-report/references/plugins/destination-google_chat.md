@@ -58,6 +58,20 @@ is tried again (see [Tries again](../docs/plugins.md#tries-again)).
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.
 
+#### Adapt a headline to Google Chat
+
+Use the complete [headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/) as the starting project.
+Declare `google_chat`, use `ops_chat` from the profile above, and set the message output's
+`destination: {profile: ops_chat}`. Add a `dev: {deliver: false}` target to the profile, preview
+the rendered message locally, then validate prod before sending.
+
+A file output or `attach` cannot be sent to this message-only destination; use a storage link
+in the message instead. `invalid-destination-option` identifies the unsupported option.
+`delivery-failed` with an invalid webhook needs the space's current webhook in the environment
+variable. If messages exceed 4,000 characters, shorten the text so recipients can see it all.
+See [messages](../docs/messages.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md) and [message](../docs/glossary.md#message).
+
 ### Destinations
 
 The built-in `local` destination copies the file to a path, relative to the project. It needs no

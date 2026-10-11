@@ -31,6 +31,30 @@ None.
 
 Arrow types are preserved: a decimal stays a decimal at its precision, a timestamp keeps its time zone.
 
+#### Keep types in an analytics export
+
+Use Parquet when the receiver needs typed data rather than display formatting. Starting from
+the [tutorial project](https://github.com/get-dre/dre/blob/master/examples/tutorial/), add `parquet` to `dependencies.yml` and change:
+
+```yaml
+output: {format: parquet}
+```
+
+One query makes one `.parquet` file; several queries make separate files. Preview the output
+and read it back with DuckDB to verify types:
+
+```sql
+select * from read_parquet('path/to/the/generated/file.parquet')
+```
+
+Use the path printed by the run or `dre history <report> --latest --path`; run folder names
+change each time. The [monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) supplies a realistic
+dataset to export by changing its format. Remove xlsx-only query `columns` and `style` settings
+when doing so. `invalid-output-option` identifies options belonging to another format;
+`undeclared-plugin` means `parquet` must be added to dependencies.
+See [output keys](../docs/reference-report.md#output), [error codes](../docs/reference-error-codes.md) and
+[format](../docs/glossary.md#format).
+
 ### Formats
 
 Each format plugin declares and checks its own options: `dre validate` and `dre run` send every

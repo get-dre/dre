@@ -51,7 +51,7 @@ Set in the report's `output.destination` entry.
 
 ### SFTP
 
-#### Notes
+##### Notes
 
 `host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
 (+ `private_key_passphrase`). `private_key` is the key's text, for when it can't be a file (a CI
@@ -67,7 +67,7 @@ see [Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporar
 write (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](../docs/plugin-postgres.md)
 source's `ssh:` block takes the same settings.
 
-#### RSA keys
+##### RSA keys
 
 RSA private keys sign through the `rsa` crate, which has a known timing weakness
 ([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
@@ -88,6 +88,42 @@ per connection, a few times a run. So DRE keeps RSA keys working and warns once 
 To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
 (its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
 Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
+
+##### Deliver a file without exposing a partial upload
+
+Use the complete [SFTP delivery example](https://github.com/get-dre/dre/blob/master/examples/sftp-delivery/) for a runnable local server
+and report. For a real receiving server, use its verified host key and a key file:
+
+```yaml
+#### profiles.yml
+destinations:
+  partner:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: sftp.example.com
+        username: reporting
+        private_key_path: ~/.ssh/id_ed25519
+        known_hosts_path: ~/.ssh/known_hosts
+```
+
+```yaml
+#### within a report's output
+destination:
+  profile: partner
+  path: "incoming/report-{{ run.date.yyyymmdd }}.csv"
+  atomic: true
+  temp_dir: staging
+  if_exists: error
+```
+
+`temp_dir` and the final path must allow a rename on the same server. The receiving system
+should watch `incoming`, not `staging`. `sftp/host-key-mismatch` requires verifying the server
+identity with its administrator before updating the pin; disabling the check hides a changed
+server. `sftp/file-exists` needs a new dated name or a deliberate replacement policy.
+See [atomic upload behavior](../docs/plugins.md#uploads-under-a-temporary-name),
+[destination keys](../docs/reference-report.md#outputdestination) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 

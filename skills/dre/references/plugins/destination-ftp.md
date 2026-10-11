@@ -46,7 +46,7 @@ Set in the report's `output.destination` entry.
 
 ### FTP and FTPS
 
-#### Notes
+##### Notes
 
 `host`, `port` (21), `username`, `password`, `passive` (default true), and `tls`: `none` or
 `explicit` (FTPS). `tls_accept_invalid_certs` allows self-signed server certificates.
@@ -58,6 +58,43 @@ Server require by default. Uploads go under a temporary name first (`atomic`, `t
 [Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
 server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
 rename; FTP can't do both in one step (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
+
+##### Send an export over explicit FTPS
+
+Use FTP when the receiver requires it; explicit FTPS protects the connection. Adapt the
+report in the [SFTP delivery example](https://github.com/get-dre/dre/blob/master/examples/sftp-delivery/) with the `ftp` package and:
+
+```yaml
+#### profiles.yml
+destinations:
+  partner:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: ftp
+        host: ftp.example.com
+        username: reporting
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: explicit
+        passive: true
+```
+
+```yaml
+#### within the report's output
+destination:
+  profile: partner
+  path: "incoming/report-{{ run.date.yyyymmdd }}.csv"
+  atomic: true
+  temp_dir: staging
+  if_exists: error
+```
+
+Keep `tls_accept_invalid_certs` disabled for a real server. A certificate failure needs the
+server certificate or trust chain repaired. `ftp/file-exists` means the name is taken;
+`delivery-failed` on rename needs write access in both directories and a supported rename.
+For a firewall timeout, check passive data ports as well as the control port.
+See [destination keys](../docs/reference-report.md#outputdestination),
+[atomic uploads](../docs/plugins.md#uploads-under-a-temporary-name) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
