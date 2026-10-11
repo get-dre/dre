@@ -1,0 +1,5 @@
+name: slack_headline
+default_profile: sample
+vars:
+  revenue: 3500
+  threshold: 3000

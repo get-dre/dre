@@ -1,0 +1,8 @@
+queries: [statement]
+output:
+  format: csv
+  destination:
+    profile: partner_sftp
+    path: /incoming/client_a.csv
+    atomic: true
+    if_exists: error

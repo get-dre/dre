@@ -1,0 +1,6 @@
+queries: [headline]
+output:
+  format: message
+  when: "results.headline.value >= var('threshold')"
+  text: "Acme Corp revenue: {{ results.headline.value | currency('USD') }}"
+  destination: {profile: finance_slack}

@@ -1,0 +1,5 @@
+- name: weekday_sales
+  report: sales
+  set: north
+  cron: '0 9 * * 1-5'
+  timezone: UTC

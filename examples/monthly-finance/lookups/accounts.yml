@@ -1,0 +1,4 @@
+columns: {category: string, account_code: string}
+rows:
+  - {category: Hardware, account_code: '4000'}
+  - {category: Services, account_code: '4100'}

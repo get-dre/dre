@@ -1,0 +1,4 @@
+name: first_report
+default_profile: sample
+vars:
+  month: '2026-01'

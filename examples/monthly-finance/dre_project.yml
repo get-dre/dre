@@ -1,0 +1,4 @@
+name: monthly_finance
+default_profile: sample
+vars:
+  month: '2026-01'
