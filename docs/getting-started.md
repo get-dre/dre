@@ -9,6 +9,8 @@ position: 1
 
 Choose the path you want to use. Both create the same plain YAML and SQL project.
 
+The [glossary](glossary.md) explains terms such as report, Binding, Set, source and target.
+
 ## With a coding agent
 
 DRE is built to be driven by coding agents as well as people: everything is plain YAML and SQL

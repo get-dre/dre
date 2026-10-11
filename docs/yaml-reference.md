@@ -29,6 +29,9 @@ themselves.
 
 For editor autocomplete and validation, see [Editor setup](editor-setup.md).
 
+For copyable projects, see [examples](examples.md). [Project configuration](project-configuration.md)
+explains how defaults, folders and Sets combine; the [glossary](glossary.md) defines the terms.
+
 ## Reusing YAML: `x-*` keys and anchors
 
 Every YAML file DRE reads accepts top-level keys starting with `x-`, as docker-compose does, and

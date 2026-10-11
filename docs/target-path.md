@@ -96,6 +96,33 @@ run 0.3 and 0.4 on one target path.
 
 ## Cleaning
 
+Inspect and prune a report's history with explicit storage and Binding names:
+
+```bash
+dre history monthly --binding domestic --output json
+dre history monthly --binding domestic --latest --path
+dre clean --prune --keep-runs 3
+```
+
+`--binding` names a Set, or `default` for a report without Sets. `--latest` selects the current
+finished run and `--path` prints only its directory. The `current` run may have failed: inspect
+its `run_results.json` before treating its files as delivered.
+
+For a lock from a stopped process on another machine, inspect its holder before unlocking:
+
+```bash
+dre unlock monthly --binding domestic --target-path /mnt/shared/dre/target
+```
+
+`--yes` skips the confirmation in an automated recovery procedure. Use it only after that
+procedure has confirmed the holder stopped; removing a live lock permits overlapping runs.
+`run-in-progress` means a lock still exists, not that the output is corrupt. `target-path-unwritable`
+means permissions, a mount or disk capacity needs fixing before another run.
+
+The [monthly finance project](../examples/monthly-finance/) provides a complete report to inspect.
+See [CLI options](cli-reference.md#dre-history), [error codes](reference-error-codes.md) and the
+[target path](glossary.md#target-path) and [Binding](glossary.md#binding) terms.
+
 `dre clean` deletes the target folder only if DRE created it
 (it leaves a `.dre_target` file there) or it's the project's own `target/`, so a mistyped
 `--target-path` can't delete anything else.

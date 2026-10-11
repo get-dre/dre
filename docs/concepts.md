@@ -7,6 +7,8 @@ position: 3
 
 # Concepts
 
+New to a term? The [glossary](glossary.md) defines DRE's vocabulary and differences from dbt.
+
 - **Report**: one or more Jinja-templated SQL queries plus an output config, declared in YAML.
   A `.sql` file under `reports/` with no YAML is an *unmanaged* report, meant for quick tests.
 - **Set** and **Binding**: one report can run as many named variants (clients, regions,

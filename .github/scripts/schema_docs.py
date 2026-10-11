@@ -41,6 +41,19 @@ PAGES = [
 ]
 
 
+GUIDES = {
+    "project": ("project-configuration", "Project configuration"),
+    "report": ("building-reports", "Build and run reports"),
+    "sets": ("project-configuration#change-one-report-variant", "Report variants"),
+    "schedules": ("schedules", "Schedules"),
+    "timings": ("schedules#share-a-timing", "Shared timings"),
+    "profiles": ("connections", "Connections and targets"),
+    "sources": ("sources", "Sources"),
+    "dependencies": ("registry", "Plugin and macro packages"),
+    "lookup": ("lookups", "Lookups"),
+}
+
+
 class Doc:
     def __init__(self, name):
         self.name = name
@@ -193,6 +206,14 @@ def generate_page(name, slug, title, where, order, description):
         "```yaml",
         f"# yaml-language-server: $schema={URL}/v{version}/{name}.schema.json",
         "```",
+        "",
+    ]
+    guide, guide_title = GUIDES[name]
+    page, _, anchor = guide.partition("#")
+    target = f"{page}.md" + (f"#{anchor}" if anchor else "")
+    lines += [
+        f"For copyable examples and common errors, see [{guide_title}]({target}). "
+        "The [glossary](glossary.md) defines DRE's terms.",
         "",
     ]
     found = []
