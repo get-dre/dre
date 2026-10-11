@@ -10,6 +10,7 @@ Install DRE, learn the ideas, and make a first report.
 
 - [Getting started](getting-started.md): Start with a coding agent or from the command line.
 - [Install](install.md): Install DRE with the install script, Homebrew, Scoop, pip or cargo.
+- [Your first report in 10 minutes](first-report.md): Build an Excel report with DuckDB, then add variables, tabs, formats, Sets, a schedule and local delivery.
 - [Concepts](concepts.md): Reports, Sets, Bindings, templates, lookups, plugins, delivery, logs, verification and selecting.
 
 ## Build reports
@@ -21,6 +22,8 @@ Queries, outputs, templates, lookups and messages.
 - [Lookups](lookups.md): Mapping tables kept as files: typed columns, inline or temp table.
 - [Messages](messages.md): Headline numbers to Slack, Teams, Google Chat and email, built from a report's own queries.
 - [DRE practices](practices.md): The opinions DRE’s agent skills give, and the reasons behind them.
+- [Project configuration](project-configuration.md): Share defaults, override reports and Sets, and bound template queries.
+- [Tested examples](examples.md): Complete, copyable projects with checked output: Excel, bank files, Sets, Slack and SFTP.
 
 ## Connect
 
@@ -83,6 +86,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 - [Exit codes](exit-codes.md): What each dre exit code means, so a scheduler knows whether to retry, alert or stop.
 - [Environment variables](environment-variables.md): Every DRE_* variable and what it does.
 - [The manifest and `run_results.json`](manifest.md): The project manifest and the per-run results file, with the manifest JSON Schema.
+- [Glossary](glossary.md): DRE terms, from Bindings and Sets to targets, sources and run artifacts.
 
 ## Upgrading
 

@@ -423,4 +423,4 @@ DST), and a rule without an anchor fires on dates that depend on when you look.
 
 ---
 
-**Previous:** [Messages](messages.md) · **Next:** [Connections and targets](connections.md)
+**Previous:** [Messages](messages.md) · **Next:** [Project configuration](project-configuration.md)

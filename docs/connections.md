@@ -7,6 +7,11 @@ position: 1
 
 # Connections and targets
 
+The [tutorial project](../examples/tutorial/) has a complete local profile;
+[SFTP delivery](../examples/sftp-delivery/) adds separate delivery targets. The
+[profiles reference](reference-profiles.md) lists shared keys; the
+[glossary](glossary.md) defines connection, destination, source and target.
+
 > **Changed in 0.2.** `profiles.yml` calls database connections `connections:` (it was
 > `sources:`), and each query can run on its own connection. **Changed in 0.2.1:** each profile
 > has its own default `target:` again, a missing entry is an error, and `{deliver: false}` marks
@@ -227,4 +232,4 @@ See [Templates](templates.md). Secret fields stay unreadable everywhere.
 
 ---
 
-**Previous:** [DRE practices](practices.md) · **Next:** [Sources](sources.md)
+**Previous:** [Tested examples](examples.md) · **Next:** [Sources](sources.md)

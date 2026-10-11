@@ -1,0 +1,10 @@
+- name: monday_north
+  report: regional
+  set: north
+  cron: '0 9 * * 1'
+  timezone: UTC
+- name: monday_south
+  report: regional
+  set: south
+  cron: '0 9 * * 1'
+  timezone: UTC

@@ -7,6 +7,11 @@ position: 3
 
 # First-party plugins
 
+The complete [examples](examples.md) cover local output, workbooks, fixed-width feeds, report
+variants, headline messages and SFTP delivery. Each plugin page below adds its profile recipe
+and common errors. [Dependency keys](reference-dependencies.md) describe declarations;
+the [glossary](glossary.md) defines source plugin, format, destination and plugin package.
+
 Plugins come in packages, declared once each under `plugins:` in `dependencies.yml` (see
 [the registry docs](registry.md)). A source or destination is configured through a profile in
 `profiles.yml` (under `connections:` or `destinations:`) whose target has its `type`. Fields holding

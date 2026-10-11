@@ -1,0 +1,45 @@
+{
+  "$comment": "The docs' sections, in order. Each page in docs/ names its section and its place in it in its front matter (`section:`, `position:`). .github/scripts/docs_sections.py builds docs/README.md and every page's previous/next links from these; getdre.com builds its sidebar from them.",
+  "sections": [
+    {
+      "id": "get-started",
+      "title": "Get started",
+      "description": "Install DRE, learn the ideas, and make a first report."
+    },
+    {
+      "id": "build-reports",
+      "title": "Build reports",
+      "description": "Queries, outputs, templates, lookups and messages."
+    },
+    {
+      "id": "connect",
+      "title": "Connect",
+      "description": "Connections, targets and the sources reports read."
+    },
+    {
+      "id": "schedule-and-run",
+      "title": "Schedule and run",
+      "description": "Schedules, orchestrators and where runs write their files."
+    },
+    {
+      "id": "plugins",
+      "title": "Plugins",
+      "description": "Installing plugins, the registry, and every first-party plugin."
+    },
+    {
+      "id": "reference",
+      "title": "Reference",
+      "description": "The command line, every YAML file, error codes, environment variables and the manifest."
+    },
+    {
+      "id": "upgrading",
+      "title": "Upgrading",
+      "description": "Updating DRE and what changed in each release."
+    },
+    {
+      "id": "extend",
+      "title": "Extend DRE",
+      "description": "The plugin protocol, building from source and editor setup."
+    }
+  ]
+}

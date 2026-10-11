@@ -1,0 +1,7 @@
+sources:
+  - name: finance
+    profile: sample
+    schema: main
+    tables:
+      - name: sales
+        identifier: sample_sales

@@ -1,0 +1,368 @@
+---
+title: "Templates"
+description: "Jinja in SQL, paths and options: connection, destination, source(), profile(), columns(), dates and timezones."
+section: build-reports
+position: 2
+---
+
+# Templates
+
+For complete SQL and YAML using these functions, see [regional reports](https://github.com/get-dre/dre/blob/master/examples/regional-reports/)
+and [monthly finance](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/). The [glossary](glossary.md) defines connections,
+sources, lookups and macro packages; [report keys](reference-report.md) define where templates live.
+
+SQL files, output paths, destination options and template values all render through the same
+Jinja environment ([minijinja](https://github.com/mitsuhiko/minijinja)). Beyond your own macros
+in `macros/` and packages, every template sees:
+
+| Name | What it is |
+|---|---|
+| `var('name', default)` | A variable: `--var`, then the schedule, Set, report, folders, project. |
+| `env_var('NAME', default)` | An environment variable. |
+| `run.*` | The run: `report`, `set`, `target`, `schedule`, `date`, `now`, `timezone`. |
+| `target.name` | The run's target (environment). `target` has no other fields. |
+| `connection.*` | The query's connection: its fields for its entry in this run (below). |
+| `destination.*` | The destination being rendered, in its `path` and options only. |
+| `profile('name').*` | Any profile's entry for this run (below). |
+| `source('source', 'table')` | A declared table's name (see [Sources](sources.md)). |
+| `run_query(sql, profile=)` | Rows from the query's connection, or another. |
+| `columns(rel, profile=)` | A relation's columns (below). |
+| `ref('file')` / `lookup('name')` | Another `.sql` file as a subquery; a lookup's rows. |
+| `date()`, `datetime()`, `period()`, `month_of()`, ... | Calendar values (below). |
+| `dispatch('macro', 'package')` | A package macro's per-database variant. |
+| `raise_error('message')` | Stop rendering with this error, e.g. from a macro that checks its arguments. |
+
+## Variables, loops and maps
+
+`--var` values are read as YAML 1.2, like a value in a YAML file: `--var with_total=false` is
+`false`, `--var n=5` is a number, and `--var 'regions=[NAM, EMEA]'` is a list a `{% for %}` walks.
+Anything else stays text (`yes`, `2026-01-31`, `010`, `1.0.0`). Quote a value to keep it text:
+`--var flag='"false"'`. Before 0.4, every `--var` was text.
+
+`{% break %}` and `{% continue %}` work inside a `{% for %}` loop. A map keeps the order it was
+written in: `{% for k, v in {'low': 10, 'high': 90} | items %}` gives `low` first, and a `vars:` map
+keeps its YAML order. When a lower level (a Set, `--var`) sets a variable the project already
+has, it replaces the whole value in place.
+
+## Names from profiles: `connection`, `destination` and `profile()`
+
+> **Changed in 0.2.** `target.<field>` is now `connection.<field>`, `run.profile` is
+> `connection.name` and `run.source_type` is `connection.type`; `target` holds only `name`. The
+> old names fail with their replacement. See [Upgrading to 0.2](migrating-to-0.2.md).
+
+Build names from the connection instead of hard-coding them:
+
+```sql
+select * from {{ connection.catalog }}.{{ connection.schema }}.orders   -- client_a_catalog.sales_dev.orders
+```
+
+- `connection` is the connection the query runs on (see
+  [Which connection a query runs on](connections.md#which-connection-a-query-runs-on)):
+  `connection.name` (also `.profile`) is the profile's name, `connection.type` the plugin type,
+  `connection.target` its entry for this run (`--target`, `DRE_TARGET`, else the profile's own
+  `target:`, else `dev`), and every other field of that entry is there by its own name. Fields are read after `env_var()` has been applied. Outside query SQL (an
+  output path, a subject), `connection` is the Binding's inherited connection.
+- `target.name` is the run's target (`dev`, `prod`): `--target`, else `DRE_TARGET`, else `dev`.
+  It's never a profile's own default, so with a connection on `target: prod` and no flags,
+  `target.name` is `dev` and `connection.target` is `prod`.
+- `destination.*` is the destination whose `path` and options are being rendered:
+  `path: "out/{{ destination.bucket }}/{{ run.report }}.csv"`. `destination.target` is its entry
+  for this run. A `{deliver: false}` entry renders no path or options.
+- `profile('reports_s3').bucket` reads any profile's entry for this run the same way. It
+  looks in `connections:` and `destinations:`; when both have the name, say which:
+  `profile('shared', role='destination')` (or `role='connection'`).
+- **Secrets can't be read.** A field whose value comes from a `DRE_SECRET_*` variable, or that the
+  plugin's `describe` marks secret, is an error to read, so a password never reaches compiled SQL,
+  logs or a file path. When the plugin isn't installed to ask, fields named like `password`,
+  `secret`, `token`, `key` or `credential` count as secret.
+
+For tables the project reads, declaring [sources](sources.md) is often simpler than building names:
+`{{ source('sales', 'orders') }}` renders the table's name and decides the connection.
+
+Keep the naming rule in one place with your own macro:
+
+```sql
+{# macros/names.sql #}
+{% macro crm(t) %}{{ var('client') }}_catalog.crm_{{ target.name }}.{{ t }}{% endmacro %}
+
+select * from {{ crm('orders') }}
+```
+
+## Columns: `columns(rel)`
+
+`columns('orders')` returns the relation's columns in `select *` order, each with `name` and
+`type` (the Arrow type, e.g. `Int64`, `Utf8`, `Date32`):
+
+```sql
+select {% for c in columns('orders') if c.name != '_etl_ts' %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+from orders
+```
+
+`rel` is anything that can follow `from`: a table, a fully qualified name, a temp table made by an
+earlier query, or `ref('file')`. DRE asks the database with `select * from <rel> as _dre_cols
+where 1=0`, once per relation in each file it renders, on the query's connection unless
+`profile=` names another (or a source in `rel` names one). Like `run_query()`, it connects only
+when a template calls it, so `dre compile` connects for reports that use it. Packages build on it:
+`dre_utils.star()` is one.
+
+`dre run` renders each query just before running it, so a template sees what the queries before
+it made. `dre compile`, `--dry-run` and `dre validate` run nothing, so there a temp table made by
+an earlier query doesn't exist yet: `columns()` or `run_query()` on it fails there, and works in
+`dre run`. `dre validate` reports such a report as a warning (it can only be checked by
+`dre run`) and still checks everything else.
+
+## Another connection: `profile=`
+
+`run_query()` and `columns()` run on the query's connection (in an output path or a template
+value, the Binding's inherited one). `profile=` sends them to another connection's session, and a
+[source](sources.md) the SQL reads decides it when `profile=` isn't given; an explicit `profile=`
+must agree with every source the SQL reads.
+
+```sql
+{% set fx = run_query("select rate from " ~ source('finance', 'fx_rates') ~ " where day = current_date") %}
+{% set regions = run_query('select code from regions', profile='crm_pg') %}
+select amount * {{ fx[0].rate }} as amount_aud from {{ source('sales', 'orders') }}
+```
+
+A `source()` called anywhere in a query's file counts towards that query's sources, so a query
+reading sources on two connections, even through `run_query()`, is an error.
+
+## Conditions, loops and Python-style methods
+
+`{% if %}` / `{% elif %}` / `{% else %}` and `{% for %}` work in SQL, and inside the string values
+of YAML (a `path:`, a subject). Loops have `loop.index`, `loop.first`, `loop.last`, `loop.length`,
+`for ... else`, `range()` and `{% for x in xs if cond %}`. The YAML structure itself (keys, list
+items) is plain YAML: Jinja only renders values.
+
+Common Python string and mapping methods work as they do in Jinja2: `'a,b'.split(',')`,
+`s.startswith('a')`, `s.strip()`, `s.replace(a, b)`, `d.get('k', default)`, `d.keys()`,
+`d.values()`, `d.items()`.
+
+### Lists and dicts you can change: `list()` and `dict()`
+
+A `[]` or `{}` literal, and a `var()` value, can't change once made. To build one up in a loop,
+start from `list()` or `dict()` (optionally from existing values: `list(var('regions'))`):
+
+```sql
+{% set cols = list() %}
+{% for c in columns('orders') if c.name != '_etl_ts' %}
+  {% set _ = cols.append(c.name) %}
+{% endfor %}
+select {{ cols | join(', ') }} from orders
+```
+
+- Lists: `append`, `extend`, `insert`, `pop`, `remove`, `clear`, `sort(reverse=true)`, `reverse`,
+  `index`, `count`, `copy`. Dicts: `update`, `get`, `setdefault`, `pop`, `clear`, `keys`,
+  `values`, `items`, `copy`.
+- They behave like Python's: `{% set b = a %}` is the same list (use `a.copy()` for another);
+  a dict keeps the order keys were added in; `l[-1]` is the last item.
+- Write `{% set _ = items.append(x) %}`: the method returns nothing, and there is no `{% do %}`.
+  Calling a changing method on a `[]` literal or a `var()` value is an error that says so.
+- They last for one render only; nothing carries over between queries, Sets or runs.
+- For a counter or a flag, `namespace()` also works: `{% set ns = namespace(n=0) %}` then
+  `{% set ns.n = ns.n + 1 %}`.
+
+## String literals and Databricks
+
+Databricks SQL doesn't read `''` inside a string literal as an escaped quote: `'O''Brien'` is two
+adjacent literals that Databricks joins into `OBrien`. It reads backslashes as escapes
+instead: `'O\'Brien'`. Postgres and DuckDB are the other way round. A macro that writes values
+into SQL as literals should `dispatch()` a Databricks variant:
+
+```sql
+{% macro literal(v) %}{{ dispatch('literal', 'my_macros')(v) }}{% endmacro %}
+{% macro default__literal(v) %}'{{ v | replace("'", "''") }}'{% endmacro %}
+{% macro databricks__literal(v) %}'{{ v | replace("\\", "\\\\") | replace("'", "\\'") }}'{% endmacro %}
+```
+
+Lookups (`ref('countries')`) are inlined in a form every engine reads the same way.
+
+## Numbers: `number`, `percent`, `signed`, `currency`, `compact`
+
+These filters make values readable in every template (SQL, paths, destination options and
+messages). They round half away from zero.
+
+| Filter | Example | en | de-DE |
+|---|---|---|---|
+| `number(decimals=0)` | `12340.5 \| number` | `12,341` | `12.341` |
+| | `1234.5678 \| number(2)` | `1,234.57` | `1.234,57` |
+| `percent(decimals=1)` | `0.0412 \| percent` | `4.1%` | `4,1 %` |
+| `signed(decimals=0)` | `-320 \| signed` | `−320` | `−320` |
+| | `0.0412 \| percent \| signed` | `+4.1%` | `+4,1 %` |
+| `currency(code, decimals=0)` | `12340 \| currency('EUR')` | `€12,340` | `12.340 €` |
+| `compact(decimals=1)` | `1234567 \| compact` | `1.2M` | `1,2M` |
+
+- Negative numbers start with `-`; `signed` writes `+` or a minus sign (`−`) and leaves zero
+  alone. On text another filter made, `signed` adds `+` unless it's negative or zero.
+- `none` renders as nothing. Text that holds a number (`'12.5'`) is read as one; any other value
+  is an error naming the filter.
+- `currency` takes an ISO 4217 code. Common codes print their symbol (`€`, `$`, `£`, `¥`, `kr`,
+  ...); others print the code (`CHF 12'340`).
+- `compact` uses `K`, `M`, `B` and `T` in every locale, with the locale's decimal separator.
+
+### Locale
+
+`locale:` sets the separators and where the currency symbol and percent sign go. Set it in
+`dre_project.yml`, as a folder's `+locale`, on a report, or on a Set (inline or in sets.yml);
+the most specific wins. Default: `en`.
+
+```yaml
+# dre_project.yml
+locale: de-DE
+```
+
+DRE carries its own conventions for these languages: `en`, `de`, `fr`, `it`, `es`, `nl`, `pt`,
+`sv`, `da`, `nb`/`no`, `fi`, `pl`, `cs`, `ja`, `zh` and `ko`, with regional variants where they
+differ (`de-CH`, `fr-CH`, `it-CH`, `es-MX`, `es-US`, `pt-BR`). Any other region uses its
+language's conventions; an unknown language is an error when the project loads.
+
+## Dates and times
+
+`run.date` is a date, not a string. It's `DRE_RUN_DATE` when set, else the date of `DRE_RUN_AT`
+in the run's timezone when that's set, else today in the run's timezone. Everything below is worked out when the template renders, so the compiled SQL holds
+plain literals, and a rerun with the same `DRE_RUN_DATE` renders the same SQL.
+
+```sql
+where txn_date between '{{ run.date.prev_month.start.date }}' and '{{ run.date.prev_month.end.date }}'
+-- where txn_date between '2026-08-01' and '2026-08-31'
+```
+
+### Timezone
+
+The run's timezone decides what "today" is and what midnight means. It's **UTC** unless you set
+one, nearest first:
+
+1. `--timezone Australia/Sydney`
+2. `DRE_TIMEZONE`
+3. `timezone:` on the `schedules.yml` entry, or its shared timing's (with `--schedule`)
+4. `timezone:` in the report's YAML
+5. `+timezone:` in folder config
+6. `timezone:` in `dre_project.yml`
+
+Names are IANA timezone names (`Europe/London`, `America/New_York`, `UTC`). `run.timezone`
+renders the one in use, and `run_results.json` and the JSON events record it.
+
+### Dates
+
+A date renders as `YYYY-MM-DD`.
+
+| | |
+|---|---|
+| Parts | `year`, `month`, `day`, `quarter`, `week`, `week_year`, `weekday` (1 = Monday ... 7), `day_of_year`, `days_in_month` |
+| Neighbours | `prev_day`, `next_day`, `add(days=, weeks=, months=, years=)` (negative to go back; 31 Jan + 1 month is 28/29 Feb) |
+| Boundaries | `week_start`, `week_end`, `month_start`, `month_end`, `quarter_start`, `quarter_end`, `year_start`, `year_end` |
+| Periods | `this_week`, `prev_week`, `next_week`, `this_month`, `prev_month`, `next_month`, `this_quarter`, `prev_quarter`, `next_quarter`, `this_year`, `prev_year`, `next_year`, `as_period()` (the day itself) |
+| Formats | `iso`, `yyyymmdd`, `ddmmyyyy`, `yyyy`, `mm`, `dd`, `format('%d/%m/%Y')` (strftime) |
+| As time | `start`, `end` (its first and last instant), `unix`, `unix_ms` (its midnight) |
+
+### Periods
+
+A period is a run of whole days: a week, a month, a quarter, a year, or any range.
+
+| | |
+|---|---|
+| `start`, `end` | Its first and last instant: `2026-08-01 00:00:00`, `2026-08-31 23:59:59.999999`. |
+| `start.date`, `end.date` | Its first and last day: `2026-08-01`, `2026-08-31`. Also `first_day`, `last_day`. |
+| `next`, `prev` | The adjacent period of the same kind (`prev_month.prev` is two months back). |
+| `days` | How many days it has. |
+
+Filter a `date` column with the days and a `timestamp` column with the instants:
+
+```sql
+where txn_date between '{{ p.start.date }}' and '{{ p.end.date }}'
+where txn_ts   between '{{ p.start }}'      and '{{ p.end }}'
+where txn_ts   >=      '{{ p.start }}'      and txn_ts < '{{ p.next.start }}'
+```
+
+The last form is the safest for timestamps: some databases keep fewer than 6 decimal places and
+round `23:59:59.999999` up to the next day.
+
+### Datetimes
+
+A datetime is an instant, shown in a timezone. It renders as `YYYY-MM-DD HH:MM:SS`, with
+`.ffffff` only when there's a fraction.
+
+| | |
+|---|---|
+| Parts | `date`, `time`, `year`, `month`, `day`, `hour`, `minute`, `second`, `timezone`, `offset` |
+| Other zones | `utc`, `tz('Europe/London')`: the same instant, shown elsewhere |
+| Formats | `iso` (with offset: `2026-08-01T00:00:00+10:00`), `unix`, `unix_ms`, `format('%H:%M')` |
+| Moving | `add(days=, weeks=, months=, years=, hours=, minutes=, seconds=)` |
+
+`run.now` is the instant the run started, unless `DRE_RUN_AT` pins it to the instant the run was
+scheduled for. Without `DRE_RUN_AT` it isn't reproducible, and `DRE_RUN_DATE` doesn't change it.
+
+`run.scheduled_at` is that `DRE_RUN_AT` instant, shown in the run's timezone, and `none` when
+`DRE_RUN_AT` isn't set. It tells two firings on the same day apart:
+
+```yaml
+path: "out/intraday-{{ run.scheduled_at.format('%Y%m%d-%H%M') if run.scheduled_at else run.date.yyyymmdd }}.csv"
+```
+
+A day's first instant depends on the zone: with `timezone: Australia/Sydney`,
+`run.date.start.utc` is 13:00 or 14:00 the previous day, and `run.date.unix` is Sydney's
+midnight. Use `.utc` when the table stores UTC timestamps but the report is about Sydney days.
+
+### Building dates
+
+| | |
+|---|---|
+| `date('2026-03-15')`, `date(2026, 3, 15)` | A date. |
+| `'2026-03-15' \| as_date` | A date from a string var (`YYYY-MM-DD` or `YYYYMMDD`). |
+| `datetime('2026-03-15 10:30:00')`, `\| as_datetime` | A datetime, in the run's zone unless the string has an offset (`...+10:00`, `...Z`). |
+| `month_of(2026, 2)`, `quarter_of(2026, 1)`, `year_of(2026)` | A period. |
+| `week_of(2026, 12)` | Week 12 of 2026, in the project's week numbering. |
+| `date_range('2026-01-05', '2026-01-18')` | Any run of days; its `next` is the following run of the same length. |
+
+### Named periods: `period()`
+
+`period(name)` is a period relative to `run.date`, so a schedule var can pick a report's range:
+
+```yaml
+# schedules.yml
+- {name: flash_daily, report: sales, cron: "0 7 * * *", vars: {period: yesterday}}
+- {name: close_monthly, report: sales, cron: "0 6 1 * *", vars: {period: last_month}}
+```
+
+```sql
+{% set p = period(var('period')) %}
+where sale_date between '{{ p.start.date }}' and '{{ p.end.date }}'
+```
+
+| Name | Period |
+|---|---|
+| `today`, `yesterday` | That one day. |
+| `this_week`, `last_week` | The whole week (see `week_start`). |
+| `this_month`, `last_month`, `this_quarter`, `last_quarter`, `this_year`, `last_year` | The whole month, quarter or year. |
+| `mtd`, `qtd`, `ytd` | From the start of the month, quarter or year through `run.date` itself. |
+| `last_n_days` | The `n` days before `run.date`: `period('last_n_days', n=7)`. |
+| `last_n_months` | The `n` whole months before `run.date`'s month. |
+
+`as_of=` counts from another date: `period('last_month', as_of=var('as_at'))`.
+
+### Weeks
+
+```yaml
+# dre_project.yml
+week_start: monday      # or sunday: moves week_start, week_end and the week periods
+week_numbering: iso     # or us
+```
+
+- `iso` (default): week 1 holds the year's first Thursday, so the first days of January can
+  belong to the previous year's week 52 or 53. `week_year` gives that year.
+- `us`: week 1 holds 1 January.
+
+## Fix rendering failures
+
+`unresolved-var` means no level supplies the variable; give `var()` a default or set it in YAML
+or with `--var`. `unset-env-var` needs the named environment variable configured without putting
+its value into SQL. `unknown-ref` names a missing SQL file or lookup; `ref-cycle` identifies a
+loop between shared SQL files. `parse-failed` and `compile-failed` include the original template
+cause and filename. Use `dre explain <code>` with the [error reference](reference-error-codes.md)
+before changing a working database query to work around a template failure.
+
+<!-- docs-nav: generated by .github/scripts/docs_sections.py from docs/sections.json -->
+
+---
+
+**Previous:** [Build and run reports](building-reports.md) · **Next:** [Lookups](lookups.md)

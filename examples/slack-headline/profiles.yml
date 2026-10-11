@@ -1,0 +1,13 @@
+connections:
+  sample:
+    targets:
+      dev: {type: duckdb}
+      prod: {type: duckdb}
+destinations:
+  finance_slack:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: slack
+        token: "{{ env_var('DRE_SECRET_SLACK_TOKEN') }}"
+        channel: "{{ env_var('SLACK_CHANNEL') }}"

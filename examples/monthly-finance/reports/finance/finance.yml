@@ -1,0 +1,29 @@
+queries:
+  - {query: setup, tab: false}
+  - query: detail
+    tab_name: Detail
+    columns:
+      revenue: {format: "#,##0.00"}
+      commission: {formula: "=ROUND({revenue}*0.1,2)", format: "#,##0.00", total: sum}
+  - query: summary
+    tab_name: Summary
+    columns:
+      revenue: {format: "#,##0.00"}
+output:
+  - name: finance
+    format: xlsx
+    columns:
+      revenue: {total: sum}
+    style:
+      header: {fill: "#176B59", font_color: "#FFFFFF"}
+      banded_rows: "#F0F5F3"
+    destination: {profile: local, path: "out/finance-{{ var('month') }}.xlsx"}
+  - name: presentation
+    format: xlsx
+    queries: [summary]
+    template:
+      file: templates/finance.xlsx
+      bindings:
+        - {sheet: Summary, cell: A1, value: "Acme Corp - {{ var('month') }}"}
+        - {sheet: Summary, query: summary, anchor: A4, header: true}
+    destination: {profile: local, path: "out/presentation-{{ var('month') }}.xlsx"}

@@ -106,6 +106,10 @@ output:
 | `borders` | output, tab | `none`, `thin`, `medium`, around every cell of the table |
 
 Cell keys on an output or tab apply to every data cell. A column's `fill` wins over the band.
+`bold`, `italic` and `underline` toggle emphasis; `font.name` and `font.size` choose a face and
+point size. `font_color` colors text, while `fill` colors its background. `align` sets horizontal
+placement, `border` frames data cells and `borders` frames every table cell. `header` and
+`totals` style those rows independently; `banded_rows` makes wide tables easier to scan.
 Styled cells are written even when empty, so a band or border has no gaps. In a template, the
 template's formatting stays, and only a column's `style` is applied over it, on the cells DRE
 fills. `dre validate` rejects an unknown key, a colour that isn't `"#RRGGBB"` and any other bad
@@ -158,7 +162,7 @@ column: a date code on a number, a number code on a date, or either on text or b
 | `#,##0.00` | `1,234.50` |
 | `0.0%` | `12.5%` |
 | `[$€-x-euro2] #,##0.00` | `€ 1,234.50` |
-| `#,##0.00;[Red](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#,##0.00)` | negatives in red, in parentheses |
+| `#,##0.00;[Red](../docs/plugin-xlsx.md#,##0.00)` | negatives in red, in parentheses |
 | `dd/mm/yyyy` | `25/01/2026` |
 | `mmm yyyy` | `Jan 2026` |
 | `h:mm AM/PM` | a time as `3:05 PM` |
@@ -210,6 +214,47 @@ block in `A5:C5`), are filled down to every inserted row the way Excel's fill-do
 row references move (`=B6*C6`, and a running total `=SUM(C$5:C5)` becomes `=SUM(C$5:C6)`),
 absolute rows (`$B$5`, `B$5`) stay. Excel works out their values when the file is opened.
 
+#### Start from a complete workbook project
+
+Use xlsx for reports people inspect, filter and share. The
+[monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) includes SQL, lookup data, formatting
+and a workbook template. The minimum output is `output: {format: xlsx}`; declare `xlsx` in
+dependencies and provide one named result query. `max_rows_per_sheet` splits large results;
+set it below Excel's limit when a recipient needs smaller sheets. `totals_label` labels the
+first unaggregated column of a totals row.
+
+To fill an existing branded workbook, keep `templates/monthly.xlsx` in the project and map
+query results to sheet locations:
+
+```yaml
+output:
+  format: xlsx
+  template:
+    file: templates/monthly.xlsx
+    bindings:
+      - {sheet: Summary, cell: B2, value: "{{ run.date.prev_month }}"}
+      - {sheet: Summary, cell: B3, query: summary, column: revenue}
+      - sheet: Detail
+        query: detail
+        result_index: 1
+        anchor: A5
+        header: true
+        columns: [region, revenue]
+```
+
+`file` is relative to the project root; `sheet` must exist in the template. A table uses
+`anchor` and optionally selected `columns`; a scalar uses `cell` with either `value`, or
+`query` and `column`. `result_index` is one-based and defaults to the last result set.
+Do not put both `value` and `query` on a scalar binding. The placeholder cells keep their
+template formatting unless explicitly overridden.
+
+`missing-template` means the file path does not resolve from the project root. `invalid-cell`
+means a cell is not an Excel address such as `B3`. `invalid-output-option` covers malformed
+styles or formulas; `format-failed` reports a runtime mismatch such as a column absent from
+the query. Fix SQL aliases to match `columns` and formula references, then preview again.
+See [template binding keys](../docs/reference-report.md#outputtemplatebindings),
+[error codes](../docs/reference-error-codes.md), [format](../docs/glossary.md#format) and [Binding](../docs/glossary.md#binding).
+
 ### Formats
 
 Each format plugin declares and checks its own options: `dre validate` and `dre run` send every
@@ -231,10 +276,10 @@ format_options:
 | Format | Options |
 |---|---|
 | `csv`, `delimited` | `delimiter`, `quote`, `quoting`, `header`, `line_ending`, `encoding`, `null`, `byte_order_mark` |
-| `fixed_width` | `columns` (see [Fixed-width columns](https://github.com/get-dre/dre/blob/master/docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
+| `fixed_width` | `columns` (see [Fixed-width columns](../docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
-| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-widths)), `style` (see [Styles](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](https://github.com/get-dre/dre/blob/master/docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
-| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format)) |
+| `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](../docs/plugin-xlsx.md#column-widths)), `style` (see [Styles](../docs/plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](../docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](../docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
+| `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](../docs/plugins.md#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
 `""` for none. The file is written the same way; only its name changes.
