@@ -53,7 +53,7 @@ None: a source's settings are its profile fields.
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
-| `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). |
+| `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](../docs/plugins.md#tries-again)). |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |
@@ -96,10 +96,10 @@ connections:
           host_key_fingerprint: "SHA256:..."   # or known_hosts_path
 ```
 
-The `ssh:` block takes the same settings as the [`sftp`](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md) destination: `host`, `port`
+The `ssh:` block takes the same settings as the [`sftp`](../docs/plugin-sftp.md) destination: `host`, `port`
 (22), `username`, and `password`, `private_key_path` or `private_key` (+
 `private_key_passphrase`), or `use_agent: true`, and `allow_rsa_keys` (see
-[RSA keys](https://github.com/get-dre/dre/blob/master/docs/plugin-sftp.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
+[RSA keys](../docs/plugin-sftp.md#rsa-keys)); the bastion's host key is checked against `known_hosts_path` (default
 `~/.ssh/known_hosts`) or a pinned `host_key_fingerprint`, and an unknown or changed key is
 refused (there's no `accept_unknown_host` here). The error for an unknown key prints its
 fingerprint, ready to pin. `connect_timeout` covers the whole way, SSH included, and errors say
@@ -109,6 +109,34 @@ Templates can't read the `ssh` block (it may hold a key), and `dre init` doesn't
 A connection error names the server (`host:port/database`). On macOS the plugin uses the system
 TLS stack: TLS 1.2 at most, and with `verify-ca`/`verify-full` a server certificate valid for more
 than 825 days is rejected (Apple's limit), so issue server certificates for 825 days or less.
+
+#### Check the connection before porting a report
+
+For a minimal direct connection, use:
+
+```yaml
+connections:
+  warehouse:
+    targets:
+      dev:
+        type: postgres
+        host: localhost
+        user: reporting
+        database: analytics
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+```
+
+Copy the [tutorial project's](https://github.com/get-dre/dre/blob/master/examples/tutorial/) report structure, declare `postgres`,
+and start with `select 1 as connection_check` before replacing the SQL with business queries.
+Run `dre validate --live <report>` to check SQL without executing it. Adapt the complete
+[monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) after loading its sample data into Postgres;
+replace any DuckDB-specific SQL with PostgreSQL equivalents.
+
+`invalid-connection-setting` means the profile shape needs fixing before connecting.
+`connection-failed` names the server: check host, port, credentials and TLS. `query-failed`
+on a relation checks database/schema names and the reporting role's permissions.
+See [connection reference](../docs/reference-profiles.md), [error codes](../docs/reference-error-codes.md),
+and [connection](../docs/glossary.md#connection).
 
 ## Guide notes
 

@@ -1,0 +1,5 @@
+queries:
+  - {query: sales, tab_name: Sales}
+  - {query: summary, tab_name: Summary}
+output:
+  format: xlsx

@@ -1,0 +1,657 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/get-dre/dre/blob/master/docs/run-results.schema.json",
+  "title": "DRE run results",
+  "type": "object",
+  "description": "`<target path>/run/<report>/<set or default>/runs/<run id>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.",
+  "properties": {
+    "schema_version": {
+      "description": "The format's version: `dre/run-results/v1`.",
+      "const": "dre/run-results/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "This run's id (`20261009T060000Z-k3f9`: its UTC start and four random characters), the name of its folder under `runs/`."
+    },
+    "report": {
+      "type": "string"
+    },
+    "set": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Null for a report without Sets."
+    },
+    "binding": {
+      "type": "string",
+      "description": "The Binding's folder name: the Set's, or `default`."
+    },
+    "managed": {
+      "type": "boolean",
+      "description": "False for a bare .sql under reports/ (an unmanaged report)."
+    },
+    "profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The inherited connection (Set, report, folder `+profile`, `default_profile`), rendered."
+    },
+    "connections": {
+      "type": "array",
+      "description": "Every connection the Binding's queries ran on.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target": {
+      "type": "string",
+      "description": "The run's target (environment): `--target`, else `DRE_TARGET`, else `dev`."
+    },
+    "schedule": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The schedule it ran under (`--schedule`)."
+    },
+    "schedule_vars": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The vars that schedule layered in.",
+      "additionalProperties": true
+    },
+    "vars": {
+      "type": "object",
+      "description": "Every var the Binding rendered with: its own, the schedule's, then `--var`.",
+      "additionalProperties": true
+    },
+    "run_date": {
+      "type": "string",
+      "description": "`run.date`, `YYYY-MM-DD`."
+    },
+    "scheduled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The instant it was scheduled for (`DRE_RUN_AT`), RFC 3339."
+    },
+    "timezone": {
+      "type": "string",
+      "description": "The run's timezone (IANA name)."
+    },
+    "params": {
+      "description": "What the command was asked to do.",
+      "$ref": "#/$defs/Params"
+    },
+    "status": {
+      "$ref": "#/$defs/Status"
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it failed."
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "`error`'s code (see the error codes reference)."
+    },
+    "error_kind": {
+      "enum": [
+        "usage",
+        "config",
+        "plugin",
+        "refused",
+        "connection",
+        "auth",
+        "query",
+        "delivery",
+        "internal",
+        "cancelled",
+        "timed_out",
+        null
+      ],
+      "description": "`error_code`'s kind."
+    },
+    "preview": {
+      "type": "boolean",
+      "description": "Whether it was a `--preview`: never delivered."
+    },
+    "row_limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "`--preview`'s row limit per query.",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "started_at": {
+      "type": "string",
+      "description": "When the Binding started, RFC 3339."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "result_sets": {
+      "type": "array",
+      "description": "Each result set its queries produced, in order.",
+      "items": {
+        "$ref": "#/$defs/ResultSet"
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "description": "Every file every output wrote.",
+      "items": {
+        "$ref": "#/$defs/OutputFile"
+      }
+    },
+    "output_results": {
+      "type": "array",
+      "description": "One entry per output, in declared order.",
+      "items": {
+        "$ref": "#/$defs/OutputResult"
+      }
+    },
+    "delivery": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why outputs weren't delivered, when that's by design (no destination, `deliver: false`, a preview)."
+    },
+    "deliveries": {
+      "type": "array",
+      "description": "Every destination, in delivery order: file outputs, then messages.",
+      "items": {
+        "$ref": "#/$defs/Delivery"
+      }
+    },
+    "schema_drift": {
+      "type": "array",
+      "description": "How the result sets' columns changed since the last run, if they did.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_path": {
+      "type": "string",
+      "description": "The resolved target path."
+    },
+    "settings": {
+      "type": "array",
+      "description": "Every setting and where its value came from.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "A flag (`--target`), an environment variable (`DRE_TARGET`), a dre_project.yml key, how it was found, or `default`."
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "source"
+        ]
+      },
+      "x-dre-null": true
+    },
+    "manifest_checksum": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The SHA-256 of the manifest.json bytes this run wrote."
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "report",
+    "set",
+    "binding",
+    "managed",
+    "profile",
+    "connections",
+    "target",
+    "schedule",
+    "schedule_vars",
+    "vars",
+    "run_date",
+    "scheduled_at",
+    "timezone",
+    "params",
+    "status",
+    "error",
+    "error_code",
+    "error_kind",
+    "preview",
+    "row_limit",
+    "started_at",
+    "duration_ms",
+    "result_sets",
+    "outputs",
+    "output_results",
+    "delivery",
+    "deliveries",
+    "schema_drift",
+    "target_path",
+    "settings",
+    "manifest_checksum"
+  ],
+  "$defs": {
+    "Params": {
+      "type": "object",
+      "description": "The command's parameters.",
+      "properties": {
+        "selector": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`--target` as given."
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`--profile`."
+        },
+        "vars": {
+          "type": "object",
+          "description": "`--var`.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "run_date": {
+          "type": "string"
+        },
+        "scheduled_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`--timezone` or `DRE_TIMEZONE`."
+        },
+        "output_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "accept_schema_change": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "selector",
+        "set",
+        "schedule",
+        "target",
+        "profile",
+        "vars",
+        "run_date",
+        "scheduled_at",
+        "timezone",
+        "output_name",
+        "output_path",
+        "dry_run",
+        "preview",
+        "accept_schema_change"
+      ]
+    },
+    "Status": {
+      "description": "How a Binding ended.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        {
+          "type": "string",
+          "description": "`--dry-run`: rendered, nothing executed.",
+          "const": "dry_run"
+        },
+        {
+          "type": "string",
+          "description": "`dre validate --live`: checked on the database, nothing executed.",
+          "const": "checked"
+        },
+        {
+          "type": "string",
+          "description": "Stopped by Ctrl-C or a termination signal while it ran; nothing was delivered after.",
+          "const": "cancelled"
+        },
+        {
+          "type": "string",
+          "description": "Stopped because the run took longer than its timeout; nothing was delivered after.",
+          "const": "timed_out"
+        }
+      ]
+    },
+    "ResultSet": {
+      "type": "object",
+      "description": "One result set.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Its name: the tab name."
+        },
+        "query": {
+          "type": "string"
+        },
+        "connection": {
+          "type": "string",
+          "description": "The connection it came from."
+        },
+        "rows": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "query",
+        "connection",
+        "rows",
+        "columns"
+      ]
+    },
+    "OutputFile": {
+      "type": "object",
+      "description": "One file an output wrote.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative to the project root, or to the target path when that's outside the project."
+        },
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "delivered_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where it was delivered, when it was."
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The output's `name:`."
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "delivered_to",
+        "output"
+      ]
+    },
+    "OutputResult": {
+      "type": "object",
+      "description": "How one output ended.",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "type": "string"
+        },
+        "queries": {
+          "type": "array",
+          "description": "The queries it formatted.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "delivered",
+            "kept",
+            "skipped",
+            "failed"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutputFileRef"
+          }
+        },
+        "delivery": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Delivery"
+          }
+        },
+        "when": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Its `when:`, evaluated."
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A message output's rendered title and text, as sent."
+        }
+      },
+      "required": [
+        "name",
+        "format",
+        "queries",
+        "status",
+        "error",
+        "files",
+        "delivery",
+        "deliveries"
+      ]
+    },
+    "OutputFileRef": {
+      "type": "object",
+      "description": "One file of an output.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "delivered_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "delivered_to"
+      ]
+    },
+    "Delivery": {
+      "type": "object",
+      "description": "One delivery to one destination.",
+      "properties": {
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Its plugin type; null for an entry that delivers nowhere."
+        },
+        "profile": {
+          "type": "string",
+          "description": "The destination profile."
+        },
+        "target": {
+          "type": "string",
+          "description": "The profile's entry for the run."
+        },
+        "status": {
+          "enum": [
+            "delivered",
+            "not_delivered",
+            "failed"
+          ]
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where it went."
+        },
+        "attempts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many tries it took, when the plugin had to try again after a temporary error.",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A code from the error codes reference, e.g. `query-failed`, or a plugin's own, namespaced by the plugin, e.g. `sftp/host-key-mismatch`."
+        }
+      },
+      "required": [
+        "profile",
+        "type",
+        "target",
+        "status"
+      ]
+    },
+    "Message": {
+      "type": "object",
+      "description": "A message output's rendered title and text.",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "text"
+      ]
+    }
+  }
+}

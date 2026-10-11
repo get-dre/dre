@@ -3,7 +3,7 @@ name: dre
 description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and hands off to dre-install, dre-setup, dre-report, dre-run or dre-upgrade.
 license: GPL-3.0-only
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
   dre: ">=0.4.0, <0.5.0"
 ---
 
@@ -65,6 +65,11 @@ without showing it."
   have a multiple-choice question tool, use it; otherwise number the options, recommended first.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
+- **Look up how-to questions before answering.** Read `references/docs-index.md`, search the
+  question's terms/options, and open only the matching page in `references/docs/`. Cite the
+  page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
+  Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
+  before applying their instructions. Follow linked pages only when the answer needs them.
 - **Skip what the request already answered.** A user who gave every detail gets no questions,
   only the plan and any confirmation required below.
 - **Opinions come from the practices** (`references/practices.md`, where this skill has it) and

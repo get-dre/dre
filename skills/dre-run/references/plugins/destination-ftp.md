@@ -46,7 +46,7 @@ Set in the report's `output.destination` entry.
 
 ### FTP and FTPS
 
-#### Notes
+##### Notes
 
 `host`, `port` (21), `username`, `password`, `passive` (default true), and `tls`: `none` or
 `explicit` (FTPS). `tls_accept_invalid_certs` allows self-signed server certificates.
@@ -55,9 +55,46 @@ Paths are relative to the folder the login starts in; a leading `/` means the se
 which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
 connections reuse the control connection's TLS session, which vsftpd, ProFTPD and FileZilla
 Server require by default. Uploads go under a temporary name first (`atomic`, `temp_dir`: see
-[Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
+[Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporary-name)), and a failed upload removes the temporary file from the
 server when it can. With `if_exists: error` or `number`, DRE looks for the name before the
-rename; FTP can't do both in one step (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+rename; FTP can't do both in one step (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
+
+##### Send an export over explicit FTPS
+
+Use FTP when the receiver requires it; explicit FTPS protects the connection. Adapt the
+report in the [SFTP delivery example](https://github.com/get-dre/dre/blob/master/examples/sftp-delivery/) with the `ftp` package and:
+
+```yaml
+#### profiles.yml
+destinations:
+  partner:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: ftp
+        host: ftp.example.com
+        username: reporting
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: explicit
+        passive: true
+```
+
+```yaml
+#### within the report's output
+destination:
+  profile: partner
+  path: "incoming/report-{{ run.date.yyyymmdd }}.csv"
+  atomic: true
+  temp_dir: staging
+  if_exists: error
+```
+
+Keep `tls_accept_invalid_certs` disabled for a real server. A certificate failure needs the
+server certificate or trust chain repaired. `ftp/file-exists` means the name is taken;
+`delivery-failed` on rename needs write access in both directories and a supported rename.
+For a firewall timeout, check passive data ports as well as the control port.
+See [destination keys](../docs/reference-report.md#outputdestination),
+[atomic uploads](../docs/plugins.md#uploads-under-a-temporary-name) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -124,7 +161,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -138,7 +175,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

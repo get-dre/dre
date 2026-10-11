@@ -36,7 +36,7 @@ None.
 
 #### Notes
 
-Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Google Chat space through its incoming webhook. Like
+Posts [messages](../docs/plugins.md#the-message-format) to a Google Chat space through its incoming webhook. Like
 `teams`, it takes messages only. Released as `1.0.0-rc.1`.
 
 The profile holds `webhook_url` (it contains the space's key and token), best set with
@@ -53,10 +53,24 @@ To create the webhook: in Google Chat, open the space, then **Apps & integration
 > **Add webhook**, name it, and copy the URL (Google Workspace accounts only; an administrator
 may need to allow webhooks). The message is the title in bold, then the text in Chat's
 formatting. Over 4,000 characters it's cut short with a note and a warning. A rate-limited post
-is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
+is tried again (see [Tries again](../docs/plugins.md#tries-again)).
 
 Every destination streams the file from `target/run/`. If an upload fails, the output stays
 there and the run reports which Binding failed.
+
+#### Adapt a headline to Google Chat
+
+Use the complete [headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/) as the starting project.
+Declare `google_chat`, use `ops_chat` from the profile above, and set the message output's
+`destination: {profile: ops_chat}`. Add a `dev: {deliver: false}` target to the profile, preview
+the rendered message locally, then validate prod before sending.
+
+A file output or `attach` cannot be sent to this message-only destination; use a storage link
+in the message instead. `invalid-destination-option` identifies the unsupported option.
+`delivery-failed` with an invalid webhook needs the space's current webhook in the environment
+variable. If messages exceed 4,000 characters, shorten the text so recipients can see it all.
+See [messages](../docs/messages.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md) and [message](../docs/glossary.md#message).
 
 ### Destinations
 
@@ -123,7 +137,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -137,7 +151,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

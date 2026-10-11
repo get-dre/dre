@@ -57,6 +57,11 @@ would be missing from the list, which a consumer would read as removed. Run `dre
 The schedules guide's [What's supported](schedules.md#whats-supported) lists every cron field, rule
 part and option.
 
+The complete [regional reports example](../examples/regional-reports/) supplies schedules to
+expand. Use `--split` when your scheduler tracks each report/Set separately, and bounded
+`--from`/`--to` windows when refreshing a calendar. See the
+[CLI reference](cli-reference.md#dre-schedule-ls) and [firing](glossary.md#firing).
+
 ## The JSON document
 
 ```json

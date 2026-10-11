@@ -45,11 +45,44 @@ Set in the report's `output.destination` entry.
 
 ### Azure Blob Storage
 
-#### Notes
+##### Notes
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
 `use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
-Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+Takes `if_exists` (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
+
+##### Archive a workbook with an Azure identity
+
+Use Azure Blob for report files alongside Azure data. For local work after `az login`, add:
+
+```yaml
+#### profiles.yml
+destinations:
+  archive:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: azure_blob
+        account_name: financereports
+        container: monthly
+        use_azure_cli: true
+```
+
+```yaml
+#### within the monthly finance report's output
+destination:
+  profile: archive
+  path: "az://monthly/{{ run.date.yyyymm }}.xlsx"
+  if_exists: error
+```
+
+Adapt the complete [monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) and preview before
+delivery. On an Azure runner, use `use_managed_identity: true` instead of a local CLI session.
+Choose one authentication method; do not combine it with account keys or a connection string.
+`azure_blob/file-exists` means a previous delivery owns the path; `delivery-failed` with denied
+access needs storage permissions for the chosen identity. The account and container must already exist.
+See [destination keys](../docs/reference-report.md#outputdestination),
+[delivery behavior](../docs/plugins.md#destinations) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -116,7 +149,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -130,7 +163,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

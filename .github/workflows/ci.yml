@@ -260,5 +260,10 @@ jobs:
       - run: cargo nextest run --workspace --no-fail-fast
         env:
           DRE_TEST_PREBUILT_BINS: "1"
+      - name: Validate and run public examples against this build
+        shell: bash
+        run: |
+          ext=""; [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
+          python .github/scripts/check_examples.py --dre "target/debug/dre$ext" --plugins-dir target/debug
       # nextest doesn't run doctests.
       - run: cargo test --workspace --doc
