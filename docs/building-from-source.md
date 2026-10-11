@@ -32,10 +32,11 @@ For a full local trial, build only the needed packages and use the
 [tutorial project](../examples/tutorial/):
 
 ```bash
-cargo build --release -p dre-cli -p dre-plugin-duckdb -p dre-plugin-csv
+cargo build --release -p dre-cli -p dre-plugin-duckdb -p dre-plugin-csv -p dre-plugin-xlsx
 export DRE_PLUGINS_DIR="$PWD/target/release"
-./target/release/dre validate --project-dir examples/tutorial --no-auto-install
-./target/release/dre run --project-dir examples/tutorial --no-auto-install --preview 5
+cd examples/tutorial
+../../target/release/dre validate --no-auto-install
+../../target/release/dre run --no-auto-install --preview 5
 ```
 
 If `CARGO_TARGET_DIR` is set, substitute that directory for `target` in every command. Avoid

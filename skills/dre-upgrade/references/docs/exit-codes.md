@@ -40,7 +40,8 @@ guessing from a message. For a minimal shell wrapper around the
 [tutorial project](https://github.com/get-dre/dre/blob/master/examples/tutorial/):
 
 ```bash
-dre run --project-dir examples/tutorial --preview 5
+cd examples/tutorial || exit 2
+dre run --preview 5
 status=$?
 case "$status" in
   0) echo "Report completed" ;;

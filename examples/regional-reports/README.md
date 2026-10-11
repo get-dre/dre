@@ -18,5 +18,6 @@ dre run regional --set south
 ```
 
 Two Monday schedules name the report and the appropriate Set. `dre schedule ls` lists
-upcoming UTC occurrences; `dre schedule run` is the foreground scheduler and belongs
-under your process manager when used in production.
+upcoming UTC occurrences. An external scheduler dispatches each firing with
+`dre run --schedule monday_north` or `dre run --schedule monday_south`.
+See [orchestration](../../docs/orchestration.md) for runner recipes.

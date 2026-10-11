@@ -261,12 +261,13 @@ The idea of a project manifest comes from dbt; the format and code are DRE's own
 ## Inspect a concrete run
 
 ```bash
-dre validate --project-dir examples/tutorial --json
-dre run --project-dir examples/tutorial --preview 5
-dre history --project-dir examples/tutorial --latest --path sales
+cd examples/tutorial
+dre validate --json
+dre run --preview 5
+dre history --latest --path sales
 ```
 
-`sales` is the report name shown by `dre ls --project-dir examples/tutorial`.
+`sales` is the report name shown by `dre ls` in that project.
 The complete [tutorial example](../examples/tutorial/) gives a small manifest and run-result
 pair to inspect. Use the history path rather than assuming a fixed run directory.
 `project-file-missing` leaves no current manifest; do not reuse a manifest saved from another

@@ -173,14 +173,16 @@ inside the shell argument when it resembles a boolean: `--var flag='"false"'` ke
 `--strict` also fails on warnings. `--json` on validation gives tools structured problems,
 while `--log-format json` gives a stream of diagnostic events.
 
-When launched from another directory, select project and profile locations explicitly:
+Run the tutorial example from its project directory:
 
 ```bash
-dre validate --project-dir ./examples/tutorial --profiles-dir ./examples/tutorial --json
-dre --log-format json --color never run --project-dir ./examples/tutorial --preview 5
+cd examples/tutorial
+dre validate --profiles-dir . --json
+dre --log-format json --color never run --preview 5
 ```
 
-`--profiles-dir` names the directory containing `profiles.yml`. `--target` picks an environment;
+From another directory, use an absolute `--project-dir` path. `--profiles-dir` names the directory
+containing `profiles.yml`. `--target` picks an environment;
 `--target-path` chooses artifact storage. A misspelled environment fails with `missing-target-entry`.
 Use `-v` or `--verbose` for each step (`--log-level debug` is equivalent), `-q` or `--quiet`
 for only errors and the final summary, or `--log-level info` for normal output. `--color always`

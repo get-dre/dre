@@ -105,8 +105,8 @@ to fix. The delivered location is the uploaded files' permalinks.
 
 ## Try the headline project
 
-Use the complete [Slack headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/) for a query, message,
-attachment and dev target that posts nothing. The minimum Slack profile is:
+Use the complete [Slack headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/) for a query, conditional
+message and dev target that posts nothing. The minimum Slack profile is:
 
 ```yaml
 destinations:

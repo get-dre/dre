@@ -192,7 +192,8 @@ New file: [schedules.yml](../examples/tutorial/.steps/06-schedule/schedules.yml)
 Expected output: `weekday_sales` appears with its next weekday occurrences at 09:00 UTC.
 The dates depend on when you run the command. The existing workbooks stay as they are.
 Listing schedules does not start a background process. See [Scheduling](schedules.md)
-to run the foreground scheduler under a process manager.
+and [Orchestration](orchestration.md) to have your external scheduler dispatch each firing
+with `dre run --schedule weekday_sales`.
 
 ## 7. Deliver to a local folder
 

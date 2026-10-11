@@ -32,13 +32,14 @@ flags:
 
 ## Prepare a runner and maintain its pins
 
-The [tutorial project](../examples/tutorial/) declares `duckdb` and `csv`. Install its
+The [tutorial project](../examples/tutorial/) declares `duckdb`, `csv` and `xlsx`. Install its
 dependencies during runner setup, then require the run to use those installed versions:
 
 ```bash
-dre deps --project-dir examples/tutorial
-dre validate --project-dir examples/tutorial --no-auto-install
-dre run --project-dir examples/tutorial --no-auto-install --preview 5
+cd examples/tutorial
+dre deps
+dre validate --no-auto-install
+dre run --no-auto-install --preview 5
 dre plugin list
 ```
 

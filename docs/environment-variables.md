@@ -36,7 +36,8 @@ and pass the intended instant rather than the retry's wall clock:
 export DRE_TARGET_PATH=/mnt/shared/dre/target
 export DRE_KEEP_RUNS=7
 export DRE_RUN_TIMEOUT=30m
-DRE_RUN_AT=2026-10-05T09:00:00Z dre run --project-dir examples/regional-reports --schedule monday_north --preview 5
+cd examples/regional-reports
+DRE_RUN_AT=2026-10-05T09:00:00Z dre run --schedule monday_north --preview 5
 ```
 
 `monday_north` is that project's named schedule. Command flags override their matching
