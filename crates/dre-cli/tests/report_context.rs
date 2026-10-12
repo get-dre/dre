@@ -293,6 +293,25 @@ fn declared_extensions_install_pinned_versions_without_rewriting_owner_acceptanc
         .collect();
     p.write("index.json", &json!({"schema":2,"plugins":[],"extensions":[{"name":"dre-mcp","kind":"extension","license":"Proprietary","proprietary_license":true,
         "versions":[{"version":"0.1.0-rc.1","artifacts":{dre_core::manager::platform():{"url":p.path("companion"),"sha256":digest}}}]}]}).to_string());
+    // A different executable on PATH must not replace the owner's exact managed pin.
+    p.write("wrong/dre-mcp", "#!/bin/sh\nprintf 'wrong-path-version\\n'\n");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p.path("wrong/dre-mcp"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let search = format!(
+        "{}:{}",
+        p.path("wrong").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    p.dre_env(
+        "mcp",
+        &["serve"],
+        &[
+            ("DRE_REGISTRY_URL", p.path("index.json").to_str().unwrap()),
+            ("PATH", &search),
+        ],
+    )
+    .ok()
+    .says("declared-ready");
     let before = p.read("dependencies.yml");
     p.dre_env(
         "deps",

@@ -95,9 +95,9 @@ it does not certify PR approval or actual reading. The RC has no automatic expir
 The companion distribution remains in local development; the EULA draft must be completed
 before release. Package installation becomes available once an owner-selected registry exists.
 
-## Personal MCP preview
+## MCP preview
 
-The personal `dre-mcp` RC uses local stdio and existing DRE connections. It distinguishes:
+The current `dre-mcp` RC uses local stdio and existing DRE connections. It distinguishes:
 
 - **Verified report:** execution of an explicitly exposed report, with variables, time, SQL
   hashes and exact report output downloads.

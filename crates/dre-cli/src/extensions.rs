@@ -260,14 +260,27 @@ pub fn handoff(args: McpArgs, _printer: &Printer) -> ExitCode {
         }
     };
     let policy = entries.iter().find(|entry| entry.name == "dre-mcp");
-    let binary = std::env::var_os("DRE_MCP_BIN")
+    let explicit_binary = std::env::var_os("DRE_MCP_BIN");
+    let binary = explicit_binary
+        .clone()
         .map(PathBuf::from)
         .or_else(|| installed(policy.map(|entry| entry.version.as_str())))
-        .unwrap_or_else(|| PathBuf::from("dre-mcp"));
+        .unwrap_or_else(|| {
+            policy.map_or_else(
+                || PathBuf::from("dre-mcp"),
+                |entry| {
+                    dre_core::dre_home()
+                        .join("extensions/dre-mcp")
+                        .join(&entry.version)
+                        .join(if cfg!(windows) { "dre-mcp.exe" } else { "dre-mcp" })
+                },
+            )
+        });
     match Command::new(&binary).args(&args.args).status() {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
         Err(error) => {
             if error.kind() == std::io::ErrorKind::NotFound
+                && explicit_binary.is_none()
                 && let Some(policy) = policy.filter(|entry| entry.accept_license.is_some())
             {
                 return match install(&format!("dre-mcp@{}", policy.version), true) {
@@ -285,6 +298,7 @@ pub fn handoff(args: McpArgs, _printer: &Printer) -> ExitCode {
                 };
             }
             if error.kind() == std::io::ErrorKind::NotFound
+                && explicit_binary.is_none()
                 && std::io::stdin().is_terminal()
                 && std::io::stderr().is_terminal()
             {
@@ -295,7 +309,11 @@ pub fn handoff(args: McpArgs, _printer: &Printer) -> ExitCode {
                 let mut answer = String::new();
                 let _ = std::io::stdin().read_line(&mut answer);
                 if ["y", "yes"].contains(&answer.trim().to_ascii_lowercase().as_str()) {
-                    match install("dre-mcp", true) {
+                    let package = policy.map_or_else(
+                        || "dre-mcp".to_owned(),
+                        |entry| format!("dre-mcp@{}", entry.version),
+                    );
+                    match install(&package, true) {
                         Ok(path) => {
                             return match Command::new(path).args(&args.args).status() {
                                 Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
