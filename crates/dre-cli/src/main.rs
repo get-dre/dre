@@ -60,7 +60,7 @@ enum Command {
     /// Check the project (config, references, templates, schedules) and compile its SQL.
     Validate(ValidateArgs),
     /// Run reports: render, execute, format into the target folder, and deliver.
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     /// Render reports' SQL into <target path>/compiled/ without running it, and list the files.
     Compile(CompileArgs),
     /// Run one read-only query on a configured connection and write typed JSON rows.
@@ -408,7 +408,7 @@ fn main() -> ExitCode {
         Command::History(a) => history::history(a),
         Command::Unlock(a) => history::unlock(a),
         Command::Validate(a) => validate(a, &printer),
-        Command::Run(a) => run(a, printer),
+        Command::Run(a) => run(*a, printer),
         Command::Compile(a) => compile(a, printer),
         Command::Query(a) => query(a, printer),
         Command::Catalog(a) => catalog(a, printer),
