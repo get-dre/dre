@@ -22,6 +22,10 @@ pub struct ReportFile {
     /// The report's name. Default: the name of the folder the YAML file is in. Report names are unique across the project.
     #[schemars(length(min = 1))]
     pub name: Option<Located<Loose<String>>>,
+    /// What this report answers, including its business definitions and units.
+    pub description: Option<Located<Loose<String>>>,
+    /// Metadata for external tools. DRE checks its shape, not the meaning of its keys.
+    pub meta: Option<Located<Loose<JsonMap>>>,
     /// Tags to select the report with, `-s tag:<tag>`.
     pub tags: Option<Located<Loose<Vec<String>>>>,
     /// The `.sql` files whose results make the report's tabs, in the order they run, on one database session.
@@ -40,6 +44,9 @@ pub struct ReportFile {
     pub default_set: Option<Located<Loose<String>>>,
     /// Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.
     pub vars: Option<Located<Loose<JsonMap>>>,
+    /// Optional declarations for variables: type, default, allowed values, description and required.
+    /// Kept separate from `vars` so a map-valued variable remains a plain value.
+    pub var_schema: Option<Located<Loose<crate::variables::Definitions>>>,
     /// The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC.
     pub timezone: Option<Located<Loose<String>>>,
     /// The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`.

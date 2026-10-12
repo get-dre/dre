@@ -115,6 +115,16 @@ pub struct ManifestProject {
 #[schemars(rename = "report")]
 pub struct ManifestReport {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The report's own metadata, without inherited layers applied.
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub meta: Map,
+    /// Unmerged metadata, outermost first; consumers decide its meaning.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub meta_layers: Vec<crate::project::MetaLayer>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub var_schema: crate::variables::Definitions,
     /// False for a bare .sql under reports/ (an unmanaged report).
     pub managed: bool,
     /// The defining YAML, or the .sql of an unmanaged report.
@@ -424,6 +434,10 @@ fn report(
     let errors = errors.cloned().unwrap_or_default();
     ManifestReport {
         name: r.name.clone(),
+        description: r.description.clone(),
+        meta: r.meta.clone(),
+        meta_layers: r.meta_layers.clone(),
+        var_schema: r.var_schema.clone(),
         managed: r.managed,
         file: slash(&r.file),
         folder: r.folder.clone(),

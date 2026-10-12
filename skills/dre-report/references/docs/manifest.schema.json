@@ -104,6 +104,30 @@
         "name": {
           "type": "string"
         },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "description": "The report's own metadata, without inherited layers applied.",
+          "additionalProperties": true
+        },
+        "meta_layers": {
+          "type": "array",
+          "description": "Unmerged metadata, outermost first; consumers decide its meaning.",
+          "items": {
+            "$ref": "#/$defs/MetaLayer"
+          }
+        },
+        "var_schema": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Definition"
+          }
+        },
         "managed": {
           "type": "boolean",
           "description": "False for a bare .sql under reports/ (an unmanaged report)."
@@ -183,6 +207,77 @@
         "checksum",
         "valid",
         "bindings"
+      ]
+    },
+    "MetaLayer": {
+      "type": "object",
+      "description": "An unmerged metadata layer. Consumers own its semantics and can explain its origin.",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "file",
+        "key",
+        "meta"
+      ]
+    },
+    "Definition": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The value's type. Dates are real calendar dates in YYYY-MM-DD form.",
+          "$ref": "#/$defs/VariableType"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What this input means, including its units or reporting period."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether execution requires a value. A default satisfies this requirement.",
+          "default": false
+        },
+        "default": {
+          "description": "Used when no project, folder, report, Set, schedule or CLI value supplies this variable."
+        },
+        "allowed": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Optional exact values accepted for this variable; required for the enum type.",
+          "items": true
+        }
+      },
+      "required": [
+        "type",
+        "required"
+      ],
+      "additionalProperties": false
+    },
+    "VariableType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "date",
+        "array",
+        "object",
+        "enum"
       ]
     },
     "query": {

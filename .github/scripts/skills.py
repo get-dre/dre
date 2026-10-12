@@ -47,6 +47,7 @@ COPIES = {
     "dre-install": [],
     "dre-setup": ["practices", "plugins"],
     "dre-report": ["practices", "plugins"],
+    "dre-ai": ["practices", "ai-ready"],
     "dre-run": ["practices", "plugins"],
     "dre-upgrade": [],
 }
@@ -299,6 +300,8 @@ class Cli:
         """None if `dre <tokens>` names real commands and flags, else what's wrong."""
         path, i = [], 0
         while i < len(tokens):
+            if path == ["mcp"]:
+                return None  # Core forwards opaque arguments; the separately installed companion owns their schema.
             t = tokens[i]
             if t.startswith("<") or "{" in t or "$" in t:
                 return None  # a placeholder: what follows can't be checked
@@ -649,6 +652,10 @@ def sync(root):
             target.write_text(practices)
         elif target.exists():
             target.unlink()
+        if "ai-ready" in COPIES.get(skill, []):
+            guide = skills_root / skill / "references" / "ai-ready-reports.md"
+            guide.parent.mkdir(parents=True, exist_ok=True)
+            guide.write_text(_relink(strip_nav((root / "docs/ai-ready-reports.md").read_text()), "ai-ready-reports.md"))
     bundle_docs(root)
 
 
@@ -741,7 +748,7 @@ def check(root, replies):
         for pid in sorted(cited_practices(md) - practices):
             problems.append(f"{rel}: cites {pid}, which isn't in {PRACTICES}")
         # Hand-written files only: the plugin docs use `type:` for other things (fixed-width columns).
-        if "references/plugins/" not in rel and "references/docs/" not in rel:
+        if "references/plugins/" not in rel and "references/docs/" not in rel and not rel.endswith("references/ai-ready-reports.md"):
             problems += [f"{rel}: {u} names no first-party plugin" for u in unknown_plugins(md, known)]
     # The user docs, which the skills point to, name only real commands too.
     for path in [root / "README.md", *sorted((root / "docs").glob("*.md"))]:

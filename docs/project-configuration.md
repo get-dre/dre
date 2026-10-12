@@ -157,4 +157,4 @@ meaning and repair steps. Run `dre validate --strict` after changing defaults so
 
 ---
 
-**Previous:** [DRE practices](practices.md) · **Next:** [Tested examples](examples.md)
+**Previous:** [AI-ready reports](ai-ready-reports.md) · **Next:** [Tested examples](examples.md)

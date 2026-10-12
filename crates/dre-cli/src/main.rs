@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod cli_reference;
 mod exit;
+mod extensions;
 mod history;
 mod init;
 mod ls;
@@ -59,9 +60,18 @@ enum Command {
     /// Check the project (config, references, templates, schedules) and compile its SQL.
     Validate(ValidateArgs),
     /// Run reports: render, execute, format into the target folder, and deliver.
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     /// Render reports' SQL into <target path>/compiled/ without running it, and list the files.
     Compile(CompileArgs),
+    /// Run one read-only query on a configured connection and write typed JSON rows.
+    Query(QueryArgs),
+    /// Read live table/column definitions and comments through a configured connection.
+    Catalog(CatalogArgs),
+    /// Hand arguments to the installed companion binary.
+    Mcp(extensions::McpArgs),
+    /// Install or update companion binaries, separately from source/format/destination plugins.
+    #[command(subcommand)]
+    Extension(extensions::ExtensionCommand),
     /// Remove the target folder (compiled SQL, run outputs, schema snapshots, the manifest).
     Clean(CleanArgs),
     /// List the reports and Bindings a selection or schedule covers, without running anything.
@@ -98,6 +108,39 @@ struct ExplainArgs {
 }
 
 #[derive(Args)]
+struct QueryArgs {
+    #[command(flatten)]
+    project: ProjectArgs,
+    /// The configured source connection.
+    #[arg(long)]
+    profile: String,
+    /// File containing one read-only SQL query (relative to the project directory).
+    #[arg(long)]
+    sql_file: PathBuf,
+    /// JSON result file (relative to the project directory).
+    #[arg(long)]
+    output_json: PathBuf,
+    /// Maximum result rows. The result records whether more rows were available.
+    #[arg(long, default_value_t = 1000)]
+    max_rows: u64,
+}
+
+#[derive(Args)]
+struct CatalogArgs {
+    #[command(flatten)]
+    project: ProjectArgs,
+    /// The source connection to inspect.
+    #[arg(long)]
+    profile: String,
+    /// JSON object with `tables` and `schemas` arrays of relation names.
+    #[arg(long)]
+    tables_file: PathBuf,
+    /// Catalogue JSON file, relative to the project directory.
+    #[arg(long)]
+    output_json: PathBuf,
+}
+
+#[derive(Args)]
 struct RunArgs {
     /// What to run: report names, `tag:<tag>`, folder names or dotted folder paths
     /// (`dre run a b` runs both). Runs every report when omitted.
@@ -129,6 +172,12 @@ struct RunArgs {
     /// Render SQL into target/compiled/ and stop; no report query is executed.
     #[arg(long)]
     dry_run: bool,
+    /// Keep normal outputs locally without delivering them to any destination.
+    #[arg(long)]
+    no_deliver: bool,
+    /// Write typed JSON rows per query and isolate this run's outputs/history in DIR.
+    #[arg(long, value_name = "DIR", conflicts_with = "dry_run")]
+    output_json: Option<PathBuf>,
     /// Execute with a row limit (default 100); output stays in target/ and is never delivered.
     #[arg(long, value_name = "ROWS", num_args = 0..=1, default_missing_value = "100")]
     preview: Option<u64>,
@@ -214,6 +263,9 @@ struct NewArgs {
 
 #[derive(Args)]
 struct DepsArgs {
+    /// Acknowledge proprietary companion installation when no owner licence policy is declared.
+    #[arg(long)]
+    accept_proprietary: bool,
     #[arg(long, default_value = ".")]
     project_dir: PathBuf,
     #[arg(long)]
@@ -359,8 +411,12 @@ fn main() -> ExitCode {
         Command::History(a) => history::history(a),
         Command::Unlock(a) => history::unlock(a),
         Command::Validate(a) => validate(a, &printer),
-        Command::Run(a) => run(a, printer),
+        Command::Run(a) => run(*a, printer),
         Command::Compile(a) => compile(a, printer),
+        Command::Query(a) => query(a, printer),
+        Command::Catalog(a) => catalog(a, printer),
+        Command::Mcp(a) => extensions::handoff(a, &printer),
+        Command::Extension(a) => extensions::manage(a, &printer),
         Command::Clean(a) => clean(a),
         Command::Ls(a) => ls::ls(a),
         Command::Schedule(schedule::ScheduleCommand::Ls(a)) => schedule::ls(a),
@@ -646,6 +702,61 @@ fn compile_for_validate(
 }
 
 /// `dre compile`: render the selection into target/compiled/ and list the files.
+fn catalog(a: CatalogArgs, printer: output::Printer) -> ExitCode {
+    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
+        return exit::not_started();
+    }
+    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+        return exit::not_started();
+    };
+    let result = (|| -> Result<(), String> {
+        let request =
+            std::fs::read_to_string(project.root.join(&a.tables_file)).map_err(|e| e.to_string())?;
+        let request =
+            serde_json::from_str(&request).map_err(|e| format!("invalid catalogue request: {e}"))?;
+        let catalog = dre_core::catalog::build(&project, &a.profile, &request)?;
+        let path = project.root.join(&a.output_json);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        dre_core::fs::write_atomic(&path, serde_json::to_vec(&catalog).unwrap().as_slice())
+            .map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            printer.error(&error);
+            exit::not_started()
+        }
+    }
+}
+
+fn query(a: QueryArgs, printer: output::Printer) -> ExitCode {
+    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
+        return exit::not_started();
+    }
+    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+        return exit::not_started();
+    };
+    let result = (|| -> Result<(), String> {
+        let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
+        let rows = dre_core::query::execute(&project, &a.profile, &sql, a.max_rows)?;
+        let path = project.root.join(&a.output_json);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        dre_core::fs::write_atomic(&path, serde_json::to_vec(&rows).unwrap().as_slice())
+            .map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            printer.error(&error);
+            exit::not_started()
+        }
+    }
+}
+
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
         return exit::not_started();
@@ -911,6 +1022,13 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
         return exit::not_started();
     };
+    if let Some(path) = &a.output_json {
+        let value = path.to_string_lossy();
+        if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
+            printer.error(&format!("--output-json: {error}"));
+            return exit::not_started();
+        }
+    }
     printer.log_runs();
     for s in project.settings.lines() {
         printer.detail(output::Tone::Note, "Setting", &s);
@@ -973,6 +1091,8 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         output_name: a.output_name,
         output_path: a.output_path,
         dry_run: a.dry_run,
+        no_deliver: a.no_deliver,
+        output_json: a.output_json,
         preview: a.preview,
         accept_schema_change: a.accept_schema_change,
         interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
@@ -1128,13 +1248,21 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         return exit::not_started();
     };
     if plugins::ensure(&project, true, true, printer) {
+        let extensions = match extensions::sync_declared(&a.project_dir, a.accept_proprietary) {
+            Ok(count) => count,
+            Err(error) => {
+                printer.error(&error);
+                return exit::failed();
+            }
+        };
         printer.line(
             output::Tone::Good,
             "Synced",
             &format!(
-                "{} plugin(s) and {} package(s); dre.lock is up to date",
+                "{} plugin(s), {} package(s) and {} companion(s); plugin/package dre.lock is up to date",
                 project.plugins.len(),
-                project.packages.len()
+                project.packages.len(),
+                extensions
             ),
         );
         exit::ok()

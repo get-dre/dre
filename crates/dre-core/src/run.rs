@@ -51,6 +51,9 @@ pub struct RunOptions {
     pub output_name: Option<String>,
     pub output_path: Option<String>,
     pub dry_run: bool,
+    pub no_deliver: bool,
+    /// Optional isolated run store, plus typed rows under report/binding/query.json.
+    pub output_json: Option<PathBuf>,
     /// `--preview [N]`: row limit per query.
     pub preview: Option<u64>,
     pub accept_schema_change: bool,
@@ -453,8 +456,13 @@ pub fn execute(
     events: Events,
 ) -> Vec<BindingOutcome> {
     let limits = Limits::new(project, plan, opts);
+    let target = opts
+        .output_json
+        .as_ref()
+        .map(|p| project.root.join(p))
+        .unwrap_or_else(|| project.target_dir.clone());
     if limits.sequential() {
-        let store = RunStore::new(&project.target_dir);
+        let store = RunStore::new(&target);
         let mut outcomes = Vec::new();
         for (report, b) in &plan.bindings {
             if cancel.is_cancelled() {
@@ -471,7 +479,7 @@ pub fn execute(
         }
         return outcomes;
     }
-    let store = RunStore::concurrent(&project.target_dir);
+    let store = RunStore::concurrent(&target);
     let n = plan.bindings.len();
     let state = std::sync::Mutex::new(Running::new(n));
     let wake = std::sync::Condvar::new();
@@ -755,6 +763,7 @@ pub fn run_targets(
                     .destinations
                     .iter()
                     .flatten()
+                    .filter(|_| !opts.no_deliver)
                     .filter(|d| !profiles.is_builtin_local(d))
                     .map(|d| (Role::Destination, d.clone())),
             );
@@ -1433,6 +1442,11 @@ impl<'a> BindingRun<'a> {
     }
 
     fn run_inner(&mut self) -> Result<(), Fail> {
+        let errors =
+            crate::variables::check_values(&self.report.var_schema, &self.vars, &self.opts.vars, true);
+        if !errors.is_empty() {
+            return Err(errors.join("; ").into());
+        }
         // The parse pass with this run's inputs: each query's connection and sources.
         self.parsed = crate::parse::binding(self.project, self.report, self.b, &self.vars, &self.inputs());
         if !self.parsed.errors.is_empty() {
@@ -1576,6 +1590,23 @@ impl<'a> BindingRun<'a> {
         pool.close_all();
 
         self.name_result_sets()?;
+        if let Some(dir) = &self.opts.output_json {
+            let dir = self
+                .project
+                .root
+                .join(dir)
+                .join(&self.report.name)
+                .join(self.b.dir_name());
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            for result in &self.produced {
+                crate::rows::write_spool(
+                    &result.spool,
+                    &dir.join(format!("{}.json", result.name)),
+                    result.rows,
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
 
         // 5. Format every file output into target/run/; one whose `when:` is false is skipped.
         let (file_outs, message_outs): (Vec<usize>, Vec<usize>) =
@@ -1609,7 +1640,7 @@ impl<'a> BindingRun<'a> {
 
         // 6. Deliver the file outputs, then render and deliver each message, so a message can
         // link to what was delivered. A failed output doesn't stop the next one.
-        let preview = self.opts.preview.is_some();
+        let preview = self.opts.preview.is_some() || self.opts.no_deliver;
         let mut failures = Vec::new();
         for oi in file_outs.into_iter().chain(message_outs) {
             if self.outs[oi].status == Some(OutputStatus::Skipped) {
@@ -1630,7 +1661,11 @@ impl<'a> BindingRun<'a> {
                 }
             }
             if preview {
-                self.outs[oi].delivery_note = Some("preview: not delivered".into());
+                self.outs[oi].delivery_note = Some(if self.opts.no_deliver {
+                    "--no-deliver: output kept locally".into()
+                } else {
+                    "preview: not delivered".into()
+                });
                 self.outs[oi].status = Some(OutputStatus::Kept);
             } else if let Err(e) = self.deliver(oi) {
                 failures.push(e.or(Code::DeliveryFailed));
@@ -1933,6 +1968,18 @@ impl<'a> BindingRun<'a> {
             crate::secrets::mask(&sql).as_bytes(),
         )
         .map_err(|e| e.to_string())?;
+        // Hash the exact rendered SQL before masking display artifacts. Integrations can
+        // identify executed SQL without receiving any secret embedded in it.
+        {
+            use sha2::Digest;
+            let digest = sha2::Sha256::digest(sql.as_bytes());
+            let hash = digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            std::fs::write(self.compiled_dir.join(format!("{}.sha256", q.query)), hash)
+                .map_err(|e| e.to_string())?;
+        }
         self.ui
             .step(Level::Debug, "Rendered", &q.path.display().to_string(), None);
         // 2. Split. One file makes at most one tab, from its last statement, so any earlier
@@ -2089,6 +2136,9 @@ impl<'a> BindingRun<'a> {
     /// Each destination's rendered `profile`, `path` and options; `destination.*` is that
     /// destination while its values render.
     fn render_destinations(&mut self) -> Result<(), Fail> {
+        if self.opts.no_deliver {
+            return Ok(());
+        }
         if self.b.destinations().next().is_none() {
             return Ok(());
         }

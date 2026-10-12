@@ -10,6 +10,15 @@
       "description": "The report's name. Default: the name of the folder the YAML file is in. Report names are unique across the project.",
       "minLength": 1
     },
+    "description": {
+      "type": "string",
+      "description": "What this report answers, including its business definitions and units."
+    },
+    "meta": {
+      "type": "object",
+      "description": "Metadata for external tools. DRE checks its shape, not the meaning of its keys.",
+      "additionalProperties": true
+    },
     "tags": {
       "type": "array",
       "description": "Tags to select the report with, `-s tag:<tag>`.",
@@ -73,6 +82,13 @@
       "type": "object",
       "description": "Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.",
       "additionalProperties": true
+    },
+    "var_schema": {
+      "type": "object",
+      "description": "Optional declarations for variables: type, default, allowed values, description and required.\nKept separate from `vars` so a map-valued variable remains a plain value.",
+      "additionalProperties": {
+        "$ref": "#/$defs/Definition"
+      }
     },
     "timezone": {
       "type": "string",
@@ -572,6 +588,49 @@
         "name"
       ],
       "additionalProperties": false
+    },
+    "Definition": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The value's type. Dates are real calendar dates in YYYY-MM-DD form.",
+          "$ref": "#/$defs/VariableType"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this input means, including its units or reporting period."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether execution requires a value. A default satisfies this requirement.",
+          "default": false
+        },
+        "default": {
+          "description": "Used when no project, folder, report, Set, schedule or CLI value supplies this variable."
+        },
+        "allowed": {
+          "type": "array",
+          "description": "Optional exact values accepted for this variable; required for the enum type.",
+          "items": true
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "VariableType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "date",
+        "array",
+        "object",
+        "enum"
+      ]
     }
   },
   "patternProperties": {

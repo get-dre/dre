@@ -165,6 +165,20 @@ Paths are relative to the project root with forward slashes on every OS. Keys ar
 are no timestamps, host names or absolute paths, so the same project gives the same bytes on any
 machine, and moving the target path doesn't change the file.
 
+### Generic integration context
+
+DRE 0.4.1 adds report `description`, opaque `meta`, and `meta_layers` with the originating file
+and configuration key. Layers preserve project, folder and report evidence separately; external
+consumers choose their own interpretation. Core does not validate companion-specific `meta.ai`.
+Declared `var_schema` records types, descriptions, defaults, required inputs and allowed values.
+Existing projects keep working without those optional declarations.
+
+An isolated `dre run --no-deliver --output-json <dir>` also exports typed rows per query and
+normal formatted outputs, with run results outside the scheduled report's history. Each compiled
+query has a SHA-256 companion file identifying exact SQL before secret masking. Displayed SQL
+may be masked; hashes and run provenance preserve the execution reference. Live catalogue
+metadata is obtained separately through configured connections and their upstream comments.
+
 ### What's left out
 
 - Anything that only exists after rendering: compiled SQL (that's `compiled/`), rendered output

@@ -1,0 +1,9 @@
+# Standard DRE source declarations. They resolve SQL names, not data access permissions.
+# Warehouse comments are supplied by the pipeline, not by these declarations alone.
+sources:
+  - name: shop
+    schema: main
+    profile: warehouse
+    tables:
+      - name: orders
+      - name: customers

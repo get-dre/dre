@@ -269,7 +269,7 @@ fn the_schemas_have_the_keys_the_parser_has() {
     same(
         "dependencies",
         props(&raw("dependencies")),
-        set(&["plugins", "packages"]),
+        set(&["plugins", "packages", "extensions"]),
     );
     same(
         "lookup config",

@@ -26,6 +26,7 @@ For copyable examples and common errors, see [Project configuration](project-con
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` (required) | string |  | The project's name. Required. |
+| `meta` | map |  | Metadata for external tools, preserved as the first report metadata layer. |
 | `default_profile` | string |  | The connection (in `profiles.yml`) reports use when nothing else names one. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `default_output` | map, as in [the report reference](reference-report.md) |  | The output every report starts from (the built-in default is `format: csv`). A report's own `output` is merged on top. |
 | `format_options` | map |  | Default options per output format, under every output of that format. A report's own keys win. |
@@ -60,6 +61,7 @@ Folder config: settings for the report folders, by folder name, nested to match 
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `+meta` | map |  | Metadata for external tools, preserved as a layer with its configuration origin. |
 | `+tags` | list of string |  | Tags added to every report in the folder. |
 | `+output` | map, as in [the report reference](reference-report.md) |  | Output settings every report in the folder starts from; a report's own keys win. |
 | `+profile` | string |  | The connection for reports in the folder. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |

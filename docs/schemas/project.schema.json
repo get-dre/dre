@@ -10,6 +10,11 @@
       "description": "The project's name. Required.",
       "minLength": 1
     },
+    "meta": {
+      "type": "object",
+      "description": "Metadata for external tools, preserved as the first report metadata layer.",
+      "additionalProperties": true
+    },
     "default_profile": {
       "type": "string",
       "description": "The connection (in `profiles.yml`) reports use when nothing else names one. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`."
@@ -193,6 +198,11 @@
       "type": "object",
       "description": "Settings for every report in this folder and the folders below it. Keys starting with `+` are settings; any other key is a subfolder.",
       "properties": {
+        "+meta": {
+          "type": "object",
+          "description": "Metadata for external tools, preserved as a layer with its configuration origin.",
+          "additionalProperties": true
+        },
         "+tags": {
           "type": "array",
           "description": "Tags added to every report in the folder.",

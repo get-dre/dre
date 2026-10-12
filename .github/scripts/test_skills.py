@@ -329,6 +329,11 @@ class ReferenceCliTest(unittest.TestCase):
         self.assertIn("isn't a dre command", cli.check(["plugin", "frob"]))
         self.assertIn("has no `--json` option", cli.check(["run", "--json"]))
 
+    def test_companion_arguments_are_owned_by_the_companion(self):
+        cli = skills.ReferenceCli(self.MD + "\n## `dre mcp`\n\nHand arguments to the companion.\n")
+        self.assertIsNone(cli.check(["mcp", "license", "accept", "--version", "2026-10"]))
+        self.assertIn("isn't a dre command", cli.check(["mcq", "serve"]))
+
 
 class BundledDocs(unittest.TestCase):
     def test_plugin_references_link_to_local_pages_and_original_anchors(self):

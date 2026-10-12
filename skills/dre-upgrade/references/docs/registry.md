@@ -30,6 +30,26 @@ Every plugin a declared package provides can then be used as a profile's `type:`
 the package to add when DRE's registry has one. DRE only ever installs the packages a project
 declares; it never infers them from a `type:`.
 
+## Companion extensions
+
+Extensions are separate executables, not source, format or destination plugins. The registry's
+optional top-level `extensions` array uses entries with `name`, `kind: "extension"`, `license`,
+`proprietary_license` and `versions`. Each version has the same platform-keyed `artifacts`
+structure as a plugin, with a required SHA-256 checksum. Existing plugin index readers ignore
+this sibling array; plugin installation continues to read `plugins` only.
+
+`dre extension install <name>` and `dre extension update <name>` install verified artifacts in
+`~/.dre/extensions/<name>/<version>/`. A `current` pointer selects the installed version.
+Separately licensed proprietary extensions require interactive acceptance or an explicit
+`--accept-proprietary`. Installation does not make their source part of the GPL engine.
+
+`dre mcp` forwards arguments to the `dre-mcp` companion, preserving its exit status.
+`DRE_MCP_BIN` can point to a local build for testing. A missing companion produces installation
+guidance, or an interactive install offer. DRE MCP RC binaries are distributed only through the public
+`get-dre/dre` GitHub Releases, tagged `dre-mcp-v<version>`. Its proprietary source remains private.
+The same registry and checksum verification used for plugins handles extension downloads.
+Read the bundled EULA before accepting it; RC versions have no automatic expiry.
+
 ## The registry
 
 DRE installs packages from a static JSON index. The index is a plain file, hosted alongside
