@@ -3090,11 +3090,11 @@ impl Loader {
             }
         };
         for (name, definition) in &var_schema {
-            if let Some(value) = &definition.default {
-                if let Err(error) = definition.check(name, value) {
-                    self.diags
-                        .error(Code::InvalidField, Some(r.file.display.clone()), None, error);
-                }
+            if let Some(value) = &definition.default
+                && let Err(error) = definition.check(name, value)
+            {
+                self.diags
+                    .error(Code::InvalidField, Some(r.file.display.clone()), None, error);
             }
             if name.trim().is_empty() {
                 self.diags.error(

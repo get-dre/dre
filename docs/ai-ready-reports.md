@@ -104,8 +104,9 @@ Review the resolved scope with `dre mcp access` before connecting an AI client.
 then swaps it atomically. A failed refresh retains the active context. In-flight calls retain
 the snapshot they started with. Use refresh after changing definitions or upstream comments.
 
-The RC's live catalog supports DuckDB, Postgres and Databricks. Exploration requires a source
-plugin that advertises read-only support; unsupported plugins fail closed. Cross-connection
+The RC's live catalog supports DuckDB, Postgres and Databricks. DuckDB and Postgres exploration require a source plugin that advertises read-only support.
+Databricks uses a validated single SELECT but cannot enforce a read-only session: use a
+read-only database role. Other unsupported plugins fail closed. Cross-connection
 joins and arbitrary model-authored SQL are outside this first version. Personal mode runs with
 your local credentials. A report can contain write SQL even when delivery is disabled; review
 exposed reports and use an appropriate database role.

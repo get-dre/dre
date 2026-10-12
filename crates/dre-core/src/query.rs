@@ -64,14 +64,17 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     let mut process = plugin
         .start(log, Some(&project.root))
         .map_err(|e| e.to_string())?;
-    if !process.has(dre_protocol::CAP_READ_ONLY) {
+    let session_read_only = process.has(dre_protocol::CAP_READ_ONLY);
+    // Databricks has no read-only session capability. Its single-SELECT guard is
+    // enforced here; database permissions remain the user's enforcement boundary.
+    if !session_read_only && target.kind != "databricks" {
         return Err(format!(
             "the {} plugin cannot guarantee a read-only connection",
             target.kind
         ));
     }
     process
-        .open(crate::run::render_connection(target)?, true)
+        .open(crate::run::render_connection(target)?, session_read_only)
         .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
     let mut rows = Vec::new();
     let mut columns = Vec::new();
@@ -110,6 +113,6 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     let _ = process.close();
     Ok(
         json!({"schema_version": "dre/rows/v1", "columns": columns, "row_count": rows.len(), "rows": rows,
-        "truncated": truncated, "connection": profile, "target": project.target_name}),
+        "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {"SQL validation; use a read-only Databricks database role"}, "connection": profile, "target": project.target_name}),
     )
 }
