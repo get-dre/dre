@@ -1,0 +1,8 @@
+# Run commands with --profiles-dir profiles (from this example directory).
+# This is a local fictional dataset, so no credentials are needed.
+connections:
+  warehouse:
+    targets:
+      dev:
+        type: duckdb
+        path: harbour.duckdb  # Relative to this project's root.

@@ -1,0 +1,8 @@
+# Generated local data, DRE outputs and retained MCP runs; never commit these.
+*.duckdb
+*.duckdb.wal
+/target/
+/dre_deps/
+/dre.lock
+/.dre-mcp/
+/logs/

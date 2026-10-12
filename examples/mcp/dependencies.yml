@@ -1,0 +1,5 @@
+# Normal DRE plugins. MCP itself is a separate executable, not a source/format plugin.
+plugins:
+  - duckdb   # Local pipeline models and exact decimal values.
+  - csv      # Default output of the setup report.
+  - xlsx     # The reviewed revenue workbook.

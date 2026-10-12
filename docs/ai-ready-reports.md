@@ -12,6 +12,10 @@ SQL, declared inputs and business purpose with table and column comments supplie
 pipeline. A good dbt setup or another well-documented pipeline makes this context much stronger.
 DRE consumes those comments; it does not replace your pipeline or own its model documentation.
 
+A complete, commented [MCP example](https://github.com/get-dre/dre/tree/master/examples/mcp) includes
+local pipeline models, sources, reviewed report SQL, typed inputs and optional MCP configuration.
+Exposure starts disabled for owner review.
+
 ## Describe the business answer
 
 Write a `description` and realistic example questions. State grain, units, exclusions and period

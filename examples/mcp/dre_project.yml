@@ -1,0 +1,4 @@
+# A normal DRE project: all reports still run without the MCP companion.
+name: harbour_mcp
+# Connection name defined in profiles/profiles.yml.
+default_profile: warehouse

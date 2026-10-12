@@ -1,0 +1,7 @@
+# Local demo setup: represents the output and comments supplied by a data pipeline.
+# Run once on a new example database. It intentionally creates tables and inserts data.
+# This report is not a reviewed answer and must never be exposed to MCP.
+meta:
+  ai:
+    expose: false
+queries: [seed]

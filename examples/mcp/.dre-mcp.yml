@@ -1,0 +1,21 @@
+# OPTIONAL: read only by the MCP companion. Ordinary DRE runs ignore this hidden file.
+# Exposing a report exposes its referenced tables for context/exploration by default.
+# Use false, or pass --no-report-tables, to allow report runs without inherited table exposure.
+expose_report_tables: true
+
+# Extra tables/schemas always require an explicit opt-in, using connection names from profiles.
+# tables:
+#   warehouse: [main.region_targets]
+# schemas:
+#   warehouse: [analytics_public]
+# Exclusions win over both explicit and inherited table exposure.
+# exclude_tables:
+#   warehouse: [main.customer_private]
+
+# Small retained local history for this example. These are user data, not disposable cache.
+max_runs: 10
+max_snapshots: 3
+# Other optional controls (defaults shown):
+# cache_ttl_seconds: 300
+# max_rows: 1000
+# query_timeout_seconds: 60

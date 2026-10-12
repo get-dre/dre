@@ -1,0 +1,27 @@
+# Optional human/agent context: explains what this recurring report answers.
+description: Net revenue by customer region, excluding GST
+meta:
+  # Optional provenance context shown with MCP results; normal DRE runs do not require it.
+  units: AUD
+  ai:
+    # OPTIONAL MCP opt-in. Leave false until an owner reviews this project's data scope.
+    # Change to true to discover/run this report through MCP.
+    # An inherited expose:false cannot be overridden by a child report.
+    expose: false
+    # Optional retrieval examples. `dre mcp test` checks these questions find this report.
+    questions:
+      - What is net revenue by region?
+      - Which region has the most revenue?
+    # Optional report-specific opt-out. Exposed reports expose their related tables by default.
+    # expose_report_tables: false
+# Optional typed inputs for tools and CLI; separate from legacy vars values.
+var_schema:
+  region:
+    type: enum
+    default: all       # Startup compilation needs a representative value.
+    allowed: [all, North, South]
+    description: Customer region, or all regions
+# Normal DRE query/output definitions, independent of MCP.
+queries: [revenue]
+output:
+  format: xlsx
