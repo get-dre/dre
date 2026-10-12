@@ -11,6 +11,16 @@ DRE 0.4 is about runs you can leave to a scheduler: they stop cleanly, say exact
 never leave half a file behind and never send anything twice. It's a minor release, so a few
 things change; read [What changes](#what-changes) before you update a scheduled job.
 
+## Additive context support in 0.4.1
+
+Optional report descriptions, metadata layers and declared variable schemas let external tools
+consume report context without changing existing projects. Isolated no-delivery row exports,
+exact rendered-SQL hashes, live relation catalogs and single-SELECT queries provide generic
+integration contracts. Companion executables can install separately through the extension
+registry and receive a `dre mcp` handoff. See [AI-ready reports](ai-ready-reports.md),
+[manifest contracts](manifest.md#generic-integration-context), and the
+[commented MCP example](https://github.com/get-dre/dre/tree/master/examples/mcp).
+
 ## Runs
 
 - **[Exit codes](exit-codes.md)** an orchestrator can act on: `0` success, `1` something failed

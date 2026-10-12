@@ -26,6 +26,8 @@ For copyable examples and common errors, see [Build and run reports](building-re
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string |  | The report's name. Default: the name of the folder the YAML file is in. Report names are unique across the project. |
+| `description` | string |  | What this report answers, including its business definitions and units. |
+| `meta` | map |  | Metadata for external tools. DRE checks its shape, not the meaning of its keys. |
 | `tags` | list of string |  | Tags to select the report with, `-s tag:<tag>`. |
 | `queries` | list of string or map (see below) |  | The `.sql` files whose results make the report's tabs, in the order they run, on one database session. |
 | `output` | map (see below) or list of map (see below) |  | One output, or a list of outputs formatted from the same run of the queries (file outputs are delivered before messages). A list replaces the inherited output; a map changes it. |
@@ -33,6 +35,7 @@ For copyable examples and common errors, see [Build and run reports](building-re
 | `sets` | list of string or map (see below) |  | The Sets the report can run as, by name (declared in `sets.yml`) or declared here. |
 | `default_set` | string |  | The Set a plain `dre run` uses. Must be one of `sets`. |
 | `vars` | map |  | Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps. |
+| `var_schema` | map |  | Optional declarations for variables: type, default, allowed values, description and required. Kept separate from `vars` so a map-valued variable remains a plain value. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
 | `locale` | string |  | The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`. |
 | `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
@@ -170,6 +173,18 @@ A query with settings.
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
+
+## `var_schema.<name>`
+
+
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `type` (required) | `string` or `integer` or `number` or `boolean` or `date` or `array` or `object` or `enum` |  | The value's type. Dates are real calendar dates in YYYY-MM-DD form. |
+| `description` | string |  | What this input means, including its units or reporting period. |
+| `required` | boolean | `false` | Whether execution requires a value. A default satisfies this requirement. |
+| `default` | any |  | Used when no project, folder, report, Set, schedule or CLI value supplies this variable. |
+| `allowed` | list of any |  | Optional exact values accepted for this variable; required for the enum type. |
 
 ## `plugins[]`
 
