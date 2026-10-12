@@ -57,7 +57,7 @@ None: a source's settings are its profile fields.
 | `scopes` | For `oauth`: default `all-apis offline_access` for browser sign-in, `all-apis` for a service principal. |
 | `redirect_port` | For browser sign-in: the localhost port the sign-in redirects to. Default 8020, which is what `databricks-cli` allows. |
 | `catalog`, `schema` | Defaults for the session. |
-| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)). The destination uses it for uploads too. |
+| `retries` | How many times to try connecting again after a dropped connection, default 3 (see [Tries again](../docs/plugins.md#tries-again)). The destination uses it for uploads too. |
 | `retry_timeout` | Seconds to keep waiting while a stopped warehouse starts. Default 900. While it waits, DRE says so every 30 seconds. A host that doesn't resolve, or refuses the connection, fails at once. |
 
 ```yaml
@@ -122,7 +122,7 @@ escaped quote: `'O''Brien'` is two literals, `'O'` and `'Brien'`, which Databric
 
 `VARIANT`, `STRUCT`, `ARRAY` and `MAP` columns arrive as compact JSON text (from `databricks`
 1.2.0; before, `STRUCT`, `ARRAY` and `MAP` were passed on as nested Arrow), intervals and
-geography as text. See [Types from warehouses](https://github.com/get-dre/dre/blob/master/docs/plugins.md#types-from-warehouses).
+geography as text. See [Types from warehouses](../docs/plugins.md#types-from-warehouses).
 
 #### As a destination
 
@@ -152,8 +152,27 @@ On Databricks compute, where `/Volumes` and `/Workspace` are mounted, the file i
 directly instead: no API call and no sign-in, with the job's own access. The same report works
 outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databricks job or cluster.
 
-Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
+Takes `if_exists` (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
 `overwrite=false` refuses a taken name in the same step.
+
+#### Verify a warehouse, then add report SQL
+
+The dev profile above is a minimal browser-authenticated warehouse connection. Copy the
+[tutorial](https://github.com/get-dre/dre/blob/master/examples/tutorial/) structure, declare `databricks`, and start the result query
+with `select 1 as connection_check`. `dre validate --live <report>` validates its statement;
+`dre run <report> --preview 5` checks the formatted output without uploading it.
+
+For a realistic workbook, adapt [monthly finance](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/) to existing
+warehouse tables and replace any DuckDB-specific SQL. A Volume destination on that
+workbook needs `destination: {profile: lakehouse, path: /Volumes/main/reporting/reports/monthly.xlsx}`
+under its output, and a matching destination target entry.
+
+`connection-failed` needs the workspace host, warehouse HTTP path and warehouse permission
+checked. A browser login cannot run unattended; configure the job's supported identity.
+`delivery-failed` on a Volume needs access to that catalog, schema and volume, even when SQL
+warehouse queries succeed. `missing-target-entry` means the connection or destination lacks
+the selected target. See [profiles](../docs/reference-profiles.md), [destination keys](../docs/reference-report.md#outputdestination),
+[error codes](../docs/reference-error-codes.md), and [target](../docs/glossary.md#target).
 
 ### Types from warehouses
 

@@ -8,6 +8,11 @@
   have a multiple-choice question tool, use it; otherwise number the options, recommended first.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
+- **Look up how-to questions before answering.** Read `references/docs-index.md`, search the
+  question's terms/options, and open only the matching page in `references/docs/`. Cite the
+  page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
+  Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
+  before applying their instructions. Follow linked pages only when the answer needs them.
 - **Skip what the request already answered.** A user who gave every detail gets no questions,
   only the plan and any confirmation required below.
 - **Opinions come from the practices** (`references/practices.md`, where this skill has it) and

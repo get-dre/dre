@@ -48,7 +48,7 @@ def releases(repo):
         page += 1
 
 
-def artifacts(release, package, version):
+def artifacts(release, package, version, extension=False):
     """The release's archives with their SHA256SUMS checksums; None if it isn't complete."""
     assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
     if "SHA256SUMS" not in assets:
@@ -58,7 +58,8 @@ def artifacts(release, package, version):
         parts = line.split()
         if len(parts) == 2:
             sums[parts[1].lstrip("*")] = parts[0].lower()
-    pattern = re.compile("^dre-plugin-" + re.escape(package) + "-" + re.escape(version) + r"-([a-z0-9_]+-[a-z0-9_]+)\.tar\.gz$")
+    prefix = package if extension else "dre-plugin-" + package
+    pattern = re.compile("^" + re.escape(prefix) + "-" + re.escape(version) + r"-([a-z0-9_]+-[a-z0-9_]+)\.tar\.gz$")
     out = {}
     for name, url in sorted(assets.items()):
         m = pattern.match(name)
@@ -76,7 +77,8 @@ def main(old_path, repo):
     index["schema"] = SCHEMA
     by_name = {p["name"]: p for p in index["plugins"]}
 
-    for release in releases(repo):
+    published = list(releases(repo))
+    for release in published:
         m = TAG.match(release["tag_name"])
         if not m or release.get("draft"):
             continue
@@ -102,6 +104,24 @@ def main(old_path, repo):
         {k: p[k] for k in ("name", "description", "provides", "versions")}
         for p in sorted(by_name.values(), key=lambda p: p["name"])
     ]
+    extension_catalog = json.loads((pathlib.Path(__file__).parent / "extensions.json").read_text())
+    by_extension = {e["name"]: e for e in index.get("extensions", [])}
+    for name, settings in extension_catalog.items():
+        entry = by_extension.setdefault(name, {"name": name, **settings, "versions": []})
+        for release in published:
+            prefix = name + "-v"
+            if release.get("draft") or not release["tag_name"].startswith(prefix):
+                continue
+            version = release["tag_name"][len(prefix):]
+            if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", version):
+                continue
+            if any(v["version"] == version for v in entry["versions"]):
+                continue
+            found = artifacts(release, name, version, extension=True)
+            if found:
+                entry["versions"].append({"version": version, "protocol": PROTOCOL, "artifacts": found})
+                print(f"added extension {name} {version}", file=sys.stderr)
+    index["extensions"] = sorted(by_extension.values(), key=lambda e: e["name"])
     json.dump(index, sys.stdout, indent=2)
     print()
 

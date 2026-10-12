@@ -19,6 +19,8 @@ For editor autocomplete and validation, add this as the first line of the file (
 # yaml-language-server: $schema=https://getdre.com/schemas/v0.4/schedules.schema.json
 ```
 
+For copyable examples and common errors, see [Schedules](schedules.md). The [glossary](glossary.md) defines DRE's terms.
+
 The file is a list; each entry has these keys.
 
 ## Keys

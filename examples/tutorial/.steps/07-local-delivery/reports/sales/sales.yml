@@ -1,0 +1,16 @@
+queries:
+  - query: sales
+    tab_name: Sales
+    columns:
+      revenue: {format: "#,##0.00"}
+  - query: summary
+    tab_name: Summary
+    columns:
+      revenue: {format: "#,##0.00"}
+sets:
+  - {name: north, vars: {region: North}}
+  - {name: south, vars: {region: South}}
+default_set: north
+output:
+  format: xlsx
+  destination: {profile: local, path: "out/{{ var('region') }}.xlsx"}

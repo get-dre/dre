@@ -59,6 +59,7 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 .github/scripts/schema_docs.py check
+      - run: python3 .github/scripts/test_registry_index.py
       - run: python3 .github/scripts/test_docs_sections.py
       - run: python3 .github/scripts/docs_sections.py check
       - run: python3 .github/scripts/plugin_pages.py check
@@ -260,5 +261,10 @@ jobs:
       - run: cargo nextest run --workspace --no-fail-fast
         env:
           DRE_TEST_PREBUILT_BINS: "1"
+      - name: Validate and run public examples against this build
+        shell: bash
+        run: |
+          ext=""; [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
+          python .github/scripts/check_examples.py --dre "target/debug/dre$ext" --plugins-dir target/debug
       # nextest doesn't run doctests.
       - run: cargo test --workspace --doc

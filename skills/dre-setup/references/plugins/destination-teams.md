@@ -36,7 +36,7 @@ None.
 
 ##### Notes
 
-Posts [messages](https://github.com/get-dre/dre/blob/master/docs/plugins.md#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
+Posts [messages](../docs/plugins.md#the-message-format) to a Microsoft Teams channel through a Workflows webhook.
 It takes messages only: a file output, or `attach:`, sent to it is an error in `dre validate`.
 Deliver files to object storage and link them from the message with `outputs.<name>.location`.
 Released as `1.0.0-rc.1`.
@@ -57,7 +57,21 @@ to a channel when a webhook request is received**, pick the team and channel, an
 it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
 links and bullets. Teams has no destination options. A message over 15,000 characters is cut
 short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
-warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](https://github.com/get-dre/dre/blob/master/docs/plugins.md#tries-again)).
+warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](../docs/plugins.md#tries-again)).
+
+##### Adapt a headline to Teams
+
+Start with the complete [headline example](https://github.com/get-dre/dre/blob/master/examples/slack-headline/). Add `teams` to its
+dependencies, use the profile above, and replace the headline destination with
+`destination: {profile: finance_teams}`. Add `dev: {deliver: false}` beside the prod profile
+entry to keep local runs quiet. Run `dre run <report> --preview 5` to inspect the message.
+
+`invalid-destination-option` on `attach` means Teams takes messages only; remove attachments
+and put a storage link in the text. `delivery-failed` after the workflow was removed needs a
+new webhook URL set through the environment variable. A truncated message needs shorter text;
+the warning is not a delivery failure. See [messages](../docs/messages.md),
+[destination keys](../docs/reference-report.md#outputdestination), [error codes](../docs/reference-error-codes.md)
+and [message](../docs/glossary.md#message).
 
 ### Destinations
 
@@ -124,7 +138,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -138,7 +152,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

@@ -51,7 +51,7 @@ Set in the report's `output.destination` entry.
 
 ### SFTP
 
-#### Notes
+##### Notes
 
 `host`, `port` (22), `username`, and `password`, `private_key_path` or `private_key`
 (+ `private_key_passphrase`). `private_key` is the key's text, for when it can't be a file (a CI
@@ -63,11 +63,11 @@ checked against `known_hosts_path` (default `~/.ssh/known_hosts`) or a pinned
 With `use_agent` set to `true`, it signs in with the keys in your SSH agent (`SSH_AUTH_SOCK`; the OpenSSH agent's
 pipe on Windows) instead of a password or key file, so the key never enters DRE.
 Missing directories are created. Uploads go under a temporary name first (`atomic`, `temp_dir`:
-see [Uploads under a temporary name](https://github.com/get-dre/dre/blob/master/docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
-write (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](https://github.com/get-dre/dre/blob/master/docs/plugin-postgres.md)
+see [Uploads under a temporary name](../docs/plugins.md#uploads-under-a-temporary-name)); `if_exists` is checked in the same step as the
+write (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)). The [`postgres`](../docs/plugin-postgres.md)
 source's `ssh:` block takes the same settings.
 
-#### RSA keys
+##### RSA keys
 
 RSA private keys sign through the `rsa` crate, which has a known timing weakness
 ([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
@@ -88,6 +88,42 @@ per connection, a few times a run. So DRE keeps RSA keys working and warns once 
 To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
 (its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
 Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
+
+##### Deliver a file without exposing a partial upload
+
+Use the complete [SFTP delivery example](https://github.com/get-dre/dre/blob/master/examples/sftp-delivery/) for a runnable local server
+and report. For a real receiving server, use its verified host key and a key file:
+
+```yaml
+#### profiles.yml
+destinations:
+  partner:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: sftp.example.com
+        username: reporting
+        private_key_path: ~/.ssh/id_ed25519
+        known_hosts_path: ~/.ssh/known_hosts
+```
+
+```yaml
+#### within a report's output
+destination:
+  profile: partner
+  path: "incoming/report-{{ run.date.yyyymmdd }}.csv"
+  atomic: true
+  temp_dir: staging
+  if_exists: error
+```
+
+`temp_dir` and the final path must allow a rename on the same server. The receiving system
+should watch `incoming`, not `staging`. `sftp/host-key-mismatch` requires verifying the server
+identity with its administrator before updating the pin; disabling the check hides a changed
+server. `sftp/file-exists` needs a new dated name or a deliberate replacement policy.
+See [atomic upload behavior](../docs/plugins.md#uploads-under-a-temporary-name),
+[destination keys](../docs/reference-report.md#outputdestination) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -154,7 +190,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -168,7 +204,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

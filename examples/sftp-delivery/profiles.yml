@@ -1,0 +1,15 @@
+connections:
+  sample:
+    targets:
+      dev: {type: duckdb}
+      prod: {type: duckdb}
+destinations:
+  partner_sftp:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: "{{ env_var('SFTP_HOST') }}"
+        username: "{{ env_var('SFTP_USERNAME') }}"
+        password: "{{ env_var('DRE_SECRET_SFTP_PASSWORD') }}"
+        host_key_fingerprint: "{{ env_var('SFTP_HOST_KEY_FINGERPRINT') }}"

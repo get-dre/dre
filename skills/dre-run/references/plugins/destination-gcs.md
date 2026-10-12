@@ -41,12 +41,42 @@ Set in the report's `output.destination` entry.
 
 ### Google Cloud Storage
 
-#### Notes
+##### Notes
 
 `bucket`, and `service_account_key_path` or `service_account_key`. Leave both out to use
 application default credentials: `GOOGLE_APPLICATION_CREDENTIALS`, the file
 `gcloud auth application-default login` writes, or the metadata server on Google Cloud. `endpoint` is for emulators. Paths are `gs://bucket/key`.
-Uploads use GCS's resumable protocol. Takes `if_exists` (see [A file already at the path](https://github.com/get-dre/dre/blob/master/docs/plugins.md#a-file-already-at-the-path)).
+Uploads use GCS's resumable protocol. Takes `if_exists` (see [A file already at the path](../docs/plugins.md#a-file-already-at-the-path)).
+
+##### Archive a workbook with application credentials
+
+Use GCS for a report archive alongside Google Cloud data. With application default credentials
+already configured, add this destination to the [monthly finance example](https://github.com/get-dre/dre/blob/master/examples/monthly-finance/):
+
+```yaml
+#### profiles.yml
+destinations:
+  archive:
+    targets:
+      dev: {deliver: false}
+      prod: {type: gcs, bucket: finance-reports}
+```
+
+```yaml
+#### within the report's output
+destination:
+  profile: archive
+  path: "gs://finance-reports/monthly/{{ run.date.yyyymm }}.xlsx"
+  if_exists: number
+```
+
+`number` preserves a taken name by adding a suffix. Preview locally before choosing prod.
+`gcs/file-exists` with `if_exists: error` needs a new name or an intentional overwrite.
+`delivery-failed` with missing credentials needs the job's Google identity configured;
+a local login does not carry to a different runner. Use `service_account_key_path` only when
+key-file credentials are required, or `service_account_key` through `env_var()` for JSON text.
+See [delivery behavior](../docs/plugins.md#destinations),
+[destination keys](../docs/reference-report.md#outputdestination) and [destination](../docs/glossary.md#destination).
 
 ### Destinations
 
@@ -113,7 +143,7 @@ output:
 ```
 
 - Entries are delivered in order. If one fails, the rest are still attempted; the Binding then
-  fails and the run exits 1 (see [exit codes](https://github.com/get-dre/dre/blob/master/docs/exit-codes.md)).
+  fails and the run exits 1 (see [exit codes](../docs/exit-codes.md)).
 - Each entry uses its profile's entry for the run (`--target`, `DRE_TARGET`, else the profile's
   own `target:`, else `dev`). A profile with no such entry is an error before anything runs; an
   entry `{deliver: false}` delivers nowhere, logged, while the others are delivered.
@@ -127,7 +157,7 @@ output:
 - Credentials stay in `profiles.yml`. Options belong to the report, so a Set can address its own
   recipients.
 - The `email` destination always attaches the output file, so an output over its size limit
-  fails that entry; DRE can't email a link instead (see [`email`](https://github.com/get-dre/dre/blob/master/docs/plugin-email.md)).
+  fails that entry; DRE can't email a link instead (see [`email`](../docs/plugin-email.md)).
 - A destination fails the delivery if its entry has a key it doesn't take, so a misspelt `path`
   is caught instead of ignored.
 

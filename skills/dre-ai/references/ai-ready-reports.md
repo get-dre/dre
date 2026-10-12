@@ -151,3 +151,7 @@ The companion is a separately licensed extension. This preview is being built an
 its distribution channel is chosen. Team transport, authentication and a hosted service are
 outside the personal RC.
 
+DRE supplies access to configured data and provenance, while connected agents generate answers.
+Project owners define and maintain context. Users must review AI answers, rendered SQL, assumptions
+and underlying results before relying on them.
+

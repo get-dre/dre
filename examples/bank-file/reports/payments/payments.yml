@@ -1,0 +1,11 @@
+queries: [payments]
+output:
+  format: fixed_width
+  extension: txt
+  line_ending: "\r\n"
+  columns:
+    - {name: account_id, width: 10}
+    - {name: account_name, width: 20}
+    - {name: amount, width: 10, align: right, pad: "0", decimals: 2, decimal_point: implied, sign: none}
+    - {name: posted_on, width: 8, date_format: "%Y%m%d"}
+  destination: {profile: local, path: out/payments.txt}

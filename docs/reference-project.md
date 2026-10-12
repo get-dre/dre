@@ -19,6 +19,8 @@ For editor autocomplete and validation, add this as the first line of the file (
 # yaml-language-server: $schema=https://getdre.com/schemas/v0.4/project.schema.json
 ```
 
+For copyable examples and common errors, see [Project configuration](project-configuration.md). The [glossary](glossary.md) defines DRE's terms.
+
 ## Keys
 
 | Key | Type | Default | Description |
