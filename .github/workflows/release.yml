@@ -40,8 +40,8 @@ name: Release
 
 on:
   push:
-    # skills-v<version> releases the agent skills instead (skills-release.yml).
-    tags: ["v*", "*-v[0-9]*", "!skills-v*"]
+    # Skills release separately; MCP binaries build privately and publish precompiled assets.
+    tags: ["v*", "*-v[0-9]*", "!skills-v*", "!dre-mcp-v*"]
   workflow_dispatch:
     inputs:
       tag:
