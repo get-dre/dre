@@ -5,7 +5,7 @@ plugins:
   - xlsx     # The reviewed revenue workbook.
 
 # Optional MCP companion. Ordinary report commands do not install or require it.
-# Once a distribution is available, `dre deps` installs this exact companion version.
+# `dre deps` downloads this exact companion version from the public GitHub registry.
 # Read `dre mcp license show` before setting accept_license. This value is an explicit
 # owner/admin declaration of acceptance, intended for your normal configuration PR review.
 # A changed EULA requires manual review and a changed accept_license value; tools never rewrite it.

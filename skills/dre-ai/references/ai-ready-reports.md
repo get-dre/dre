@@ -92,8 +92,10 @@ EULA and edit that field manually through your repository's review process. No u
 project YAML or accepts future versions. A local receipt records terms version, SHA-256 and time;
 it does not certify PR approval or actual reading. The RC has no automatic expiry.
 
-The companion distribution remains in local development; the EULA draft must be completed
-before release. Package installation becomes available once an owner-selected registry exists.
+Compiled companion binaries are distributed through `get-dre/dre` GitHub Releases under
+`dre-mcp-v<version>`. DRE’s standard registry downloads the pinned extension and verifies its
+SHA-256 checksum. The binary includes the versioned EULA and third-party notices; its proprietary
+source remains private.
 
 ## MCP preview
 
@@ -147,9 +149,8 @@ joins and arbitrary model-authored SQL are outside this first version. Personal 
 your local credentials. A report can contain write SQL even when delivery is disabled; review
 exposed reports and use an appropriate database role.
 
-The companion is a separately licensed extension. This preview is being built and tested before
-its distribution channel is chosen. Team transport, authentication and a hosted service are
-outside the personal RC.
+The companion is a separately licensed extension, released as an early RC on GitHub.
+Team transport, authentication and a hosted service are outside this first RC.
 
 DRE supplies access to configured data and provenance, while connected agents generate answers.
 Project owners define and maintain context. Users must review AI answers, rendered SQL, assumptions
