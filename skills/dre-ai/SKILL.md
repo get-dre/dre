@@ -76,4 +76,6 @@ exposure by default, `--no-report-tables`, and exclusions in `.dre-mcp.yml` (AI-
 review and enable exposure themselves. Use provenance labels consistently (AI-4).
 
 Finish with changed files, validation results, missing upstream documentation and the owner's
-remaining exposure decision. Do not run or deliver reports unless the user authorized it.
+remaining exposure decision. Explicitly explain that the report's join is evidence of reviewed
+logic, not a guarantee that every new query using that relationship is correct (AI-2).
+Do not run or deliver reports unless the user authorized it.
