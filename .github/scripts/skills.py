@@ -48,6 +48,7 @@ COPIES = {
     "dre-install": [],
     "dre-setup": ["practices", "plugins"],
     "dre-report": ["practices", "plugins"],
+    "dre-ai": ["practices", "ai-ready"],
     "dre-run": ["practices", "plugins"],
     "dre-upgrade": [],
 }
@@ -584,6 +585,10 @@ def sync(root):
             target.write_text(practices)
         elif target.exists():
             target.unlink()
+        if "ai-ready" in COPIES.get(skill, []):
+            guide = skills_root / skill / "references" / "ai-ready-reports.md"
+            guide.parent.mkdir(parents=True, exist_ok=True)
+            guide.write_text(_relink(strip_nav((root / "docs/ai-ready-reports.md").read_text()), "ai-ready-reports.md"))
 
 
 def generate(root, replies):
@@ -673,7 +678,7 @@ def check(root, replies):
         for pid in sorted(cited_practices(md) - practices):
             problems.append(f"{rel}: cites {pid}, which isn't in {PRACTICES}")
         # Hand-written files only: the plugin docs use `type:` for other things (fixed-width columns).
-        if "references/plugins/" not in rel:
+        if "references/plugins/" not in rel and not rel.endswith("references/ai-ready-reports.md"):
             problems += [f"{rel}: {u} names no first-party plugin" for u in unknown_plugins(md, known)]
     # The user docs, which the skills point to, name only real commands too.
     for path in [root / "README.md", *sorted((root / "docs").glob("*.md"))]:
@@ -693,7 +698,7 @@ def check(root, replies):
         fresh = pathlib.Path(tmp)
         shutil.copytree(skills_root, fresh / "skills")
         (fresh / "docs").mkdir()
-        for doc in (PLUGIN_DOCS, PRACTICES, *(f"docs/plugin-{p}.md" for p in {e[1] for es in DOC_SECTIONS.values() for e in es if e[0] == "page"})):
+        for doc in (PLUGIN_DOCS, PRACTICES, "docs/ai-ready-reports.md", *(f"docs/plugin-{p}.md" for p in {e[1] for es in DOC_SECTIONS.values() for e in es if e[0] == "page"})):
             shutil.copy(root / doc, fresh / doc)
         sync(fresh)
         generate(fresh, replies)

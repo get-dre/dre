@@ -21,6 +21,7 @@ Queries, outputs, templates, lookups and messages.
 - [Lookups](lookups.md): Mapping tables kept as files: typed columns, inline or temp table.
 - [Messages](messages.md): Headline numbers to Slack, Teams, Google Chat and email, built from a report's own queries.
 - [DRE practices](practices.md): The opinions DRE’s agent skills give, and the reasons behind them.
+- [AI-ready reports](ai-ready-reports.md): Turn reviewed report logic and upstream documentation into trustworthy context for AI.
 
 ## Connect
 

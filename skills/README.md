@@ -12,6 +12,7 @@ undo; and never ask for, repeat or store a password, token or key.
 | `dre` | Works out where you are (dre installed? a project? profiles?) and hands off to the right skill. Start here: "help me with dre". |
 | `dre-install` | Installs `dre` on macOS, Linux or Windows (install script, Homebrew, Scoop, uv, pipx, pip), and fixes PATH and Python problems. |
 | `dre-setup` | Installs the source plugin, writes the connection profile with a safe sign-in, creates a starter project and validates it. |
+| `dre-ai` | Prepares report descriptions, questions, declared inputs and pipeline context; leaves exposure to the owner. |
 | `dre-report` | Designs and writes a report around your goal: SQL, tabs, variables, format and destinations. Also changes existing reports. |
 | `dre-run` | Validates, previews, runs and delivers, confirming before production runs and real deliveries, and explains failures. |
 | `dre-upgrade` | Checks for updates to `dre` and to these skills, and applies the ones you choose. The only skill that uses the network. |

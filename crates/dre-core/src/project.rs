@@ -64,6 +64,8 @@ pub const DEFAULT_RUN_QUERY_MAX_ROWS: u64 = 10_000;
 
 pub const REPORT_KEYS: &[&str] = &[
     "name",
+    "description",
+    "meta",
     "tags",
     "queries",
     "output",
@@ -72,6 +74,7 @@ pub const REPORT_KEYS: &[&str] = &[
     "default_set",
     "schedule",
     "vars",
+    "var_schema",
     "timezone",
     "locale",
 ];
@@ -85,6 +88,7 @@ const OLD_PLUGIN_KEYS: &[&str] = &["destinations", "formats"];
 pub const SOURCES_KEY: &str = "sources";
 pub const PROJECT_KEYS: &[&str] = &[
     "name",
+    "meta",
     "default_profile",
     "default_output",
     "format_options",
@@ -110,6 +114,7 @@ pub const SCHEDULE_ENTRY_KEYS: &[&str] = &[
 /// The timings file's name. Other YAML files of timings are recognised by their shape.
 pub const TIMINGS_FILE: &str = "timings.yml";
 pub const FOLDER_CONFIG_KEYS: &[&str] = &[
+    "+meta",
     "+tags",
     "+output",
     "+profile",
@@ -167,6 +172,8 @@ pub const PLUGIN_ENTRY_KEYS: &[&str] = &["name", "version", "github", "local", "
 #[derive(Debug, Clone, Serialize)]
 pub struct Project {
     pub name: String,
+    #[serde(skip_serializing_if = "JsonMap::is_empty")]
+    pub meta: JsonMap<String, Json>,
     #[serde(skip)]
     pub root: PathBuf,
     /// The folder DRE writes its generated files to (compiled SQL, run outputs, schema
@@ -287,6 +294,14 @@ impl Project {
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "JsonMap::is_empty")]
+    pub meta: JsonMap<String, Json>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub meta_layers: Vec<MetaLayer>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub var_schema: crate::variables::Definitions,
     pub managed: bool,
     /// The defining YAML (managed) or `.sql` (unmanaged), relative to the root.
     pub file: PathBuf,
@@ -311,6 +326,14 @@ impl Report {
     pub fn binding(&self, set: &str) -> Option<&Binding> {
         self.bindings.iter().find(|b| b.set.as_deref() == Some(set))
     }
+}
+
+/// An unmerged metadata layer. Consumers own its semantics and can explain its origin.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct MetaLayer {
+    pub file: String,
+    pub key: String,
+    pub meta: JsonMap<String, Json>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -814,6 +837,7 @@ fn key_line(yf: &YamlFile, key: &str) -> Option<usize> {
 /// Folder-level config from `reports:` in `dre_project.yml`.
 #[derive(Default, Clone)]
 struct FolderCfg {
+    meta: Option<MetaLayer>,
     tags: Vec<String>,
     output: Option<Mapping>,
     profile: Option<(String, Option<usize>)>,
@@ -1129,6 +1153,7 @@ impl Loader {
                 None
             }
         };
+        let meta = self.typed_metadata(&yf.display, pf.meta, "meta");
         let default_profile_line = pf.default_profile.as_ref().and_then(de::Located::line);
         let default_profile = self.typed_string(&yf.display, pf.default_profile, "default_profile");
         let run_target = crate::profiles::RunTarget::resolve(self.opts.target.as_deref());
@@ -1255,6 +1280,7 @@ impl Loader {
         };
         Some(Project {
             name: name?,
+            meta,
             root: self.root.clone(),
             target_dir: self.target.dir.clone(),
             target_source: self.target.source,
@@ -1348,6 +1374,31 @@ impl Loader {
             Some(crate::manager::registry_url()),
             env_or_default(settings::REGISTRY_URL),
         );
+    }
+
+    /// A metadata map. Its contents belong to the consuming tool, not core.
+    fn typed_metadata(
+        &mut self,
+        file: &Path,
+        value: Option<de::Located<Loose<JsonMap<String, Json>>>>,
+        key: &str,
+    ) -> JsonMap<String, Json> {
+        match value {
+            None => JsonMap::new(),
+            Some(de::Located {
+                value: Loose::Ok(map),
+                ..
+            }) => map,
+            Some(value) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    Some(file.to_path_buf()),
+                    value.line(),
+                    format!("`{key}` must be a map"),
+                );
+                JsonMap::new()
+            }
+        }
     }
 
     /// An optional string key of a typed file: its value, else an error.
@@ -1617,6 +1668,18 @@ impl Loader {
             };
             let any = f.sets_anything();
             let mut cfg = FolderCfg::default();
+            if let Some(meta) = f.meta {
+                let value = self.typed_metadata(file, Some(meta), "+meta");
+                cfg.meta = Some(MetaLayer {
+                    file: crate::slash(file).to_string_lossy().into_owned(),
+                    key: if path.is_empty() {
+                        "reports.+meta".into()
+                    } else {
+                        format!("reports.{}.+meta", path.join("."))
+                    },
+                    meta: value,
+                });
+            }
             let bad = |s: &mut Self, k: &str, kline: Option<usize>, what: &str| {
                 s.diags.error(
                     Code::InvalidField,
@@ -2696,6 +2759,8 @@ impl Loader {
                 let owns = |k: &str| owner.get(k) == Some(&i);
                 let ReportFile {
                     name: _,
+                    description,
+                    meta,
                     output: _,
                     plugins: _,
                     sources: _,
@@ -2704,12 +2769,19 @@ impl Loader {
                     profile,
                     default_set,
                     vars,
+                    var_schema,
                     timezone,
                     locale,
                     sets,
                     schedule,
                     unknown: _,
                 } = f.typed;
+                if owns("description") {
+                    typed.description = description;
+                }
+                if owns("meta") {
+                    typed.meta = meta;
+                }
                 if owns("tags") {
                     typed.tags = tags;
                 }
@@ -2724,6 +2796,9 @@ impl Loader {
                 }
                 if owns("vars") {
                     typed.vars = vars;
+                }
+                if owns("var_schema") {
+                    typed.var_schema = var_schema;
                 }
                 if owns("timezone") {
                     typed.timezone = timezone;
@@ -3001,6 +3076,50 @@ impl Loader {
                 .map(|l| (l.file.display.clone(), r.lines.get(k).copied().flatten()))
         };
         let typed = &r.typed;
+        let var_schema = match &typed.var_schema {
+            None => BTreeMap::new(),
+            Some(de::Located {
+                value: Loose::Ok(schema),
+                ..
+            }) => schema.clone(),
+            Some(value) => {
+                let (file, _) = located("var_schema").unwrap();
+                self.diags.error(Code::InvalidField, Some(file), value.line(),
+                    "`var_schema` must map variable names to declarations with a supported type, default, allowed values, description and required flag");
+                BTreeMap::new()
+            }
+        };
+        for (name, definition) in &var_schema {
+            if let Some(value) = &definition.default {
+                if let Err(error) = definition.check(name, value) {
+                    self.diags
+                        .error(Code::InvalidField, Some(r.file.display.clone()), None, error);
+                }
+            }
+            if name.trim().is_empty() {
+                self.diags.error(
+                    Code::InvalidField,
+                    Some(r.file.display.clone()),
+                    None,
+                    "variable names must be non-empty",
+                );
+            }
+        }
+        let description = self.typed_string(
+            &located("description").map_or_else(|| r.file.display.clone(), |(f, _)| f),
+            typed.description.clone(),
+            "description",
+        );
+        let meta_file = located("meta").map_or_else(|| r.file.display.clone(), |(f, _)| f);
+        let meta = self.typed_metadata(&meta_file, typed.meta.clone(), "meta");
+        let mut meta_layers = metadata_layers(project, &layers);
+        if typed.meta.is_some() {
+            meta_layers.push(MetaLayer {
+                file: crate::slash(&meta_file).to_string_lossy().into_owned(),
+                key: "meta".into(),
+                meta: meta.clone(),
+            });
+        }
 
         let mut tags: Vec<String> = layers.iter().flat_map(|l| l.tags.clone()).collect();
         if let Some(t) = &typed.tags {
@@ -3118,6 +3237,11 @@ impl Loader {
         }
 
         let mut output = builtin_output();
+        for (name, definition) in &var_schema {
+            if let Some(value) = &definition.default {
+                vars.entry(name.clone()).or_insert_with(|| value.clone());
+            }
+        }
         let mut merge_problems = Vec::new();
         if let Some(o) = project_default_output(project) {
             merge_problems.extend(merge_output(&mut output, &o));
@@ -3199,6 +3323,10 @@ impl Loader {
 
         Some(Report {
             name,
+            var_schema,
+            description,
+            meta,
+            meta_layers,
             managed: true,
             file: r.file.display.clone(),
             folder: r.folder.clone(),
@@ -4261,6 +4389,10 @@ impl Loader {
         );
         Report {
             name: name.to_string(),
+            description: None,
+            meta: JsonMap::new(),
+            meta_layers: metadata_layers(project, &layers),
+            var_schema: BTreeMap::new(),
             managed: false,
             file: path.to_path_buf(),
             folder,
@@ -5215,6 +5347,10 @@ impl Loader {
         }
         for r in &project.reports {
             for b in &r.bindings {
+                for error in crate::variables::check_values(&r.var_schema, &b.vars, &self.opts.vars, false) {
+                    self.diags
+                        .error(Code::InvalidField, Some(r.file.clone()), None, error);
+                }
                 let ctx = match &b.set {
                     Some(s) => format!("report `{}`, Set `{s}`", r.name),
                     None => format!("report `{}`", r.name),
@@ -5652,6 +5788,19 @@ fn inherited_profile_at(layers: &[&FolderCfg], project: &Project) -> Option<Prof
         line: project.default_profile_line,
         key: "`default_profile`".into(),
     })
+}
+
+fn metadata_layers(project: &Project, folders: &[&FolderCfg]) -> Vec<MetaLayer> {
+    let mut layers = Vec::new();
+    if !project.meta.is_empty() {
+        layers.push(MetaLayer {
+            file: PROJECT_FILE.into(),
+            key: "meta".into(),
+            meta: project.meta.clone(),
+        });
+    }
+    layers.extend(folders.iter().filter_map(|f| f.meta.clone()));
+    layers
 }
 
 fn folder_layers<'a>(folders: &'a BTreeMap<Vec<String>, FolderCfg>, folder: &[String]) -> Vec<&'a FolderCfg> {

@@ -3,8 +3,8 @@ name: dre-report
 description: Create or change a DRE report - the SQL files and report YAML, its tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat), headline messages built from the results (several outputs per report, conditional sends with when:, number filters) and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, to add a tab, a column format, a variable, a destination or a recipient to an existing one, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project.
 license: GPL-3.0-only
 metadata:
-  version: "3.0.0"
-  dre: ">=0.4.0, <0.5.0"
+  version: "3.1.0"
+  dre: ">=0.4.1, <0.5.0"
 ---
 
 # Write or change a DRE report
@@ -118,10 +118,18 @@ output:
   from `macros/`. Never `target.<field>`, `run.profile` or `run.source_type`: DRE 0.2 removed
   them (`dre validate` names the replacement).
 - Report keys: `queries`, `output`, `vars`, `profile` (a connection other than the project's
-  `default_profile`), `sets`, `default_set`, `tags`, `timezone`. Schedules live in `schedules.yml`,
+  `default_profile`), `sets`, `default_set`, `tags`, `timezone`, `description`, `meta`, `var_schema`. Schedules live in `schedules.yml`,
   never in a report (see Scheduling a report). Query entry keys:
   `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`. Output keys DRE owns: `format`,
   `destination`, `template`, `extension`; every other output key is the format plugin's option.
+
+## AI context
+
+When creating or changing a report, preserve its business `description` and example
+`meta.ai.questions`. Add `var_schema` for model-editable inputs without replacing legacy
+`vars`. Gather grain, units, exclusions and period rules from existing evidence or ask the
+user for missing facts (AI-1). For detailed AI readiness work, follow `dre-ai`.
+Never enable `meta.ai.expose: true`; exposure remains an owner decision (AI-3).
 
 ## Steps
 

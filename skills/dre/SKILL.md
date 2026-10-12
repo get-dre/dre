@@ -3,8 +3,8 @@ name: dre
 description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and hands off to dre-install, dre-setup, dre-report, dre-run or dre-upgrade.
 license: GPL-3.0-only
 metadata:
-  version: "3.0.0"
-  dre: ">=0.4.0, <0.5.0"
+  version: "3.1.0"
+  dre: ">=0.4.1, <0.5.0"
 ---
 
 # DRE guide
@@ -133,6 +133,7 @@ question, recommending the next step from the facts:
 - writing or changing a schedule ("run it every 2nd Tuesday", a shared timing): `dre-report`;
 - when schedules run, rerunning a scheduled firing, or setting up cron, Airflow, Databricks
   Jobs or another orchestrator: `dre-run`;
+- preparing descriptions, questions or context for MCP discovery: `dre-ai`;
 - a question about updates: `dre-upgrade`.
 
 Say which skill you're handing off to and why, then follow that skill's `SKILL.md` from its

@@ -25,6 +25,8 @@ pub struct ProjectFile {
     /// The project's name. Required.
     #[schemars(required, length(min = 1))]
     pub name: Option<Located<Loose<String>>>,
+    /// Metadata for external tools, preserved as the first report metadata layer.
+    pub meta: Option<Located<Loose<JsonMap>>>,
     /// The connection (in `profiles.yml`) reports use when nothing else names one. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`.
     pub default_profile: Option<Located<Loose<String>>>,
     /// The output every report starts from (the built-in default is `format: csv`). A report's own `output` is merged on top.
@@ -124,6 +126,9 @@ pub struct Dispatch {
 #[derive(Deserialize, JsonSchema)]
 #[schemars(rename = "folder", extend("additionalProperties" = {"$ref": "#/$defs/folder"}))]
 pub struct Folder {
+    /// Metadata for external tools, preserved as a layer with its configuration origin.
+    #[serde(rename = "+meta")]
+    pub meta: Option<Located<Loose<JsonMap>>>,
     /// Tags added to every report in the folder.
     #[serde(rename = "+tags")]
     pub tags: Option<Located<Loose<Vec<String>>>>,
@@ -161,6 +166,7 @@ impl Folder {
     /// subfolders.
     pub fn sets_anything(&self) -> bool {
         self.tags.is_some()
+            || self.meta.is_some()
             || self.output.is_some()
             || self.profile.is_some()
             || self.schedule.is_some()

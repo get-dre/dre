@@ -85,6 +85,8 @@ dre run [OPTIONS] [SELECTOR]...
 | `--output-name <OUTPUT_NAME>` |  | Override the output file name for this run (the first output, with several). |
 | `--output-path <OUTPUT_PATH>` |  | Override the full output (delivery) path for this run (the first output, with several). |
 | `--dry-run` |  | Render SQL into target/compiled/ and stop; no report query is executed. |
+| `--no-deliver` |  | Keep normal outputs locally without delivering them to any destination. |
+| `--output-json <DIR>` |  | Write typed JSON rows per query and isolate this run's outputs/history in DIR. |
 | `--preview [<ROWS>]` |  | Execute with a row limit (default 100); output stays in target/ and is never delivered. |
 | `--accept-schema-change` |  | Deliver even if the output schema changed since the last successful run, and accept the new schema. Snapshots live in the target path, so a fresh CI runner has no history unless `--target-path` (or DRE_TARGET_PATH) points at a folder that persists. |
 | `--timeout <DURATION>` |  | Stop the run if it takes longer than this: a duration such as `2h` or `90m`, or seconds (default: $DRE_RUN_TIMEOUT, then `flags: run_timeout` in dre_project.yml; off without any). Its Bindings are then recorded as `timed_out`, and `dre` exits 124. |
@@ -126,6 +128,121 @@ Example:
 ```bash
 dre compile tag:finance
 ```
+
+## `dre query`
+
+Run one read-only query on a configured connection and write typed JSON rows.
+
+```text
+dre query [OPTIONS] --profile <PROFILE> --sql-file <SQL_FILE> --output-json <OUTPUT_JSON>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
+| `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
+| `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
+| `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
+| `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
+| `--profile <PROFILE>` |  | The configured source connection. |
+| `--sql-file <SQL_FILE>` |  | File containing one read-only SQL query (relative to the project directory). |
+| `--output-json <OUTPUT_JSON>` |  | JSON result file (relative to the project directory). |
+| `--max-rows <MAX_ROWS>` | `1000` | Maximum result rows. The result records whether more rows were available. |
+
+
+## `dre catalog`
+
+Read live table/column definitions and comments through a configured connection.
+
+```text
+dre catalog [OPTIONS] --profile <PROFILE> --tables-file <TABLES_FILE> --output-json <OUTPUT_JSON>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
+| `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
+| `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
+| `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
+| `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
+| `--profile <PROFILE>` |  | The source connection to inspect. |
+| `--tables-file <TABLES_FILE>` |  | JSON object with `tables` and `schemas` arrays of relation names. |
+| `--output-json <OUTPUT_JSON>` |  | Catalogue JSON file, relative to the project directory. |
+
+
+## `dre mcp`
+
+Hand arguments to the installed companion binary.
+
+```text
+dre mcp [OPTIONS] [ARGS]...
+```
+
+| Argument | Description |
+|---|---|
+| `ARGS...` | Arguments passed unchanged to the installed companion. |
+
+
+## `dre extension`
+
+Install or update companion binaries, separately from source/format/destination plugins.
+
+Subcommands:
+
+- [`dre extension install`](#dre-extension-install): Install a separately licensed companion executable.
+- [`dre extension update`](#dre-extension-update): Update an installed companion after verifying its checksum.
+
+## `dre extension install`
+
+Install a separately licensed companion executable.
+
+```text
+dre extension install [OPTIONS] <NAME>
+```
+
+| Argument | Description |
+|---|---|
+| `NAME` | Companion package name, optionally with @version. |
+
+| Option | Default | Description |
+|---|---|---|
+| `--accept-proprietary` |  | Acknowledge the proprietary licence shown before an extension is installed. |
+| `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
+| `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
+| `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
+| `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
+| `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
+
+
+## `dre extension update`
+
+Update an installed companion after verifying its checksum.
+
+```text
+dre extension update [OPTIONS] <NAME>
+```
+
+| Argument | Description |
+|---|---|
+| `NAME` | Companion package name, optionally with @version. |
+
+| Option | Default | Description |
+|---|---|---|
+| `--accept-proprietary` |  | Acknowledge the proprietary licence shown before an extension is installed. |
+| `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
+| `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
+| `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
+| `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
+| `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
+
 
 ## `dre clean`
 

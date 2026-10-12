@@ -54,6 +54,9 @@ class Doc:
 
     def resolve(self, node, home):
         """Follow `$ref`s; returns (schema, home file, ref'd) with the node's own description kept."""
+        # JSON Schema permits boolean schemas, e.g. an unconstrained metadata value.
+        if isinstance(node, bool):
+            return ({} if node else {"not": {}}, home)
         desc = node.get("description")
         ref = False
         while "$ref" in node:
@@ -81,12 +84,16 @@ def esc(text):
 
 
 def other_file(doc, node, home):
+    if isinstance(node, bool):
+        return None
     """The schema file a `$ref` points into, when it isn't the one being documented."""
     f = node.get("$ref", "").partition("#")[0].replace(".schema.json", "")
     return f if f and f != doc.name else None
 
 
 def type_of(doc, node, home):
+    if isinstance(node, bool):
+        return "any" if node else "no values"
     if "x-doc-type" in node:
         return node["x-doc-type"]
     foreign = other_file(doc, node, home)

@@ -1,5 +1,6 @@
 //! DRE core: turns a project directory into a resolved, validated project, and runs it.
 
+pub mod catalog;
 pub mod codes;
 pub mod coltypes;
 pub mod config;
@@ -24,7 +25,9 @@ pub mod plugins;
 pub mod preflight;
 pub mod profiles;
 pub mod project;
+pub mod query;
 pub mod render;
+pub mod rows;
 pub mod run;
 pub mod run_results;
 pub mod runs;
@@ -36,6 +39,7 @@ pub mod settings;
 pub mod sqlsplit;
 pub mod target;
 pub mod values;
+pub mod variables;
 pub mod yaml;
 
 pub use diag::{Diagnostic, Diagnostics, Severity};

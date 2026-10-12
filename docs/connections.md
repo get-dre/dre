@@ -227,4 +227,4 @@ See [Templates](templates.md). Secret fields stay unreadable everywhere.
 
 ---
 
-**Previous:** [DRE practices](practices.md) · **Next:** [Sources](sources.md)
+**Previous:** [AI-ready reports](ai-ready-reports.md) · **Next:** [Sources](sources.md)
