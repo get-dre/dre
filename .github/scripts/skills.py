@@ -301,6 +301,8 @@ class Cli:
         """None if `dre <tokens>` names real commands and flags, else what's wrong."""
         path, i = [], 0
         while i < len(tokens):
+            if path == ["mcp"]:
+                return None  # Core forwards opaque arguments; the separately installed companion owns their schema.
             t = tokens[i]
             if t.startswith("<") or "{" in t or "$" in t:
                 return None  # a placeholder: what follows can't be checked

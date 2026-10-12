@@ -263,6 +263,9 @@ struct NewArgs {
 
 #[derive(Args)]
 struct DepsArgs {
+    /// Acknowledge proprietary companion installation when no owner licence policy is declared.
+    #[arg(long)]
+    accept_proprietary: bool,
     #[arg(long, default_value = ".")]
     project_dir: PathBuf,
     #[arg(long)]
@@ -1245,13 +1248,21 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         return exit::not_started();
     };
     if plugins::ensure(&project, true, true, printer) {
+        let extensions = match extensions::sync_declared(&a.project_dir, a.accept_proprietary) {
+            Ok(count) => count,
+            Err(error) => {
+                printer.error(&error);
+                return exit::failed();
+            }
+        };
         printer.line(
             output::Tone::Good,
             "Synced",
             &format!(
-                "{} plugin(s) and {} package(s); dre.lock is up to date",
+                "{} plugin(s), {} package(s) and {} companion(s); plugin/package dre.lock is up to date",
                 project.plugins.len(),
-                project.packages.len()
+                project.packages.len(),
+                extensions
             ),
         );
         exit::ok()

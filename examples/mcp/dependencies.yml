@@ -3,3 +3,14 @@ plugins:
   - duckdb   # Local pipeline models and exact decimal values.
   - csv      # Default output of the setup report.
   - xlsx     # The reviewed revenue workbook.
+
+# Optional MCP companion. Ordinary report commands do not install or require it.
+# Once a distribution is available, `dre deps` installs this exact companion version.
+# Read `dre mcp license show` before setting accept_license. This value is an explicit
+# owner/admin declaration of acceptance, intended for your normal configuration PR review.
+# A changed EULA requires manual review and a changed accept_license value; tools never rewrite it.
+# It is NOT a licence key and does not enable report exposure.
+# extensions:
+#   - name: dre-mcp
+#     version: "0.1.0-rc.1"
+#     accept_license: "2026-10"

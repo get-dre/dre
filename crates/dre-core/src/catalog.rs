@@ -59,7 +59,7 @@ fn parts(name: &str, kind: &str) -> Result<Vec<String>, String> {
             part.as_ident()
                 .map(|id| {
                     if kind == "postgres" && id.quote_style.is_none() {
-                        id.value.to_lowercase()
+                        id.value.to_ascii_lowercase()
                     } else {
                         id.value.clone()
                     }

@@ -271,3 +271,35 @@ fn extension_install_requires_license_acceptance_and_checks_artifact_hash() {
     // A rejected update leaves the previously installed binary usable.
     p.dre("mcp", &[]).ok().says("companion-ready");
 }
+
+#[cfg(unix)]
+#[test]
+fn declared_extensions_install_pinned_versions_without_rewriting_owner_acceptance() {
+    use sha2::{Digest, Sha256};
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: companions\n"),
+            (
+                "dependencies.yml",
+                "extensions:\n  - name: dre-mcp\n    version: '0.1.0-rc.1'\n    accept_license: '2026-10'\n",
+            ),
+        ],
+        "",
+    );
+    p.write("companion", "#!/bin/sh\nprintf 'declared-ready\\n'\n");
+    let digest: String = Sha256::digest(p.read("companion").as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    p.write("index.json", &json!({"schema":2,"plugins":[],"extensions":[{"name":"dre-mcp","kind":"extension","license":"Proprietary","proprietary_license":true,
+        "versions":[{"version":"0.1.0-rc.1","artifacts":{dre_core::manager::platform():{"url":p.path("companion"),"sha256":digest}}}]}]}).to_string());
+    let before = p.read("dependencies.yml");
+    p.dre_env(
+        "deps",
+        &[],
+        &[("DRE_REGISTRY_URL", p.path("index.json").to_str().unwrap())],
+    )
+    .ok();
+    assert_eq!(p.read("dependencies.yml"), before);
+    p.dre("mcp", &["serve"]).ok().says("declared-ready");
+}

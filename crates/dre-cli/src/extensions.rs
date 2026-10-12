@@ -45,6 +45,58 @@ struct Extension {
     versions: Vec<dre_core::manager::IndexVersion>,
 }
 
+fn declared(root: &std::path::Path) -> Result<Vec<dre_core::config::dependencies::ExtensionEntry>, String> {
+    #[derive(Deserialize)]
+    struct Dependencies {
+        #[serde(default)]
+        extensions: Vec<dre_core::config::dependencies::ExtensionEntry>,
+    }
+    let mut entries = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    for file in dre_core::packages::DEPENDENCY_FILES {
+        let path = root.join(file);
+        if !path.exists() {
+            continue;
+        }
+        let dependencies: Dependencies =
+            serde_saphyr::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("invalid {}: {e}", path.display()))?;
+        for entry in dependencies.extensions {
+            if entry.name.is_empty()
+                || !entry
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                || !names.insert(entry.name.clone())
+            {
+                return Err("extension names must be valid and unique".into());
+            }
+            semver::Version::parse(&entry.version)
+                .map_err(|e| format!("extension `{}` needs an exact version: {e}", entry.name))?;
+            if entry.accept_license.as_ref().is_some_and(|v| v.trim().is_empty()) {
+                return Err("accept_license must name a reviewed EULA version".into());
+            }
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
+pub fn sync_declared(root: &std::path::Path, accept_proprietary: bool) -> Result<usize, String> {
+    let entries = declared(root)?;
+    for entry in &entries {
+        let path = install(
+            &format!("{}@{}", entry.name, entry.version),
+            accept_proprietary || entry.accept_license.is_some(),
+        )?;
+        eprintln!(
+            "Installed companion {}. Read its EULA before use; owner-pinned accept_license values are never updated automatically.",
+            path.display()
+        );
+    }
+    Ok(entries.len())
+}
+
 fn install(name: &str, accept: bool) -> Result<PathBuf, String> {
     let (name, requested) = name.split_once('@').map_or((name, None), |(n, v)| (n, Some(v)));
     if name.is_empty()
@@ -171,9 +223,12 @@ pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
     }
 }
 
-fn installed() -> Option<PathBuf> {
+fn installed(pinned: Option<&str>) -> Option<PathBuf> {
     let root = dre_core::dre_home().join("extensions/dre-mcp");
-    let current = std::fs::read_to_string(root.join("current")).ok()?;
+    let current = match pinned {
+        Some(version) => version.to_owned(),
+        None => std::fs::read_to_string(root.join("current")).ok()?,
+    };
     let version = semver::Version::parse(current.trim()).ok()?;
     let name = if cfg!(windows) { "dre-mcp.exe" } else { "dre-mcp" };
     let path = root.join(version.to_string()).join(name);
@@ -181,13 +236,54 @@ fn installed() -> Option<PathBuf> {
 }
 
 pub fn handoff(args: McpArgs, _printer: &Printer) -> ExitCode {
+    let root = args
+        .args
+        .windows(2)
+        .find(|pair| pair[0] == "--project-dir")
+        .map(|pair| PathBuf::from(&pair[1]))
+        .or_else(|| {
+            args.args
+                .iter()
+                .find_map(|arg| arg.strip_prefix("--project-dir=").map(PathBuf::from))
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+    let entries = if args.args.first().is_some_and(|arg| arg == "license") {
+        Ok(Vec::new())
+    } else {
+        declared(&root)
+    };
+    let entries = match entries {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+    let policy = entries.iter().find(|entry| entry.name == "dre-mcp");
     let binary = std::env::var_os("DRE_MCP_BIN")
         .map(PathBuf::from)
-        .or_else(installed)
+        .or_else(|| installed(policy.map(|entry| entry.version.as_str())))
         .unwrap_or_else(|| PathBuf::from("dre-mcp"));
     match Command::new(&binary).args(&args.args).status() {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
         Err(error) => {
+            if error.kind() == std::io::ErrorKind::NotFound
+                && let Some(policy) = policy.filter(|entry| entry.accept_license.is_some())
+            {
+                return match install(&format!("dre-mcp@{}", policy.version), true) {
+                    Ok(path) => match Command::new(path).args(&args.args).status() {
+                        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
+                        Err(error) => {
+                            eprintln!("cannot start companion: {error}");
+                            ExitCode::from(2)
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("companion installation failed: {error}");
+                        ExitCode::from(2)
+                    }
+                };
+            }
             if error.kind() == std::io::ErrorKind::NotFound
                 && std::io::stdin().is_terminal()
                 && std::io::stderr().is_terminal()

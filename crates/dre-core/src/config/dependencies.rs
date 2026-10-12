@@ -14,8 +14,25 @@ pub struct DependenciesFile {
     #[serde(default)]
     #[schemars(schema_with = "plugins")]
     pub plugins: Option<PluginsSection>,
+    /// Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately.
+    #[serde(default)]
+    pub extensions: Vec<ExtensionEntry>,
     /// Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`.
     pub packages: Option<Located<Loose<Vec<Loose<Package>>>>>,
+}
+
+/// An optional companion dependency, separate from source/format/destination plugins.
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ExtensionEntry {
+    /// Registry executable name, e.g. `dre-mcp`.
+    pub name: String,
+    /// Exact semantic version, including an RC suffix where applicable.
+    pub version: String,
+    /// Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms.
+    #[serde(default)]
+    pub accept_license: Option<String>,
 }
 
 /// The `plugins:` key of any project YAML file.

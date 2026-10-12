@@ -68,6 +68,13 @@
         }
       ]
     },
+    "extensions": {
+      "type": "array",
+      "description": "Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately.",
+      "items": {
+        "$ref": "#/$defs/ExtensionEntry"
+      }
+    },
     "packages": {
       "type": "array",
       "description": "Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`.",
@@ -78,6 +85,29 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "ExtensionEntry": {
+      "type": "object",
+      "description": "An optional companion dependency, separate from source/format/destination plugins.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Registry executable name, e.g. `dre-mcp`."
+        },
+        "version": {
+          "type": "string",
+          "description": "Exact semantic version, including an RC suffix where applicable."
+        },
+        "accept_license": {
+          "type": "string",
+          "description": "Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms."
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
     "package": {
       "type": "object",
       "description": "A macro package, from git or from a folder.",

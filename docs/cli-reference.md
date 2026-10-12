@@ -381,6 +381,7 @@ dre deps [OPTIONS]
 
 | Option | Default | Description |
 |---|---|---|
+| `--accept-proprietary` |  | Acknowledge proprietary companion installation when no owner licence policy is declared. |
 | `--project-dir <PROJECT_DIR>` | `.` |  |
 | `--profiles-dir <PROFILES_DIR>` |  |  Environment: `DRE_PROFILES_DIR`. |
 

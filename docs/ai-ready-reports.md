@@ -63,6 +63,38 @@ DRE compiles hardcoded table names, `source()` calls and Jinja before extracting
 A report's original join type, predicate, filters and grouping provide useful evidence. A join
 used in one report does not establish a universal relationship or prove a new query correct.
 
+## Install and review the companion
+
+`dre mcp serve` forwards to the separately installed `dre-mcp serve` executable. Core owns a
+generic extension installer; companion implementation remains separately licensed.
+Declare an optional exact-version companion under `extensions:` in `dependencies.yml`:
+
+```yaml
+extensions:
+  - name: dre-mcp
+    version: "0.1.0-rc.1"
+    # Set only after the authorised owner reads and accepts this EULA version.
+    # Treat changes as a configuration PR; installation/update never rewrites it.
+    accept_license: "2026-10"
+```
+
+`dre deps` installs declared companions separately from plugins. Ordinary report commands do
+not install them. Without an acceptance policy, proprietary installation needs explicit
+`--accept-proprietary`; that download acknowledgement does not replace the companion's EULA.
+A missing MCP binary can be downloaded at launch when the project declares a reviewed policy;
+otherwise interactive setup offers installation and unattended launch prints setup instructions.
+
+Read the terms with `dre mcp license show`. Individual setup can use
+`dre mcp license accept --version 2026-10`, then `dre mcp serve`. For approved automation,
+a pinned `accept_license` applies the owner's declaration without a startup prompt. New terms
+reject a stale project value even if the local user accepted them separately. Review the new
+EULA and edit that field manually through your repository's review process. No update changes
+project YAML or accepts future versions. A local receipt records terms version, SHA-256 and time;
+it does not certify PR approval or actual reading. The RC has no automatic expiry.
+
+The companion distribution remains in local development; the EULA draft must be completed
+before release. Package installation becomes available once an owner-selected registry exists.
+
 ## Personal MCP preview
 
 The personal `dre-mcp` RC uses local stdio and existing DRE connections. It distinguishes:

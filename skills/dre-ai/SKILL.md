@@ -10,7 +10,7 @@ metadata:
 # Prepare AI context for DRE reports
 
 Read [AI-ready reports](references/ai-ready-reports.md)
-for metadata, inheritance and MCP scope. Read `references/practices.md` for AI-1 through AI-4.
+for metadata, inheritance and MCP scope. Read `references/practices.md` for AI-1 through AI-5.
 
 <!-- BEGIN shared/version-check.md -->
 ### Step 1: check the installed dre
@@ -66,6 +66,9 @@ DRE leverages that upstream context rather than replacing the pipeline (AI-2).
 Run `dre validate` and `dre compile --select <report>`. If the MCP companion is available,
 run `dre mcp validate` and `dre mcp test` to check declared example questions and collisions.
 Otherwise explain that MCP retrieval checks remain pending; do not claim they passed.
+
+If MCP stops for EULA review, report the owner action required. Preserve `accept_license`;
+context preparation does not authorise accepting or changing legal terms (AI-5).
 
 Never enable `meta.ai.expose: true`. Leave existing owner-approved exposure unchanged; for new
 metadata use false or omit exposure. Summarize suggested scope, including report-related table
