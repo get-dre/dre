@@ -73,16 +73,26 @@ Every DRE and plugin release, from 0.4.0, publishes three things next to each ar
   with the [GitHub CLI](https://cli.github.com):
 
   ```bash
-  gh attestation verify dre-0.4.0-linux-x86_64.tar.gz --repo get-dre/dre
+  gh attestation verify dre-0.4.1-linux-x86_64.tar.gz \
+    --repo get-dre/dre \
+    --signer-workflow get-dre/dre/.github/workflows/release.yml
   ```
 
-  It fails for a file that wasn't built by DRE's release workflow, or was changed afterwards.
+  This requires signed provenance from the official repository's release workflow and a
+  matching file digest. It fails if the file was changed, or its attestation comes from a
+  different repository or workflow. It establishes origin, not that the code is free of bugs
+  or that the trusted release workflow could never be compromised.
   Wheels on PyPI also carry PyPI's own attestations.
 - **An SBOM** (`<archive>.cdx.json`, CycloneDX): every component in the file, Rust crates and Go
   modules included, for your vulnerability scanner. The SBOMs are attested too.
 
 `install.sh`, `dre system update` and plugin installs check the checksums; they don't check
 attestations yet.
+
+These checks identify official releases; they impose no restriction on building or running
+modified DRE. A fork that publishes its own attestations can use its own repository and release
+workflow in the command above. Local builds do not need an attestation, and the license is
+unchanged.
 
 ## Check the installed command
 
