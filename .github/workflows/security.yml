@@ -20,6 +20,22 @@ permissions:
   contents: read
 
 jobs:
+  provenance:
+    name: Release provenance policy
+    # The fixture is an official published release; independent forks need their own fixture.
+    # Pull requests from forks still run this read-only check in the upstream repository.
+    if: github.repository == 'get-dre/dre'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify official provenance and reject tampering or other identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/test_provenance.sh
+
   rust:
     name: Rust (cargo-deny)
     runs-on: ubuntu-latest
