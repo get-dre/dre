@@ -205,3 +205,308 @@ fn verbose_says_which_profiles_file_it_used() {
         .says("  Profiles  ")
         .says("profiles.yml (from --profiles-dir)");
 }
+
+fn variable_logging_project(mask_secrets: bool, secret: &str) -> TestProject {
+    let p = TestProject::new(
+        &[
+            ("dependencies.yml", PLUGINS_YML),
+            ("reports/demo/demo.yml", "queries: [q]\n"),
+            (
+                "reports/demo/q.sql",
+                "select length('{{ var(\"payload\", \"\") }}') as width\n",
+            ),
+        ],
+        "connections: {warehouse: {targets: {dev: {type: duckdb, path: ':memory:'}}}}\n",
+    );
+    p.write(
+        "dre_project.yml",
+        &format!("name: redaction_check\ndefault_profile: warehouse\nmask_secrets: {mask_secrets}\n"),
+    );
+    p.write("schedules.yml", &serde_json::json!([{
+        "name": "daily", "report": "demo", "cron": "0 7 * * *",
+        "vars": {"token": secret, "nested": [{"token": format!("{secret}-tail")}], "public": "visible-value"},
+    }]).to_string());
+    p
+}
+
+fn check_variable_surfaces(masking: bool, mode: &str, colour: &str) {
+    let credential = "line\\break\"雪\tend\n";
+    let extended = format!("{credential}-tail");
+    let p = variable_logging_project(masking, credential);
+    let assignment = format!("payload={extended}");
+    let run = p.dre_env(
+        "run",
+        &[
+            "--schedule",
+            "daily",
+            "--var",
+            &assignment,
+            "-v",
+            "--log-format",
+            mode,
+            "--color",
+            colour,
+        ],
+        &[
+            ("DRE_SECRET_BASE", credential),
+            ("DRE_SECRET_EXTENDED", &extended),
+        ],
+    );
+    run.ok();
+    let logs = p.run_logs();
+    let metadata = p.json("target/run/demo/default/run_results.json");
+    let expected_base = if masking { "*****" } else { credential };
+    let expected_extended = if masking { "*****" } else { &extended };
+    assert_eq!(metadata["schedule_vars"]["token"], expected_base);
+    assert_eq!(metadata["vars"]["payload"], expected_extended);
+    assert_eq!(metadata["schedule_vars"]["nested"][0]["token"], expected_extended);
+    // The run log's JSON remains usable by tools that extract its fields.
+    for marker in ["Parameters ", "Schedule daily vars ", "Vars "] {
+        let json = logs
+            .lines()
+            .find_map(|line| line.split_once(marker).map(|(_, body)| body))
+            .unwrap();
+        let fields: serde_json::Value = serde_json::from_str(json).unwrap();
+        if marker == "Parameters " {
+            assert_eq!(fields["vars"]["payload"], expected_extended);
+        } else {
+            assert_eq!(fields["token"], expected_base);
+            assert_eq!(fields["nested"][0]["token"], expected_extended);
+            assert_eq!(fields["public"], "visible-value");
+        }
+    }
+    if mode == "json" {
+        let events: Vec<serde_json::Value> = run
+            .stdout
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let binding = events
+            .iter()
+            .find(|event| event["event"] == "binding_vars")
+            .unwrap();
+        assert_eq!(binding["vars"]["payload"], expected_extended);
+        assert_eq!(binding["schedule_vars"]["token"], expected_base);
+    }
+    for output in [&run.stdout, &logs] {
+        assert!(output.contains("visible-value"));
+        for value in [credential, extended.as_str()] {
+            let encoded = serde_json::to_string(value).unwrap();
+            let escaped = &encoded[1..encoded.len() - 1];
+            if masking {
+                assert!(
+                    !output.contains(value) && !output.contains(escaped),
+                    "credential escaped redaction: {output}"
+                );
+                assert!(
+                    !output.contains("*****-tail"),
+                    "overlapping credential was only partly masked: {output}"
+                );
+            } else {
+                assert!(
+                    output.contains(escaped),
+                    "masking opt-out lost its value: {output}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        p.read("target/run/demo/default/demo.csv"),
+        format!("width\r\n{}\r\n", extended.chars().count())
+    );
+}
+
+#[test]
+fn variable_output_protects_json_escaped_credentials() {
+    for (mode, colour) in [("text", "never"), ("text", "always"), ("json", "never")] {
+        check_variable_surfaces(true, mode, colour);
+    }
+}
+
+#[test]
+fn variable_output_respects_the_masking_opt_out() {
+    for mode in ["text", "json"] {
+        check_variable_surfaces(false, mode, "never");
+    }
+}
+
+#[test]
+fn number_filter_diagnostics_mask_before_debug_escaping() {
+    let secret = "audit\"secret\\\n\té";
+    for mask in [true, false] {
+        let p = variable_logging_project(mask, secret);
+        p.write(
+            "reports/demo/q.sql",
+            "select {{ env_var('DRE_SECRET_PROBE') | number }}\n",
+        );
+        let r = p.dre_env(
+            "compile",
+            &["demo", "--no-auto-install"],
+            &[("DRE_SECRET_PROBE", secret)],
+        );
+        r.failed();
+        let text = format!("{}{}", r.stdout, r.stderr);
+        let debug = format!("{secret:?}");
+        if mask {
+            assert!(
+                !text.contains(&debug),
+                "diagnostic leaks debug-escaped secret: {text}"
+            );
+            assert!(text.contains("*****"), "{text}");
+        } else {
+            assert!(text.contains(&debug), "{text}");
+        }
+    }
+}
+
+#[test]
+fn history_json_masks_secrets_in_existing_run_records() {
+    let secret = "audit\"secret\\\n\té";
+    let p = variable_logging_project(true, secret);
+    // A record made with masking off, or before this value was registered as a secret.
+    p.write(
+        "target/run/demo/default/runs/20261014_010203/run_results.json",
+        &serde_json::json!({
+            "status": "error", "error": format!("failed: {secret}"),
+        })
+        .to_string(),
+    );
+    let r = p.dre_env(
+        "history",
+        &["demo", "--output", "json"],
+        &[("DRE_SECRET_PROBE", secret)],
+    );
+    r.ok();
+    let rows: serde_json::Value = serde_json::from_str(&r.stdout).unwrap();
+    assert_eq!(rows[0]["error"], "failed: *****");
+    p.write(
+        "dre_project.yml",
+        "name: log_redaction\ndefault_profile: warehouse\nmask_secrets: false\n",
+    );
+    let r = p.dre_env(
+        "history",
+        &["demo", "--output", "json"],
+        &[("DRE_SECRET_PROBE", secret)],
+    );
+    r.ok();
+    let rows: serde_json::Value = serde_json::from_str(&r.stdout).unwrap();
+    assert_eq!(rows[0]["error"], format!("failed: {secret}"));
+}
+
+#[test]
+fn message_logs_mask_markdown_escaped_secrets() {
+    let secret = "audit*secret_[value]\\end";
+    let escaped = dre_protocol::markdown::escape(secret);
+    for mask in [true, false] {
+        let p = variable_logging_project(mask, secret);
+        p.write("reports/demo/q.sql", "select 1 as n\n");
+        p.write("reports/demo/demo.yml", "queries: [q]\noutput:\n  format: message\n  text: \"Value: {{ env_var('DRE_SECRET_PROBE') }}\"\n");
+        let r = p.dre_env(
+            "run",
+            &["demo", "--preview", "1", "-v"],
+            &[("DRE_SECRET_PROBE", secret)],
+        );
+        r.ok();
+        let record = p.json("target/run/demo/default/run_results.json");
+        let message = record["output_results"][0]["message"]["text"].as_str().unwrap();
+        for text in [&r.stdout, &p.run_logs(), message] {
+            if mask {
+                assert!(
+                    !text.contains(&escaped),
+                    "message output leaks escaped secret: {text}"
+                );
+                assert!(text.contains("*****"), "{text}");
+            } else {
+                assert!(text.contains(&escaped), "{text}");
+            }
+        }
+        // Report payloads keep the original value, even while logs are masked.
+        assert!(p.read("target/run/demo/default/demo.md").contains(&escaped));
+    }
+}
+
+#[test]
+fn number_filter_diagnostics_do_not_echo_nested_secret_values() {
+    let secret = "audit\"secret\\\n\té";
+    let p = variable_logging_project(true, secret);
+    p.write(
+        "reports/demo/q.sql",
+        "select {{ [env_var('DRE_SECRET_PROBE')] | number }}\n",
+    );
+    let r = p.dre_env(
+        "compile",
+        &["demo", "--no-auto-install"],
+        &[("DRE_SECRET_PROBE", secret)],
+    );
+    r.failed();
+    let debug = format!("{secret:?}");
+    assert!(
+        !r.stdout.contains(&debug),
+        "nested diagnostic leaks secret: {}",
+        r.stdout
+    );
+}
+
+#[test]
+fn message_summaries_mask_before_truncating_long_secret_values() {
+    let secret = format!("audit*secret_{}end", "x".repeat(150));
+    let p = variable_logging_project(true, &secret);
+    p.write("reports/demo/q.sql", "select 1 as n\n");
+    p.write(
+        "reports/demo/demo.yml",
+        "queries: [q]\noutput:\n  format: message\n  text: \"{{ env_var('DRE_SECRET_PROBE') }}\"\n",
+    );
+    let r = p.dre_env("run", &["demo"], &[("DRE_SECRET_PROBE", &secret)]);
+    r.ok();
+    for text in [&r.stdout, &p.run_logs()] {
+        assert!(
+            !text.contains("audit"),
+            "message excerpt leaks secret prefix: {text}"
+        );
+        assert!(text.contains("*****"), "{text}");
+    }
+}
+
+#[test]
+fn mutable_template_diagnostics_do_not_echo_nested_secret_values() {
+    let secret = "audit\"secret\\\n\té";
+    for expression in [
+        "{% set xs = list() %}{{ xs.remove([env_var('DRE_SECRET_PROBE')]) }}",
+        "{% set xs = list() %}{{ xs.index([env_var('DRE_SECRET_PROBE')]) }}",
+        "{% set xs = dict() %}{{ xs.pop([env_var('DRE_SECRET_PROBE')]) }}",
+    ] {
+        let p = variable_logging_project(true, secret);
+        p.write("reports/demo/q.sql", expression);
+        let r = p.dre_env(
+            "compile",
+            &["demo", "--no-auto-install"],
+            &[("DRE_SECRET_PROBE", secret)],
+        );
+        r.failed();
+        assert!(
+            !r.stdout.contains(&format!("{secret:?}")),
+            "mutable diagnostic leaks secret: {}",
+            r.stdout
+        );
+    }
+}
+
+#[test]
+fn message_titles_mask_whitespace_normalized_secrets() {
+    let secret = "audit\n\tsecret value";
+    let p = variable_logging_project(true, secret);
+    p.write("reports/demo/q.sql", "select 1 as n\n");
+    p.write("reports/demo/demo.yml", "queries: [q]\noutput:\n  format: message\n  title: \"{{ env_var('DRE_SECRET_PROBE') }}\"\n  text: visible\n");
+    let r = p.dre_env("run", &["demo"], &[("DRE_SECRET_PROBE", secret)]);
+    r.ok();
+    let normalized = secret.split_whitespace().collect::<Vec<_>>().join(" ");
+    let record = p.json("target/run/demo/default/run_results.json");
+    assert_eq!(record["output_results"][0]["message"]["title"], "*****");
+    for text in [&r.stdout, &p.run_logs()] {
+        assert!(
+            !text.contains(&normalized),
+            "title leaks normalized secret: {text}"
+        );
+    }
+    assert!(p.read("target/run/demo/default/demo.md").contains(&normalized));
+}

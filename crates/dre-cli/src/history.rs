@@ -74,6 +74,15 @@ fn shown(project_dir: &Path, p: &Path) -> String {
 }
 
 pub fn history(a: HistoryArgs) -> ExitCode {
+    // History works even when profiles or report sources are gone. Read only the masking
+    // preference; default to protection for missing, unreadable or invalid project files.
+    let mask_secrets = std::fs::read_to_string(a.project_dir.join(dre_core::project::PROJECT_FILE))
+        .ok()
+        .and_then(|text| dre_core::config::node::parse(&text).ok())
+        .and_then(|node| node.get("mask_secrets").map(|v| v.to_json()))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    dre_core::secrets::set_enabled(mask_secrets);
     let dir = match report_dir(&a.project_dir, a.target_path.as_deref(), &a.report) {
         Ok(d) => d,
         Err(e) => {
@@ -142,17 +151,18 @@ pub fn history(a: HistoryArgs) -> ExitCode {
             println!("{}", r["path"].as_str().unwrap_or_default());
         }
     } else if a.output == HistoryOutput::Json {
-        println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+        println!("{}", dre_core::secrets::to_json_pretty(&rows).unwrap());
     } else {
         for r in &rows {
             let mark = if r["current"] == true { "*" } else { " " };
-            println!(
+            let line = format!(
                 "{mark} {:<10} {:<24} {:<12} {}",
                 r["binding"].as_str().unwrap_or_default(),
                 r["run_id"].as_str().unwrap_or_default(),
                 r["status"].as_str().unwrap_or_default(),
                 r["path"].as_str().unwrap_or_default()
             );
+            println!("{}", dre_core::secrets::mask(&line));
         }
         println!("(* the current run)");
     }

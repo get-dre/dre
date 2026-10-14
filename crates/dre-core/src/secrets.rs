@@ -64,6 +64,43 @@ pub fn mask(s: &str) -> Cow<'_, str> {
     mask_with(s, &SECRETS)
 }
 
+/// Mask a rendered message without changing the report payload. Markdown interpolation has
+/// already escaped punctuation, so both literal and escaped secret values must be matched.
+pub(crate) fn mask_markdown(s: &str) -> Cow<'_, str> {
+    static VALUES: LazyLock<Vec<String>> = LazyLock::new(|| {
+        let mut values: Vec<String> = SECRETS
+            .iter()
+            .flat_map(|s| [s.clone(), dre_protocol::markdown::escape(s)])
+            .collect();
+        values.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        values.dedup();
+        values
+    });
+    if !ENABLED.load(Ordering::Relaxed) {
+        return Cow::Borrowed(s);
+    }
+    mask_with(s, &VALUES)
+}
+
+/// Message titles collapse whitespace before delivery. Match that representation as well as
+/// the literal secret when protecting a title in logs and run metadata.
+pub(crate) fn mask_message_title(s: &str) -> Cow<'_, str> {
+    static VALUES: LazyLock<Vec<String>> = LazyLock::new(|| {
+        let mut values: Vec<String> = SECRETS
+            .iter()
+            .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")])
+            .filter(|s| !s.is_empty())
+            .collect();
+        values.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        values.dedup();
+        values
+    });
+    if !ENABLED.load(Ordering::Relaxed) {
+        return Cow::Borrowed(s);
+    }
+    mask_with(s, &VALUES)
+}
+
 /// Whether masking is enabled and `s` contains a complete registered secret.
 pub fn contains_secret(s: &str) -> bool {
     ENABLED.load(Ordering::Relaxed) && SECRETS.iter().any(|secret| s.contains(secret))

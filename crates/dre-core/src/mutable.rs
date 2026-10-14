@@ -166,7 +166,7 @@ impl Object for MutableList {
                 let at = items
                     .iter()
                     .position(|x| *x == v)
-                    .ok_or_else(|| bad(format!("`remove()`: {v} is not in the list")))?;
+                    .ok_or_else(|| bad("`remove()`: the value is not in the list"))?;
                 items.remove(at);
                 Ok(Value::from(()))
             }
@@ -197,7 +197,7 @@ impl Object for MutableList {
                     .iter()
                     .position(|x| *x == v)
                     .map(|i| Value::from(i as i64))
-                    .ok_or_else(|| bad(format!("`index()`: {v} is not in the list")))
+                    .ok_or_else(|| bad("`index()`: the value is not in the list"))
             }
             "count" => {
                 let (v,): (Value,) = from_args(args).map_err(|_| bad("`count()` takes one value"))?;
@@ -316,7 +316,7 @@ impl Object for MutableDict {
                     from_args(args).map_err(|_| bad("`pop()` takes a key and an optional default"))?;
                 match pairs.iter().position(|(x, _)| *x == k) {
                     Some(at) => Ok(pairs.remove(at).1),
-                    None => default.ok_or_else(|| bad(format!("`pop()`: no key {k}"))),
+                    None => default.ok_or_else(|| bad("`pop()`: no key with that value")),
                 }
             }
             "clear" => {
