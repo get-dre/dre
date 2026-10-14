@@ -11,6 +11,21 @@ DRE 0.4 is about runs you can leave to a scheduler: they stop cleanly, say exact
 never leave half a file behind and never send anything twice. It's a minor release, so a few
 things change; read [What changes](#what-changes) before you update a scheduled job.
 
+## Secret masking fixes in 0.4.2
+
+Update to 0.4.2 if you use `DRE_SECRET_*` values. Earlier versions can expose those values in
+logs or diagnostics after JSON or debug escaping, Markdown escaping, message-title whitespace
+normalization, or message-summary truncation. History JSON now also redacts registered secrets
+when reading older run records. The fix covers the CLI and core; existing plugins keep working.
+
+Database inputs and report result files keep their original values, and `mask_secrets: false`
+continues to disable masking. Review retained logs and run records from earlier versions; if a
+credential was exposed, rotate it and restrict or remove the affected copies. Updating DRE does
+not rewrite those historical files.
+
+Thanks to [xingf-msft](https://github.com/xingf-msft) for reporting the JSON text-log bypass in
+[PR 154](https://github.com/get-dre/dre/pull/154).
+
 ## Additive context support in 0.4.1
 
 Optional report descriptions, metadata layers and declared variable schemas let external tools
