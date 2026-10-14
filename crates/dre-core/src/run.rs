@@ -1852,6 +1852,9 @@ impl<'a> BindingRun<'a> {
         std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
         std::fs::write(&path, crate::message::file_body(&title, &text)).map_err(|e| e.to_string())?;
         self.outs[oi].files.push((path, None));
+        // Protect preview and metadata copies; report files and deliveries retain their values.
+        let shown_title = crate::secrets::mask_message_title(&title);
+        let shown_text = crate::secrets::mask_markdown(&text);
         if self.opts.preview.is_some() {
             let mut notes = Vec::new();
             if let Some(n) = self.opts.preview {
@@ -1868,8 +1871,8 @@ impl<'a> BindingRun<'a> {
             notes.extend(self.destination_limits(oi, length));
             self.ui.message(&ShownMessage {
                 output: self.b.outputs[oi].name.clone(),
-                title: title.clone(),
-                text: text.clone(),
+                title: shown_title.into_owned(),
+                text: shown_text.into_owned(),
                 notes,
             });
         } else {
@@ -2868,10 +2871,10 @@ impl<'a> BindingRun<'a> {
                 delivery: run.delivery_note.clone(),
                 deliveries: run.deliveries.clone(),
                 when: run.when,
-                message: run
-                    .message
-                    .clone()
-                    .map(|(title, text)| run_results::Message { title, text }),
+                message: run.message.clone().map(|(title, text)| run_results::Message {
+                    title: crate::secrets::mask_message_title(&title).into_owned(),
+                    text: crate::secrets::mask_markdown(&text).into_owned(),
+                }),
             });
         }
         // In delivery order: file outputs, then messages.

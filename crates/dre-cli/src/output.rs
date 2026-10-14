@@ -19,6 +19,12 @@ use dre_protocol::host::LogSink;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use serde_json::json;
 
+// Protect strings and keys while they still hold literal values, including JSON fragments
+// embedded in ordinary log lines. Text masking cannot recover values after JSON escaping.
+fn protected_json<T: serde::Serialize>(value: &T) -> String {
+    dre_core::secrets::to_json_line(value).expect("JSON output must serialize")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum Verbosity {
     /// Errors and the final summary only.
@@ -191,7 +197,7 @@ impl Printer {
     /// Record the run's parameters in the log file (and as a JSON event).
     pub fn log_params(&self, params: &serde_json::Value) {
         let mut i = self.inner.lock().unwrap();
-        i.file_log("INFO", &format!("Parameters {params}"));
+        i.file_log("INFO", &format!("Parameters {}", protected_json(params)));
         if i.format == LogFormat::Json {
             i.json(json!({"event": "run_parameters", "parameters": params}));
         }
@@ -531,15 +537,18 @@ impl Ui for Printer {
     ) {
         let mut i = self.inner.lock().unwrap();
         if let Some(name) = schedule {
-            let sv = serde_json::Value::Object(schedule_vars.cloned().unwrap_or_default());
-            i.file_log("INFO", &format!("Schedule {name} vars {sv}"));
+            let schedule_values = schedule_vars.cloned().unwrap_or_default();
+            i.file_log(
+                "INFO",
+                &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
+            );
         }
-        let v = serde_json::Value::Object(vars.clone());
-        i.file_log("INFO", &format!("Vars {v}"));
+        let variables = protected_json(vars);
+        i.file_log("INFO", &format!("Vars {variables}"));
         if i.format == LogFormat::Json {
             i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
         } else if i.shows(Level::Debug) {
-            let text = i.paint(DIM, &v.to_string());
+            let text = i.paint(DIM, &variables);
             i.print(Tone::Note, "Vars", &text);
         }
     }

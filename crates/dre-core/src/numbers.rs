@@ -231,14 +231,19 @@ fn to_number(filter: &str, v: &Value) -> Result<Option<f64>, Error> {
         return s.trim().parse::<f64>().map(Some).map_err(|_| {
             Error::new(
                 ErrorKind::InvalidOperation,
-                format!("`{filter}` needs a number, but got the text {s:?}"),
+                format!(
+                    "`{filter}` needs a number, but got the text {:?}",
+                    crate::secrets::mask(s)
+                ),
             )
         });
     }
     f64::try_from(v.clone()).map(Some).map_err(|_| {
         Error::new(
             ErrorKind::InvalidOperation,
-            format!("`{filter}` needs a number, but got {} `{v}`", v.kind()),
+            // Compound values format their strings with debug escaping, which defeats the
+            // text sinks' raw-value masking. The type is enough to explain this error.
+            format!("`{filter}` needs a number, but got {}", v.kind()),
         )
     })
 }
