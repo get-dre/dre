@@ -205,3 +205,127 @@ fn verbose_says_which_profiles_file_it_used() {
         .says("  Profiles  ")
         .says("profiles.yml (from --profiles-dir)");
 }
+
+fn variable_logging_project(mask_secrets: bool, secret: &str) -> TestProject {
+    let config = format!("name: log_redaction\ndefault_profile: warehouse\nmask_secrets: {mask_secrets}\n");
+    let schedule_vars = serde_json::json!({
+        "scheduled_secret": secret,
+        "nested": [{"value": format!("{secret}-long")}],
+        "public": "visible-value",
+    });
+    let schedules = format!("- name: daily\n  report: demo\n  cron: '0 7 * * *'\n  vars: {schedule_vars}\n");
+    TestProject::new(
+        &[
+            ("dre_project.yml", &config),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            ("schedules.yml", &schedules),
+            ("reports/demo/demo.yml", "queries: [q]\n"),
+            ("reports/demo/q.sql", "select length('{{ var('probe') }}') as n\n"),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: ':memory:', threads: 1}\n",
+    )
+}
+
+#[test]
+fn variable_json_is_redacted_before_it_is_embedded_in_text_output() {
+    let secret = "audit\"secret\\\n\té";
+    let long = format!("{secret}-long");
+    for (format, color) in [("text", "never"), ("text", "always"), ("json", "never")] {
+        let p = variable_logging_project(true, secret);
+        let argument = format!("probe={long}");
+        let r = p.dre_env(
+            "run",
+            &[
+                "--schedule",
+                "daily",
+                "--var",
+                &argument,
+                "-v",
+                "--log-format",
+                format,
+                "--color",
+                color,
+            ],
+            &[("DRE_SECRET_SHORT", secret), ("DRE_SECRET_LONG", &long)],
+        );
+        r.ok();
+        let log = p.run_logs();
+        let record = p.read("target/run/demo/default/run_results.json");
+        for (surface, text) in [("stdout", &r.stdout), ("dre.log", &log), ("run record", &record)] {
+            for value in [secret, long.as_str()] {
+                let encoded = serde_json::to_string(value).unwrap();
+                for form in [value, &encoded[1..encoded.len() - 1]] {
+                    assert!(!text.contains(form), "{surface} leaks {form:?}:\n{text}");
+                }
+            }
+            assert!(text.contains("visible-value"), "{surface}:\n{text}");
+            assert!(text.contains("*****"), "{surface}:\n{text}");
+            assert!(
+                !text.contains("*****-long"),
+                "{surface} only masked a substring:\n{text}"
+            );
+        }
+        // Each JSON fragment in the text log remains parseable after masking.
+        for prefix in ["Parameters ", "Schedule daily vars ", "Vars "] {
+            let fragment = log
+                .lines()
+                .find_map(|line| line.split_once(prefix).map(|(_, json)| json))
+                .unwrap_or_else(|| panic!("missing {prefix:?}: {log}"));
+            let value: serde_json::Value = serde_json::from_str(fragment).unwrap();
+            if prefix == "Parameters " {
+                assert_eq!(value["vars"]["probe"], "*****");
+            } else {
+                assert_eq!(value["scheduled_secret"], "*****");
+                assert_eq!(value["nested"][0]["value"], "*****");
+            }
+        }
+        if format == "json" {
+            let events: Vec<serde_json::Value> = r
+                .stdout
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let event = events.iter().find(|e| e["event"] == "binding_vars").unwrap();
+            assert_eq!(event["vars"]["probe"], "*****");
+            assert_eq!(event["schedule_vars"]["scheduled_secret"], "*****");
+        }
+        // Only presentation is masked: the database still receives the original variable.
+        assert_eq!(
+            p.read("target/run/demo/default/demo.csv"),
+            format!("n\r\n{}\r\n", long.chars().count())
+        );
+    }
+}
+
+#[test]
+fn variable_json_stays_visible_when_secret_masking_is_disabled() {
+    let secret = "audit\"secret\\\n\té";
+    let long = format!("{secret}-long");
+    let encoded = serde_json::to_string(&long).unwrap();
+    for format in ["text", "json"] {
+        let p = variable_logging_project(false, secret);
+        let argument = format!("probe={long}");
+        let r = p.dre_env(
+            "run",
+            &[
+                "--schedule",
+                "daily",
+                "--var",
+                &argument,
+                "-v",
+                "--log-format",
+                format,
+                "--color",
+                "never",
+            ],
+            &[("DRE_SECRET_SHORT", secret), ("DRE_SECRET_LONG", &long)],
+        );
+        r.ok();
+        for text in [&r.stdout, &p.run_logs()] {
+            assert!(text.contains(&encoded[1..encoded.len() - 1]), "{text}");
+        }
+        let record = p.json("target/run/demo/default/run_results.json");
+        assert_eq!(record["params"]["vars"]["probe"], long);
+        assert_eq!(record["schedule_vars"]["scheduled_secret"], secret);
+    }
+}

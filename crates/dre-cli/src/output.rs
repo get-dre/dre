@@ -191,7 +191,10 @@ impl Printer {
     /// Record the run's parameters in the log file (and as a JSON event).
     pub fn log_params(&self, params: &serde_json::Value) {
         let mut i = self.inner.lock().unwrap();
-        i.file_log("INFO", &format!("Parameters {params}"));
+        // JSON embedded in text needs structural masking too, before escaping secret values.
+        let text =
+            dre_core::secrets::to_json_line(params).expect("serializing a serde_json::Value cannot fail");
+        i.file_log("INFO", &format!("Parameters {text}"));
         if i.format == LogFormat::Json {
             i.json(json!({"event": "run_parameters", "parameters": params}));
         }
@@ -532,14 +535,16 @@ impl Ui for Printer {
         let mut i = self.inner.lock().unwrap();
         if let Some(name) = schedule {
             let sv = serde_json::Value::Object(schedule_vars.cloned().unwrap_or_default());
+            let sv =
+                dre_core::secrets::to_json_line(&sv).expect("serializing a serde_json::Value cannot fail");
             i.file_log("INFO", &format!("Schedule {name} vars {sv}"));
         }
-        let v = serde_json::Value::Object(vars.clone());
+        let v = dre_core::secrets::to_json_line(vars).expect("serializing a serde_json::Map cannot fail");
         i.file_log("INFO", &format!("Vars {v}"));
         if i.format == LogFormat::Json {
             i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
         } else if i.shows(Level::Debug) {
-            let text = i.paint(DIM, &v.to_string());
+            let text = i.paint(DIM, &v);
             i.print(Tone::Note, "Vars", &text);
         }
     }
