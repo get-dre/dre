@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 dre-protocol.workspace = true
 serde_json.workspace = true
-russh = "0.63"
+russh = "0.64"
 tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
