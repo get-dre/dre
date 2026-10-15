@@ -35,6 +35,30 @@ class RegistryExtensions(unittest.TestCase):
                 if expected:
                     self.assertEqual(result['extensions'][0]['versions'][0]['artifacts']['linux-x86_64']['sha256'], 'a' * 64)
 
+    def test_signatures_and_catalog_settings_reach_the_index(self):
+        archive = 'dre-mcp-0.1.0-rc.2-linux-x86_64.tar.gz'
+        release = {'tag_name': 'dre-mcp-v0.1.0-rc.2', 'assets': [
+            {'name': archive, 'browser_download_url': 'https://example.test/' + archive},
+            {'name': archive + '.minisig', 'browser_download_url': 'https://example.test/sig'},
+            {'name': 'SHA256SUMS', 'browser_download_url': 'https://example.test/SHA256SUMS'}]}
+        replies = {'https://example.test/SHA256SUMS': ('b' * 64 + '  ' + archive + '\n').encode(),
+                   'https://example.test/sig': b'untrusted comment: test\nRUQ...\n'}
+        # An entry from before `command` existed is brought up to date.
+        original = {'schema': 2, 'plugins': [], 'extensions': [{'name': 'dre-mcp', 'kind': 'extension',
+                    'license': 'LicenseRef-Proprietary', 'proprietary_license': True, 'versions': []}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            old = Path(temporary) / 'packages.json'
+            old.write_text(json.dumps(original))
+            output = io.StringIO()
+            with patch.object(registry, 'releases', return_value=iter([release])), \
+                 patch.object(registry, 'get', side_effect=replies.__getitem__), \
+                 contextlib.redirect_stdout(output):
+                registry.main(old, 'get-dre/dre')
+        entry = json.loads(output.getvalue())['extensions'][0]
+        self.assertEqual(entry['command'], 'mcp')
+        artifact = entry['versions'][0]['artifacts']['linux-x86_64']
+        self.assertEqual(artifact['minisig'], 'untrusted comment: test\nRUQ...\n')
+
     def test_archive_without_its_checksum_is_not_indexed(self):
         release = {'assets': [{'name': 'dre-mcp-0.1.0-rc.1-macos-aarch64.tar.gz',
                               'browser_download_url': 'https://example.test/archive'},

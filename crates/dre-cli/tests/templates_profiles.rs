@@ -265,3 +265,48 @@ fn columns_sees_a_relation_recreated_by_an_earlier_query() {
         "select 'id extra ' as cols\n"
     );
 }
+
+#[test]
+fn values_profiles_read_through_env_var_are_masked_without_the_secret_prefix() {
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: masked\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", PLUGINS_YML),
+            ("reports/r/r.yml", "queries: [q]\noutput: {format: csv}\n"),
+            (
+                "reports/r/q.sql",
+                "select '{{ env_var('WH_PASSWORD') }}' as leaked\n",
+            ),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb, password: \"{{ env_var('WH_PASSWORD') }}\"}\n",
+    );
+    p.duckdb("data.duckdb", "select 1;");
+    let env = [("WH_PASSWORD", "plain-env-password")];
+    let r = p.dre_env("compile", &["-s", "r"], &env);
+    r.ok();
+    assert!(!r.stdout.contains("plain-env-password") && !r.stderr.contains("plain-env-password"));
+    assert_eq!(
+        p.read("target/compiled/r/default/q.sql"),
+        "select '*****' as leaked\n"
+    );
+}
+
+#[test]
+fn a_failing_connection_masks_paths_read_through_env_var() {
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: masked\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", PLUGINS_YML),
+            ("reports/r/r.yml", "queries: [q]\noutput: {format: csv}\n"),
+            ("reports/r/q.sql", "select 1 as one\n"),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: \"{{ env_var('WH_FILE') }}\"}\n",
+    );
+    let missing = p.path("no-such-folder/hidden-warehouse-file.duckdb");
+    let r = p.dre_env("run", &["-s", "r"], &[("WH_FILE", missing.to_str().unwrap())]);
+    r.failed();
+    assert!(
+        !r.stdout.contains("hidden-warehouse-file") && !r.stderr.contains("hidden-warehouse-file"),
+        "{r:?}"
+    );
+}

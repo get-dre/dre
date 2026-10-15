@@ -88,6 +88,38 @@ impl DuckDb {
     fn conn(&self) -> Result<&Connection> {
         self.conn.as_ref().ok_or_else(|| "no open session".into())
     }
+    fn open_with(&mut self, c: &Map<String, Value>, read_only: bool, sandbox: bool) -> Result<()> {
+        let path = conn_str(c, "path").unwrap_or(":memory:");
+        let mut config = Config::default();
+        if read_only && path != ":memory:" {
+            config = config.access_mode(AccessMode::ReadOnly)?;
+        }
+        if sandbox {
+            config = config
+                .enable_external_access(false)?
+                .with("autoinstall_known_extensions", "false")?
+                .with("autoload_known_extensions", "false")?;
+        }
+        if let Some(t) = c
+            .get("threads")
+            .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
+        {
+            config = config.threads(t)?;
+        }
+        if let Some(m) = conn_str(c, "memory_limit") {
+            config = config.max_memory(m)?;
+        }
+        let conn = Connection::open_with_flags(path, config)
+            .map_err(|e| format!("can't open DuckDB database `{path}`: {e}"))?;
+        // When core cancels a request, interrupt the running query.
+        let interrupt = conn.interrupt_handle();
+        dre_protocol::plugin::on_cancel(move || interrupt.interrupt());
+        if sandbox {
+            conn.execute_batch("SET lock_configuration = true")?;
+        }
+        self.conn = Some(conn);
+        Ok(())
+    }
 }
 
 impl Source for DuckDb {
@@ -108,27 +140,13 @@ impl Source for DuckDb {
     }
 
     fn open(&mut self, c: &Map<String, Value>, read_only: bool) -> Result<()> {
-        let path = conn_str(c, "path").unwrap_or(":memory:");
-        let mut config = Config::default();
-        if read_only && path != ":memory:" {
-            config = config.access_mode(AccessMode::ReadOnly)?;
-        }
-        if let Some(t) = c
-            .get("threads")
-            .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
-        {
-            config = config.threads(t)?;
-        }
-        if let Some(m) = conn_str(c, "memory_limit") {
-            config = config.max_memory(m)?;
-        }
-        let conn = Connection::open_with_flags(path, config)
-            .map_err(|e| format!("can't open DuckDB database `{path}`: {e}"))?;
-        // When core cancels a request, interrupt the running query.
-        let interrupt = conn.interrupt_handle();
-        dre_protocol::plugin::on_cancel(move || interrupt.interrupt());
-        self.conn = Some(conn);
-        Ok(())
+        self.open_with(c, read_only, false)
+    }
+
+    /// `dre query`: read-only, no files or network outside the database, settings locked so
+    /// the query can't turn that back on.
+    fn open_sandboxed(&mut self, c: &Map<String, Value>) -> Result<()> {
+        self.open_with(c, true, true)
     }
 
     /// Bulk load through DuckDB's appender into a temp table.

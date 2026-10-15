@@ -93,6 +93,9 @@ pub struct Manifest {
     pub sources: BTreeMap<String, ManifestSource>,
     /// The plugin packages the project declares.
     pub plugins: Vec<ManifestPlugin>,
+    /// The companions the project declares under `extensions:`, each with its own settings as written.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<crate::config::dependencies::ExtensionEntry>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -412,6 +415,7 @@ fn document(
         schedules,
         sources: sources(project),
         plugins,
+        extensions: crate::packages::declared_extensions(&project.root).unwrap_or_default(),
     };
     sorted(serde_json::to_value(doc).expect("a manifest serializes"))
 }

@@ -320,6 +320,11 @@ pub trait Source {
         Vec::new()
     }
     fn open(&mut self, connection: &Map<String, Value>, read_only: bool) -> Result<()>;
+    /// Open a read-only session for core's `dre query`: also refuse files, programs and the
+    /// network outside the database where the engine can. Default: a read-only [`Source::open`].
+    fn open_sandboxed(&mut self, connection: &Map<String, Value>) -> Result<()> {
+        self.open(connection, true)
+    }
     /// Run one statement. `row_limit` is a hint; the SDK enforces it either way.
     fn execute(&mut self, sql: &str, row_limit: Option<u64>, out: &mut dyn ResultSink) -> Result<()>;
     /// Verify without executing. Only called when the plugin advertises `check`.
@@ -934,9 +939,14 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Request::Open {
                 connection,
                 read_only,
+                sandbox,
             },
         ) => {
-            s.open(&connection, read_only)?;
+            if sandbox {
+                s.open_sandboxed(&connection)?;
+            } else {
+                s.open(&connection, read_only)?;
+            }
             out.send(&Response::Ok {});
         }
         (Handler::Source(s), Request::Load { name }) => {

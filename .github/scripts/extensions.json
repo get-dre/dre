@@ -1,6 +1,7 @@
 {
   "dre-mcp": {
     "kind": "extension",
+    "command": "mcp",
     "license": "LicenseRef-Proprietary",
     "proprietary_license": true
   }

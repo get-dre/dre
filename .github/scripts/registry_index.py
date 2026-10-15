@@ -49,7 +49,8 @@ def releases(repo):
 
 
 def artifacts(release, package, version, extension=False):
-    """The release's archives with their SHA256SUMS checksums; None if it isn't complete."""
+    """The release's archives with their SHA256SUMS checksums; None if it isn't complete. An
+    extension archive's `<archive>.minisig` asset, when published, goes in as its `minisig`."""
     assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
     if "SHA256SUMS" not in assets:
         return None
@@ -67,6 +68,8 @@ def artifacts(release, package, version, extension=False):
             if name not in sums:
                 return None
             out[m.group(1)] = {"url": url, "sha256": sums[name]}
+            if extension and name + ".minisig" in assets:
+                out[m.group(1)]["minisig"] = get(assets[name + ".minisig"]).decode()
     return out or None
 
 
@@ -107,7 +110,8 @@ def main(old_path, repo):
     extension_catalog = json.loads((pathlib.Path(__file__).parent / "extensions.json").read_text())
     by_extension = {e["name"]: e for e in index.get("extensions", [])}
     for name, settings in extension_catalog.items():
-        entry = by_extension.setdefault(name, {"name": name, **settings, "versions": []})
+        entry = by_extension.setdefault(name, {"name": name, "versions": []})
+        entry.update(settings)
         for release in published:
             prefix = name + "-v"
             if release.get("draft") or not release["tag_name"].startswith(prefix):

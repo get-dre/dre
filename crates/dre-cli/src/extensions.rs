@@ -1,13 +1,27 @@
 //! Generic companion binaries: separate from plugins and their protocol handshake.
-use crate::output::Printer;
+//!
+//! Core knows nothing about an extension's licence beyond the registry's label, which it shows
+//! before installing. Installing always needs a yes at the prompt or `--accept-proprietary`, and
+//! only runs an artifact downloaded over `https` whose minisign signature matches the key built
+//! into `dre`. Settings in a project's `extensions:` entries beyond `name` and `version` belong to
+//! the extension, which reads and checks them itself.
+use crate::output::{Printer, Tone};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+/// The key extension artifacts are signed with (minisign). Rotating it: add the new key here
+/// in a core release before the extension release signed with it.
+const TRUSTED_KEY: &str = "RWR2AdtS79I6bUXgpG6WHb3NHBN3Y/iZpzZyiTZoQJopVeOZxP5swhXP";
 
 #[derive(clap::Args)]
 pub struct McpArgs {
+    /// Install the companion without asking, after reviewing the licence the registry names.
+    #[arg(long)]
+    pub accept_proprietary: bool,
     /// Arguments passed unchanged to the installed companion.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
@@ -15,21 +29,19 @@ pub struct McpArgs {
 
 #[derive(clap::Subcommand)]
 pub enum ExtensionCommand {
-    /// Install a separately licensed companion executable.
+    /// Install, or update to the newest version, a separately licensed companion executable.
+    #[command(visible_alias = "update")]
     Install(InstallArgs),
-    /// Update an installed companion after verifying its checksum.
-    Update(InstallArgs),
 }
 #[derive(clap::Args)]
 pub struct InstallArgs {
     /// Companion package name, optionally with @version.
     pub name: String,
-    /// Acknowledge the proprietary licence shown before an extension is installed.
+    /// Install without asking, after reviewing the licence the registry names.
     #[arg(long)]
     pub accept_proprietary: bool,
-    #[command(flatten)]
-    pub project: crate::ProjectArgs,
 }
+
 #[derive(Deserialize)]
 struct Index {
     schema: u32,
@@ -42,93 +54,91 @@ struct Extension {
     kind: String,
     license: String,
     proprietary_license: bool,
-    versions: Vec<dre_core::manager::IndexVersion>,
+    /// The `dre` subcommand that hands off to it; default: the name without `dre-`.
+    #[serde(default)]
+    command: Option<String>,
+    versions: Vec<Version>,
+}
+#[derive(Deserialize)]
+struct Version {
+    version: semver::Version,
+    artifacts: BTreeMap<String, Artifact>,
+}
+#[derive(Deserialize)]
+struct Artifact {
+    url: String,
+    sha256: String,
+    /// The artifact's minisign signature (the whole `.minisig` file).
+    #[serde(default)]
+    minisig: Option<String>,
 }
 
-fn declared(root: &std::path::Path) -> Result<Vec<dre_core::config::dependencies::ExtensionEntry>, String> {
-    #[derive(Deserialize)]
-    struct Dependencies {
-        #[serde(default)]
-        extensions: Vec<dre_core::config::dependencies::ExtensionEntry>,
-    }
-    let mut entries = Vec::new();
-    let mut names = std::collections::BTreeSet::new();
-    for file in dre_core::packages::DEPENDENCY_FILES {
-        let path = root.join(file);
-        if !path.exists() {
-            continue;
-        }
-        let dependencies: Dependencies =
-            serde_saphyr::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("invalid {}: {e}", path.display()))?;
-        for entry in dependencies.extensions {
-            if entry.name.is_empty()
-                || !entry
-                    .name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                || !names.insert(entry.name.clone())
-            {
-                return Err("extension names must be valid and unique".into());
-            }
-            semver::Version::parse(&entry.version)
-                .map_err(|e| format!("extension `{}` needs an exact version: {e}", entry.name))?;
-            if entry.accept_license.as_ref().is_some_and(|v| v.trim().is_empty()) {
-                return Err("accept_license must name a reviewed EULA version".into());
-            }
-            entries.push(entry);
-        }
-    }
-    Ok(entries)
+/// The `dre` subcommand an extension handles: its registry `command`, else its name without
+/// `dre-`.
+fn command_of<'a>(name: &'a str, command: Option<&'a str>) -> &'a str {
+    command.unwrap_or(name.strip_prefix("dre-").unwrap_or(name))
 }
 
-pub fn sync_declared(root: &std::path::Path, accept_proprietary: bool) -> Result<usize, String> {
-    let entries = declared(root)?;
-    for entry in &entries {
-        let path = install(
-            &format!("{}@{}", entry.name, entry.version),
-            accept_proprietary || entry.accept_license.is_some(),
-        )?;
-        eprintln!(
-            "Installed companion {}. Read its EULA before use; owner-pinned accept_license values are never updated automatically.",
-            path.display()
-        );
-    }
-    Ok(entries.len())
+fn executable(name: &str) -> String {
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
-fn install(name: &str, accept: bool) -> Result<PathBuf, String> {
-    let (name, requested) = name.split_once('@').map_or((name, None), |(n, v)| (n, Some(v)));
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err("invalid extension name".into());
+fn extensions_dir() -> PathBuf {
+    dre_core::dre_home().join("extensions")
+}
+
+/// Whether the user agrees to install: `--accept-proprietary`, else a yes at the prompt.
+/// `None` when nobody can be asked.
+fn consent(question: &str, accepted: bool) -> Option<bool> {
+    if accepted {
+        return Some(true);
     }
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        return None;
+    }
+    eprint!("{question} [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    let _ = std::io::stdin().read_line(&mut answer);
+    Some(["y", "yes"].contains(&answer.trim().to_ascii_lowercase().as_str()))
+}
+
+enum Installed {
+    Done(PathBuf),
+    Declined,
+    /// Not interactive and no `--accept-proprietary`.
+    NotAsked,
+}
+
+fn registry() -> Result<Vec<Extension>, String> {
     let bytes = dre_core::manager::fetch(&dre_core::manager::registry_url())?;
     let index: Index =
         serde_json::from_slice(&bytes).map_err(|e| format!("invalid extension registry: {e}"))?;
     if index.schema != 2 {
         return Err("unsupported extension registry schema".into());
     }
-    let extension = index
+    Ok(index
         .extensions
-        .iter()
-        .find(|e| e.name == name && e.kind == "extension")
-        .ok_or_else(|| format!("extension `{name}` is not in this registry"))?;
-    eprintln!(
-        "Extension `{name}` licence: {}{}",
-        extension.license,
-        if extension.proprietary_license {
-            " (proprietary)"
-        } else {
-            ""
-        }
-    );
-    if extension.proprietary_license && !accept {
-        return Err("this extension is proprietary-licensed; review its licence and pass --accept-proprietary to install it".into());
+        .into_iter()
+        .filter(|e| e.kind == "extension")
+        .collect())
+}
+
+/// Download, check and install `name` (optionally `name@version`), after asking.
+fn install(spec: &str, accepted: bool) -> Result<Installed, String> {
+    let (name, requested) = spec.split_once('@').map_or((spec, None), |(n, v)| (n, Some(v)));
+    if !dre_core::packages::valid_extension_name(name) {
+        return Err("invalid extension name".into());
     }
+    let extension = registry()?
+        .into_iter()
+        .find(|e| e.name == name)
+        .ok_or_else(|| format!("extension `{name}` is not in this registry"))?;
+    install_from(extension, requested, accepted)
+}
+
+fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -> Result<Installed, String> {
+    let name = extension.name.as_str();
     let requested = requested
         .map(semver::Version::parse)
         .transpose()
@@ -139,64 +149,60 @@ fn install(name: &str, accept: bool) -> Result<PathBuf, String> {
         .filter(|v| requested.as_ref().is_none_or(|r| r == &v.version))
         .max_by_key(|v| &v.version)
         .ok_or("no matching extension version")?;
+    let label = if extension.proprietary_license {
+        format!("{} (proprietary)", extension.license)
+    } else {
+        extension.license.clone()
+    };
+    match consent(
+        &format!(
+            "Extension `{name}` {} is licensed under {label}, separately from DRE. Install it?",
+            version.version
+        ),
+        accepted,
+    ) {
+        Some(true) => {}
+        Some(false) => return Ok(Installed::Declined),
+        None => return Ok(Installed::NotAsked),
+    }
     let platform = dre_core::manager::platform();
     let artifact = version
         .artifacts
         .get(&platform)
         .ok_or_else(|| format!("no extension artifact for {platform}"))?;
-    if artifact.sha256.len() != 64 || !artifact.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("extension artifacts require a published SHA-256 checksum".into());
+    let file_name = artifact.url.rsplit(['/', '\\']).next().unwrap_or_default();
+    // Released archives are named for what they hold; the signature covers that name too.
+    if artifact.url.starts_with("https://")
+        && !file_name.starts_with(&format!("{name}-{}-{platform}.", version.version))
+    {
+        return Err(format!(
+            "extension artifact `{file_name}` doesn't match {name} {} for {platform}",
+            version.version
+        ));
     }
-    let bytes = dre_core::manager::fetch(&artifact.url)?;
-    let digest = Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    if !digest.eq_ignore_ascii_case(&artifact.sha256) {
-        return Err("extension artifact checksum mismatch; download discarded".into());
-    }
-    let executable = if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.into()
-    };
-    let bytes = if artifact.url.ends_with(".tar.gz") || artifact.url.ends_with(".tgz") {
-        use std::io::Read;
-        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes.as_slice()));
-        let mut found = None;
-        for entry in archive.entries().map_err(|e| e.to_string())? {
-            let mut entry = entry.map_err(|e| e.to_string())?;
-            if entry.header().entry_type().is_file()
-                && entry
-                    .path()
-                    .map_err(|e| e.to_string())?
-                    .file_name()
-                    .is_some_and(|n| n == executable.as_str())
-            {
-                if found.is_some() {
-                    return Err("extension archive contains duplicate executables".into());
-                }
-                let mut data = Vec::new();
-                entry.read_to_end(&mut data).map_err(|e| e.to_string())?;
-                found = Some(data);
-            }
-        }
-        found.ok_or("extension archive has no expected executable")?
+    let bytes = download(artifact, file_name)?;
+    let digest = hex_sha256(&bytes);
+    let file = executable(name);
+    let binary = if artifact.url.ends_with(".tar.gz") || artifact.url.ends_with(".tgz") {
+        unpack(&bytes, &file)?
     } else {
         bytes
     };
-    let root = dre_core::dre_home().join("extensions").join(name);
+    let root = extensions_dir().join(name);
     let folder = root.join(version.version.to_string());
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let destination = folder.join(&executable);
-    dre_core::fs::write_atomic(&destination, &bytes).map_err(|e| e.to_string())?;
+    let destination = folder.join(&file);
+    dre_core::fs::write_atomic(&destination, &binary).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
     }
-    let receipt = serde_json::json!({"name":name,"version":version.version,"license":extension.license,"proprietary_license":extension.proprietary_license,"platform":platform,"artifact_sha256":digest});
+    let command = command_of(name, extension.command.as_deref());
+    let receipt = serde_json::json!({"name": name, "version": version.version, "command": command,
+        "license": extension.license, "proprietary_license": extension.proprietary_license,
+        "platform": platform, "artifact_sha256": digest});
     dre_core::fs::write_atomic(
         &folder.join("extension.json"),
         serde_json::to_vec(&receipt).unwrap().as_slice(),
@@ -204,17 +210,131 @@ fn install(name: &str, accept: bool) -> Result<PathBuf, String> {
     .map_err(|e| e.to_string())?;
     dre_core::fs::write_atomic(&root.join("current"), version.version.to_string().as_bytes())
         .map_err(|e| e.to_string())?;
-    Ok(destination)
+    Ok(Installed::Done(destination))
+}
+
+/// The artifact's bytes, once its URL, checksum and signature check out.
+fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
+    let local_registry = !dre_core::manager::registry_url().contains("://");
+    // A local registry (a development build) may point at local files; anything else needs TLS.
+    if !(artifact.url.starts_with("https://") || local_registry && !artifact.url.contains("://")) {
+        return Err("extension artifacts must be downloaded over https".into());
+    }
+    if artifact.sha256.len() != 64 || !artifact.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("extension artifacts require a published SHA-256 checksum".into());
+    }
+    let signature = artifact
+        .minisig
+        .as_deref()
+        .ok_or("the extension artifact is not signed; download refused")?;
+    let bytes = dre_core::manager::fetch(&artifact.url)?;
+    if !hex_sha256(&bytes).eq_ignore_ascii_case(&artifact.sha256) {
+        return Err("extension artifact checksum mismatch; download discarded".into());
+    }
+    verify(&bytes, signature, file_name)?;
+    Ok(bytes)
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Check `bytes` against a minisign signature from the trusted key, whose signed (trusted)
+/// comment names `file_name`: a signature can't be replayed for another artifact.
+fn verify(bytes: &[u8], signature: &str, file_name: &str) -> Result<(), String> {
+    let refused = |why: String| format!("extension signature check failed ({why}); download discarded");
+    let key = trusted_key();
+    let key = minisign_verify::PublicKey::from_base64(&key).map_err(|e| refused(e.to_string()))?;
+    let signature = minisign_verify::Signature::decode(signature).map_err(|e| refused(e.to_string()))?;
+    key.verify(bytes, &signature, false)
+        .map_err(|e| refused(e.to_string()))?;
+    if !signature
+        .trusted_comment()
+        .split('\t')
+        .any(|field| field == format!("file:{file_name}"))
+    {
+        return Err(refused(format!(
+            "the signature is for another file than {file_name}"
+        )));
+    }
+    Ok(())
+}
+
+/// Tests sign with their own key; release builds only ever trust the built-in one.
+fn trusted_key() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(key) = std::env::var("DRE_TEST_EXTENSION_KEY") {
+        return key;
+    }
+    TRUSTED_KEY.into()
+}
+
+fn unpack(archive: &[u8], file: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(archive));
+    let mut found = None;
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry = entry.map_err(|e| e.to_string())?;
+        if entry.header().entry_type().is_file()
+            && entry
+                .path()
+                .map_err(|e| e.to_string())?
+                .file_name()
+                .is_some_and(|n| n == file)
+        {
+            if found.is_some() {
+                return Err("extension archive contains duplicate executables".into());
+            }
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).map_err(|e| e.to_string())?;
+            found = Some(data);
+        }
+    }
+    found.ok_or_else(|| "extension archive has no expected executable".into())
+}
+
+/// `dre deps`: install the project's declared extensions at their pinned versions.
+pub fn sync_declared(root: &Path, accepted: bool, printer: &Printer) -> Result<usize, String> {
+    let mut installed = 0;
+    for entry in dre_core::packages::declared_extensions(root)? {
+        let path = extensions_dir()
+            .join(&entry.name)
+            .join(&entry.version)
+            .join(executable(&entry.name));
+        if path.is_file() {
+            installed += 1;
+            continue;
+        }
+        match install(&format!("{}@{}", entry.name, entry.version), accepted)? {
+            Installed::Done(path) => {
+                printer.line(Tone::Good, "Installed", &format!("companion {}", path.display()));
+                installed += 1;
+            }
+            Installed::Declined => printer.line(Tone::Warn, "Skipped", &format!("companion {}", entry.name)),
+            Installed::NotAsked => printer.line(
+                Tone::Warn,
+                "Skipped",
+                &format!(
+                    "companion {}: installing it needs a yes at the prompt or --accept-proprietary",
+                    entry.name
+                ),
+            ),
+        }
+    }
+    Ok(installed)
 }
 
 pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
-    let args = match command {
-        ExtensionCommand::Install(a) | ExtensionCommand::Update(a) => a,
-    };
+    let ExtensionCommand::Install(args) = command;
     match install(&args.name, args.accept_proprietary) {
-        Ok(path) => {
-            println!("Installed extension {}", path.display());
+        Ok(Installed::Done(path)) => {
+            printer.line(Tone::Good, "Installed", &format!("extension {}", path.display()));
             ExitCode::SUCCESS
+        }
+        Ok(Installed::Declined) => ExitCode::from(1),
+        Ok(Installed::NotAsked) => {
+            printer.error("not installed: review the licence, then pass --accept-proprietary");
+            ExitCode::from(2)
         }
         Err(error) => {
             printer.error(&error);
@@ -223,116 +343,109 @@ pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
     }
 }
 
-fn installed(pinned: Option<&str>) -> Option<PathBuf> {
-    let root = dre_core::dre_home().join("extensions/dre-mcp");
-    let current = match pinned {
-        Some(version) => version.to_owned(),
-        None => std::fs::read_to_string(root.join("current")).ok()?,
-    };
-    let version = semver::Version::parse(current.trim()).ok()?;
-    let name = if cfg!(windows) { "dre-mcp.exe" } else { "dre-mcp" };
-    let path = root.join(version.to_string()).join(name);
-    path.is_file().then_some(path)
+/// The installed extension handling `dre <command>`: the declared pin's version when the
+/// project has one, else the current version.
+fn installed(command: &str, pins: &[dre_core::config::dependencies::ExtensionEntry]) -> Option<PathBuf> {
+    let mut dirs: Vec<_> = std::fs::read_dir(extensions_dir()).ok()?.flatten().collect();
+    dirs.sort_by_key(|d| d.file_name());
+    for dir in dirs {
+        let name = dir.file_name().to_string_lossy().into_owned();
+        let version = match pins.iter().find(|e| e.name == name) {
+            Some(pin) => pin.version.clone(),
+            None => std::fs::read_to_string(dir.path().join("current")).unwrap_or_default(),
+        };
+        let Ok(version) = semver::Version::parse(version.trim()) else {
+            continue;
+        };
+        let folder = dir.path().join(version.to_string());
+        let receipt: serde_json::Value = std::fs::read(folder.join("extension.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let handles = command_of(&name, receipt["command"].as_str()) == command;
+        let path = folder.join(executable(&name));
+        if handles && path.is_file() {
+            return Some(path);
+        }
+    }
+    None
 }
 
-pub fn handoff(args: McpArgs, _printer: &Printer) -> ExitCode {
-    let root = args
-        .args
-        .windows(2)
+fn project_dir(args: &[String]) -> PathBuf {
+    args.windows(2)
         .find(|pair| pair[0] == "--project-dir")
         .map(|pair| PathBuf::from(&pair[1]))
         .or_else(|| {
-            args.args
-                .iter()
+            args.iter()
                 .find_map(|arg| arg.strip_prefix("--project-dir=").map(PathBuf::from))
         })
-        .unwrap_or_else(|| PathBuf::from("."));
-    let entries = if args.args.first().is_some_and(|arg| arg == "license") {
-        Ok(Vec::new())
-    } else {
-        declared(&root)
-    };
-    let entries = match entries {
-        Ok(entries) => entries,
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// `dre <command> …`: run the extension that handles `command`, with `--dre-bin` set to this
+/// `dre` so it never runs a different one from the PATH. Offers to install it when missing.
+pub fn handoff(command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
+    let pins = match dre_core::packages::declared_extensions(&project_dir(&args.args)) {
+        Ok(pins) => pins,
         Err(error) => {
-            eprintln!("{error}");
+            printer.error(&error);
             return ExitCode::from(2);
         }
     };
-    let policy = entries.iter().find(|entry| entry.name == "dre-mcp");
-    let explicit_binary = std::env::var_os("DRE_MCP_BIN");
-    let binary = explicit_binary
-        .clone()
-        .map(PathBuf::from)
-        .or_else(|| installed(policy.map(|entry| entry.version.as_str())))
-        .unwrap_or_else(|| {
-            policy.map_or_else(
-                || PathBuf::from("dre-mcp"),
-                |entry| {
-                    dre_core::dre_home()
-                        .join("extensions/dre-mcp")
-                        .join(&entry.version)
-                        .join(if cfg!(windows) { "dre-mcp.exe" } else { "dre-mcp" })
-                },
-            )
-        });
-    match Command::new(&binary).args(&args.args).status() {
+    let variable = format!("DRE_{}_BIN", command.to_ascii_uppercase());
+    let binary = match std::env::var_os(&variable) {
+        Some(binary) => PathBuf::from(binary),
+        None => match installed(command, &pins) {
+            Some(binary) => binary,
+            None => match offer(command, &pins, args.accept_proprietary, printer) {
+                Ok(binary) => binary,
+                Err(code) => return code,
+            },
+        },
+    };
+    let mut forwarded = Vec::new();
+    if !args
+        .args
+        .iter()
+        .any(|a| a == "--dre-bin" || a.starts_with("--dre-bin="))
+        && let Ok(dre) = std::env::current_exe()
+    {
+        forwarded.push("--dre-bin".into());
+        forwarded.push(dre.into_os_string());
+    }
+    forwarded.extend(args.args.iter().map(Into::into));
+    match Command::new(&binary).args(&forwarded).status() {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
         Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound
-                && explicit_binary.is_none()
-                && let Some(policy) = policy.filter(|entry| entry.accept_license.is_some())
-            {
-                return match install(&format!("dre-mcp@{}", policy.version), true) {
-                    Ok(path) => match Command::new(path).args(&args.args).status() {
-                        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
-                        Err(error) => {
-                            eprintln!("cannot start companion: {error}");
-                            ExitCode::from(2)
-                        }
-                    },
-                    Err(error) => {
-                        eprintln!("companion installation failed: {error}");
-                        ExitCode::from(2)
-                    }
-                };
-            }
-            if error.kind() == std::io::ErrorKind::NotFound
-                && explicit_binary.is_none()
-                && std::io::stdin().is_terminal()
-                && std::io::stderr().is_terminal()
-            {
-                eprint!(
-                    "DRE MCP is a proprietary-licensed companion. Install it from the extension registry? [y/N] "
-                );
-                let _ = std::io::stderr().flush();
-                let mut answer = String::new();
-                let _ = std::io::stdin().read_line(&mut answer);
-                if ["y", "yes"].contains(&answer.trim().to_ascii_lowercase().as_str()) {
-                    let package = policy.map_or_else(
-                        || "dre-mcp".to_owned(),
-                        |entry| format!("dre-mcp@{}", entry.version),
-                    );
-                    match install(&package, true) {
-                        Ok(path) => {
-                            return match Command::new(path).args(&args.args).status() {
-                                Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8),
-                                Err(error) => {
-                                    eprintln!("cannot start installed companion: {error}");
-                                    ExitCode::from(2)
-                                }
-                            };
-                        }
-                        Err(error) => eprintln!("extension installation failed: {error}"),
-                    }
-                }
-            } else {
-                eprintln!(
-                    "cannot start {}: {error}; install the companion with `dre extension install dre-mcp --accept-proprietary`, or set DRE_MCP_BIN to a local build",
-                    binary.display()
-                );
-            }
+            printer.error(&format!("cannot start {}: {error}", binary.display()));
             ExitCode::from(2)
         }
+    }
+}
+
+/// Install the extension handling `command` (the project's pinned version, if any).
+fn offer(
+    command: &str,
+    pins: &[dre_core::config::dependencies::ExtensionEntry],
+    accepted: bool,
+    printer: &Printer,
+) -> Result<PathBuf, ExitCode> {
+    let failed = |error: String| {
+        printer.error(&error);
+        ExitCode::from(2)
+    };
+    let extension = registry()
+        .map_err(failed)?
+        .into_iter()
+        .find(|e| command_of(&e.name, e.command.as_deref()) == command)
+        .ok_or_else(|| failed(format!("no extension provides `dre {command}` in this registry")))?;
+    let name = extension.name.clone();
+    let pin = pins.iter().find(|e| e.name == name).map(|e| e.version.clone());
+    match install_from(extension, pin.as_deref(), accepted).map_err(failed)? {
+        Installed::Done(path) => Ok(path),
+        Installed::Declined => Err(ExitCode::from(1)),
+        Installed::NotAsked => Err(failed(format!(
+            "`dre {command}` needs the {name} extension, which isn't installed; run `dre {command} --accept-proprietary` or `dre extension install {name}` after reviewing its licence"
+        ))),
     }
 }

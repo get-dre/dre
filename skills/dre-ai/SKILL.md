@@ -3,14 +3,14 @@ name: dre-ai
 description: "Prepare AI context for DRE reports: descriptions, business questions, declared inputs, inherited context and upstream table documentation. Use when an analyst wants reports ready for MCP discovery or needs to improve retrieval. Does not enable exposure."
 license: GPL-3.0-only
 metadata:
-  version: "3.2.0"
+  version: "3.2.1"
   dre: ">=0.4.1, <0.5.0"
 ---
 
 # Prepare AI context for DRE reports
 
 Read [AI-ready reports](references/ai-ready-reports.md)
-for metadata, inheritance and MCP scope. Read `references/practices.md` for AI-1 through AI-5.
+for metadata, inheritance and MCP scope. Read `references/practices.md` for AI-1 through AI-6.
 
 <!-- BEGIN shared/version-check.md -->
 ### Step 1: check the installed dre
@@ -57,6 +57,14 @@ Write a concise `description`, `meta.ai.questions` phrased as real business ques
 defaults so context compilation resolves tables. Record business definitions in inherited
 `ai_context.md`, keeping report-specific exceptions near the report (AI-1).
 
+Constrain every input the agent may vary (AI-6). Prefer `date`, `integer`, `number` or
+`boolean`. For a string, propose an `allowed` list when the values are known (regions, product
+lines), else a `pattern` matching the whole value plus a `max_length` (a customer code:
+`pattern: '[A-Z]{3}[0-9]{4}'`, `max_length: 7`); ask the user to confirm it. `pattern` and
+`max_length` need dre 0.4.3 or later; on an older dre use `allowed`. Explain that a free-text
+string, or an array or object without `allowed`, keeps the report from being exposed: the
+value is rendered into the SQL, so the model could change the reviewed query.
+
 Report missing table or column comments to the pipeline owner. Suggest descriptions for their
 dbt model or pipeline documentation if requested; do not silently write warehouse comments.
 DRE leverages that upstream context rather than replacing the pipeline (AI-2).
@@ -67,8 +75,9 @@ Run `dre validate` and `dre compile --select <report>`. If the MCP companion is 
 run `dre mcp validate` and `dre mcp test` to check declared example questions and collisions.
 Otherwise explain that MCP retrieval checks remain pending; do not claim they passed.
 
-If MCP stops for EULA review, report the owner action required. Preserve `accept_license`;
-context preparation does not authorise accepting or changing legal terms (AI-5).
+If MCP stops for EULA review, report the owner action required. Leave companion settings in
+`extensions:` (such as `accept_license`) unchanged; context preparation does not authorise
+accepting or changing legal terms (AI-5).
 
 Never enable `meta.ai.expose: true`. Leave existing owner-approved exposure unchanged; for new
 metadata use false or omit exposure. Summarize suggested scope, including report-related table

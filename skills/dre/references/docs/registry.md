@@ -38,10 +38,12 @@ optional top-level `extensions` array uses entries with `name`, `kind: "extensio
 structure as a plugin, with a required SHA-256 checksum. Existing plugin index readers ignore
 this sibling array; plugin installation continues to read `plugins` only.
 
-`dre extension install <name>` and `dre extension update <name>` install verified artifacts in
-`~/.dre/extensions/<name>/<version>/`. A `current` pointer selects the installed version.
-Separately licensed proprietary extensions require interactive acceptance or an explicit
-`--accept-proprietary`. Installation does not make their source part of the GPL engine.
+`dre extension install <name>` installs, or updates to the newest version (`<name>@<version>`
+for an exact one), in `~/.dre/extensions/<name>/<version>/`; a `current` pointer selects the
+installed version. Every install asks first, showing the licence the registry names, or takes
+`--accept-proprietary`. The artifact must come over `https`, match its SHA-256 checksum and
+carry a minisign signature from the key built into `dre`; anything else is refused.
+Installation does not make an extension's source part of the GPL engine.
 
 `dre mcp` forwards arguments to the `dre-mcp` companion, preserving its exit status.
 `DRE_MCP_BIN` can point to a local build for testing. A missing companion produces installation

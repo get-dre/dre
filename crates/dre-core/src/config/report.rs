@@ -44,7 +44,7 @@ pub struct ReportFile {
     pub default_set: Option<Located<Loose<String>>>,
     /// Variables, read in SQL and YAML with `var('name')`. Values can be strings, numbers, booleans, lists or maps.
     pub vars: Option<Located<Loose<JsonMap>>>,
-    /// Optional declarations for variables: type, default, allowed values, description and required.
+    /// Optional declarations for variables: type, default, allowed values, description, required, and for strings a pattern and max_length.
     /// Kept separate from `vars` so a map-valued variable remains a plain value.
     pub var_schema: Option<Located<Loose<crate::variables::Definitions>>>,
     /// The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC.

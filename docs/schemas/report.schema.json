@@ -85,7 +85,7 @@
     },
     "var_schema": {
       "type": "object",
-      "description": "Optional declarations for variables: type, default, allowed values, description and required.\nKept separate from `vars` so a map-valued variable remains a plain value.",
+      "description": "Optional declarations for variables: type, default, allowed values, description, required, and for strings a pattern and max_length.\nKept separate from `vars` so a map-valued variable remains a plain value.",
       "additionalProperties": {
         "$ref": "#/$defs/Definition"
       }
@@ -612,6 +612,15 @@
           "type": "array",
           "description": "Optional exact values accepted for this variable; required for the enum type.",
           "items": true
+        },
+        "pattern": {
+          "type": "string",
+          "description": "For `string` variables: a regular expression the whole value must match, e.g.\n`^[A-Z]{3}[0-9]{4}$` for a customer code. Anchors are implied."
+        },
+        "max_length": {
+          "type": "integer",
+          "description": "For `string` variables: the most characters a value may have.",
+          "minimum": 0
         }
       },
       "required": [

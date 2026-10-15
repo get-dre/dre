@@ -244,6 +244,7 @@ impl Profiles {
                 return out;
             }
         };
+        crate::secrets::register_env_references(&text);
         let tree = match node::parse(&text) {
             Ok(n) => n,
             Err(e) => {

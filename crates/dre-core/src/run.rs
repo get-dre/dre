@@ -1442,8 +1442,7 @@ impl<'a> BindingRun<'a> {
     }
 
     fn run_inner(&mut self) -> Result<(), Fail> {
-        let errors =
-            crate::variables::check_values(&self.report.var_schema, &self.vars, &self.opts.vars, true);
+        let errors = crate::variables::check_run_values(&self.report.var_schema, &self.vars, &self.opts.vars);
         if !errors.is_empty() {
             return Err(errors.join("; ").into());
         }

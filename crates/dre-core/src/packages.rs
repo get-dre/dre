@@ -60,6 +60,44 @@ struct Manifest {
     name: String,
 }
 
+/// Whether `name` can name an extension (and its executable): ASCII letters, digits, `-`, `_`.
+pub fn valid_extension_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The `extensions:` entries of the root dependency files: unique valid names, exact versions.
+pub fn declared_extensions(root: &Path) -> Result<Vec<crate::config::dependencies::ExtensionEntry>, String> {
+    #[derive(serde::Deserialize)]
+    struct Dependencies {
+        #[serde(default)]
+        extensions: Vec<crate::config::dependencies::ExtensionEntry>,
+    }
+    let mut entries = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    for file in DEPENDENCY_FILES {
+        let path = root.join(file);
+        if !path.exists() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let dependencies: Dependencies =
+            serde_saphyr::from_str(&text).map_err(|e| format!("invalid {}: {e}", path.display()))?;
+        for entry in dependencies.extensions {
+            let valid = valid_extension_name(&entry.name);
+            if !valid || !names.insert(entry.name.clone()) {
+                return Err("extension names must be valid and unique".into());
+            }
+            semver::Version::parse(&entry.version)
+                .map_err(|e| format!("extension `{}` needs an exact version: {e}", entry.name))?;
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
 /// Every `packages:` entry in the root dependency files. Problems go to `diags`.
 pub fn declared(root: &Path, diags: &mut Diagnostics) -> Vec<Declared> {
     let mut out: Vec<Declared> = Vec::new();

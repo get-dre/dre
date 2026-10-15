@@ -2,8 +2,8 @@
 //! any project YAML file may also declare, and `packages:`, the macro packages.
 
 use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 
 use super::de::{Located, Loose, Map, OneOf, UnknownKeys};
 
@@ -14,25 +14,25 @@ pub struct DependenciesFile {
     #[serde(default)]
     #[schemars(schema_with = "plugins")]
     pub plugins: Option<PluginsSection>,
-    /// Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately.
+    /// Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately.
     #[serde(default)]
     pub extensions: Vec<ExtensionEntry>,
     /// Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`.
     pub packages: Option<Located<Loose<Vec<Loose<Package>>>>>,
 }
 
-/// An optional companion dependency, separate from source/format/destination plugins.
-#[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
+/// An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(extend("additionalProperties" = true, "x-doc-other" = "Settings of the companion itself, which reads and checks them; see its documentation."))]
 pub struct ExtensionEntry {
     /// Registry executable name, e.g. `dre-mcp`.
     pub name: String,
     /// Exact semantic version, including an RC suffix where applicable.
     pub version: String,
-    /// Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms.
-    #[serde(default)]
-    pub accept_license: Option<String>,
+    /// The companion's own settings, untouched by DRE.
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub settings: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// The `plugins:` key of any project YAML file.
@@ -139,4 +139,26 @@ struct Item(PluginItem);
 /// The schema of `plugins:`, wherever it's written.
 pub(super) fn plugins(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     g.subschema_for::<Plugins>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_entries_keep_settings_dre_does_not_own() {
+        let node = super::super::node::parse(
+            "extensions:\n  - name: dre-mcp\n    version: '0.1.0'\n    accept_license: '2026-10'\n    team: {seats: 5}\npackages:\n  - local: pkg\n",
+        )
+        .unwrap();
+        let file: DependenciesFile = super::super::de::from_node(&node).unwrap();
+        let entry = &file.extensions[0];
+        assert_eq!(
+            (entry.name.as_str(), entry.version.as_str()),
+            ("dre-mcp", "0.1.0")
+        );
+        assert_eq!(entry.settings["accept_license"], "2026-10");
+        assert_eq!(entry.settings["team"]["seats"], 5);
+        assert!(file.packages.is_some());
+    }
 }

@@ -138,3 +138,25 @@ fn a_cancel_interrupts_the_running_query() {
         e => panic!("{e:?}"),
     }
 }
+
+#[test]
+fn sandboxed_sessions_reach_no_files_and_cannot_unlock_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("secret.txt");
+    std::fs::write(&secret, "top secret").unwrap();
+    let read = format!("select content from read_text('{}')", secret.display());
+    // An ordinary session reads files: reports may use them.
+    let mut p = open(":memory:", false);
+    assert_eq!(rows(&mut p, &read), Some(1));
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let mut c = Map::new();
+    c.insert("path".into(), json!(":memory:"));
+    p.open_sandboxed(c).unwrap();
+    assert!(p.execute(&read, None, |_, _| Ok(())).is_err());
+    assert!(
+        p.execute("set enable_external_access = true", None, |_, _| Ok(()))
+            .is_err()
+    );
+    assert_eq!(rows(&mut p, "select 42"), Some(1));
+}
