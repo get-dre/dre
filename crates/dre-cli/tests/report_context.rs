@@ -354,8 +354,13 @@ impl Signer {
     fn key(&self) -> String {
         self.0.pk.to_base64()
     }
+    /// Sign as `minisign -S` does: the trusted comment names the file.
     fn sign(&self, bytes: &[u8]) -> String {
-        minisign::sign(Some(&self.0.pk), &self.0.sk, bytes, None, None)
+        self.sign_as(bytes, "companion")
+    }
+    fn sign_as(&self, bytes: &[u8], file: &str) -> String {
+        let comment = format!("timestamp:0\tfile:{file}\thashed");
+        minisign::sign(Some(&self.0.pk), &self.0.sk, bytes, Some(&comment), None)
             .unwrap()
             .into_string()
     }
@@ -422,6 +427,16 @@ fn extensions_install_only_with_consent_and_a_trusted_signature() {
     p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
         .failed()
         .says("signature check failed");
+    // A good signature for another file can't be replayed.
+    companion_registry(
+        &p,
+        "0.1.0-rc.3",
+        Some(signer.sign_as(p.read("companion").as_bytes(), "other.tar.gz")),
+        None,
+    );
+    p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
+        .failed()
+        .says("another file");
     // No signature at all.
     companion_registry(&p, "0.1.0-rc.3", None, None);
     p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
@@ -491,4 +506,24 @@ fn declared_extensions_keep_their_own_settings_and_still_need_consent() {
     p.dre_env("mcp", &["serve"], &[("PATH", &search)])
         .ok()
         .says("declared-ready");
+}
+
+#[test]
+fn catalogue_refuses_a_source_type_with_unknown_quoting_rules() {
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: catalogue\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", "plugins: [duckdb]\n"),
+            ("tables.json", "{\"tables\":[\"orders\"]}"),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb}\n  other:\n    targets:\n      dev: {type: mystery_db, host: example}\n",
+    );
+    p.duckdb("data.duckdb", "select 1");
+    p.dre(
+        "catalog",
+        &["--profile", "other", "--tables-file", "tables.json", "--output-file", "c.json"],
+    )
+    .failed()
+    .says("not yet supported for `mystery_db`");
+    assert!(!p.path("c.json").exists());
 }

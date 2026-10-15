@@ -8,14 +8,13 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 /// How a string value becomes a SQL literal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiteralStyle {
     /// `'…'` with each `'` doubled; the dialect has no backslash escapes in literals.
     Doubling,
-    /// The UTF-8 bytes as hex, decoded by [`Dialect::hex_literal`]: no quote or backslash of
-    /// the value ever reaches the dialect's lexer.
-    Hex,
+    /// The UTF-8 bytes as hex, decoded by this expression (`{hex}` stands for the digits): no
+    /// quote or backslash of the value ever reaches the dialect's lexer.
+    Hex(&'static str),
 }
 
 /// How an identifier written without quotes matches a stored name.
@@ -32,8 +31,6 @@ pub enum IdentifierCase {
 pub struct Dialect {
     pub identifier_quote: char,
     pub literal_style: LiteralStyle,
-    /// For [`LiteralStyle::Hex`]: the expression, with `{hex}` standing for the hex digits.
-    pub hex_literal: Option<&'static str>,
     pub identifier_case: IdentifierCase,
     /// Functions that read files, run programs or reach the network; `dre query` refuses them.
     pub denied_functions: &'static [&'static str],
@@ -42,7 +39,6 @@ pub struct Dialect {
 const DUCKDB: Dialect = Dialect {
     identifier_quote: '"',
     literal_style: LiteralStyle::Doubling,
-    hex_literal: None,
     identifier_case: IdentifierCase::Insensitive,
     denied_functions: &[
         "read_text",
@@ -75,6 +71,7 @@ const DUCKDB: Dialect = Dialect {
         "postgres_query",
         "postgres_attach",
         "mysql_query",
+        "query",
         "query_table",
         "getenv",
         "duckdb_secrets",
@@ -85,8 +82,7 @@ const DUCKDB: Dialect = Dialect {
 
 const POSTGRES: Dialect = Dialect {
     identifier_quote: '"',
-    literal_style: LiteralStyle::Hex,
-    hex_literal: Some("convert_from(decode('{hex}', 'hex'), 'UTF8')"),
+    literal_style: LiteralStyle::Hex("convert_from(decode('{hex}', 'hex'), 'UTF8')"),
     identifier_case: IdentifierCase::LowerUnlessQuoted,
     denied_functions: &[
         "pg_read_file",
@@ -107,6 +103,16 @@ const POSTGRES: Dialect = Dialect {
         "dblink_connect",
         "dblink_send_query",
         "pg_execute_server_program",
+        // Run SQL passed as a string, past this guard.
+        "query_to_xml",
+        "query_to_xml_and_xmlschema",
+        "query_to_xmlschema",
+        "cursor_to_xml",
+        "cursor_to_xmlschema",
+        "table_to_xml",
+        "table_to_xml_and_xmlschema",
+        "database_to_xml",
+        "schema_to_xml",
         "current_setting",
         "pg_reload_conf",
         "pg_terminate_backend",
@@ -116,8 +122,7 @@ const POSTGRES: Dialect = Dialect {
 
 const DATABRICKS: Dialect = Dialect {
     identifier_quote: '`',
-    literal_style: LiteralStyle::Hex,
-    hex_literal: Some("decode(unhex('{hex}'), 'UTF-8')"),
+    literal_style: LiteralStyle::Hex("decode(unhex('{hex}'), 'UTF-8')"),
     identifier_case: IdentifierCase::Insensitive,
     denied_functions: &[
         "read_files",
@@ -150,12 +155,12 @@ pub fn of(kind: &str) -> Option<&'static Dialect> {
 impl Dialect {
     /// `value` as a SQL string literal.
     pub fn literal(&self, value: &str) -> String {
-        match (self.literal_style, self.hex_literal) {
-            (LiteralStyle::Hex, Some(template)) => {
+        match self.literal_style {
+            LiteralStyle::Hex(template) => {
                 let hex: String = value.bytes().map(|b| format!("{b:02x}")).collect();
                 template.replace("{hex}", &hex)
             }
-            _ => format!("'{}'", value.replace('\'', "''")),
+            LiteralStyle::Doubling => format!("'{}'", value.replace('\'', "''")),
         }
     }
 
@@ -182,8 +187,14 @@ impl Dialect {
         json!({
             "identifier_quote": self.identifier_quote.to_string(),
             "identifier_case": self.identifier_case,
-            "literal_style": self.literal_style,
-            "hex_literal": self.hex_literal,
+            "literal_style": match self.literal_style {
+                LiteralStyle::Doubling => "doubling",
+                LiteralStyle::Hex(_) => "hex",
+            },
+            "hex_literal": match self.literal_style {
+                LiteralStyle::Hex(template) => Some(template),
+                LiteralStyle::Doubling => None,
+            },
         })
     }
 }
@@ -213,6 +224,8 @@ mod tests {
     fn denied_functions_match_any_case_and_schema() {
         let pg = of("postgres").unwrap();
         assert!(pg.denies("PG_READ_FILE") && pg.denies("pg_catalog.pg_read_file"));
+        // Functions that run SQL given as a string would carry a denied call past the guard.
+        assert!(pg.denies("query_to_xml") && of("duckdb").unwrap().denies("query"));
         assert!(!pg.denies("lower"));
     }
 }

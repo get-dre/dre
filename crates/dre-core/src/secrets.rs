@@ -29,13 +29,40 @@ fn eligible(value: &str) -> bool {
 
 /// Secret values, longest first so a secret containing another is masked whole. Starts with
 /// `DRE_SECRET_*`; [`register_env_references`] adds the variables `profiles.yml` reads.
-static SECRETS: LazyLock<RwLock<Arc<Vec<String>>>> = LazyLock::new(|| {
-    RwLock::new(Arc::new(sorted(
+static SECRETS: LazyLock<RwLock<Arc<Secrets>>> = LazyLock::new(|| {
+    RwLock::new(Arc::new(Secrets::new(sorted(
         std::env::vars()
             .filter(|(k, _)| k.starts_with(PREFIX))
             .map(|(_, v)| v),
-    )))
+    ))))
 });
+
+/// The secret values, and the forms they take in Markdown and in collapsed titles.
+struct Secrets {
+    plain: Vec<String>,
+    markdown: Vec<String>,
+    title: Vec<String>,
+}
+
+impl Secrets {
+    fn new(plain: Vec<String>) -> Secrets {
+        let markdown = sorted(
+            plain
+                .iter()
+                .flat_map(|s| [s.clone(), dre_protocol::markdown::escape(s)]),
+        );
+        let title = sorted(
+            plain
+                .iter()
+                .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")]),
+        );
+        Secrets {
+            plain,
+            markdown,
+            title,
+        }
+    }
+}
 
 fn sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut v: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
@@ -44,7 +71,7 @@ fn sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
     v
 }
 
-fn secrets() -> Arc<Vec<String>> {
+fn secrets() -> Arc<Secrets> {
     SECRETS.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -69,8 +96,8 @@ pub fn register_env_references(text: &str) {
         return;
     }
     let mut guard = SECRETS.write().unwrap_or_else(|e| e.into_inner());
-    let merged = sorted(guard.iter().cloned().chain(values));
-    *guard = Arc::new(merged);
+    let merged = sorted(guard.plain.iter().cloned().chain(values));
+    *guard = Arc::new(Secrets::new(merged));
 }
 
 pub fn set_enabled(on: bool) {
@@ -97,7 +124,7 @@ pub fn mask(s: &str) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    mask_with(s, &secrets())
+    mask_with(s, &secrets().plain)
 }
 
 /// Mask a rendered message without changing the report payload. Markdown interpolation has
@@ -106,12 +133,7 @@ pub(crate) fn mask_markdown(s: &str) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    let values = sorted(
-        secrets()
-            .iter()
-            .flat_map(|s| [s.clone(), dre_protocol::markdown::escape(s)]),
-    );
-    mask_with(s, &values)
+    mask_with(s, &secrets().markdown)
 }
 
 /// Message titles collapse whitespace before delivery. Match that representation as well as
@@ -120,17 +142,12 @@ pub(crate) fn mask_message_title(s: &str) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    let values = sorted(
-        secrets()
-            .iter()
-            .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")]),
-    );
-    mask_with(s, &values)
+    mask_with(s, &secrets().title)
 }
 
 /// Whether masking is enabled and `s` contains a complete registered secret.
 pub fn contains_secret(s: &str) -> bool {
-    ENABLED.load(Ordering::Relaxed) && secrets().iter().any(|secret| s.contains(secret.as_str()))
+    ENABLED.load(Ordering::Relaxed) && secrets().plain.iter().any(|secret| s.contains(secret.as_str()))
 }
 
 fn mask_source_error_with<'a>(error: &'a str, sensitive: bool, secrets: &[String]) -> Cow<'a, str> {
@@ -148,7 +165,7 @@ pub fn mask_source_error(error: &str, sensitive: bool) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(error);
     }
-    mask_source_error_with(error, sensitive, &secrets())
+    mask_source_error_with(error, sensitive, &secrets().plain)
 }
 
 fn unique_masked_names_with(names: &[String], secrets: &[String]) -> Vec<String> {
@@ -215,7 +232,7 @@ fn redact_json_with(v: &mut serde_json::Value, secrets: &[String]) {
 /// masked keys receive `#2`, `#3`, and so on rather than silently replacing another entry.
 pub fn redact_json(v: &mut serde_json::Value) {
     if ENABLED.load(Ordering::Relaxed) {
-        redact_json_with(v, &secrets());
+        redact_json_with(v, &secrets().plain);
     }
 }
 

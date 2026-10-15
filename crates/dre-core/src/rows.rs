@@ -10,12 +10,7 @@ use serde_json::json;
 
 pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> anyhow::Result<()> {
     let reader = FileReader::try_new(File::open(spool)?, None)?;
-    let columns: Vec<_> = reader
-        .schema()
-        .fields()
-        .iter()
-        .map(|f| json!({"name": f.name(), "type": f.data_type().to_string()}))
-        .collect();
+    let columns = column_types(&reader.schema());
     let mut out = BufWriter::new(File::create(output)?);
     write!(
         out,
@@ -36,4 +31,13 @@ pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> anyhow::Resul
     out.write_all(b"]}\n")?;
     out.flush()?;
     Ok(())
+}
+
+/// Each column's name and Arrow type, as `dre/rows/v1` lists them.
+pub fn column_types(schema: &arrow::datatypes::Schema) -> Vec<serde_json::Value> {
+    schema
+        .fields()
+        .iter()
+        .map(|f| json!({"name": f.name(), "type": f.data_type().to_string()}))
+        .collect()
 }

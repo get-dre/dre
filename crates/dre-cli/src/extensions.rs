@@ -73,16 +73,10 @@ struct Artifact {
     minisig: Option<String>,
 }
 
-/// The `dre` subcommand of an extension without a registry `command`.
-fn default_command(name: &str) -> &str {
-    name.strip_prefix("dre-").unwrap_or(name)
-}
-
-fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+/// The `dre` subcommand an extension handles: its registry `command`, else its name without
+/// `dre-`.
+fn command_of<'a>(name: &'a str, command: Option<&'a str>) -> &'a str {
+    command.unwrap_or(name.strip_prefix("dre-").unwrap_or(name))
 }
 
 fn executable(name: &str) -> String {
@@ -91,11 +85,6 @@ fn executable(name: &str) -> String {
 
 fn extensions_dir() -> PathBuf {
     dre_core::dre_home().join("extensions")
-}
-
-/// The project's `extensions:` entries, from its dependency files.
-fn declared(root: &Path) -> Result<Vec<dre_core::config::dependencies::ExtensionEntry>, String> {
-    dre_core::packages::declared_extensions(root)
 }
 
 /// Whether the user agrees to install: `--accept-proprietary`, else a yes at the prompt.
@@ -138,7 +127,7 @@ fn registry() -> Result<Vec<Extension>, String> {
 /// Download, check and install `name` (optionally `name@version`), after asking.
 fn install(spec: &str, accepted: bool) -> Result<Installed, String> {
     let (name, requested) = spec.split_once('@').map_or((spec, None), |(n, v)| (n, Some(v)));
-    if !valid_name(name) {
+    if !dre_core::packages::valid_extension_name(name) {
         return Err("invalid extension name".into());
     }
     let extension = registry()?
@@ -181,7 +170,17 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
         .artifacts
         .get(&platform)
         .ok_or_else(|| format!("no extension artifact for {platform}"))?;
-    let bytes = download(artifact)?;
+    let file_name = artifact.url.rsplit(['/', '\\']).next().unwrap_or_default();
+    // Released archives are named for what they hold; the signature covers that name too.
+    if artifact.url.starts_with("https://")
+        && !file_name.starts_with(&format!("{name}-{}-{platform}.", version.version))
+    {
+        return Err(format!(
+            "extension artifact `{file_name}` doesn't match {name} {} for {platform}",
+            version.version
+        ));
+    }
+    let bytes = download(artifact, file_name)?;
     let digest = hex_sha256(&bytes);
     let file = executable(name);
     let binary = if artifact.url.ends_with(".tar.gz") || artifact.url.ends_with(".tgz") {
@@ -200,7 +199,7 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
         std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
     }
-    let command = extension.command.as_deref().unwrap_or(default_command(name));
+    let command = command_of(name, extension.command.as_deref());
     let receipt = serde_json::json!({"name": name, "version": version.version, "command": command,
         "license": extension.license, "proprietary_license": extension.proprietary_license,
         "platform": platform, "artifact_sha256": digest});
@@ -215,7 +214,7 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
 }
 
 /// The artifact's bytes, once its URL, checksum and signature check out.
-fn download(artifact: &Artifact) -> Result<Vec<u8>, String> {
+fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
     let local_registry = !dre_core::manager::registry_url().contains("://");
     // A local registry (a development build) may point at local files; anything else needs TLS.
     if !(artifact.url.starts_with("https://") || local_registry && !artifact.url.contains("://")) {
@@ -232,7 +231,7 @@ fn download(artifact: &Artifact) -> Result<Vec<u8>, String> {
     if !hex_sha256(&bytes).eq_ignore_ascii_case(&artifact.sha256) {
         return Err("extension artifact checksum mismatch; download discarded".into());
     }
-    verify(&bytes, signature)?;
+    verify(&bytes, signature, file_name)?;
     Ok(bytes)
 }
 
@@ -240,14 +239,25 @@ fn hex_sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Check `bytes` against a minisign signature from the trusted key.
-fn verify(bytes: &[u8], signature: &str) -> Result<(), String> {
+/// Check `bytes` against a minisign signature from the trusted key, whose signed (trusted)
+/// comment names `file_name`: a signature can't be replayed for another artifact.
+fn verify(bytes: &[u8], signature: &str, file_name: &str) -> Result<(), String> {
     let refused = |why: String| format!("extension signature check failed ({why}); download discarded");
     let key = trusted_key();
     let key = minisign_verify::PublicKey::from_base64(&key).map_err(|e| refused(e.to_string()))?;
     let signature = minisign_verify::Signature::decode(signature).map_err(|e| refused(e.to_string()))?;
     key.verify(bytes, &signature, false)
-        .map_err(|e| refused(e.to_string()))
+        .map_err(|e| refused(e.to_string()))?;
+    if !signature
+        .trusted_comment()
+        .split('\t')
+        .any(|field| field == format!("file:{file_name}"))
+    {
+        return Err(refused(format!(
+            "the signature is for another file than {file_name}"
+        )));
+    }
+    Ok(())
 }
 
 /// Tests sign with their own key; release builds only ever trust the built-in one.
@@ -286,7 +296,7 @@ fn unpack(archive: &[u8], file: &str) -> Result<Vec<u8>, String> {
 /// `dre deps`: install the project's declared extensions at their pinned versions.
 pub fn sync_declared(root: &Path, accepted: bool, printer: &Printer) -> Result<usize, String> {
     let mut installed = 0;
-    for entry in declared(root)? {
+    for entry in dre_core::packages::declared_extensions(root)? {
         let path = extensions_dir()
             .join(&entry.name)
             .join(&entry.version)
@@ -336,21 +346,23 @@ pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
 /// The installed extension handling `dre <command>`: the declared pin's version when the
 /// project has one, else the current version.
 fn installed(command: &str, pins: &[dre_core::config::dependencies::ExtensionEntry]) -> Option<PathBuf> {
-    for dir in std::fs::read_dir(extensions_dir()).ok()?.flatten() {
+    let mut dirs: Vec<_> = std::fs::read_dir(extensions_dir()).ok()?.flatten().collect();
+    dirs.sort_by_key(|d| d.file_name());
+    for dir in dirs {
         let name = dir.file_name().to_string_lossy().into_owned();
         let version = match pins.iter().find(|e| e.name == name) {
             Some(pin) => pin.version.clone(),
-            None => match std::fs::read_to_string(dir.path().join("current")) {
-                Ok(current) => current,
-                Err(_) => continue,
-            },
+            None => std::fs::read_to_string(dir.path().join("current")).unwrap_or_default(),
         };
-        let folder = dir.path().join(version.trim());
+        let Ok(version) = semver::Version::parse(version.trim()) else {
+            continue;
+        };
+        let folder = dir.path().join(version.to_string());
         let receipt: serde_json::Value = std::fs::read(folder.join("extension.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        let handles = receipt["command"].as_str().unwrap_or(default_command(&name)) == command;
+        let handles = command_of(&name, receipt["command"].as_str()) == command;
         let path = folder.join(executable(&name));
         if handles && path.is_file() {
             return Some(path);
@@ -373,7 +385,7 @@ fn project_dir(args: &[String]) -> PathBuf {
 /// `dre <command> …`: run the extension that handles `command`, with `--dre-bin` set to this
 /// `dre` so it never runs a different one from the PATH. Offers to install it when missing.
 pub fn handoff(command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
-    let pins = match declared(&project_dir(&args.args)) {
+    let pins = match dre_core::packages::declared_extensions(&project_dir(&args.args)) {
         Ok(pins) => pins,
         Err(error) => {
             printer.error(&error);
@@ -425,7 +437,7 @@ fn offer(
     let extension = registry()
         .map_err(failed)?
         .into_iter()
-        .find(|e| e.command.as_deref().unwrap_or(default_command(&e.name)) == command)
+        .find(|e| command_of(&e.name, e.command.as_deref()) == command)
         .ok_or_else(|| failed(format!("no extension provides `dre {command}` in this registry")))?;
     let name = extension.name.clone();
     let pin = pins.iter().find(|e| e.name == name).map(|e| e.version.clone());

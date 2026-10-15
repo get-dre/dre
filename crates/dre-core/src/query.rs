@@ -36,12 +36,15 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
         std::ops::ControlFlow::<()>::Continue(())
     });
     /// Refuses anything but reads, and functions that reach files, programs or the network.
-    struct ReadOnly(Option<&'static crate::dialect::Dialect>, Option<String>);
+    struct ReadOnly {
+        dialect: Option<&'static crate::dialect::Dialect>,
+        refused: Option<String>,
+    }
     impl ReadOnly {
         fn function(&mut self, name: &ObjectName) -> std::ops::ControlFlow<()> {
             let name = name.to_string();
-            if self.0.is_some_and(|d| d.denies(&name)) {
-                self.1 = Some(name);
+            if self.dialect.is_some_and(|d| d.denies(&name)) {
+                self.refused = Some(name);
                 return std::ops::ControlFlow::Break(());
             }
             std::ops::ControlFlow::Continue(())
@@ -74,10 +77,14 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
                         .iter()
                         .any(|p| p.as_ident().is_some_and(|i| i.quote_style == Some('\''))) =>
                 {
-                    self.1 = Some(name.to_string());
+                    self.refused = Some(name.to_string());
                     std::ops::ControlFlow::Break(())
                 }
-                TableFactor::Table { name, .. } | TableFactor::Function { name, .. } => self.function(name),
+                // A table function, not a table that happens to share a function's name.
+                TableFactor::Table {
+                    name, args: Some(_), ..
+                }
+                | TableFactor::Function { name, .. } => self.function(name),
                 _ => std::ops::ControlFlow::Continue(()),
             }
         }
@@ -88,9 +95,12 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
             }
         }
     }
-    let mut guard = ReadOnly(crate::dialect::of(&target.kind), None);
+    let mut guard = ReadOnly {
+        dialect: crate::dialect::of(&target.kind),
+        refused: None,
+    };
     safe &= statements.visit(&mut guard).is_continue();
-    if let Some(name) = guard.1 {
+    if let Some(name) = guard.refused {
         return Err(format!(
             "`{name}` reads files, runs programs or reaches the network; `dre query` refuses it and nothing was run"
         ));
@@ -126,7 +136,7 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     let result = process
         .execute(sql, Some(max_rows + 1), |schema, batch| {
             if columns.is_empty() {
-                columns = column_types(schema);
+                columns = crate::rows::column_types(schema);
             }
             let left = (max_rows + 1).saturating_sub(rows.len() as u64) as usize;
             let batch = batch.slice(0, left.min(batch.num_rows()));
@@ -140,7 +150,7 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
         .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
     if let Execution::Result { schema, .. } = result {
         if columns.is_empty() {
-            columns = column_types(&schema);
+            columns = crate::rows::column_types(&schema);
         }
     } else {
         return Err("the query returned no result set".into());
@@ -152,13 +162,4 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
         json!({"schema_version": "dre/rows/v1", "columns": columns, "row_count": rows.len(), "rows": rows,
         "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {"SQL validation; use a read-only Databricks database role"}, "connection": profile, "target": project.target_name}),
     )
-}
-
-/// Each column's name and Arrow type, as `dre/rows/v1` lists them.
-fn column_types(schema: &arrow::datatypes::Schema) -> Vec<Value> {
-    schema
-        .fields()
-        .iter()
-        .map(|f| json!({"name": f.name(), "type": f.data_type().to_string()}))
-        .collect()
 }
