@@ -2,6 +2,7 @@
 //! DRE does not create or maintain upstream comments.
 
 use crate::{
+    dialect::{Dialect, IdentifierCase},
     profiles::{Entry, Role},
     project::Project,
 };
@@ -22,7 +23,7 @@ pub struct Request {
     pub schemas: Vec<String>,
 }
 
-fn parts(name: &str, kind: &str) -> Result<Vec<String>, String> {
+fn parts(name: &str, dialect: &Dialect) -> Result<Vec<String>, String> {
     let statements = Parser::parse_sql(&GenericDialect {}, &format!("select * from {name}"))
         .map_err(|e| format!("invalid relation `{name}`: {e}"))?;
     let [Statement::Query(query)] = statements.as_slice() else {
@@ -58,7 +59,9 @@ fn parts(name: &str, kind: &str) -> Result<Vec<String>, String> {
         .map(|part| {
             part.as_ident()
                 .map(|id| {
-                    if kind == "postgres" && id.quote_style.is_none() {
+                    if dialect.identifier_case == IdentifierCase::LowerUnlessQuoted
+                        && id.quote_style.is_none()
+                    {
                         id.value.to_ascii_lowercase()
                     } else {
                         id.value.clone()
@@ -69,18 +72,6 @@ fn parts(name: &str, kind: &str) -> Result<Vec<String>, String> {
         .collect()
 }
 
-fn lit(value: &str, kind: &str) -> String {
-    let hex = value
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    match kind {
-        "databricks" => format!("decode(unhex('{hex}'), 'UTF-8')"),
-        "postgres" => format!("convert_from(decode('{hex}', 'hex'), 'UTF8')"),
-        _ => format!("'{}'", value.replace('\'', "''")),
-    }
-}
 fn rows(project: &Project, profile: &str, sql: &str) -> Result<Vec<Value>, String> {
     let value = crate::query::execute(project, profile, sql, 100_000)?;
     if value["truncated"] == true {
@@ -93,15 +84,18 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
     let Entry::Use(target) = project.profiles.entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` is unavailable"));
     };
+    let unsupported = || {
+        format!(
+            "live catalogue comments are not yet supported for `{}`; supported: duckdb, postgres, databricks",
+            target.kind
+        )
+    };
+    let dialect = crate::dialect::of(&target.kind).ok_or_else(unsupported)?;
+    let lit = |value: &str| dialect.literal(value);
     let defaults = match target.kind.as_str() {
         "duckdb" | "postgres" => "select current_database(), current_schema()",
         "databricks" => "select current_catalog(), current_schema()",
-        _ => {
-            return Err(format!(
-                "live catalogue comments are not yet supported for `{}`; supported: duckdb, postgres, databricks",
-                target.kind
-            ));
-        }
+        _ => return Err(unsupported()),
     };
     let defaults = rows(project, profile, defaults)?;
     let catalog = defaults
@@ -113,7 +107,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         .ok_or("the connection returned no current schema")?;
     let mut wanted = Vec::new();
     for name in &request.tables {
-        let p = parts(name, &target.kind)?;
+        let p = parts(name, dialect)?;
         let (c, s, n) = match p.as_slice() {
             [n] => (catalog.to_owned(), schema.to_owned(), n.clone()),
             [s, n] => (catalog.to_owned(), s.clone(), n.clone()),
@@ -130,7 +124,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
                 profile,
                 &format!(
                     "select current_database(), ns.nspname, cl.relname from pg_class cl join pg_namespace ns on ns.oid=cl.relnamespace where cl.oid=to_regclass({})",
-                    lit(name, &target.kind)
+                    lit(name)
                 ),
             )?;
             let row = resolved
@@ -147,20 +141,11 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         wanted.push((name.clone(), c, s, n));
     }
     let mut filters = Vec::new();
-    let comparison = |column: &str, value: &str| {
-        if target.kind == "duckdb" {
-            format!("lower({column})=lower({})", lit(value, &target.kind))
-        } else {
-            format!("{column}={}", lit(value, &target.kind))
-        }
+    let comparison = |column: &str, value: &str| match dialect.identifier_case {
+        IdentifierCase::Insensitive => format!("lower({column})=lower({})", lit(value)),
+        IdentifierCase::LowerUnlessQuoted => format!("{column}={}", lit(value)),
     };
-    let equal = |left: &str, right: &str| {
-        if target.kind == "duckdb" {
-            left.eq_ignore_ascii_case(right)
-        } else {
-            left == right
-        }
-    };
+    let equal = |left: &str, right: &str| dialect.same_name(left, right);
     for (_, c, s, n) in &wanted {
         filters.push(format!(
             "({} and {} and {})",
@@ -170,7 +155,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         ));
     }
     for name in &request.schemas {
-        let p = parts(name, &target.kind)?;
+        let p = parts(name, dialect)?;
         let (c, s) = match p.as_slice() {
             [s] => (catalog, s.as_str()),
             [c, s] => (c.as_str(), s.as_str()),
@@ -186,7 +171,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         "duckdb" => "(select database_name as table_catalog, schema_name as table_schema, table_name, comment as description from duckdb_tables() union all select database_name, schema_name, view_name, comment from duckdb_views()) t".to_owned(),
         "postgres" => "(select current_database() as table_catalog, n.nspname as table_schema, c.relname as table_name, obj_description(c.oid, 'pg_class') as description from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','v','m','f','p')) t".to_owned(),
         "databricks" => "(select table_catalog, table_schema, table_name, comment as description from system.information_schema.tables) t".to_owned(),
-        _ => unreachable!(),
+        _ => return Err(unsupported()),
     };
     let filter = if filters.is_empty() {
         "false".into()
@@ -208,23 +193,23 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         let sql = match target.kind.as_str() {
             "duckdb" => format!(
                 "select column_name, data_type, comment from duckdb_columns() where database_name={} and schema_name={} and table_name={} order by column_index",
-                lit(c, &target.kind),
-                lit(s, &target.kind),
-                lit(n, &target.kind)
+                lit(c),
+                lit(s),
+                lit(n)
             ),
             "postgres" => format!(
                 "select a.attname, format_type(a.atttypid,a.atttypmod), col_description(c.oid,a.attnum) from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where current_database()={} and n.nspname={} and c.relname={} and a.attnum>0 and not a.attisdropped order by a.attnum",
-                lit(c, &target.kind),
-                lit(s, &target.kind),
-                lit(n, &target.kind)
+                lit(c),
+                lit(s),
+                lit(n)
             ),
             "databricks" => format!(
                 "select column_name, full_data_type, comment from system.information_schema.columns where table_catalog={} and table_schema={} and table_name={} order by ordinal_position",
-                lit(c, &target.kind),
-                lit(s, &target.kind),
-                lit(n, &target.kind)
+                lit(c),
+                lit(s),
+                lit(n)
             ),
-            _ => unreachable!(),
+            _ => return Err(unsupported()),
         };
         let columns: Vec<Value> = rows(project, profile, &sql)?
             .iter()
@@ -250,7 +235,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
     }
     Ok(
         json!({"schema_version":"dre/catalog/v1","connection":profile,"target":project.target_name,
-        "source_type":target.kind,"identifier_quote":if target.kind=="databricks" {"`"} else {"\""},
+        "source_type":target.kind,"identifier_quote":dialect.identifier_quote.to_string(),"dialect":dialect.describe(),
         "current_catalog":catalog,"current_schema":schema,"tables":out}),
     )
 }

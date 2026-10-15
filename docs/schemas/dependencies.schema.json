@@ -70,7 +70,7 @@
     },
     "extensions": {
       "type": "array",
-      "description": "Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately.",
+      "description": "Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately.",
       "items": {
         "$ref": "#/$defs/ExtensionEntry"
       }
@@ -87,7 +87,7 @@
   "$defs": {
     "ExtensionEntry": {
       "type": "object",
-      "description": "An optional companion dependency, separate from source/format/destination plugins.",
+      "description": "An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.",
       "properties": {
         "name": {
           "type": "string",
@@ -96,17 +96,14 @@
         "version": {
           "type": "string",
           "description": "Exact semantic version, including an RC suffix where applicable."
-        },
-        "accept_license": {
-          "type": "string",
-          "description": "Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms."
         }
       },
       "required": [
         "name",
         "version"
       ],
-      "additionalProperties": false
+      "additionalProperties": true,
+      "x-doc-other": "Settings of the companion itself, which reads and checks them; see its documentation."
     },
     "package": {
       "type": "object",

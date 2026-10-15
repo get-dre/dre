@@ -14,25 +14,25 @@ pub struct DependenciesFile {
     #[serde(default)]
     #[schemars(schema_with = "plugins")]
     pub plugins: Option<PluginsSection>,
-    /// Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately.
+    /// Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately.
     #[serde(default)]
     pub extensions: Vec<ExtensionEntry>,
     /// Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`.
     pub packages: Option<Located<Loose<Vec<Loose<Package>>>>>,
 }
 
-/// An optional companion dependency, separate from source/format/destination plugins.
+/// An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.
 #[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
+#[schemars(extend("additionalProperties" = true, "x-doc-other" = "Settings of the companion itself, which reads and checks them; see its documentation."))]
 pub struct ExtensionEntry {
     /// Registry executable name, e.g. `dre-mcp`.
     pub name: String,
     /// Exact semantic version, including an RC suffix where applicable.
     pub version: String,
-    /// Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms.
-    #[serde(default)]
-    pub accept_license: Option<String>,
+    /// The companion's own settings, untouched by DRE.
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub settings: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// The `plugins:` key of any project YAML file.

@@ -1,4 +1,5 @@
-//! Secret masking. The value of every environment variable named `DRE_SECRET_*` is replaced by
+//! Secret masking. The value of every environment variable named `DRE_SECRET_*`, and of every
+//! environment variable `profiles.yml` reads through `env_var()`, is replaced by
 //! `*****` in everything DRE writes for people to read: the console, `logs/dre.log`, JSON events,
 //! `run_results.json` and the compiled SQL in `target/compiled/`. The SQL actually sent to the
 //! database is unchanged. `mask_secrets: false` in `dre_project.yml` turns masking off.
@@ -11,8 +12,8 @@
 //! make it unreadable, and a value that short isn't a secret anyway.
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, RwLock};
 
 pub const PREFIX: &str = "DRE_SECRET_";
 pub const MASK: &str = "*****";
@@ -26,16 +27,51 @@ fn eligible(value: &str) -> bool {
     value.chars().count() >= MIN_LEN
 }
 
-/// Secret values, longest first so a secret containing another is masked whole.
-static SECRETS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    let mut v: Vec<String> = std::env::vars()
-        .filter(|(k, v)| k.starts_with(PREFIX) && eligible(v))
-        .map(|(_, v)| v)
-        .collect();
+/// Secret values, longest first so a secret containing another is masked whole. Starts with
+/// `DRE_SECRET_*`; [`register_env_references`] adds the variables `profiles.yml` reads.
+static SECRETS: LazyLock<RwLock<Arc<Vec<String>>>> = LazyLock::new(|| {
+    RwLock::new(Arc::new(sorted(
+        std::env::vars()
+            .filter(|(k, _)| k.starts_with(PREFIX))
+            .map(|(_, v)| v),
+    )))
+});
+
+fn sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut v: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
     v.sort_by_key(|s| std::cmp::Reverse(s.len()));
     v.dedup();
     v
-});
+}
+
+fn secrets() -> Arc<Vec<String>> {
+    SECRETS.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The environment variables a template reads through `env_var('NAME')` (either quote).
+pub fn env_references(text: &str) -> Vec<String> {
+    static CALL: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"env_var\(\s*(?:'([^']+)'|"([^"]+)")"#).unwrap());
+    CALL.captures_iter(text)
+        .filter_map(|c| c.get(1).or_else(|| c.get(2)))
+        .map(|m| m.as_str().to_owned())
+        .collect()
+}
+
+/// Mask the values of the environment variables `text` (a `profiles.yml`) reads through
+/// `env_var()`: connection passwords and tokens are usually passed that way.
+pub fn register_env_references(text: &str) {
+    let values: Vec<String> = env_references(text)
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+    let mut guard = SECRETS.write().unwrap_or_else(|e| e.into_inner());
+    let merged = sorted(guard.iter().cloned().chain(values));
+    *guard = Arc::new(merged);
+}
 
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
@@ -61,49 +97,40 @@ pub fn mask(s: &str) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    mask_with(s, &SECRETS)
+    mask_with(s, &secrets())
 }
 
 /// Mask a rendered message without changing the report payload. Markdown interpolation has
 /// already escaped punctuation, so both literal and escaped secret values must be matched.
 pub(crate) fn mask_markdown(s: &str) -> Cow<'_, str> {
-    static VALUES: LazyLock<Vec<String>> = LazyLock::new(|| {
-        let mut values: Vec<String> = SECRETS
-            .iter()
-            .flat_map(|s| [s.clone(), dre_protocol::markdown::escape(s)])
-            .collect();
-        values.sort_by_key(|s| std::cmp::Reverse(s.len()));
-        values.dedup();
-        values
-    });
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    mask_with(s, &VALUES)
+    let values = sorted(
+        secrets()
+            .iter()
+            .flat_map(|s| [s.clone(), dre_protocol::markdown::escape(s)]),
+    );
+    mask_with(s, &values)
 }
 
 /// Message titles collapse whitespace before delivery. Match that representation as well as
 /// the literal secret when protecting a title in logs and run metadata.
 pub(crate) fn mask_message_title(s: &str) -> Cow<'_, str> {
-    static VALUES: LazyLock<Vec<String>> = LazyLock::new(|| {
-        let mut values: Vec<String> = SECRETS
-            .iter()
-            .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")])
-            .filter(|s| !s.is_empty())
-            .collect();
-        values.sort_by_key(|s| std::cmp::Reverse(s.len()));
-        values.dedup();
-        values
-    });
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(s);
     }
-    mask_with(s, &VALUES)
+    let values = sorted(
+        secrets()
+            .iter()
+            .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")]),
+    );
+    mask_with(s, &values)
 }
 
 /// Whether masking is enabled and `s` contains a complete registered secret.
 pub fn contains_secret(s: &str) -> bool {
-    ENABLED.load(Ordering::Relaxed) && SECRETS.iter().any(|secret| s.contains(secret))
+    ENABLED.load(Ordering::Relaxed) && secrets().iter().any(|secret| s.contains(secret.as_str()))
 }
 
 fn mask_source_error_with<'a>(error: &'a str, sensitive: bool, secrets: &[String]) -> Cow<'a, str> {
@@ -121,7 +148,7 @@ pub fn mask_source_error(error: &str, sensitive: bool) -> Cow<'_, str> {
     if !ENABLED.load(Ordering::Relaxed) {
         return Cow::Borrowed(error);
     }
-    mask_source_error_with(error, sensitive, &SECRETS)
+    mask_source_error_with(error, sensitive, &secrets())
 }
 
 fn unique_masked_names_with(names: &[String], secrets: &[String]) -> Vec<String> {
@@ -188,7 +215,7 @@ fn redact_json_with(v: &mut serde_json::Value, secrets: &[String]) {
 /// masked keys receive `#2`, `#3`, and so on rather than silently replacing another entry.
 pub fn redact_json(v: &mut serde_json::Value) {
     if ENABLED.load(Ordering::Relaxed) {
-        redact_json_with(v, &SECRETS);
+        redact_json_with(v, &secrets());
     }
 }
 
@@ -263,6 +290,16 @@ mod tests {
         assert_eq!(
             mask_source_error_with("ordinary syntax error", false, &secrets),
             "ordinary syntax error"
+        );
+    }
+
+    #[test]
+    fn finds_env_var_references_with_either_quote() {
+        assert_eq!(
+            env_references(
+                "password: \"{{ env_var('PG_PASSWORD') }}\"\ntoken: '{{ env_var(\"WAREHOUSE_TOKEN\", \"x\") }}'"
+            ),
+            ["PG_PASSWORD", "WAREHOUSE_TOKEN"]
         );
     }
 

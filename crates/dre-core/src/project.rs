@@ -3085,11 +3085,15 @@ impl Loader {
             Some(value) => {
                 let (file, _) = located("var_schema").unwrap();
                 self.diags.error(Code::InvalidField, Some(file), value.line(),
-                    "`var_schema` must map variable names to declarations with a supported type, default, allowed values, description and required flag");
+                    "`var_schema` must map variable names to declarations with a supported type, default, allowed values, description, required flag, pattern and max_length");
                 BTreeMap::new()
             }
         };
         for (name, definition) in &var_schema {
+            for problem in definition.problems(name) {
+                self.diags
+                    .error(Code::InvalidField, Some(r.file.display.clone()), None, problem);
+            }
             if let Some(value) = &definition.default
                 && let Err(error) = definition.check(name, value)
             {
@@ -5347,7 +5351,7 @@ impl Loader {
         }
         for r in &project.reports {
             for b in &r.bindings {
-                for error in crate::variables::check_values(&r.var_schema, &b.vars, &self.opts.vars, false) {
+                for error in crate::variables::check_given_values(&r.var_schema, &b.vars, &self.opts.vars) {
                     self.diags
                         .error(Code::InvalidField, Some(r.file.clone()), None, error);
                 }

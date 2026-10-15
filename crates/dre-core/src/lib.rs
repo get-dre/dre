@@ -7,6 +7,7 @@ pub mod config;
 pub mod constraints;
 pub mod dates;
 pub mod diag;
+pub mod dialect;
 pub mod engine;
 pub mod error;
 pub mod fs;

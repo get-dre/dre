@@ -60,6 +60,10 @@ pub enum Request {
     Open {
         connection: Map<String, Value>,
         read_only: bool,
+        /// Core's `dre query`: the session must not reach files, programs or the network
+        /// beyond the database (protocol 1, optional; older plugins ignore it).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sandbox: bool,
     },
     /// Source: run one statement. Replies `result` (then Arrow frames, then `result_end`) or
     /// `no_result`.

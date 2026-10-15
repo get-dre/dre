@@ -26,7 +26,7 @@ For copyable examples and common errors, see [Plugin and macro packages](registr
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
-| `extensions` | list of map (see below) |  | Optional separately licensed companion executables. Installed only by `dre deps`; ordinary report commands do not install them. Pin each binary version and review its own licence separately. |
+| `extensions` | list of map (see below) |  | Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately. |
 | `packages` | list of any |  | Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`. |
 
 ## `plugins[]`
@@ -43,13 +43,13 @@ A package with its source.
 
 ## `extensions[]`
 
-An optional companion dependency, separate from source/format/destination plugins.
+An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` (required) | string |  | Registry executable name, e.g. `dre-mcp`. |
 | `version` (required) | string |  | Exact semantic version, including an RC suffix where applicable. |
-| `accept_license` | string |  | Explicit owner/admin acknowledgement of the companion's EULA version. Read its terms before setting this value. Updates never modify this field; a companion rejects stale terms. This does not imply PR approval or accept future terms. |
+| _other keys_ | | | Settings of the companion itself, which reads and checks them; see its documentation. |
 
 ## `packages[]`
 

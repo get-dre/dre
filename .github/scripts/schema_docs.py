@@ -182,7 +182,9 @@ def render_table(doc, schema, home):
         shown = "" if default is None else f"`{json.dumps(default) if not isinstance(default, str) else default}`"
         req = " (required)" if name in required else ""
         rows.append(f"| `{name}`{req} | {esc(type_of(doc, sub, home))} | {shown} | {esc(resolved.get('description', ''))} |")
-    if schema.get("additionalProperties") is True:
+    if schema.get("x-doc-other"):
+        rows.append(f"| _other keys_ | | | {esc(schema['x-doc-other'])} |")
+    elif schema.get("additionalProperties") is True:
         rows.append("| _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |")
     return "\n".join(rows)
 

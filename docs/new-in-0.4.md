@@ -11,6 +11,20 @@ DRE 0.4 is about runs you can leave to a scheduler: they stop cleanly, say exact
 never leave half a file behind and never send anything twice. It's a minor release, so a few
 things change; read [What changes](#what-changes) before you update a scheduled job.
 
+## Security hardening in 0.4.3
+
+0.4.3 is a security update; nothing in an existing project needs to change.
+
+- Connection secrets passed through `env_var()` in `profiles.yml` are now masked in DRE's
+  output, logs and errors, like `DRE_SECRET_*` values.
+- `dre query` is stricter about what a read-only query may do. With the duckdb plugin 1.2.1 or
+  later, its DuckDB sessions are also sandboxed. A read-only database role is still the
+  recommended boundary.
+- Companion installs are verified more strictly and always ask first.
+- String variables in `var_schema` can declare `pattern` and `max_length`.
+- `dre query` and `dre catalog` take `--output-file`; `--output-json` still works there, with a
+  warning, until 0.5.
+
 ## Secret masking fixes in 0.4.2
 
 Update to 0.4.2 if you use `DRE_SECRET_*` values. Earlier versions can expose those values in

@@ -3,7 +3,7 @@ name: dre-upgrade
 description: Check for and apply updates to DRE (the `dre` CLI) and to these DRE agent skills - reports installed and latest versions, whether they're compatible, and the right update command for how each was installed. Use when the user asks "is there an update?", "upgrade dre", "update the dre skills", or another DRE skill found the installed dre outside the skills' supported range.
 license: GPL-3.0-only
 metadata:
-  version: "3.2.0"
+  version: "3.2.1"
   dre: ">=0.4.1, <0.5.0"
 ---
 

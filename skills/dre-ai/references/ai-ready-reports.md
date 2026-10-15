@@ -38,12 +38,23 @@ var_schema:
     default: '2026-09-01'
     description: First day of the reporting month
     required: true
+  customer:
+    type: string
+    pattern: '[A-Z]{3}[0-9]{4}'
+    max_length: 7
+    description: Customer code, e.g. ABC1234
 queries: [revenue]
 ```
 
 `var_schema` declares types, defaults, allowed values and descriptions. It is separate from
 legacy `vars` values, which remain supported. Supported types are string, integer, number,
 boolean, date, array, object and enum. Dates use `YYYY-MM-DD`; use `allowed` to constrain an enum.
+A string can also declare `pattern` (a regular expression the whole value must match) and
+`max_length`. `dre run` and `dre validate` reject values that break them.
+
+Variables are rendered into the SQL as text, so an AI client must never set a free-text one. A
+companion that lets a model set variables should only accept typed values (date, integer, number,
+boolean), `allowed` lists, and strings with a `pattern`.
 Supply representative defaults so validation and context compilation can resolve the report.
 Document table-changing variables explicitly. Examples are retrieval tests, not proof that an
 answer or relationship is correct.
@@ -65,36 +76,29 @@ used in one report does not establish a universal relationship or prove a new qu
 
 ## Install and review the companion
 
-`dre mcp serve` forwards to the separately installed `dre-mcp serve` executable. Core owns a
-generic extension installer; companion implementation remains separately licensed.
-Declare an optional exact-version companion under `extensions:` in `dependencies.yml`:
+`dre mcp serve` forwards to the separately installed `dre-mcp serve` executable, and tells it
+to use the same `dre` (`--dre-bin`). Core owns a generic extension installer; the companion is
+separately licensed. Declare an optional exact-version companion under `extensions:` in
+`dependencies.yml`:
 
 ```yaml
 extensions:
   - name: dre-mcp
-    version: "0.1.0-rc.1"
-    # Set only after the authorised owner reads and accepts this EULA version.
-    # Treat changes as a configuration PR; installation/update never rewrites it.
-    accept_license: "2026-10"
+    version: "0.1.0-rc.2"
 ```
 
-`dre deps` installs declared companions separately from plugins. Ordinary report commands do
-not install them. Without an acceptance policy, proprietary installation needs explicit
-`--accept-proprietary`; that download acknowledgement does not replace the companion's EULA.
-A missing MCP binary can be downloaded at launch when the project declares a reviewed policy;
-otherwise interactive setup offers installation and unattended launch prints setup instructions.
+Keys besides `name` and `version` are the companion's own settings: DRE passes them through
+untouched, and the companion reads and checks them (see its documentation).
 
-Read the terms with `dre mcp license show`. Individual setup can use
-`dre mcp license accept --version 2026-10`, then `dre mcp serve`. For approved automation,
-a pinned `accept_license` applies the owner's declaration without a startup prompt. New terms
-reject a stale project value even if the local user accepted them separately. Review the new
-EULA and edit that field manually through your repository's review process. No update changes
-project YAML or accepts future versions. A local receipt records terms version, SHA-256 and time;
-it does not certify PR approval or actual reading. The RC has no automatic expiry.
+Installing a companion always asks first, whatever the project says: `dre deps`, `dre mcp` and
+`dre extension install` show the licence the registry names and wait for a yes, or take
+`--accept-proprietary`. Without a terminal and without the flag, nothing is installed and DRE
+says so. Ordinary report commands never install companions.
 
 Compiled companion binaries are distributed through `get-dre/dre` GitHub Releases under
-`dre-mcp-v<version>`. DRE’s standard registry downloads the pinned extension and verifies its
-SHA-256 checksum. The binary includes the versioned EULA and third-party notices; its proprietary
+`dre-mcp-v<version>`. DRE downloads them over `https` only, checks the SHA-256 checksum, and
+verifies a minisign signature against a key built into `dre` before installing: an unsigned or
+wrongly signed download is refused. The binary includes its EULA and third-party notices; its
 source remains private.
 
 ## MCP preview

@@ -828,6 +828,20 @@ impl PluginProcess {
             &Request::Open {
                 connection,
                 read_only,
+                sandbox: false,
+            },
+            "an open reply",
+        )
+    }
+
+    /// Open a read-only session that may not reach files, programs or the network beyond the
+    /// database, where the plugin supports it (`dre query`).
+    pub fn open_sandboxed(&mut self, connection: Map<String, Value>) -> Result<()> {
+        self.call_ok(
+            &Request::Open {
+                connection,
+                read_only: true,
+                sandbox: true,
             },
             "an open reply",
         )

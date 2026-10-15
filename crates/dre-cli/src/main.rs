@@ -67,7 +67,7 @@ enum Command {
     Query(QueryArgs),
     /// Read live table/column definitions and comments through a configured connection.
     Catalog(CatalogArgs),
-    /// Hand arguments to the installed companion binary.
+    /// Hand arguments to the companion that provides `dre mcp`, offering to install it.
     Mcp(extensions::McpArgs),
     /// Install or update companion binaries, separately from source/format/destination plugins.
     #[command(subcommand)]
@@ -117,9 +117,8 @@ struct QueryArgs {
     /// File containing one read-only SQL query (relative to the project directory).
     #[arg(long)]
     sql_file: PathBuf,
-    /// JSON result file (relative to the project directory).
-    #[arg(long)]
-    output_json: PathBuf,
+    #[command(flatten)]
+    output: OutputFile,
     /// Maximum result rows. The result records whether more rows were available.
     #[arg(long, default_value_t = 1000)]
     max_rows: u64,
@@ -135,9 +134,21 @@ struct CatalogArgs {
     /// JSON object with `tables` and `schemas` arrays of relation names.
     #[arg(long)]
     tables_file: PathBuf,
-    /// Catalogue JSON file, relative to the project directory.
+    #[command(flatten)]
+    output: OutputFile,
+}
+
+/// Where `dre query` and `dre catalog` write their JSON.
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct OutputFile {
+    /// The JSON file to write, relative to the project directory.
     #[arg(long)]
-    output_json: PathBuf,
+    output_file: Option<PathBuf>,
+    /// Deprecated: the old name of `--output-file` here (elsewhere `--output-json` names a
+    /// folder). Removed in 0.5.
+    #[arg(long)]
+    output_json: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -263,7 +274,7 @@ struct NewArgs {
 
 #[derive(Args)]
 struct DepsArgs {
-    /// Acknowledge proprietary companion installation when no owner licence policy is declared.
+    /// Install the project's declared companions without asking, after reviewing their licences.
     #[arg(long)]
     accept_proprietary: bool,
     #[arg(long, default_value = ".")]
@@ -415,7 +426,7 @@ fn main() -> ExitCode {
         Command::Compile(a) => compile(a, printer),
         Command::Query(a) => query(a, printer),
         Command::Catalog(a) => catalog(a, printer),
-        Command::Mcp(a) => extensions::handoff(a, &printer),
+        Command::Mcp(a) => extensions::handoff("mcp", a, &printer),
         Command::Extension(a) => extensions::manage(a, &printer),
         Command::Clean(a) => clean(a),
         Command::Ls(a) => ls::ls(a),
@@ -701,53 +712,56 @@ fn compile_for_validate(
     (ui.plans, ui.targets)
 }
 
-/// `dre compile`: render the selection into target/compiled/ and list the files.
 fn catalog(a: CatalogArgs, printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, _)) = load_for_run(&a.project, &printer) else {
-        return exit::not_started();
-    };
-    let result = (|| -> Result<(), String> {
+    json_command(&a.project, a.output, &printer, |project| {
         let request =
             std::fs::read_to_string(project.root.join(&a.tables_file)).map_err(|e| e.to_string())?;
         let request =
             serde_json::from_str(&request).map_err(|e| format!("invalid catalogue request: {e}"))?;
-        let catalog = dre_core::catalog::build(&project, &a.profile, &request)?;
-        let path = project.root.join(&a.output_json);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        dre_core::fs::write_atomic(&path, serde_json::to_vec(&catalog).unwrap().as_slice())
-            .map_err(|e| e.to_string())
-    })();
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            printer.error(&error);
-            exit::not_started()
-        }
-    }
+        dre_core::catalog::build(project, &a.profile, &request)
+    })
 }
 
 fn query(a: QueryArgs, printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
+    json_command(&a.project, a.output, &printer, |project| {
+        let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
+        dre_core::query::execute(project, &a.profile, &sql, a.max_rows)
+    })
+}
+
+/// `dre query` and `dre catalog`: load the project, build one JSON document, write it.
+fn json_command(
+    args: &ProjectArgs,
+    output: OutputFile,
+    printer: &output::Printer,
+    build: impl FnOnce(&dre_core::project::Project) -> Result<serde_json::Value, String>,
+) -> ExitCode {
+    if !args.no_auto_install && !plugins::sync_packages(&args.project_dir, printer) {
         return exit::not_started();
     }
-    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+    let Some((project, _)) = load_for_run(args, printer) else {
         return exit::not_started();
     };
-    let result = (|| -> Result<(), String> {
-        let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
-        let rows = dre_core::query::execute(&project, &a.profile, &sql, a.max_rows)?;
-        let path = project.root.join(&a.output_json);
+    let file = match (output.output_file, output.output_json) {
+        (Some(file), _) => file,
+        (None, Some(file)) => {
+            printer.line(
+                output::Tone::Warn,
+                "Deprecated",
+                "--output-json here is now --output-file; the old name stops working in 0.5",
+            );
+            file
+        }
+        (None, None) => unreachable!("clap requires one of the output flags"),
+    };
+    let result = build(&project).and_then(|value| {
+        let path = project.root.join(&file);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        dre_core::fs::write_atomic(&path, serde_json::to_vec(&rows).unwrap().as_slice())
+        dre_core::fs::write_atomic(&path, serde_json::to_vec(&value).unwrap().as_slice())
             .map_err(|e| e.to_string())
-    })();
+    });
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -757,6 +771,7 @@ fn query(a: QueryArgs, printer: output::Printer) -> ExitCode {
     }
 }
 
+/// `dre compile`: render the selection into target/compiled/ and list the files.
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
         return exit::not_started();
@@ -1248,7 +1263,7 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         return exit::not_started();
     };
     if plugins::ensure(&project, true, true, printer) {
-        let extensions = match extensions::sync_declared(&a.project_dir, a.accept_proprietary) {
+        let extensions = match extensions::sync_declared(&a.project_dir, a.accept_proprietary, printer) {
             Ok(count) => count,
             Err(error) => {
                 printer.error(&error);

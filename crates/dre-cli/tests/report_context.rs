@@ -123,6 +123,38 @@ fn declared_variables_supply_defaults_and_reject_invalid_overrides() {
 }
 
 #[test]
+fn string_variables_can_require_a_pattern_and_a_max_length() {
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: patterns\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            (
+                "reports/customer/customer.yml",
+                "queries: [q]\nvar_schema:\n  code: {type: string, default: ABC1234, pattern: '[A-Z]{3}[0-9]{4}', max_length: 7}\n",
+            ),
+            ("reports/customer/q.sql", "select '{{ var('code') }}' as code\n"),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: ':memory:'}\n",
+    );
+    p.dre("validate", &[]).ok();
+    p.dre("run", &["--var", "code=XYZ9876"]).ok();
+    p.dre("run", &["--var", "code=ABC1234' or 1=1 --"])
+        .failed()
+        .says("variable `code` is longer than its max_length of 7");
+    p.dre("validate", &["--var", "code=abc1234"])
+        .failed()
+        .says("variable `code` does not match its pattern");
+    // A broken declaration is reported by validate, before any run.
+    p.write(
+        "reports/customer/customer.yml",
+        "queries: [q]\nvar_schema:\n  code: {type: integer, default: 1, pattern: '('}\n",
+    );
+    let r = p.dre("validate", &[]);
+    r.failed().says("`pattern` applies only to type string");
+    r.says("invalid `pattern`");
+}
+
+#[test]
 fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
     let p = TestProject::new(
         &[
@@ -141,12 +173,27 @@ fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
             "warehouse",
             "--sql-file",
             "query.sql",
-            "--output-json",
+            "--output-file",
             "result.json",
         ],
     )
     .ok();
     assert_eq!(p.json("result.json")["rows"], json!([[7]]));
+    // The 0.4 flag name still works, with a warning.
+    p.dre(
+        "query",
+        &[
+            "--profile",
+            "warehouse",
+            "--sql-file",
+            "query.sql",
+            "--output-json",
+            "old.json",
+        ],
+    )
+    .ok()
+    .says("--output-json here is now --output-file");
+    assert_eq!(p.json("old.json")["rows"], json!([[7]]));
     p.dre(
         "query",
         &[
@@ -161,6 +208,48 @@ fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
     .failed()
     .says("single read-only query");
     assert!(!p.path("bad.json").exists());
+}
+
+#[test]
+fn read_only_query_refuses_file_program_and_network_functions() {
+    let p = TestProject::new(
+        &[
+            ("dre_project.yml", "name: query\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", "plugins: [duckdb]\n"),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb}\n",
+    );
+    p.duckdb("data.duckdb", "select 1");
+    p.write("secret.txt", "top secret\n");
+    for (name, sql) in [
+        ("text", "select content from read_text('secret.txt')"),
+        (
+            "nested",
+            "select upper((select content from read_text('secret.txt')))",
+        ),
+        ("csv", "select * from READ_CSV_AUTO('secret.txt')"),
+        ("path", "select * from 'secret.txt'"),
+        ("env", "select getenv('HOME')"),
+    ] {
+        p.write(&format!("{name}.sql"), sql);
+        let r = p.dre(
+            "query",
+            &[
+                "--profile",
+                "warehouse",
+                "--sql-file",
+                &format!("{name}.sql"),
+                "--output-file",
+                "out.json",
+            ],
+        );
+        r.failed();
+        assert!(
+            r.stdout.contains("nothing was run") || r.stderr.contains("nothing was run"),
+            "{name}: {r:?}"
+        );
+        assert!(!p.path("out.json").exists(), "{name}");
+    }
 }
 
 #[test]
@@ -191,6 +280,10 @@ fn catalogue_resolves_names_and_reads_upstream_table_and_column_comments() {
     .ok();
     let c = p.json("catalog.json");
     assert_eq!(c["schema_version"], "dre/catalog/v1");
+    assert_eq!(
+        c["dialect"],
+        json!({"identifier_quote": "\"", "identifier_case": "insensitive", "literal_style": "doubling", "hex_literal": null})
+    );
     let orders = c["tables"]
         .as_array()
         .unwrap()
@@ -241,59 +334,148 @@ fn extension_handoff_forwards_arguments_without_treating_it_as_a_plugin() {
     );
     assert!(result.stdout.contains("--project-dir"), "{result:?}");
     assert!(result.stdout.contains("--profiles-dir"), "{result:?}");
+    // The companion runs this `dre`, never another one from the PATH.
+    let dre = common::bin_dir().join(format!("dre{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        result
+            .stdout
+            .starts_with(&format!("--dre-bin\n{}\n", dre.display())),
+        "{result:?}"
+    );
 }
 
-#[cfg(unix)]
-#[test]
-fn extension_install_requires_license_acceptance_and_checks_artifact_hash() {
+/// A signing key for test registries, trusted by debug builds through `DRE_TEST_EXTENSION_KEY`.
+struct Signer(minisign::KeyPair);
+
+impl Signer {
+    fn new() -> Signer {
+        Signer(minisign::KeyPair::generate_unencrypted_keypair().unwrap())
+    }
+    fn key(&self) -> String {
+        self.0.pk.to_base64()
+    }
+    fn sign(&self, bytes: &[u8]) -> String {
+        minisign::sign(Some(&self.0.pk), &self.0.sk, bytes, None, None)
+            .unwrap()
+            .into_string()
+    }
+}
+
+/// A one-extension registry in `p` serving `companion` (already written) as `dre-mcp`.
+fn companion_registry(p: &TestProject, version: &str, minisig: Option<String>, url: Option<&str>) {
     use sha2::{Digest, Sha256};
-    let p = TestProject::new(&[("dre_project.yml", "name: extensions\n")], "");
-    p.write("companion", "#!/bin/sh\necho companion-ready\n");
     let digest: String = Sha256::digest(p.read("companion").as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    let index = json!({"schema": 2, "plugins": [], "extensions": [{"name": "dre-mcp", "kind": "extension", "license": "Proprietary", "proprietary_license": true,
-        "versions": [{"version": "0.1.0-rc.1", "artifacts": {dre_core::manager::platform(): {"url": p.path("companion"), "sha256": digest}}}]}]});
-    p.write("index.json", &index.to_string());
+    let url = url.map_or_else(|| p.path("companion").display().to_string(), str::to_owned);
+    let artifact = match minisig {
+        Some(sig) => json!({"url": url, "sha256": digest, "minisig": sig}),
+        None => json!({"url": url, "sha256": digest}),
+    };
+    p.write(
+        "index.json",
+        &json!({"schema": 2, "plugins": [], "extensions": [{"name": "dre-mcp", "kind": "extension",
+            "license": "LicenseRef-Proprietary", "proprietary_license": true,
+            "versions": [{"version": version, "artifacts": {dre_core::manager::platform(): artifact}}]}]})
+        .to_string(),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn extensions_install_only_with_consent_and_a_trusted_signature() {
+    let p = TestProject::new(&[("dre_project.yml", "name: extensions\n")], "");
+    let signer = Signer::new();
+    p.write("companion", "#!/bin/sh\necho companion-ready\n");
+    let signed = signer.sign(p.read("companion").as_bytes());
+    companion_registry(&p, "0.1.0-rc.2", Some(signed.clone()), None);
+    let key = signer.key();
     let registry = p.path("index.json");
-    let env = [("DRE_REGISTRY_URL", registry.to_str().unwrap())];
+    let env = [
+        ("DRE_REGISTRY_URL", registry.to_str().unwrap()),
+        ("DRE_TEST_EXTENSION_KEY", key.as_str()),
+    ];
+    // Not interactive and no flag: nothing is installed, whatever the project says.
     p.dre_env("extension", &["install", "dre-mcp"], &env)
         .failed()
         .says("--accept-proprietary");
+    p.dre_env("mcp", &["serve"], &env)
+        .failed()
+        .says("dre mcp --accept-proprietary");
     p.dre_env("extension", &["install", "dre-mcp", "--accept-proprietary"], &env)
         .ok();
     p.dre("mcp", &[]).ok().says("companion-ready");
-    p.write("companion", "changed after registry was signed\n");
+
+    // Changed after signing: the checksum no longer matches.
+    p.write("companion", "#!/bin/sh\necho tampered\n");
     p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
         .failed()
         .says("checksum mismatch");
-    // A rejected update leaves the previously installed binary usable.
+    // A matching checksum but another key's signature.
+    companion_registry(
+        &p,
+        "0.1.0-rc.3",
+        Some(Signer::new().sign(p.read("companion").as_bytes())),
+        None,
+    );
+    p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
+        .failed()
+        .says("signature check failed");
+    // No signature at all.
+    companion_registry(&p, "0.1.0-rc.3", None, None);
+    p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
+        .failed()
+        .says("not signed");
+    // Plain http, even with a good signature.
+    companion_registry(
+        &p,
+        "0.1.0-rc.3",
+        Some(signer.sign(p.read("companion").as_bytes())),
+        Some("http://127.0.0.1:9/companion"),
+    );
+    p.dre_env("extension", &["update", "dre-mcp", "--accept-proprietary"], &env)
+        .failed()
+        .says("over https");
+    // Every rejected update leaves the installed binary usable.
     p.dre("mcp", &[]).ok().says("companion-ready");
 }
 
 #[cfg(unix)]
 #[test]
-fn declared_extensions_install_pinned_versions_without_rewriting_owner_acceptance() {
-    use sha2::{Digest, Sha256};
+fn declared_extensions_keep_their_own_settings_and_still_need_consent() {
+    // An `accept_license` from DRE 0.4.1/0.4.2, and a setting DRE has never heard of: both
+    // belong to the extension, and neither installs anything by itself.
+    let deps = "extensions:\n  - name: dre-mcp\n    version: '0.1.0-rc.2'\n    accept_license: '2026-10'\n    team: {seats: 5}\n";
     let p = TestProject::new(
         &[
             ("dre_project.yml", "name: companions\n"),
-            (
-                "dependencies.yml",
-                "extensions:\n  - name: dre-mcp\n    version: '0.1.0-rc.1'\n    accept_license: '2026-10'\n",
-            ),
+            ("dependencies.yml", deps),
         ],
         "",
     );
+    let signer = Signer::new();
     p.write("companion", "#!/bin/sh\nprintf 'declared-ready\\n'\n");
-    let digest: String = Sha256::digest(p.read("companion").as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    p.write("index.json", &json!({"schema":2,"plugins":[],"extensions":[{"name":"dre-mcp","kind":"extension","license":"Proprietary","proprietary_license":true,
-        "versions":[{"version":"0.1.0-rc.1","artifacts":{dre_core::manager::platform():{"url":p.path("companion"),"sha256":digest}}}]}]}).to_string());
-    // A different executable on PATH must not replace the owner's exact managed pin.
+    companion_registry(
+        &p,
+        "0.1.0-rc.2",
+        Some(signer.sign(p.read("companion").as_bytes())),
+        None,
+    );
+    let key = signer.key();
+    let registry = p.path("index.json");
+    let env = [
+        ("DRE_REGISTRY_URL", registry.to_str().unwrap()),
+        ("DRE_TEST_EXTENSION_KEY", key.as_str()),
+    ];
+    p.dre("validate", &[]).ok();
+    p.dre_env("deps", &[], &env)
+        .ok()
+        .says("needs a yes at the prompt or --accept-proprietary");
+    p.dre_env("mcp", &["serve"], &env).failed();
+    p.dre_env("deps", &["--accept-proprietary"], &env).ok();
+    assert_eq!(p.read("dependencies.yml"), deps);
+    // A different executable on PATH never replaces the project's pinned install.
     p.write("wrong/dre-mcp", "#!/bin/sh\nprintf 'wrong-path-version\\n'\n");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(p.path("wrong/dre-mcp"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -302,23 +484,7 @@ fn declared_extensions_install_pinned_versions_without_rewriting_owner_acceptanc
         p.path("wrong").display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    p.dre_env(
-        "mcp",
-        &["serve"],
-        &[
-            ("DRE_REGISTRY_URL", p.path("index.json").to_str().unwrap()),
-            ("PATH", &search),
-        ],
-    )
-    .ok()
-    .says("declared-ready");
-    let before = p.read("dependencies.yml");
-    p.dre_env(
-        "deps",
-        &[],
-        &[("DRE_REGISTRY_URL", p.path("index.json").to_str().unwrap())],
-    )
-    .ok();
-    assert_eq!(p.read("dependencies.yml"), before);
-    p.dre("mcp", &["serve"]).ok().says("declared-ready");
+    p.dre_env("mcp", &["serve"], &[("PATH", &search)])
+        .ok()
+        .says("declared-ready");
 }

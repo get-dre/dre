@@ -193,8 +193,11 @@ impl TestProject {
     pub fn dre_env(&self, cmd: &str, args: &[&str], env: &[(&str, &str)]) -> Run {
         let mut c = assert_cmd::Command::cargo_bin("dre").unwrap();
         c.arg(cmd).args(args);
-        c.arg("--project-dir").arg(self.root());
-        if !["clean", "history", "unlock"].contains(&cmd) {
+        // `dre extension` works on the user's install, not a project.
+        if cmd != "extension" {
+            c.arg("--project-dir").arg(self.root());
+        }
+        if !["clean", "history", "unlock", "extension"].contains(&cmd) {
             c.arg("--profiles-dir").arg(self.dir.path().join("profiles"));
         }
         c.env("DRE_PLUGINS_DIR", &self.plugins)
