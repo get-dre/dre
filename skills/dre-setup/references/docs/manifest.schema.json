@@ -50,6 +50,13 @@
       "items": {
         "$ref": "#/$defs/ManifestPlugin"
       }
+    },
+    "extensions": {
+      "type": "array",
+      "description": "The companions the project declares under `extensions:`, each with its own settings as written.",
+      "items": {
+        "$ref": "#/$defs/ExtensionEntry"
+      }
     }
   },
   "required": [
@@ -259,6 +266,22 @@
           ],
           "description": "Optional exact values accepted for this variable; required for the enum type.",
           "items": true
+        },
+        "pattern": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `string` variables: a regular expression the whole value must match, e.g.\n`^[A-Z]{3}[0-9]{4}$` for a customer code. Anchors are implied."
+        },
+        "max_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "For `string` variables: the most characters a value may have.",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "required": [
@@ -798,6 +821,26 @@
       "required": [
         "type"
       ]
+    },
+    "ExtensionEntry": {
+      "type": "object",
+      "description": "An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Registry executable name, e.g. `dre-mcp`."
+        },
+        "version": {
+          "type": "string",
+          "description": "Exact semantic version, including an RC suffix where applicable."
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": true,
+      "x-doc-other": "Settings of the companion itself, which reads and checks them; see its documentation."
     }
   }
 }
