@@ -32,7 +32,7 @@ serde.workspace = true
 sha2 = "0.11"
 flate2 = "1"
 tar = "0.4"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 minisign-verify = "0.3"
 
 [target.'cfg(unix)'.dependencies]
@@ -54,4 +54,4 @@ parquet.workspace = true
 sha2 = "0.11"
 flate2 = "1"
 tar = "0.4"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
