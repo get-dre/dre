@@ -95,31 +95,7 @@ fn extensions_dir() -> PathBuf {
 
 /// The project's `extensions:` entries, from its dependency files.
 fn declared(root: &Path) -> Result<Vec<dre_core::config::dependencies::ExtensionEntry>, String> {
-    #[derive(Deserialize)]
-    struct Dependencies {
-        #[serde(default)]
-        extensions: Vec<dre_core::config::dependencies::ExtensionEntry>,
-    }
-    let mut entries = Vec::new();
-    let mut names = std::collections::BTreeSet::new();
-    for file in dre_core::packages::DEPENDENCY_FILES {
-        let path = root.join(file);
-        if !path.exists() {
-            continue;
-        }
-        let dependencies: Dependencies =
-            serde_saphyr::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("invalid {}: {e}", path.display()))?;
-        for entry in dependencies.extensions {
-            if !valid_name(&entry.name) || !names.insert(entry.name.clone()) {
-                return Err("extension names must be valid and unique".into());
-            }
-            semver::Version::parse(&entry.version)
-                .map_err(|e| format!("extension `{}` needs an exact version: {e}", entry.name))?;
-            entries.push(entry);
-        }
-    }
-    Ok(entries)
+    dre_core::packages::declared_extensions(root)
 }
 
 /// Whether the user agrees to install: `--accept-proprietary`, else a yes at the prompt.

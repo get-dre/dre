@@ -469,6 +469,10 @@ fn declared_extensions_keep_their_own_settings_and_still_need_consent() {
         ("DRE_TEST_EXTENSION_KEY", key.as_str()),
     ];
     p.dre("validate", &[]).ok();
+    // The manifest hands the entry, settings included, to the companion.
+    let declared = &p.json("target/manifest.json")["extensions"][0];
+    assert_eq!(declared["accept_license"], "2026-10");
+    assert_eq!(declared["team"]["seats"], 5);
     p.dre_env("deps", &[], &env)
         .ok()
         .says("needs a yes at the prompt or --accept-proprietary");

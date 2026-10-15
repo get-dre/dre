@@ -73,7 +73,8 @@
       "description": "Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately.",
       "items": {
         "$ref": "#/$defs/ExtensionEntry"
-      }
+      },
+      "default": []
     },
     "packages": {
       "type": "array",

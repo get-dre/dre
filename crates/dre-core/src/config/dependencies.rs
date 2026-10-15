@@ -2,8 +2,8 @@
 //! any project YAML file may also declare, and `packages:`, the macro packages.
 
 use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 
 use super::de::{Located, Loose, Map, OneOf, UnknownKeys};
 
@@ -22,7 +22,7 @@ pub struct DependenciesFile {
 }
 
 /// An optional companion dependency, separate from source/format/destination plugins. Keys besides `name` and `version` are the companion's own settings: DRE passes them through and the companion checks them.
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(extend("additionalProperties" = true, "x-doc-other" = "Settings of the companion itself, which reads and checks them; see its documentation."))]
 pub struct ExtensionEntry {
     /// Registry executable name, e.g. `dre-mcp`.
@@ -139,4 +139,26 @@ struct Item(PluginItem);
 /// The schema of `plugins:`, wherever it's written.
 pub(super) fn plugins(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     g.subschema_for::<Plugins>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_entries_keep_settings_dre_does_not_own() {
+        let node = super::super::node::parse(
+            "extensions:\n  - name: dre-mcp\n    version: '0.1.0'\n    accept_license: '2026-10'\n    team: {seats: 5}\npackages:\n  - local: pkg\n",
+        )
+        .unwrap();
+        let file: DependenciesFile = super::super::de::from_node(&node).unwrap();
+        let entry = &file.extensions[0];
+        assert_eq!(
+            (entry.name.as_str(), entry.version.as_str()),
+            ("dre-mcp", "0.1.0")
+        );
+        assert_eq!(entry.settings["accept_license"], "2026-10");
+        assert_eq!(entry.settings["team"]["seats"], 5);
+        assert!(file.packages.is_some());
+    }
 }
