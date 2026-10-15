@@ -3525,6 +3525,7 @@ impl ProfileConnections {
                     .cloned(),
             ),
         }
+        crate::secrets::register_secret_fields(&out.fields, &secrets);
         let fields = render_connection(&out)?;
         Ok(Connection {
             profile: name.to_string(),
