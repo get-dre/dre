@@ -11,12 +11,19 @@ DRE 0.4 is about runs you can leave to a scheduler: they stop cleanly, say exact
 never leave half a file behind and never send anything twice. It's a minor release, so a few
 things change; read [What changes](#what-changes) before you update a scheduled job.
 
+## Readable diagnostics in 0.4.4
+
+0.4.4 keeps paths, hosts and other ordinary settings readable in messages again. Values that
+`profiles.yml` reads through `env_var()` are masked when they fill a secret field (a password,
+token, key or other field the plugin marks secret), as are all `DRE_SECRET_*` values. Put a
+secret that lives inside an ordinary field, such as a URL, in a `DRE_SECRET_*` variable.
+
 ## Security hardening in 0.4.3
 
 0.4.3 is a security update; nothing in an existing project needs to change.
 
 - Connection secrets passed through `env_var()` in `profiles.yml` are now masked in DRE's
-  output, logs and errors, like `DRE_SECRET_*` values.
+  output, logs and errors, like `DRE_SECRET_*` values (narrowed to secret fields in 0.4.4).
 - `dre query` is stricter about what a read-only query may do. With the duckdb plugin 1.2.1 or
   later, its DuckDB sessions are also sandboxed. A read-only database role is still the
   recommended boundary.

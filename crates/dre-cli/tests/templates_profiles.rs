@@ -292,7 +292,9 @@ fn values_profiles_read_through_env_var_are_masked_without_the_secret_prefix() {
 }
 
 #[test]
-fn a_failing_connection_masks_paths_read_through_env_var() {
+fn paths_read_through_env_var_stay_readable_in_errors() {
+    // Only secret fields (password, token, api_key, …) are masked; a path isn't a secret, and
+    // masking it would hide what the error is about.
     let p = TestProject::new(
         &[
             ("dre_project.yml", "name: masked\ndefault_profile: warehouse\n"),
@@ -302,11 +304,15 @@ fn a_failing_connection_masks_paths_read_through_env_var() {
         ],
         "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: \"{{ env_var('WH_FILE') }}\"}\n",
     );
-    let missing = p.path("no-such-folder/hidden-warehouse-file.duckdb");
+    let missing = p.path("no-such-folder/visible-warehouse-file.duckdb");
     let r = p.dre_env("run", &["-s", "r"], &[("WH_FILE", missing.to_str().unwrap())]);
     r.failed();
     assert!(
-        !r.stdout.contains("hidden-warehouse-file") && !r.stderr.contains("hidden-warehouse-file"),
+        r.stdout.contains("visible-warehouse-file") || r.stderr.contains("visible-warehouse-file"),
+        "{r:?}"
+    );
+    assert!(
+        !r.stdout.contains("*****") && !r.stderr.contains("*****"),
         "{r:?}"
     );
 }

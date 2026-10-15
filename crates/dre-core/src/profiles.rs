@@ -244,7 +244,6 @@ impl Profiles {
                 return out;
             }
         };
-        crate::secrets::register_env_references(&text);
         let tree = match node::parse(&text) {
             Ok(n) => n,
             Err(e) => {
@@ -321,6 +320,13 @@ impl Profiles {
             let (parsed, declared) = parse_section(Role::Destination, "destinations", section, &path, diags);
             out.destinations = parsed;
             out.declared.insert(Role::Destination, declared);
+        }
+        // Mask what secret fields read through env_var(); a plugin's own declarations are
+        // added when a run asks it (`run::ProfileConnections::view`).
+        for profile in out.connections.values().chain(out.destinations.values()) {
+            for target in profile.targets.values() {
+                crate::secrets::register_secret_fields(&target.fields, &[]);
+            }
         }
         out
     }

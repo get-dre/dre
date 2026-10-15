@@ -1,5 +1,6 @@
 //! Secret masking. The value of every environment variable named `DRE_SECRET_*`, and of every
-//! environment variable `profiles.yml` reads through `env_var()`, is replaced by
+//! environment variable `profiles.yml` reads through `env_var()` into a secret field (one the
+//! plugin declares secret, or named like `password`, `token`, `api_key`), is replaced by
 //! `*****` in everything DRE writes for people to read: the console, `logs/dre.log`, JSON events,
 //! `run_results.json` and the compiled SQL in `target/compiled/`. The SQL actually sent to the
 //! database is unchanged. `mask_secrets: false` in `dre_project.yml` turns masking off.
@@ -28,7 +29,7 @@ fn eligible(value: &str) -> bool {
 }
 
 /// Secret values, longest first so a secret containing another is masked whole. Starts with
-/// `DRE_SECRET_*`; [`register_env_references`] adds the variables `profiles.yml` reads.
+/// `DRE_SECRET_*`; [`register_secret_field`] adds the variables secret profile fields read.
 static SECRETS: LazyLock<RwLock<Arc<Secrets>>> = LazyLock::new(|| {
     RwLock::new(Arc::new(Secrets::new(sorted(
         std::env::vars()
@@ -85,10 +86,50 @@ pub fn env_references(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Mask the values of the environment variables `text` (a `profiles.yml`) reads through
-/// `env_var()`: connection passwords and tokens are usually passed that way.
-pub fn register_env_references(text: &str) {
-    let values: Vec<String> = env_references(text)
+/// Whether a profile field's name says it holds a secret. Paths, hosts and fingerprints don't
+/// count (`private_key_path`, `host_key_fingerprint`): masking them would hide what a message is
+/// about, and they aren't secrets.
+pub fn secret_field_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["password", "passphrase", "secret", "token", "credential"]
+        .iter()
+        .any(|w| name.contains(w))
+        || name == "key"
+        || name.ends_with("_key")
+        || name == "apikey"
+}
+
+/// Mask the values of the environment variables a secret profile field reads through
+/// `env_var()`, at any depth of `value`.
+pub fn register_secret_field(value: &serde_json::Value) {
+    let mut text = Vec::new();
+    collect_strings(value, &mut text);
+    register(text.iter().flat_map(|s| env_references(s)))
+}
+
+/// Mask the `env_var()` values that the secret fields of `fields` (a profile target) read,
+/// nested blocks (`ssh:`) included. `secret` adds names a plugin declares secret.
+pub fn register_secret_fields(fields: &serde_json::Map<String, serde_json::Value>, secret: &[String]) {
+    for (name, value) in fields {
+        if secret_field_name(name) || secret.contains(name) {
+            register_secret_field(value);
+        } else if let serde_json::Value::Object(nested) = value {
+            register_secret_fields(nested, &[]);
+        }
+    }
+}
+
+fn collect_strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(s) => out.push(s),
+        serde_json::Value::Array(a) => a.iter().for_each(|v| collect_strings(v, out)),
+        serde_json::Value::Object(o) => o.values().for_each(|v| collect_strings(v, out)),
+        _ => {}
+    }
+}
+
+fn register(names: impl Iterator<Item = String>) {
+    let values: Vec<String> = names
         .into_iter()
         .filter_map(|name| std::env::var(name).ok())
         .collect();
@@ -318,6 +359,32 @@ mod tests {
             ),
             ["PG_PASSWORD", "WAREHOUSE_TOKEN"]
         );
+    }
+
+    #[test]
+    fn secret_field_names_leave_paths_and_fingerprints_alone() {
+        for name in [
+            "password",
+            "client_secret",
+            "token",
+            "api_key",
+            "private_key",
+            "key",
+            "passphrase",
+        ] {
+            assert!(secret_field_name(name), "{name}");
+        }
+        for name in [
+            "path",
+            "host",
+            "private_key_path",
+            "host_key_fingerprint",
+            "key_id",
+            "keyspace",
+            "schema",
+        ] {
+            assert!(!secret_field_name(name), "{name}");
+        }
     }
 
     #[test]
