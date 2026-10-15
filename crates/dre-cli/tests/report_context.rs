@@ -521,7 +521,14 @@ fn catalogue_refuses_a_source_type_with_unknown_quoting_rules() {
     p.duckdb("data.duckdb", "select 1");
     p.dre(
         "catalog",
-        &["--profile", "other", "--tables-file", "tables.json", "--output-file", "c.json"],
+        &[
+            "--profile",
+            "other",
+            "--tables-file",
+            "tables.json",
+            "--output-file",
+            "c.json",
+        ],
     )
     .failed()
     .says("not yet supported for `mystery_db`");
