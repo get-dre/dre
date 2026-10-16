@@ -1942,7 +1942,7 @@ dependencies = [
 
 [[package]]
 name = "dre-cli"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "dre-core"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arrow 59.3.0",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-xlsx"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "arrow 59.3.0",
  "calamine",
@@ -3628,12 +3628,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "memo-map"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5449c8c750f1a07ea702bbd212bd999fceece9b3d1508b17023b3e174583124b"
-
-[[package]]
 name = "micromap"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3647,23 +3641,21 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minijinja"
-version = "2.24.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86886cf6dbf4e614b19c9a1eec9775f021869d7eadde0fc73921a81b90c9b4c9"
+checksum = "789a6b737c4a13bec43cd3c1b982aa8a8a192ff4bf444e0fb1fd5a324f064fd1"
 dependencies = [
  "indexmap",
- "memo-map",
  "serde",
 ]
 
 [[package]]
 name = "minijinja-contrib"
-version = "2.24.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd3e5f077bc2379f0f7d911e7cfdd921114ed99fc884533dca502944cb355b11"
+checksum = "e15d0d31fbf10ce99b313a238406d62dd5913d95a9be5fa081f1232e31292fc7"
 dependencies = [
  "minijinja",
- "serde",
 ]
 
 [[package]]
@@ -6026,9 +6018,9 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "umya-spreadsheet"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "560ef3816b56fce89975a58a7f271c57f7b3873aac8fba70572f93f3683be405"
+checksum = "032a20340d2eac6e2e6c940e6b793cd3b68223d5f9412724cb7e32ef17c584d0"
 dependencies = [
  "aes",
  "base64 0.22.1",

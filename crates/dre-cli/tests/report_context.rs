@@ -179,7 +179,7 @@ fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
     )
     .ok();
     assert_eq!(p.json("result.json")["rows"], json!([[7]]));
-    // The 0.4 flag name still works, with a warning.
+    // The 0.4 flag name is gone in 0.5.
     p.dre(
         "query",
         &[
@@ -191,9 +191,9 @@ fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
             "old.json",
         ],
     )
-    .ok()
-    .says("--output-json here is now --output-file");
-    assert_eq!(p.json("old.json")["rows"], json!([[7]]));
+    .failed()
+    .says("a similar argument exists: '--output-file'");
+    assert!(!p.path("old.json").exists());
     p.dre(
         "query",
         &[
@@ -201,7 +201,7 @@ fn read_only_query_uses_a_dre_connection_and_rejects_writes() {
             "warehouse",
             "--sql-file",
             "write.sql",
-            "--output-json",
+            "--output-file",
             "bad.json",
         ],
     )
@@ -273,7 +273,7 @@ fn catalogue_resolves_names_and_reads_upstream_table_and_column_comments() {
             "warehouse",
             "--tables-file",
             "tables.json",
-            "--output-json",
+            "--output-file",
             "catalog.json",
         ],
     )
@@ -306,7 +306,7 @@ fn catalogue_resolves_names_and_reads_upstream_table_and_column_comments() {
             "warehouse",
             "--tables-file",
             "tables.json",
-            "--output-json",
+            "--output-file",
             "uppercase.json",
         ],
     )

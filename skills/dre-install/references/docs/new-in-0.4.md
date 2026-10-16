@@ -2,7 +2,7 @@
 title: "New in 0.4"
 description: "Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.4
@@ -136,4 +136,4 @@ The schemas for editor checks are at `/schemas/v0.4/`.
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.3](new-in-0.3.md)
+**Previous:** [New in 0.5](new-in-0.5.md) · **Next:** [New in 0.3](new-in-0.3.md)

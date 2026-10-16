@@ -53,7 +53,7 @@ pub fn register(env: &mut minijinja::Environment<'_>) {
 /// Python-style methods on the built-in values (`pycompat`), except that the mutating ones get a
 /// message that says what to write instead.
 fn unknown_method(
-    state: &State<'_, '_>,
+    state: &mut State<'_, '_>,
     value: &Value,
     method: &str,
     args: &[Value],
@@ -121,7 +121,7 @@ impl Object for MutableList {
 
     fn call_method(
         self: &Arc<Self>,
-        _: &State<'_, '_>,
+        _: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -270,7 +270,7 @@ impl Object for MutableDict {
 
     fn call_method(
         self: &Arc<Self>,
-        _: &State<'_, '_>,
+        _: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {

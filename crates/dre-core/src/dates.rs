@@ -330,7 +330,7 @@ impl Object for Date {
 
     fn call_method(
         self: &Arc<Self>,
-        _: &State<'_, '_>,
+        _: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -431,7 +431,7 @@ impl Object for DateTime {
 
     fn call_method(
         self: &Arc<Self>,
-        _: &State<'_, '_>,
+        _: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {

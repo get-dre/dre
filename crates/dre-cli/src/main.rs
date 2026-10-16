@@ -140,15 +140,10 @@ struct CatalogArgs {
 
 /// Where `dre query` and `dre catalog` write their JSON.
 #[derive(Args)]
-#[group(required = true, multiple = false)]
 struct OutputFile {
     /// The JSON file to write, relative to the project directory.
     #[arg(long)]
-    output_file: Option<PathBuf>,
-    /// Deprecated: the old name of `--output-file` here (elsewhere `--output-json` names a
-    /// folder). Removed in 0.5.
-    #[arg(long)]
-    output_json: Option<PathBuf>,
+    output_file: PathBuf,
 }
 
 #[derive(Args)]
@@ -742,18 +737,7 @@ fn json_command(
     let Some((project, _)) = load_for_run(args, printer) else {
         return exit::not_started();
     };
-    let file = match (output.output_file, output.output_json) {
-        (Some(file), _) => file,
-        (None, Some(file)) => {
-            printer.line(
-                output::Tone::Warn,
-                "Deprecated",
-                "--output-json here is now --output-file; the old name stops working in 0.5",
-            );
-            file
-        }
-        (None, None) => unreachable!("clap requires one of the output flags"),
-    };
+    let file = output.output_file;
     let result = build(&project).and_then(|value| {
         let path = project.root.join(&file);
         if let Some(parent) = path.parent() {

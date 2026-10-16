@@ -134,7 +134,7 @@ dre compile tag:finance
 Run one read-only query on a configured connection and write typed JSON rows.
 
 ```text
-dre query [OPTIONS] --profile <PROFILE> --sql-file <SQL_FILE> <--output-file <OUTPUT_FILE>|--output-json <OUTPUT_JSON>>
+dre query [OPTIONS] --profile <PROFILE> --sql-file <SQL_FILE> --output-file <OUTPUT_FILE>
 ```
 
 | Option | Default | Description |
@@ -149,7 +149,6 @@ dre query [OPTIONS] --profile <PROFILE> --sql-file <SQL_FILE> <--output-file <OU
 | `--profile <PROFILE>` |  | The configured source connection. |
 | `--sql-file <SQL_FILE>` |  | File containing one read-only SQL query (relative to the project directory). |
 | `--output-file <OUTPUT_FILE>` |  | The JSON file to write, relative to the project directory. |
-| `--output-json <OUTPUT_JSON>` |  | Deprecated: the old name of `--output-file` here (elsewhere `--output-json` names a folder). Removed in 0.5. |
 | `--max-rows <MAX_ROWS>` | `1000` | Maximum result rows. The result records whether more rows were available. |
 
 
@@ -158,7 +157,7 @@ dre query [OPTIONS] --profile <PROFILE> --sql-file <SQL_FILE> <--output-file <OU
 Read live table/column definitions and comments through a configured connection.
 
 ```text
-dre catalog [OPTIONS] --profile <PROFILE> --tables-file <TABLES_FILE> <--output-file <OUTPUT_FILE>|--output-json <OUTPUT_JSON>>
+dre catalog [OPTIONS] --profile <PROFILE> --tables-file <TABLES_FILE> --output-file <OUTPUT_FILE>
 ```
 
 | Option | Default | Description |
@@ -173,7 +172,6 @@ dre catalog [OPTIONS] --profile <PROFILE> --tables-file <TABLES_FILE> <--output-
 | `--profile <PROFILE>` |  | The source connection to inspect. |
 | `--tables-file <TABLES_FILE>` |  | JSON object with `tables` and `schemas` arrays of relation names. |
 | `--output-file <OUTPUT_FILE>` |  | The JSON file to write, relative to the project directory. |
-| `--output-json <OUTPUT_JSON>` |  | Deprecated: the old name of `--output-file` here (elsewhere `--output-json` names a folder). Removed in 0.5. |
 
 
 ## `dre mcp`
