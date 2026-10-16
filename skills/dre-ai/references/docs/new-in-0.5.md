@@ -34,6 +34,13 @@ result. Run `dre compile` on your reports before and after updating and compare 
 - `dre query` and `dre catalog` take only `--output-file`. The old name, `--output-json`,
   deprecated in 0.4.3, is gone there (`dre run --output-json <dir>` is unchanged).
 
+## New plugins
+
+- The [clickhouse plugin](plugin-clickhouse.md) 1.0.0 reads ClickHouse, self-hosted or
+  ClickHouse Cloud, over HTTP or its native protocol, with TLS and SSH bastions. Profile fields
+  follow dbt-clickhouse, so a dbt profile can be copied across. Add `clickhouse` under `plugins:`
+  in `dependencies.yml`; it works with DRE 0.4.1 and later.
+
 ## Fixes
 
 - The [xlsx plugin](plugin-xlsx.md) 1.1.1 updates its spreadsheet library: page scaling, number

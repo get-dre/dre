@@ -2,7 +2,7 @@
 title: "Amazon S3"
 description: "The s3 destination: credentials and paths."
 section: plugins
-position: 13
+position: 14
 ---
 
 # Amazon S3

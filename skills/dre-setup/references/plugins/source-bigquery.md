@@ -138,8 +138,9 @@ and narrow the SQL before raising a cap. See [profiles](../docs/reference-profil
 
 ### Types from warehouses
 
-Every warehouse source (`databricks`, `bigquery`, `snowflake`) sends the same kinds of value the
-same way, so a report looks the same whichever warehouse it reads:
+Every warehouse source (`databricks`, `bigquery`, `snowflake`, `clickhouse`) sends the same kinds
+of value the same way, so a report looks the same whichever warehouse it reads (ClickHouse's own
+types are on [its page](../docs/plugin-clickhouse.md#types)):
 
 - Scalars keep their type. Exact numbers (`DECIMAL`, `NUMERIC`, `NUMBER(p,s)`) stay decimals at
   their declared precision; Snowflake `NUMBER(p,0)` up to 18 digits is an integer. Zone-aware
