@@ -2,7 +2,7 @@
 title: "Google Cloud Storage"
 description: "The gcs destination: credentials and paths."
 section: plugins
-position: 14
+position: 15
 ---
 
 # Google Cloud Storage

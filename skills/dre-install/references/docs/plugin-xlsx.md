@@ -2,7 +2,7 @@
 title: "Excel (xlsx)"
 description: "The xlsx format: column formats, formulas, totals rows and templates."
 section: plugins
-position: 12
+position: 13
 ---
 
 # Excel (xlsx)

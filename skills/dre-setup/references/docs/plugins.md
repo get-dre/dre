@@ -24,6 +24,7 @@ secrets can use `env_var()`.
 | `databricks` | the [`databricks`](plugin-databricks.md) source, and the [`databricks`](plugin-databricks.md) destination (Volumes and workspace files) |
 | `bigquery` | the [`bigquery`](plugin-bigquery.md) source (alpha: 1.0.0 pre-releases) |
 | `snowflake` | the [`snowflake`](plugin-snowflake.md) source (alpha: 1.0.0 pre-releases) |
+| `clickhouse` | the [`clickhouse`](plugin-clickhouse.md) source, self-hosted or ClickHouse Cloud |
 | `csv` | the [`csv`](plugin-csv.md) and [`delimited`](plugin-csv.md) formats |
 | `fixed_width` | the [`fixed_width`](plugin-fixed_width.md) format |
 | `parquet` | the [`parquet`](plugin-parquet.md) format |
@@ -48,7 +49,7 @@ Each plugin has its own page, with its profile fields, options and notes:
 
 - Sources: [duckdb](plugin-duckdb.md), [postgres](plugin-postgres.md),
   [databricks](plugin-databricks.md), [bigquery](plugin-bigquery.md),
-  [snowflake](plugin-snowflake.md).
+  [snowflake](plugin-snowflake.md), [clickhouse](plugin-clickhouse.md).
 - Formats: [csv and delimited](plugin-csv.md), [fixed_width](plugin-fixed_width.md),
   [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), and the built-in
   [`message`](#the-message-format).
@@ -63,8 +64,9 @@ This page has what they share.
 
 ### Types from warehouses
 
-Every warehouse source (`databricks`, `bigquery`, `snowflake`) sends the same kinds of value the
-same way, so a report looks the same whichever warehouse it reads:
+Every warehouse source (`databricks`, `bigquery`, `snowflake`, `clickhouse`) sends the same kinds
+of value the same way, so a report looks the same whichever warehouse it reads (ClickHouse's own
+types are on [its page](plugin-clickhouse.md#types)):
 
 - Scalars keep their type. Exact numbers (`DECIMAL`, `NUMERIC`, `NUMBER(p,s)`) stay decimals at
   their declared precision; Snowflake `NUMBER(p,0)` up to 18 digits is an integer. Zone-aware
@@ -199,7 +201,7 @@ Nothing is ever sent twice:
   the message was sent isn't tried again.
 - **Chat posts** (`slack`, `teams`, `google_chat`): only on a 429 or 503, or when no connection
   was made.
-- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`): only while connecting or
+- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`, `clickhouse`): only while connecting or
   signing in, never once a query is sent.
 
 ### A file already at the path

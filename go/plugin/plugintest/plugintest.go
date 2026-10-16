@@ -143,6 +143,15 @@ func (c *Conversation) Open(conn map[string]any) {
 	}
 }
 
+// OpenReadOnly opens a session with conn and `read_only: true`, and expects ok.
+func (c *Conversation) OpenReadOnly(conn map[string]any) {
+	c.t.Helper()
+	c.Send(map[string]any{"type": "open", "connection": conn, "read_only": true})
+	if r := c.Reply(); r["type"] != "ok" {
+		c.t.Fatalf("open read-only: %v", r)
+	}
+}
+
 // Query runs sql and returns the result's records, after checking the reply sequence.
 func (c *Conversation) Query(sql string) []arrow.Record {
 	c.t.Helper()

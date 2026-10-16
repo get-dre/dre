@@ -27,6 +27,7 @@ updates:
   - package-ecosystem: gomod
     directories:
       - /go/bigquery
+      - /go/clickhouse
       - /go/databricks
       - /go/plugin
       - /go/snowflake

@@ -2,7 +2,7 @@
 title: "Slack"
 description: "The slack destination: tokens, channels and DMs."
 section: plugins
-position: 19
+position: 20
 ---
 
 # Slack

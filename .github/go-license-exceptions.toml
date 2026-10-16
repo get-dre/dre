@@ -19,3 +19,9 @@ module = "github.com/apache/thrift"
 reason = """\
 Apache-2.0. Its LICENSE also has the GNU all-permissive notice of the autotools build files, which \
 aren't part of the Go library."""
+
+[[exception]]
+module = "github.com/segmentio/asm"
+reason = """\
+MIT-0 (MIT No Attribution): MIT without the notice requirement, so as permissive as the allowed MIT; \
+go-licenses doesn't classify it. Used by clickhouse-go."""

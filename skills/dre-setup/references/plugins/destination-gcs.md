@@ -119,7 +119,7 @@ Nothing is ever sent twice:
   the message was sent isn't tried again.
 - **Chat posts** (`slack`, `teams`, `google_chat`): only on a 429 or 503, or when no connection
   was made.
-- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`): only while connecting or
+- **Sources** (`postgres`, `databricks`, `bigquery`, `snowflake`, `clickhouse`): only while connecting or
   signing in, never once a query is sent.
 
 ### Several destinations

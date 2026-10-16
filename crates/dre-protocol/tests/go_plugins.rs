@@ -1,15 +1,16 @@
 //! First-party plugins built outside Cargo (the Go packages: `dre-plugin-databricks`, serving the
-//! `databricks` source and destination, and `dre-plugin-bigquery` and `dre-plugin-snowflake`),
-//! checked through the same host code core uses. CI builds them and sets `DRE_TEST_GO_PLUGINS` to
-//! their directory; the tests skip themselves when it's unset. The real-warehouse test also needs
-//! `DRE_TEST_DATABRICKS_HOST`, `_HTTP_PATH` and `_TOKEN`; the BigQuery one
-//! `DRE_TEST_BIGQUERY_EMULATOR`.
+//! `databricks` source and destination, and `dre-plugin-bigquery`, `dre-plugin-snowflake` and
+//! `dre-plugin-clickhouse`), checked through the same host code core uses. CI builds them and sets
+//! `DRE_TEST_GO_PLUGINS` to their directory; the tests skip themselves when it's unset. The
+//! real-warehouse test also needs `DRE_TEST_DATABRICKS_HOST`, `_HTTP_PATH` and `_TOKEN`; the
+//! BigQuery one `DRE_TEST_BIGQUERY_EMULATOR`; the ClickHouse one `DRE_TEST_CLICKHOUSE_HTTP` (a
+//! server with user `dre`, password `dre`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dre_protocol::host::{Execution, LogSink, PluginProcess};
-use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_SESSIONS, Kind, PluginId, conformance};
+use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS, Kind, PluginId, conformance};
 use serde_json::json;
 
 fn go_plugin(name: &str) -> Option<PathBuf> {
@@ -153,8 +154,8 @@ fn the_go_databricks_source_holds_one_session_on_a_real_warehouse() {
     );
 }
 
-/// The BigQuery and Snowflake packages: protocol conformance, their capabilities, and a clear
-/// error for a profile missing a required field.
+/// The BigQuery, Snowflake and ClickHouse packages: protocol conformance, their capabilities, and
+/// a clear error for a profile the plugin refuses.
 #[test]
 fn the_go_warehouse_packages_conform_to_the_protocol() {
     for (package, name, missing, err) in [
@@ -170,6 +171,12 @@ fn the_go_warehouse_packages_conform_to_the_protocol() {
             json!({"user": "u"}),
             "`account` is required",
         ),
+        (
+            "dre-plugin-clickhouse",
+            "clickhouse",
+            json!({"driver": "native", "compression": "gzip"}),
+            "works only with `driver: http`",
+        ),
     ] {
         let Some(bin) = go_plugin(package) else {
             eprintln!("skipped: set DRE_TEST_GO_PLUGINS to the built Go plugins");
@@ -183,6 +190,7 @@ fn the_go_warehouse_packages_conform_to_the_protocol() {
             p.has(CAP_SESSIONS) && p.has(CAP_CHECK) && p.has(CAP_LOAD),
             "{name}"
         );
+        assert_eq!(p.has(CAP_READ_ONLY), name == "clickhouse", "{name}");
         assert_eq!(p.info().provides, vec![id.clone()]);
         let e = p
             .open(missing.as_object().unwrap().clone(), false)
@@ -225,6 +233,59 @@ fn the_go_bigquery_source_reads_the_emulator() {
     let t = |n: &str| b.schema().field_with_name(n).unwrap().data_type().to_string();
     assert_eq!(t("id"), "Int64");
     assert_eq!(t("amount"), "Decimal128(38, 9)");
+    assert_eq!(t("s"), "Utf8");
+    let text = |n: &str| {
+        let i = b.schema().index_of(n).unwrap();
+        arrow::array::AsArray::as_string::<i32>(b.column(i))
+            .value(0)
+            .to_string()
+    };
+    assert_eq!(text("s"), r#"{"a":1,"b":"x,y"}"#);
+    assert_eq!(text("arr"), "[1,2]");
+}
+
+/// The clickhouse source against a ClickHouse server, through core's host code: a read-only
+/// session refuses writes, results are typed, nested values compact JSON text.
+#[test]
+fn the_go_clickhouse_source_reads_a_server() {
+    let Some(bin) = go_plugin("dre-plugin-clickhouse") else {
+        return;
+    };
+    let Ok(addr) = std::env::var("DRE_TEST_CLICKHOUSE_HTTP") else {
+        eprintln!("skipped: set DRE_TEST_CLICKHOUSE_HTTP to run");
+        return;
+    };
+    let (host, port) = addr.rsplit_once(':').unwrap();
+    let log: LogSink = Arc::new(|_, l| eprintln!("[plugin] {l}"));
+    let id = PluginId::new(Kind::Source, "clickhouse");
+    let mut p = PluginProcess::start_for(&bin, Some(&id), log, None).unwrap();
+    let conn = json!({"host": host, "port": port.parse::<u16>().unwrap(), "user": "dre", "password": "dre"});
+    p.open_sandboxed(conn.as_object().unwrap().clone()).unwrap();
+    let err = p
+        .execute(
+            "CREATE TABLE default.dre_host_test (x Int8) ENGINE = Memory",
+            None,
+            |_, _| Ok(()),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("readonly"), "{err}");
+    let mut batches = Vec::new();
+    let e = p
+        .execute(
+            "SELECT toUInt8(1) AS id, toDecimal64(1.5, 2) AS amount, CAST((1, 'x,y'), 'Tuple(a UInt8, b String)') AS s, [1, 2] AS arr",
+            None,
+            |_, b| {
+                batches.push(b);
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(matches!(e, Execution::Result { rows: 1, .. }), "{e:?}");
+    let b = &batches[0];
+    let t = |n: &str| b.schema().field_with_name(n).unwrap().data_type().to_string();
+    assert_eq!(t("id"), "Int64");
+    assert_eq!(t("amount"), "Decimal128(18, 2)");
     assert_eq!(t("s"), "Utf8");
     let text = |n: &str| {
         let i = b.schema().index_of(n).unwrap();
