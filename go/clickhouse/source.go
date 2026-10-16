@@ -41,7 +41,7 @@ type session struct {
 	queryID string
 }
 
-func open(conn map[string]any, level int) (*session, error) {
+func open(conn map[string]any, level readOnlyLevel) (*session, error) {
 	o, err := options(conn, level)
 	if err != nil {
 		return nil, &plugin.Error{Kind: "config", Message: err.Error()}
@@ -59,7 +59,7 @@ func open(conn map[string]any, level int) (*session, error) {
 	}
 	retries, err := plugin.Int(conn, "retries", 3)
 	if err != nil {
-		return nil, err
+		return nil, &plugin.Error{Kind: "config", Message: err.Error()}
 	}
 	s.conn, err = plugin.Retry(int(retries), "connecting to ClickHouse", func() (driver.Conn, error) {
 		c, err := clickhouse.Open(o)
@@ -150,7 +150,7 @@ func (s *session) Run(query string, fn func(plugin.Result) error) error {
 	}
 	defer rows.Close()
 	types := rows.ColumnTypes()
-	r := &result{rows: rows, cols: make([]column, len(types)), dest: make([]any, len(types))}
+	r := &result{rows: rows, cols: make([]column, len(types)), dest: make([]any, len(types)), failed: s.failed}
 	fields := make([]arrow.Field, len(types))
 	for i, t := range types {
 		r.cols[i] = newColumn(t.Name(), t.DatabaseTypeName())
@@ -173,12 +173,8 @@ func (s *session) Check(query string) (string, error) {
 	if err := s.usable(); err != nil {
 		return "", err
 	}
-	if returnsRows(query) {
-		err := s.drain("EXPLAIN " + query)
-		// INCORRECT_QUERY: "Only SELECT is supported for EXPLAIN query" (SHOW, DESCRIBE, ...).
-		if code(err) != 80 {
-			return "", err
-		}
+	if isSelect(query) {
+		return "", s.drain("EXPLAIN " + query)
 	}
 	if err := s.drain("EXPLAIN AST " + query); err != nil {
 		return "", err
@@ -342,6 +338,7 @@ func (s *session) Close() {
 // result streams one statement's rows as Arrow batches of the declared types.
 type result struct {
 	rows    driver.Rows
+	failed  func(error) error // the session's: a failure mid-stream loses native state too
 	cols    []column
 	dest    []any
 	schema  *arrow.Schema
@@ -361,7 +358,7 @@ func (r *result) HasNext() bool {
 func (r *result) Next() (arrow.Record, error) {
 	if !r.HasNext() {
 		if err := r.rows.Err(); err != nil {
-			return nil, cleanErr(err)
+			return nil, r.failed(err)
 		}
 		return nil, io.EOF
 	}
@@ -374,7 +371,7 @@ func (r *result) Next() (arrow.Record, error) {
 	for r.HasNext() && n < batchRows {
 		r.peeked = false
 		if err := r.rows.Scan(r.dest...); err != nil {
-			return nil, cleanErr(err)
+			return nil, r.failed(err)
 		}
 		for i, c := range r.cols {
 			c.append(builders[i], reflect.ValueOf(r.dest[i]).Elem().Interface())
@@ -384,7 +381,7 @@ func (r *result) Next() (arrow.Record, error) {
 	if !r.HasNext() {
 		// The rows ended: a failure or a cancel, not the end of the result, sends no partial batch.
 		if err := r.rows.Err(); err != nil {
-			return nil, cleanErr(err)
+			return nil, r.failed(err)
 		}
 	}
 	cols := make([]arrow.Array, len(builders))
@@ -398,6 +395,21 @@ func (r *result) Next() (arrow.Record, error) {
 // returnsRows is whether a statement answers with rows, from its first keyword (after comments
 // and opening parentheses). Anything else (DDL, SET, INSERT) is sent without asking for rows.
 func returnsRows(query string) bool {
+	switch firstKeyword(query) {
+	case "select", "with", "show", "desc", "describe", "explain", "exists", "check", "values", "from":
+		return true
+	}
+	return false
+}
+
+// isSelect is whether ClickHouse can EXPLAIN the statement (only a SELECT).
+func isSelect(query string) bool {
+	k := firstKeyword(query)
+	return k == "select" || k == "with" || k == "from"
+}
+
+// firstKeyword is a statement's first word, lowercased, after comments and opening parentheses.
+func firstKeyword(query string) string {
 	q := query
 	for {
 		q = strings.TrimLeft(q, " \t\r\n(")
@@ -407,13 +419,13 @@ func returnsRows(query string) bool {
 				q = q[i+1:]
 				continue
 			}
-			return false
+			return ""
 		case strings.HasPrefix(q, "/*"):
 			if i := strings.Index(q, "*/"); i >= 0 {
 				q = q[i+2:]
 				continue
 			}
-			return false
+			return ""
 		}
 		break
 	}
@@ -421,11 +433,7 @@ func returnsRows(query string) bool {
 	if end < 0 {
 		end = len(q)
 	}
-	switch strings.ToLower(q[:end]) {
-	case "select", "with", "show", "desc", "describe", "explain", "exists", "check", "values", "from":
-		return true
-	}
-	return false
+	return strings.ToLower(q[:end])
 }
 
 func quote(ident string) string {
@@ -494,7 +502,8 @@ func openErr(err error, o *clickhouse.Options) error {
 	case strings.Contains(m, "connection refused") || strings.Contains(m, "no such host") ||
 		strings.Contains(m, "i/o timeout") || strings.Contains(m, "deadline exceeded"):
 		hint = " (check `host`, `port` and `driver`)"
-	case strings.Contains(m, "malformed http response") || strings.Contains(m, "unexpected packet"):
+	case strings.Contains(m, "malformed http response") || strings.Contains(m, "unexpected packet") ||
+		strings.Contains(m, "is for clickhouse-client"):
 		hint = " (the port may be for the other protocol: check `driver` and `port`)"
 	case strings.Contains(m, "tls") || strings.Contains(m, "certificate"):
 		hint = " (check `secure`, `verify` and `ca_cert`)"

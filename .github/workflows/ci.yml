@@ -198,8 +198,6 @@ jobs:
               sleep 1
             done
           done
-      # Postgres and ClickHouse with TLS behind an SSH bastion, for the postgres and clickhouse
-      # plugins' tunnel tests.
       # The bigquery plugin against the BigQuery emulator.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -207,6 +205,8 @@ jobs:
           cache-dependency-path: go/*/go.sum
       - run: go test ./...
         working-directory: go/bigquery
+      # Postgres and ClickHouse with TLS behind an SSH bastion, for the postgres and clickhouse
+      # plugins' tunnel tests.
       - name: Start the SSH bastion
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
       # The clickhouse plugin against the ClickHouse service, and with TLS through the bastion.

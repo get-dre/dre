@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -20,15 +21,17 @@ import (
 // temp tables and the table functions that reach outside the database (url, file, s3, remote,
 // ...). Once a query carries one, neither SET nor a SETTINGS clause can lower it; the profile's
 // own settings, sent with it, still apply.
+type readOnlyLevel int
+
 const (
-	readWrite = 0
-	sandboxed = 1
-	readOnly  = 2
+	readWrite readOnlyLevel = 0
+	sandboxed readOnlyLevel = 1
+	readOnly  readOnlyLevel = 2
 )
 
 // options is the driver's configuration from a profile target, at a read-only level. Sessions,
 // dialing through SSH and query IDs are added by open.
-func options(conn map[string]any, level int) (*clickhouse.Options, error) {
+func options(conn map[string]any, level readOnlyLevel) (*clickhouse.Options, error) {
 	native := plugin.Optional(conn, "driver") == "native"
 	secure, err := plugin.Bool(conn, "secure", false)
 	if err != nil {
@@ -70,20 +73,16 @@ func options(conn map[string]any, level int) (*clickhouse.Options, error) {
 	if o.ReadTimeout, err = duration(conn, "send_receive_timeout", 300*time.Second); err != nil {
 		return nil, err
 	}
-	switch c := plugin.Optional(conn, "compression"); c {
-	case "", "lz4":
-		o.Compression = &clickhouse.Compression{Method: clickhouse.CompressionLZ4}
-	case "zstd":
-		o.Compression = &clickhouse.Compression{Method: clickhouse.CompressionZSTD}
-	case "gzip":
-		o.Compression = &clickhouse.Compression{Method: clickhouse.CompressionGZIP}
-	case "deflate":
-		o.Compression = &clickhouse.Compression{Method: clickhouse.CompressionDeflate}
-	case "br":
-		o.Compression = &clickhouse.Compression{Method: clickhouse.CompressionBrotli}
-	case "none":
-	default:
-		return nil, fmt.Errorf("`compression` must be one of lz4, zstd, none, gzip, deflate or br")
+	name := plugin.Optional(conn, "compression")
+	if name == "" {
+		name = "lz4"
+	}
+	c, ok := compressions[name]
+	if !ok {
+		return nil, fmt.Errorf("`compression` must be one of %s", strings.Join(compressionNames(), ", "))
+	}
+	if c.method != clickhouse.CompressionNone {
+		o.Compression = &clickhouse.Compression{Method: c.method}
 	}
 	if s, ok := conn["custom_settings"].(map[string]any); ok {
 		for k, v := range s {
@@ -91,7 +90,7 @@ func options(conn map[string]any, level int) (*clickhouse.Options, error) {
 		}
 	}
 	if level != readWrite {
-		o.Settings["readonly"] = level
+		o.Settings["readonly"] = int(level)
 	}
 	if secure {
 		if o.TLS, err = tlsConfig(conn); err != nil {
@@ -100,6 +99,22 @@ func options(conn map[string]any, level int) (*clickhouse.Options, error) {
 	}
 	return o, nil
 }
+
+// compressions are the `compression` values: the driver's method, and whether only HTTP has it.
+var compressions = map[string]struct {
+	method   clickhouse.CompressionMethod
+	httpOnly bool
+}{
+	"lz4":     {method: clickhouse.CompressionLZ4},
+	"zstd":    {method: clickhouse.CompressionZSTD},
+	"none":    {method: clickhouse.CompressionNone},
+	"gzip":    {method: clickhouse.CompressionGZIP, httpOnly: true},
+	"deflate": {method: clickhouse.CompressionDeflate, httpOnly: true},
+	"br":      {method: clickhouse.CompressionBrotli, httpOnly: true},
+}
+
+// compressionNames are the `compression` values in the order the docs give them.
+func compressionNames() []string { return []string{"lz4", "zstd", "none", "gzip", "deflate", "br"} }
 
 // database is `schema`, or dbt's `database`, or `default`.
 func database(conn map[string]any) string {
@@ -174,8 +189,7 @@ func validateConnection(conn map[string]any) []string {
 	if set("client_cert") != set("client_cert_key") {
 		errs = append(errs, "`client_cert` and `client_cert_key` go together; set both")
 	}
-	secure, _ := conn["secure"].(bool)
-	if !secure {
+	if secure, _ := plugin.Bool(conn, "secure", false); !secure {
 		var tlsOnly []string
 		for _, k := range []string{"verify", "ca_cert", "client_cert", "client_cert_key", "server_host_name"} {
 			if set(k) {
@@ -191,7 +205,7 @@ func validateConnection(conn map[string]any) []string {
 			errs = append(errs, fmt.Sprintf("%s only %s with `secure: true`", joinAnd(tlsOnly), verb))
 		}
 	}
-	if c := plugin.Optional(conn, "compression"); plugin.Optional(conn, "driver") == "native" && (c == "gzip" || c == "deflate" || c == "br") {
+	if c := plugin.Optional(conn, "compression"); plugin.Optional(conn, "driver") == "native" && compressions[c].httpOnly {
 		errs = append(errs, fmt.Sprintf("`compression: %s` works only with `driver: http`; native takes lz4, zstd or none", c))
 	}
 	if s, ok := conn["ssh"].(map[string]any); ok {

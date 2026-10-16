@@ -405,7 +405,7 @@ func appendJSON(buf *bytes.Buffer, v any, typ string) {
 		buf.WriteString(x.String())
 		return
 	case decimal.Decimal:
-		if base == "Decimal" || strings.HasPrefix(base, "Decimal") {
+		if strings.HasPrefix(base, "Decimal") {
 			_, s := decimalPrecision(base, args)
 			buf.WriteString(x.StringFixed(int32(s)))
 		} else {

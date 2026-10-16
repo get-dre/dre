@@ -71,6 +71,7 @@ type tunnel struct {
 	timeout  time.Duration
 	once     sync.Once
 	client   *ssh.Client
+	agent    net.Conn // the SSH agent's socket, with use_agent
 	err      error
 }
 
@@ -104,6 +105,9 @@ func (t *tunnel) dialer(tlsConf *tls.Config) func(ctx context.Context, addr stri
 }
 
 func (t *tunnel) closeIfSet() {
+	if t != nil && t.agent != nil {
+		t.agent.Close()
+	}
 	if t != nil && t.client != nil {
 		t.client.Close()
 	}
@@ -120,7 +124,7 @@ func (t *tunnel) connect() (*ssh.Client, error) {
 		return nil, fmt.Errorf("invalid `ssh.port`")
 	}
 	addr := net.JoinHostPort(host, strconv.FormatInt(port, 10))
-	auth, err := sshAuth(s)
+	auth, err := t.sshAuth(s)
 	if err != nil {
 		return nil, err
 	}
@@ -147,13 +151,14 @@ func (t *tunnel) connect() (*ssh.Client, error) {
 	return c, nil
 }
 
-func sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
+func (t *tunnel) sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
 	if on, _ := s["use_agent"].(bool); on {
-		a, err := agentClient()
+		c, err := agentConn()
 		if err != nil {
 			return nil, err
 		}
-		return []ssh.AuthMethod{ssh.PublicKeysCallback(a.Signers)}, nil
+		t.agent = c
+		return []ssh.AuthMethod{ssh.PublicKeysCallback(agent.NewClient(c).Signers)}, nil
 	}
 	var pem []byte
 	switch {
@@ -185,7 +190,7 @@ func sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 }
 
-func agentClient() (agent.ExtendedAgent, error) {
+func agentConn() (net.Conn, error) {
 	if runtime.GOOS == "windows" {
 		return nil, errors.New("`ssh.use_agent` isn't supported on Windows by the clickhouse plugin; use a key file")
 	}
@@ -197,7 +202,7 @@ func agentClient() (agent.ExtendedAgent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't reach the SSH agent (`ssh.use_agent: true`): %v", err)
 	}
-	return agent.NewClient(c), nil
+	return c, nil
 }
 
 // hostKeyCheck trusts a pinned fingerprint, or else known_hosts.

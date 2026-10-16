@@ -163,10 +163,13 @@ func TestCheckExplainsWithoutRunning(t *testing.T) {
 		}
 		c.Send(map[string]any{"type": "check", "sql": "SELECT nope FROM numbers(3)"})
 		plugintest.ExpectError(t, c.Reply(), "nope")
-		// Not a SELECT: parsed only.
-		c.Send(map[string]any{"type": "check", "sql": "SET max_threads = 2"})
-		if r := c.Reply(); r["type"] != "ok" {
-			t.Fatalf("%v", r)
+		// Not a SELECT: parsed only, and the session (with its temp table) stays usable.
+		c.Exec("CREATE TEMPORARY TABLE checked AS SELECT 1 AS x")
+		for _, sql := range []string{"SET max_threads = 2", "SHOW TABLES", "DESCRIBE TABLE checked", "SELECT x FROM checked"} {
+			c.Send(map[string]any{"type": "check", "sql": sql})
+			if r := c.Reply(); r["type"] != "ok" {
+				t.Fatalf("%s: %v", sql, r)
+			}
 		}
 	})
 }
@@ -244,6 +247,28 @@ func TestCancelStopsTheQueryOnTheServer(t *testing.T) {
 			time.Sleep(250 * time.Millisecond)
 		}
 	})
+}
+
+// ClickHouse Cloud, when DRE_TEST_CLICKHOUSE_CLOUD_HOST and _PASSWORD (and optionally _USER,
+// default `default`) name a service: over HTTPS and native TLS with the public CA.
+func TestClickHouseCloud(t *testing.T) {
+	host, password := os.Getenv("DRE_TEST_CLICKHOUSE_CLOUD_HOST"), os.Getenv("DRE_TEST_CLICKHOUSE_CLOUD_PASSWORD")
+	if host == "" || password == "" {
+		t.Skip("set DRE_TEST_CLICKHOUSE_CLOUD_HOST and DRE_TEST_CLICKHOUSE_CLOUD_PASSWORD")
+	}
+	user := os.Getenv("DRE_TEST_CLICKHOUSE_CLOUD_USER")
+	if user == "" {
+		user = "default"
+	}
+	for _, driver := range []string{"http", "native"} {
+		t.Run(driver, func(t *testing.T) {
+			c := started(t, map[string]any{"driver": driver, "host": host, "user": user, "password": password, "secure": true, "connect_timeout": 60.0})
+			c.Exec("CREATE TEMPORARY TABLE cloud_check AS SELECT 1 AS x")
+			if got := cell(t, c.Query("SELECT x FROM cloud_check"), "x"); got != "1" {
+				t.Fatal(got)
+			}
+		})
+	}
 }
 
 func TestBadCredentialsAreAnAuthError(t *testing.T) {

@@ -48,13 +48,11 @@ var fields = []plugin.Field{
 	{Name: "server_host_name", Description: "the host name to expect on the server's TLS certificate, when it isn't `host`", Manual: true},
 	{Name: "connect_timeout", Description: "how long to wait for a connection (`30s`, `2m`, or seconds)", Default: "10s", Manual: true, Kind: "duration"},
 	{Name: "send_receive_timeout", Description: "how long to wait on a read or write to the server (`5m`, or seconds)", Default: "300s", Manual: true, Kind: "duration"},
-	{Name: "compression", Description: "how results are compressed on the wire: lz4 (the default), zstd, none, or for http gzip, deflate or br", Manual: true, Choices: compressions},
+	{Name: "compression", Description: "how results are compressed on the wire: lz4 (the default), zstd, none, or for http gzip, deflate or br", Manual: true, Choices: compressionNames()},
 	{Name: "custom_settings", Description: "ClickHouse settings for every query, e.g. max_execution_time: 300", Manual: true, Kind: "map"},
 	{Name: "retries", Description: "how many times to try connecting again after a temporary error (0: never)", Default: 3, Manual: true, Kind: "integer"},
 	{Name: "ssh", Description: "reach the server through an SSH bastion (a block of settings)", Secret: true, Manual: true, Kind: "map"},
 }
-
-var compressions = []string{"lz4", "zstd", "none", "gzip", "deflate", "br"}
 
 // aliases are dbt's other names for fields, and dbtOnly the dbt-clickhouse fields that only
 // matter for building models or that Go handles itself: both accepted so a copied dbt profile

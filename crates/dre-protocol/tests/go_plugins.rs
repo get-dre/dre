@@ -262,7 +262,11 @@ fn the_go_clickhouse_source_reads_a_server() {
     let conn = json!({"host": host, "port": port.parse::<u16>().unwrap(), "user": "dre", "password": "dre"});
     p.open_sandboxed(conn.as_object().unwrap().clone()).unwrap();
     let err = p
-        .execute("CREATE TABLE default.dre_host_test (x Int8) ENGINE = Memory", None, |_, _| Ok(()))
+        .execute(
+            "CREATE TABLE default.dre_host_test (x Int8) ENGINE = Memory",
+            None,
+            |_, _| Ok(()),
+        )
         .unwrap_err()
         .to_string();
     assert!(err.contains("readonly"), "{err}");
