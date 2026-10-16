@@ -9,7 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/paulmach/orb v0.13.0
 	github.com/shopspring/decimal v1.4.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
