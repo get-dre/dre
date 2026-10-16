@@ -8,8 +8,8 @@ require (
 	github.com/get-dre/dre/go/plugin v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/paulmach/orb v0.13.0
-	github.com/shopspring/decimal v1.4.0
-	golang.org/x/crypto v0.56.0
+	github.com/shopspring/decimal v1.5.0
+	golang.org/x/crypto v0.58.0
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )
 
 replace github.com/get-dre/dre/go/plugin => ../plugin
