@@ -35,6 +35,9 @@ fn descriptor(exe: &Path, id: &PluginId) -> Value {
     if let Some(q) = d.identifier_quote {
         v["identifier_quote"] = json!(q);
     }
+    if let Some(s) = d.string_literal {
+        v["string_literal"] = json!(s);
+    }
     if let Some(l) = d.message_limit {
         v["message_limit"] = json!(l);
     }

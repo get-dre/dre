@@ -97,6 +97,9 @@ type Role struct {
 	Fields       []Field
 	// IdentifierQuote is the source's identifier quote character.
 	IdentifierQuote string
+	// StringLiteral, when set, tells core how to spell a string holding ' or \ in SQL it writes
+	// (an inlined lookup): "backslash" for a database without chr(). Empty: chr(39)/chr(92).
+	StringLiteral string
 	// Open starts a source session from the profile target's fields.
 	Open func(conn map[string]any) (Session, error)
 	// OpenReadOnly, when set, starts a session that refuses to change data, for an `open` with
@@ -626,7 +629,11 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 	}
 	switch t {
 	case "describe":
-		s.send(map[string]any{"type": "describe", "connection_fields": fields(s.role), "identifier_quote": s.role.IdentifierQuote})
+		d := map[string]any{"type": "describe", "connection_fields": fields(s.role), "identifier_quote": s.role.IdentifierQuote}
+		if s.role.StringLiteral != "" {
+			d["string_literal"] = s.role.StringLiteral
+		}
+		s.send(d)
 		return nil
 	case "open":
 		var conn map[string]any

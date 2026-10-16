@@ -96,10 +96,9 @@ Capabilities: `sessions`, `check`, `load`, `read_only`.
   ClickHouse can only `EXPLAIN` a `SELECT`; any other statement is parsed (`EXPLAIN AST`), not
   analysed.
 - **load** creates a temporary table on the session and sends the rows as one native insert.
-- **Lookups with a `'` or `\`**: DRE inlines a small lookup as `VALUES`, spelling those
-  characters `chr(39)` and `chr(92)`, and ClickHouse has no `chr`. Until DRE spells them for
-  ClickHouse, give such a lookup `load: temp_table` in its YAML: it's then loaded into a temporary
-  table on the session, and its text arrives unchanged.
+- **Inlined lookups** spell `'` and `\` with backslashes, as ClickHouse reads them (it has no
+  `chr()`, which other sources get). This needs DRE 0.5.1 and clickhouse 1.0.1; with an older
+  DRE, give a lookup holding those characters `load: temp_table` in its YAML.
 - **Read-only.** An unmanaged report's session runs with ClickHouse's `readonly = 2`: writes and
   DDL on tables are refused, `SET` and temp tables still work, and no statement can lower it.
   `dre query` uses `readonly = 1`, which also refuses `SET`, temp tables and the table functions

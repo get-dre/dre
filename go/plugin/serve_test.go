@@ -446,6 +446,23 @@ func TestValidateConnectionAnswersWithoutConnecting(t *testing.T) {
 	plugintest.ExpectError(t, c.Reply(), "`port` must be a whole number")
 }
 
+func TestASourceTellsCoreHowToSpellStringLiterals(t *testing.T) {
+	role := plugin.Role{Kind: "source", Name: "fake", IdentifierQuote: "`", StringLiteral: "backslash"}
+	c := plugintest.Start(t, plugin.Package{Version: "1", Roles: []plugin.Role{role}}, role)
+	c.Hello()
+	c.Send(map[string]any{"type": "describe"})
+	if d := c.Reply(); d["string_literal"] != "backslash" {
+		t.Fatalf("%v", d)
+	}
+	// Left out when the role doesn't say.
+	c2, _ := start(t)
+	c2.Hello()
+	c2.Send(map[string]any{"type": "describe"})
+	if d := c2.Reply(); d["string_literal"] != nil {
+		t.Fatalf("%v", d)
+	}
+}
+
 func TestAReadOnlyOpenUsesTheRolesReadOnlyOpener(t *testing.T) {
 	db := &fakeDB{stop: make(chan struct{})}
 	var opened []string

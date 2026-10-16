@@ -22,7 +22,8 @@ var version = "unreleased"
 var (
 	sourceRole = plugin.Role{
 		Kind: "source", Name: "clickhouse", Capabilities: []string{"sessions", "check", "load", "read_only", "validate"},
-		Fields: fields, IdentifierQuote: "`", Accepts: append(append([]string{}, aliases...), dbtOnly...),
+		// ClickHouse has no chr(): core spells ' and \ in inlined lookups with backslashes.
+		Fields: fields, IdentifierQuote: "`", StringLiteral: "backslash", Accepts: append(append([]string{}, aliases...), dbtOnly...),
 		ValidateConnection: validateConnection,
 		Open:               func(conn map[string]any) (plugin.Session, error) { return open(conn, readWrite) },
 		OpenReadOnly:       func(conn map[string]any) (plugin.Session, error) { return open(conn, readOnly) },

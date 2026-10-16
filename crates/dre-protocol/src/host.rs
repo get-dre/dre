@@ -59,6 +59,8 @@ pub struct Description {
     pub option_fields: Vec<OptionField>,
     /// A source's identifier quote character.
     pub identifier_quote: Option<String>,
+    /// How a source wants string literals spelled (`chr` when absent; `backslash`).
+    pub string_literal: Option<String>,
     /// A message destination's length limit, in characters.
     pub message_limit: Option<u64>,
 }
@@ -783,11 +785,13 @@ impl PluginProcess {
                 connection_fields,
                 option_fields,
                 identifier_quote,
+                string_literal,
                 message_limit,
             } => Ok(Description {
                 connection_fields,
                 option_fields,
                 identifier_quote,
+                string_literal,
                 message_limit,
             }),
             other => Err(self.unexpected("a describe reply", &Incoming::Json(other))),
