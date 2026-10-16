@@ -1736,11 +1736,11 @@ impl<'a> BindingRun<'a> {
             let status = run.status.map_or("pending", OutputStatus::as_str);
             outputs.insert(
                 name.clone(),
-                Value::from_serialize(json!({
+                Value::from(minijinja::value::Serde(json!({
                     "location": locations.join(", "),
                     "files": files,
                     "status": status,
-                })),
+                }))),
             );
         }
         Value::from(BTreeMap::from([

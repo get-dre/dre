@@ -37,7 +37,7 @@ After applying the update command for your install method, validate and preview 
 [tutorial project](../examples/tutorial/). For production work, preview your own report with
 the same target and variables it normally uses. Keep the old binary or dependency pin available
 until those checks pass. Read the relevant [migration notes](migrating-to-0.2.md) and
-[0.4 changes](new-in-0.4.md) before crossing a minor version.
+[0.4](new-in-0.4.md) and [0.5](new-in-0.5.md) changes before crossing a minor version.
 
 A checksum failure means the archive cannot be verified: download it again from the release;
 do not disable verification. A permission failure replacing an install means that directory
@@ -50,4 +50,4 @@ See [CLI reference](cli-reference.md#dre-system-update),
 
 ---
 
-**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.4](new-in-0.4.md)
+**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.5](new-in-0.5.md)

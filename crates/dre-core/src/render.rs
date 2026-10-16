@@ -244,18 +244,23 @@ impl Renderer {
         } else {
             UndefinedBehavior::Strict
         });
-        env.set_keep_trailing_newline(true);
+        env.set_syntax(
+            minijinja::syntax::SyntaxConfig::builder()
+                .keep_trailing_newline(true)
+                .build()
+                .expect("default delimiters are valid"),
+        );
         // Message text is portable Markdown: every value it prints is escaped, so a `*` or `_`
         // in the data stays literal (`| safe` opts out).
         env.set_auto_escape_callback(|name| {
             if name.ends_with(MARKDOWN_SUFFIX) {
-                minijinja::AutoEscape::Custom("markdown")
+                minijinja::AutoEscape::Custom("markdown".into())
             } else {
                 minijinja::AutoEscape::None
             }
         });
         env.set_formatter(|out, state, value| {
-            if state.auto_escape() == minijinja::AutoEscape::Custom("markdown") {
+            if *state.auto_escape() == minijinja::AutoEscape::Custom("markdown".into()) {
                 let text = value.to_string();
                 let text = if value.is_safe() {
                     text
@@ -463,7 +468,7 @@ impl Renderer {
                 let v = Value::from(
                     cols.into_iter()
                         .map(|c| {
-                            Value::from_iter([
+                            Value::from_pairs([
                                 ("name", Value::from(c.name)),
                                 ("type", Value::from(c.data_type)),
                             ])
@@ -686,10 +691,10 @@ fn add_vars(env: &mut Environment<'static>, vars: JsonMap<String, Json>, cli: BT
         "var",
         move |name: String, default: Option<Value>| -> Result<Value, Error> {
             if let Some(v) = cli.get(&name) {
-                return Ok(Value::from_serialize(cli_var_value(v)));
+                return Ok(Value::from(minijinja::value::Serde(cli_var_value(v))));
             }
             if let Some(v) = vars.get(&name) {
-                return Ok(Value::from_serialize(v));
+                return Ok(Value::from(minijinja::value::Serde(v)));
             }
             default.ok_or_else(|| {
                 Error::new(
@@ -924,12 +929,14 @@ struct Dispatched {
 }
 
 impl Object for Dispatched {
-    fn call(self: &Arc<Self>, state: &minijinja::State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
+    fn call(self: &Arc<Self>, state: &mut minijinja::State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
         if self.template.is_empty() {
             return Ok(Value::from(""));
         }
         let tmpl = state.env().get_template(&self.template)?;
-        let out = tmpl.render_captured(())?.state().call_macro(&self.name, args)?;
+        let out = tmpl
+            .render_captured(())?
+            .with_state_mut(|s| s.call_macro(&self.name, args))?;
         Ok(Value::from(out))
     }
 }
@@ -1125,7 +1132,7 @@ impl Object for Run {
 
     fn call_method(
         self: &Arc<Self>,
-        _: &minijinja::State<'_, '_>,
+        _: &mut minijinja::State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -1369,7 +1376,7 @@ fn connection_field(c: &Connection, key: &Value) -> Option<Value> {
                 ),
             )),
             _ => match c.fields.get(k) {
-                Some(v) => Value::from_serialize(v),
+                Some(v) => Value::from(minijinja::value::Serde(v)),
                 None => Value::from(Error::new(
                     ErrorKind::UndefinedError,
                     format!(
@@ -1438,7 +1445,7 @@ impl Object for QueryResult {
     /// `result.column('name')` (or an index): that column's values, one per row.
     fn call_method(
         self: &Arc<Self>,
-        _: &minijinja::State<'_, '_>,
+        _: &mut minijinja::State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -1580,7 +1587,7 @@ mod tests {
         );
         assert_eq!(
             ok("{{ var('m').keys() | list }} {{ var('m').items() | list }}"),
-            r#"["a"] [["a", 1]]"#
+            "['a'] [('a', 1)]"
         );
         assert_eq!(
             ok("{{ var('m').get('a') }} {{ var('m').get('z', 'none') }}"),
@@ -1678,7 +1685,7 @@ mod tests {
     fn dict_methods_follow_python() {
         assert_eq!(
             ok("{% set d = dict(a=1) %}{% set _ = d.update(b=2) %}{% set _ = d.update({'c': 3}) %}{{ d }}"),
-            r#"{"a": 1, "b": 2, "c": 3}"#
+            "{'a': 1, 'b': 2, 'c': 3}"
         );
         // Insertion order, as in Python. (Keyword arguments and `{}` literals reach us already sorted
         // until `preserve_order` is on, and the `| items` filter sorts; so add keys one by one.)
@@ -1693,7 +1700,7 @@ mod tests {
         );
         assert_eq!(
             ok("{% set d = dict(a=1) %}{{ d.setdefault('a', 9) }} {{ d.setdefault('b', 2) }} {{ d }}"),
-            r#"1 2 {"a": 1, "b": 2}"#
+            "1 2 {'a': 1, 'b': 2}"
         );
         assert_eq!(
             ok("{% set d = dict(a=1) %}{{ d.pop('a') }} {{ d.pop('a', 'gone') }} {{ d }}"),
@@ -1703,7 +1710,7 @@ mod tests {
             ok(
                 "{% set d = dict(a=1) %}{{ d.get('a') }} {{ d['a'] }} {{ d.a }} {{ 'in' if 'a' in d }} {{ d.keys() | list }}"
             ),
-            r#"1 1 1 in ["a"]"#
+            "1 1 1 in ['a']"
         );
         assert_eq!(
             ok("{% set d = dict(a=1) %}{% set e = d.copy() %}{% set _ = e.update(a=2) %}{{ d.a }} {{ e.a }}"),
@@ -1715,7 +1722,7 @@ mod tests {
         );
         assert_eq!(
             ok("{% set d = dict(a=1) %}{% set _ = d.update(d) %}{{ d }}"),
-            r#"{"a": 1}"#
+            "{'a': 1}"
         );
     }
 
@@ -1723,13 +1730,29 @@ mod tests {
     fn mutable_values_print_and_serialise_like_plain_ones() {
         assert_eq!(
             ok("{{ list([1, 'a']) }} {{ dict(k='v') }}"),
-            r#"[1, "a"] {"k": "v"}"#
+            "[1, 'a'] {'k': 'v'}"
         );
         assert_eq!(
             ok("{{ list(dict(k='v')) }} {{ list(list([2, 1])) | sort }}"),
-            r#"["k"] [1, 2]"#
+            "['k'] [1, 2]"
         );
         assert_eq!(ok("{% set l = list() %}{{ 'yes' if l else 'no' }}"), "no");
+    }
+
+    /// Templates follow Jinja2 (and so dbt) where MiniJinja 2 didn't; 0.5.0's upgrade notes list these.
+    #[test]
+    fn expressions_follow_jinja2() {
+        assert_eq!(
+            ok("{{ ['a', 1] }} {{ var('m') }} {{ var('m').items() | list }}"),
+            "['a', 1] {'a': 1} [('a', 1)]"
+        );
+        assert_eq!(ok("{{ 2.5 | round }} {{ 3.5 | round }}"), "2.0 4.0");
+        assert_eq!(ok("{{ -7 // 2 }} {{ -7 % 3 }}"), "-4 2");
+        assert_eq!(
+            ok("{{ ['b', 'P', 'n'] | max }} {{ \"don't\" | title }}"),
+            "P Don't"
+        );
+        assert!(err("{{ 1 / 0 }}").contains("unable to calculate 1 / 0"));
     }
 
     #[test]
