@@ -161,6 +161,7 @@
       }
     ],
     "option_fields": [],
-    "identifier_quote": "`"
+    "identifier_quote": "`",
+    "string_literal": "backslash"
   }
 }

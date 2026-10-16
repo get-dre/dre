@@ -43,6 +43,10 @@ result. Run `dre compile` on your reports before and after updating and compare 
 
 ## Fixes
 
+- **0.5.1**: an inlined lookup holding `'` or `\` works on ClickHouse. A source plugin now tells
+  DRE how its database spells such text (the protocol's `string_literal`), so core no longer
+  assumes every database has `chr()`. Run `dre plugin update clickhouse` to get 1.0.1.
+
 - The [xlsx plugin](plugin-xlsx.md) 1.1.1 updates its spreadsheet library: page scaling, number
   formats made of literal text, theme tint colours and row borders now come out as set. Run
   `dre plugin update xlsx` to get it.

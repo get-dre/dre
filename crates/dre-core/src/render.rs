@@ -111,6 +111,11 @@ pub trait Connections: Send + Sync {
     fn profile(&self, name: &str, role: Option<&str>) -> Result<Connection, String>;
     /// The identifier quote character a source plugin type reports (`None`: it doesn't say).
     fn identifier_quote(&self, kind: &str) -> Result<Option<String>, String>;
+    /// How a source plugin type wants string literals spelled (its `describe` reply's
+    /// `string_literal`; `None`: it doesn't say, so `chr()`).
+    fn string_literal(&self, _kind: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
 }
 
 /// Which parts of a source's name to quote.
@@ -389,6 +394,9 @@ impl Renderer {
         let runner = cfg.runner;
         let warnings: Arc<Mutex<Vec<String>>> = Arc::default();
         let lookups = Arc::new(Lookups {
+            connections: cfg.connections.clone(),
+            kind: cfg.source_type.clone(),
+            style: std::sync::OnceLock::new(),
             root: cfg.root.to_path_buf(),
             defs: cfg.lookups,
             inline_max: cfg.lookup_inline_max_rows,
@@ -1016,6 +1024,10 @@ fn add_ref(
 
 /// Lookups for one Binding: read once, inlined or loaded once.
 struct Lookups {
+    /// Asked, once, how the connection's plugin spells string literals.
+    connections: Option<Arc<dyn Connections>>,
+    kind: String,
+    style: std::sync::OnceLock<Result<lookups::StringLiteral, String>>,
     root: PathBuf,
     defs: BTreeMap<String, Lookup>,
     inline_max: u64,
@@ -1080,7 +1092,7 @@ impl Lookups {
                         "lookup `{name}` has {rows} rows; this source can't load it into a temp table, so it's inlined in the SQL. Data this size probably belongs in a table in the database"
                     ));
                 }
-                t.inline_sql()
+                t.inline_sql(self.style()?)
             }
         };
         self.loaded
@@ -1092,6 +1104,26 @@ impl Lookups {
 
     fn warn(&self, w: String) {
         self.warnings.lock().unwrap().push(w);
+    }
+
+    /// How the source spells a string literal: its plugin's `string_literal`, or `chr()` when
+    /// there's no plugin to ask (a render without a connection) or it doesn't say.
+    fn style(&self) -> Result<lookups::StringLiteral, Error> {
+        self.style
+            .get_or_init(|| match &self.connections {
+                Some(c) if !self.kind.is_empty() => {
+                    let asked = c.string_literal(&self.kind).unwrap_or(None);
+                    lookups::StringLiteral::from_describe(asked.as_deref())
+                }
+                _ => Ok(lookups::StringLiteral::Chr),
+            })
+            .clone()
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::InvalidOperation,
+                    format!("the `{}` source: {e}", self.kind),
+                )
+            })
     }
 }
 

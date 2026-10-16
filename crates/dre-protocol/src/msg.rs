@@ -148,6 +148,11 @@ pub enum Response {
         /// quote (a source's `quoting:`). Every source sets it; other kinds leave it out.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         identifier_quote: Option<String>,
+        /// Source: how core spells a string holding `'` or `\` when it writes one into SQL (an
+        /// inlined lookup): absent or `chr` for `chr(39)`/`chr(92)`, `backslash` for `\'`/`\\`
+        /// inside the quotes (a database without `chr()`, such as ClickHouse).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        string_literal: Option<String>,
         /// Destination advertising `message`: the most characters a message may have in the
         /// service, after translation. Core shows it next to a message's length in a preview.
         #[serde(default, skip_serializing_if = "Option::is_none")]

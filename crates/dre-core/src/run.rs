@@ -3481,6 +3481,7 @@ type DescribeKey = (PathBuf, Role, String);
 struct Described {
     secrets: Vec<String>,
     identifier_quote: Option<String>,
+    string_literal: Option<String>,
     capabilities: Vec<String>,
     /// A message destination's length limit.
     message_limit: Option<u64>,
@@ -3551,6 +3552,7 @@ impl ProfileConnections {
                 return Some(Described {
                     secrets: Vec::new(),
                     identifier_quote: None,
+                    string_literal: None,
                     capabilities: Vec::new(),
                     message_limit: None,
                 });
@@ -3570,6 +3572,7 @@ impl ProfileConnections {
                     .map(|f| f.name)
                     .collect(),
                 identifier_quote: d.identifier_quote,
+                string_literal: d.string_literal,
                 capabilities,
                 message_limit: d.message_limit,
             })
@@ -3608,6 +3611,12 @@ impl Connections for ProfileConnections {
                 "the `{kind}` source plugin couldn't be asked for its identifier quote character"
             )),
         }
+    }
+
+    fn string_literal(&self, kind: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .described(Role::Connection, kind)
+            .and_then(|d| d.string_literal))
     }
 }
 
