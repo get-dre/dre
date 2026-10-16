@@ -312,6 +312,12 @@ pub trait Source {
     fn identifier_quote(&self) -> Option<&'static str> {
         None
     }
+    /// How core should spell a string holding `'` or `\` (an inlined lookup), reported in
+    /// `describe`: `None` for `chr(39)`/`chr(92)`, `Some("backslash")` for a database without
+    /// `chr()`.
+    fn string_literal(&self) -> Option<&'static str> {
+        None
+    }
     /// Rules the declared [`Source::connection_fields`] can't express (two keys that can't go
     /// together, a value's form), each a sentence naming the field, never its value. Static:
     /// no network. Run by `validate_connection` and before `open`.
@@ -884,9 +890,12 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Handler::Destination(d) => d.connection_fields(),
             Handler::Format(_) => Vec::new(),
         };
-        let identifier_quote = match h {
-            Handler::Source(s) => s.identifier_quote().map(str::to_string),
-            _ => None,
+        let (identifier_quote, string_literal) = match h {
+            Handler::Source(s) => (
+                s.identifier_quote().map(str::to_string),
+                s.string_literal().map(str::to_string),
+            ),
+            _ => (None, None),
         };
         let message_limit = match h {
             Handler::Destination(d) => d.message_limit(),
@@ -896,6 +905,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             connection_fields,
             option_fields: h.option_fields(),
             identifier_quote,
+            string_literal,
             message_limit,
         });
         return Ok(());

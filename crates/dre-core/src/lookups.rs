@@ -516,9 +516,34 @@ fn to_cell(v: Option<String>, t: ColType) -> Result<Cell, String> {
     })
 }
 
+/// How an inlined lookup spells a string holding `'` or `\`, as the source plugin's `describe`
+/// reply asks (`string_literal`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StringLiteral {
+    /// `chr(39)`/`chr(92)` joined with `||`: the default, read the same by DuckDB, Postgres and
+    /// Databricks.
+    #[default]
+    Chr,
+    /// `\'` and `\\` inside the quotes: for a database without `chr()` (ClickHouse).
+    Backslash,
+}
+
+impl StringLiteral {
+    /// The style a `describe` reply's `string_literal` names; absent is [`StringLiteral::Chr`].
+    pub fn from_describe(v: Option<&str>) -> Result<StringLiteral, String> {
+        match v {
+            None | Some("chr") => Ok(StringLiteral::Chr),
+            Some("backslash") => Ok(StringLiteral::Backslash),
+            Some(other) => Err(format!(
+                "the source plugin asks for string literals spelled `{other}`, which this DRE doesn't know; update DRE"
+            )),
+        }
+    }
+}
+
 impl Table {
-    /// `(select * from (values ...) as t(cols))`: portable across DuckDB, Postgres and Databricks.
-    pub fn inline_sql(&self) -> String {
+    /// `(select * from (values ...) as t(cols))`, with text spelled as the source asks.
+    pub fn inline_sql(&self, style: StringLiteral) -> String {
         let cols = self.columns.join(", ");
         if self.rows.is_empty() {
             let nulls = vec!["NULL"; self.columns.len()].join(", ");
@@ -527,7 +552,12 @@ impl Table {
         let rows: Vec<String> = self
             .rows
             .iter()
-            .map(|r| format!("({})", r.iter().map(literal).collect::<Vec<_>>().join(", ")))
+            .map(|r| {
+                format!(
+                    "({})",
+                    r.iter().map(|c| literal(c, style)).collect::<Vec<_>>().join(", ")
+                )
+            })
             .collect();
         format!(
             "(select * from (values\n  {}\n) as t({cols}))",
@@ -603,10 +633,10 @@ impl Table {
     }
 }
 
-fn literal(c: &Cell) -> String {
+fn literal(c: &Cell, style: StringLiteral) -> String {
     match c {
         Cell::Null => "NULL".into(),
-        Cell::Text(s) => text_literal(s),
+        Cell::Text(s) => text_literal(s, style),
         Cell::Int(n) => n.to_string(),
         Cell::Num(n) => format!("{n:?}"),
         Cell::Bool(b) => b.to_string(),
@@ -614,13 +644,16 @@ fn literal(c: &Cell) -> String {
     }
 }
 
-/// A string literal every supported dialect reads the same way. Quotes and backslashes are
-/// spelled `chr(39)`/`chr(92)`: doubling a quote works in Postgres and DuckDB but Spark SQL reads
-/// `'a''b'` as two adjacent literals, and Spark treats backslash as an escape where Postgres
-/// doesn't.
-fn text_literal(s: &str) -> String {
+/// A string literal. By default quotes and backslashes are spelled `chr(39)`/`chr(92)`, which
+/// DuckDB, Postgres and Databricks read the same way: doubling a quote works in Postgres and
+/// DuckDB but Spark SQL reads `'a''b'` as two adjacent literals, and Spark treats backslash as an
+/// escape where Postgres doesn't. A source without `chr()` asks for backslash escapes.
+fn text_literal(s: &str, style: StringLiteral) -> String {
     if !s.contains(['\'', '\\']) {
         return format!("'{s}'");
+    }
+    if style == StringLiteral::Backslash {
+        return format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"));
     }
     let mut parts = Vec::new();
     let mut run = String::new();
@@ -649,14 +682,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_source_that_asks_for_backslash_escapes_gets_them() {
+        // ClickHouse has no chr(); it reads \' and \\ inside a literal.
+        let b = StringLiteral::Backslash;
+        assert_eq!(text_literal("plain", b), "'plain'");
+        assert_eq!(text_literal("a\\b'c", b), "'a\\\\b\\'c'");
+        assert_eq!(StringLiteral::from_describe(None).unwrap(), StringLiteral::Chr);
+        assert_eq!(
+            StringLiteral::from_describe(Some("backslash")).unwrap(),
+            StringLiteral::Backslash
+        );
+        let e = StringLiteral::from_describe(Some("hex")).unwrap_err();
+        assert!(e.contains("`hex`") && e.contains("update DRE"), "{e}");
+    }
+
+    #[test]
     fn inlined_text_never_relies_on_a_dialects_escapes() {
         // Portable on DuckDB, Postgres and Databricks: no '' and no \'.
-        assert_eq!(text_literal("plain"), "'plain'");
+        let c = StringLiteral::Chr;
+        assert_eq!(text_literal("plain", c), "'plain'");
         assert_eq!(
-            text_literal("a\\b'c"),
+            text_literal("a\\b'c", c),
             "('a' || chr(92) || 'b' || chr(39) || 'c')"
         );
-        assert_eq!(text_literal("'"), "(chr(39))");
+        assert_eq!(text_literal("'", c), "(chr(39))");
     }
 
     fn lookup(dir: &Path, file: &str, body: &str, cfg: Option<&str>) -> (Lookup, Diagnostics) {
@@ -685,7 +734,7 @@ mod tests {
         let t = read(dir.path(), &l).unwrap();
         assert_eq!(t.columns, ["code", "name", "pop"]);
         assert_eq!(
-            t.inline_sql(),
+            t.inline_sql(StringLiteral::Chr),
             "(select * from (values\n  ('AU', ('O' || chr(39) || 'Brien, Aus'), 27),\n  ('NZ', NULL, 5)\n) as t(code, name, pop))"
         );
         assert_eq!(t.to_batch().unwrap().num_rows(), 2);
@@ -719,7 +768,7 @@ mod tests {
         assert!(!d.has_errors());
         let t = read(dir.path(), &l).unwrap();
         assert_eq!(
-            t.inline_sql(),
+            t.inline_sql(StringLiteral::Chr),
             "(select * from (values\n  (date '2026-01-02', true)\n) as t(d, ok))"
         );
     }
@@ -760,7 +809,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (l, _) = lookup(dir.path(), "c.csv", "a,b\n", None);
         assert_eq!(
-            read(dir.path(), &l).unwrap().inline_sql(),
+            read(dir.path(), &l).unwrap().inline_sql(StringLiteral::Chr),
             "(select * from (values (NULL, NULL)) as t(a, b) where 1 = 0)"
         );
     }

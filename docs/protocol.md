@@ -269,7 +269,7 @@ The SDKs bridge each language's logging: in Rust the `log` crate (re-exported as
 
 | Request | Reply |
 |---|---|
-| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source","manual","kind","choices"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\""}` |
+| `{"type":"describe"}` | `{"type":"describe","connection_fields":[{"name","description","required","secret","default","same_as_source","manual","kind","choices"}],"option_fields":[{"name","type","description","required","default","choices","min","max"}],"identifier_quote":"\"","string_literal":"backslash"}` |
 | `{"type":"validate","options":{…}}` | `{"type":"validated","errors":["…"]}` |
 | `{"type":"validate_connection","connection":{…},"unresolved":["…"]}` (sources, destinations) | `{"type":"validated","errors":["…"],"warnings":["…"]}` |
 | `{"type":"close"}` | `{"type":"ok"}`, then the plugin exits 0 |
@@ -293,6 +293,14 @@ DuckDB and Postgres, a backtick for Databricks. Core quotes the parts of a
 [source](sources.md) that ask for it (`quoting:`) with this character, doubling it inside a name.
 Every source returns it; formats and destinations leave it out. Added in DRE 0.2 (duckdb and
 postgres 1.1.0, databricks 1.1.0); core 0.2 needs it only for a source with `quoting:`.
+
+`string_literal` (sources only, optional) says how core spells a string holding `'` or `\` when
+it writes one into SQL, as it does for an inlined [lookup](lookups.md). Absent, or `chr`: the
+characters are `chr(39)` and `chr(92)` joined with `||`, which DuckDB, Postgres and Databricks
+read the same way. `backslash`: `\'` and `\\` inside the quotes, for a database without `chr()`
+(ClickHouse). A core that doesn't know the field ignores it, so a plugin can send it to any
+core; core asks the plugin to update DRE when it names a style core doesn't know. Added in DRE
+0.5.1 (clickhouse 1.0.1).
 
 `message_limit` (destinations advertising `message`) is the most characters a message may have
 in the service after translation. `dre run --preview` shows it next to each message's length.
