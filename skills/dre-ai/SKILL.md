@@ -3,8 +3,8 @@ name: dre-ai
 description: "Prepare AI context for DRE reports: descriptions, business questions, declared inputs, inherited context and upstream table documentation. Use when an analyst wants reports ready for MCP discovery or needs to improve retrieval. Does not enable exposure."
 license: GPL-3.0-only
 metadata:
-  version: "3.2.1"
-  dre: ">=0.4.1, <0.5.0"
+  version: "3.3.0"
+  dre: ">=0.4.1, <0.6.0"
 ---
 
 # Prepare AI context for DRE reports
