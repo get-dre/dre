@@ -78,6 +78,18 @@ class Exceptions(unittest.TestCase):
             self.assertTrue(ss.problems([entry(id=bad)], TODAY), bad)
         self.assertTrue(ss.problems([entry(id="GO-2026-0001", ecosystem="rust")], TODAY))
 
+    def test_a_yanked_crate_names_one_exact_version(self):
+        y = entry(yanked="zip@8.6.0")
+        del y["id"]
+        self.assertEqual(ss.problems([y], TODAY), [])
+        for bad in ["zip", "zip@8", "zip@*", "zip@>=8"]:
+            self.assertTrue(ss.problems([dict(y, yanked=bad)], TODAY), bad)
+        self.assertIn("rust", ss.problems([dict(y, ecosystem="go")], TODAY)[0])
+        both = dict(y, id="RUSTSEC-2023-0071")
+        self.assertIn("one of", ss.problems([both], TODAY)[0])
+        self.assertEqual(ss.expiring_soon([dict(y, expires=datetime.date(2026, 10, 20))], TODAY),
+                         ["zip@8.6.0 expires on 2026-10-20"])
+
     def test_duplicates_fail(self):
         self.assertIn("twice", ss.problems([entry(), entry()], TODAY)[0])
 
@@ -94,6 +106,12 @@ class DenyConfig(unittest.TestCase):
                       '"No fix yet; \\"rsa\\" only." },\n]\nversion = 2\n', config)
         self.assertNotIn("GO-2026-0001", config)
         self.assertIn('allow = ["MIT", "Apache-2.0"]', config)
+
+    def test_a_yanked_entry_ignores_that_crate_version(self):
+        y = entry(yanked="zip@8.6.0", reason="Yanked for extract(); we never extract.")
+        del y["id"]
+        self.assertIn('  { crate = "zip@8.6.0", reason = "Yanked for extract(); we never extract." },\n',
+                      ss.deny_config(DENY, [y]))
 
     def test_no_rust_entries_gives_an_empty_list(self):
         self.assertIn("[advisories]\nignore = [\n]\n", ss.deny_config(DENY, []))

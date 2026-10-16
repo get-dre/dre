@@ -41,8 +41,15 @@ EXCEPTIONS_FILE = ROOT / ".github/vulnerability-exceptions.toml"
 GO_LICENCE_EXCEPTIONS_FILE = ROOT / ".github/go-license-exceptions.toml"
 DENY_FILE = ROOT / "deny.toml"
 OWN_GO_MODULES = "github.com/get-dre/dre"
-FIELDS = ("id", "ecosystem", "reason", "owner", "expires")
+FIELDS = ("ecosystem", "reason", "owner", "expires")
 ID_PATTERNS = {"rust": r"RUSTSEC-\d{4}-\d{4}", "go": r"GO-\d{4}-\d{4,}"}
+# A yanked Rust crate is named by one exact version, never a range.
+YANKED_PATTERN = r"[A-Za-z0-9_-]+@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?"
+
+
+def key(e):
+    """What an entry accepts: its advisory id, or the yanked crate@version."""
+    return e.get("id") or e.get("yanked") or "an entry without an id"
 # An exception this close to its expiry is pointed out, so it's renewed or fixed in time.
 WARN_DAYS = 14
 
@@ -63,7 +70,10 @@ def problems(entries, today):
     """Everything wrong with the exception entries: each a message; none means they're fine."""
     out, seen = [], set()
     for e in entries:
-        name = e.get("id", "an entry without an id")
+        name = key(e)
+        if bool(e.get("id")) == bool(e.get("yanked")):
+            out.append(f"{name}: set one of id (an advisory) and yanked (a crate@version)")
+            continue
         missing = [f for f in FIELDS if not e.get(f)]
         if missing:
             out.append(f"{name}: missing {', '.join(missing)}")
@@ -72,21 +82,26 @@ def problems(entries, today):
         if pattern is None:
             out.append(f"{name}: ecosystem must be rust or go, not {e['ecosystem']!r}")
             continue
-        if not re.fullmatch(pattern, e["id"]):
+        if e.get("yanked"):
+            if e["ecosystem"] != "rust":
+                out.append(f"{name}: yanked is for rust crates only")
+            elif not re.fullmatch(YANKED_PATTERN, e["yanked"]):
+                out.append(f"{name}: yanked must be one exact crate@version, e.g. zip@8.6.0")
+        elif not re.fullmatch(pattern, e["id"]):
             out.append(f"{name}: not an exact {e['ecosystem']} advisory id")
         if not isinstance(e["expires"], datetime.date):
             out.append(f"{name}: expires must be a date (expires = 2027-01-31), not a string")
         elif e["expires"] <= today:
             out.append(f"{name}: expired on {e['expires']} (owner: {e['owner']}); fix it, or renew "
                        "the entry with a new reason and date")
-        if e["id"] in seen:
+        if name in seen:
             out.append(f"{name}: listed twice")
-        seen.add(e["id"])
+        seen.add(name)
     return out
 
 
 def expiring_soon(entries, today):
-    return [f"{e['id']} expires on {e['expires']}" for e in entries
+    return [f"{key(e)} expires on {e['expires']}" for e in entries
             if (e["expires"] - today).days <= WARN_DAYS]
 
 
@@ -109,8 +124,11 @@ def deny_config(deny_toml, entries):
     if "ignore" in advisories:
         sys.exit("deny.toml: remove [advisories] ignore; it's generated from "
                  ".github/vulnerability-exceptions.toml")
-    lines = [f"  {{ id = {json.dumps(e['id'])}, reason = {json.dumps(' '.join(e['reason'].split()))} }},"
-             for e in entries if e["ecosystem"] == "rust"]
+    def line(e):
+        what = f"crate = {json.dumps(e['yanked'])}" if e.get("yanked") else f"id = {json.dumps(e['id'])}"
+        return f"  {{ {what}, reason = {json.dumps(' '.join(e['reason'].split()))} }},"
+
+    lines = [line(e) for e in entries if e["ecosystem"] == "rust"]
     ignore = "ignore = [\n" + "".join(line + "\n" for line in lines) + "]\n"
     config, n = re.subn(r"^\[advisories\]\n", lambda m: m.group(0) + ignore, deny_toml, flags=re.M)
     if n != 1:
@@ -198,7 +216,7 @@ def rust(report_dir):
 
 def go(report_dir):
     entries = load_exceptions()
-    accepted = {e["id"] for e in entries if e["ecosystem"] == "go"}
+    accepted = {e["id"] for e in entries if e["ecosystem"] == "go" and e.get("id")}
     allowed = allowed_licences(DENY_FILE.read_text())
     licence_args = go_licence_args(allowed, parse_licence_exceptions())
     govulncheck, go_licenses = tool("govulncheck"), tool("go-licenses")

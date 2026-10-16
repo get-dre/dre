@@ -105,7 +105,9 @@ artifacts.
   ended). Never exempt a whole crate, module or severity.
 - **An exception expired:** check the advisory again. Remove the entry once a fix is in, or renew
   it with an up-to-date reason and a new date.
-- **A yanked crate:** `cargo update -p <crate>`.
+- **A yanked crate:** `cargo update -p <crate>`. When no unyanked version fits yet (a dependency
+  still needs the yanked one), add a `yanked = "<crate>@<version>"` entry to the exceptions file,
+  with the reason, an owner and a short expiry, and remove it once the dependency moves on.
 - **An unmaintained crate** only warns. Plan to replace it.
 - **A licence that isn't allowed:** use another dependency. If its licence is in fact compatible
   with GPL-3.0-only, add it to `licenses.allow` in `deny.toml` (both languages use that list), or,
