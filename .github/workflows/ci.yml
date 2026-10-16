@@ -218,7 +218,7 @@ jobs:
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: nextest
       - run: >
@@ -270,7 +270,7 @@ jobs:
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
       # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
       # test even after a failure, so one failure can't hide others.
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: nextest
       - run: cargo nextest run --workspace --no-fail-fast
