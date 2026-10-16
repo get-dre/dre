@@ -117,8 +117,8 @@ artifacts hold `dre-<kind>-<name>`.
 ## Publishing a release
 
 Each first-party package has its own version, independent of DRE's: `plugins/<package>/Cargo.toml`,
-or `go/<package>/VERSION` for a Go package (`databricks`, `bigquery`, `snowflake`). Compatibility between DRE and a package
-comes from the [protocol](protocol.md) version, never from matching numbers: DRE 0.1.0 runs
+or `go/<package>/VERSION` for a Go package (`databricks`, `bigquery`, `snowflake`, `clickhouse`).
+Compatibility between DRE and a package comes from the [protocol](protocol.md) version, never from matching numbers: DRE 0.1.0 runs
 `duckdb` 1.0.0 and whatever `duckdb` releases later that speak the same protocol.
 
 A package is released when it changes, by pushing a `<package>-v<version>` tag, e.g.

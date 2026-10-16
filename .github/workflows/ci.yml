@@ -83,8 +83,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The Go plugin packages (databricks, bigquery, snowflake) and their shared protocol module,
-      # each its own Go module.
+      # The Go plugin packages (databricks, bigquery, snowflake, clickhouse) and their shared
+      # protocol module, each its own Go module.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
@@ -109,6 +109,15 @@ jobs:
       s3:
         image: mirror.gcr.io/adobe/s3mock:latest@sha256:ab01a6946750f451ca215a47e91030695b260e4003b8a5a6201d25029b8fca92
         ports: ["9090:9090"]
+      clickhouse:
+        image: mirror.gcr.io/clickhouse/clickhouse-server:26.8.28.14@sha256:63e02621435cde1146ab0fde66057091ee75b312d12917c0109a6a0c99bc7ce1
+        env:
+          CLICKHOUSE_USER: dre
+          CLICKHOUSE_PASSWORD: dre
+        ports: ["8123:8123", "9000:9000"]
+        options: >-
+          --health-cmd "clickhouse-client --user dre --password dre --query 'SELECT 1'"
+          --health-interval 5s --health-retries 20
       mailpit:
         image: mirror.gcr.io/axllent/mailpit:latest@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
         env:
@@ -126,6 +135,8 @@ jobs:
       DRE_TEST_SMTP: localhost:1025
       DRE_TEST_MAILPIT_API: http://localhost:8025
       DRE_TEST_BIGQUERY_EMULATOR: http://localhost:9050
+      DRE_TEST_CLICKHOUSE_HTTP: localhost:8123
+      DRE_TEST_CLICKHOUSE_NATIVE: localhost:9000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -187,7 +198,8 @@ jobs:
               sleep 1
             done
           done
-      # Postgres with TLS behind an SSH bastion, for the postgres plugin's tunnel tests.
+      # Postgres and ClickHouse with TLS behind an SSH bastion, for the postgres and clickhouse
+      # plugins' tunnel tests.
       # The bigquery plugin against the BigQuery emulator.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -197,6 +209,9 @@ jobs:
         working-directory: go/bigquery
       - name: Start the SSH bastion
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
+      # The clickhouse plugin against the ClickHouse service, and with TLS through the bastion.
+      - run: go test ./...
+        working-directory: go/clickhouse
       # The runner's rustup, not a third-party action: the newest stable Rust.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -247,7 +262,7 @@ jobs:
           ext=""; [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
           dir="$RUNNER_TEMP/go-plugins"
           mkdir -p "$dir"
-          for p in databricks bigquery snowflake; do
+          for p in databricks bigquery snowflake clickhouse; do
             (cd "go/$p" && go build -o "$dir/dre-plugin-$p$ext" .) || exit 1
           done
           echo "DRE_TEST_GO_PLUGINS=$dir" >> "$GITHUB_ENV"

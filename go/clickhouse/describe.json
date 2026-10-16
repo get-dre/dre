@@ -1,0 +1,166 @@
+{
+  "source/clickhouse": {
+    "capabilities": [
+      "check",
+      "load",
+      "read_only",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "driver",
+        "description": "the protocol: http (the default) or native, ClickHouse's own TCP protocol",
+        "required": false,
+        "secret": false,
+        "default": "http",
+        "choices": [
+          "http",
+          "native"
+        ]
+      },
+      {
+        "name": "host",
+        "description": "server host name",
+        "required": false,
+        "secret": false,
+        "default": "localhost"
+      },
+      {
+        "name": "port",
+        "description": "server port (default 8123, 8443 with secure, 9000 native, 9440 native with secure)",
+        "required": false,
+        "secret": false,
+        "kind": "integer"
+      },
+      {
+        "name": "user",
+        "description": "user name",
+        "required": false,
+        "secret": false,
+        "default": "default"
+      },
+      {
+        "name": "password",
+        "description": "password",
+        "required": false,
+        "secret": true
+      },
+      {
+        "name": "schema",
+        "description": "the ClickHouse database to use (dbt's name; `database` also works)",
+        "required": false,
+        "secret": false,
+        "default": "default"
+      },
+      {
+        "name": "secure",
+        "description": "connect with TLS (ClickHouse Cloud needs it)",
+        "required": false,
+        "secret": false,
+        "default": false,
+        "kind": "boolean"
+      },
+      {
+        "name": "verify",
+        "description": "check the server's TLS certificate",
+        "required": false,
+        "secret": false,
+        "default": true,
+        "manual": true,
+        "kind": "boolean"
+      },
+      {
+        "name": "ca_cert",
+        "description": "CA certificate to trust for the server's TLS certificate (PEM), when it isn't from a public CA",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "path"
+      },
+      {
+        "name": "client_cert",
+        "description": "client certificate (PEM), for mutual TLS",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "path"
+      },
+      {
+        "name": "client_cert_key",
+        "description": "the client certificate's private key (PEM)",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "path"
+      },
+      {
+        "name": "server_host_name",
+        "description": "the host name to expect on the server's TLS certificate, when it isn't `host`",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "10s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "send_receive_timeout",
+        "description": "how long to wait on a read or write to the server (`5m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "300s",
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "compression",
+        "description": "how results are compressed on the wire: lz4 (the default), zstd, none, or for http gzip, deflate or br",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "choices": [
+          "lz4",
+          "zstd",
+          "none",
+          "gzip",
+          "deflate",
+          "br"
+        ]
+      },
+      {
+        "name": "custom_settings",
+        "description": "ClickHouse settings for every query, e.g. max_execution_time: 300",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "map"
+      },
+      {
+        "name": "retries",
+        "description": "how many times to try connecting again after a temporary error (0: never)",
+        "required": false,
+        "secret": false,
+        "default": 3,
+        "manual": true,
+        "kind": "integer"
+      },
+      {
+        "name": "ssh",
+        "description": "reach the server through an SSH bastion (a block of settings)",
+        "required": false,
+        "secret": true,
+        "manual": true,
+        "kind": "map"
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "`"
+  }
+}

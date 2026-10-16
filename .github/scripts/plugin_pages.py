@@ -28,6 +28,7 @@ PAGES = {
     "databricks": ["source/databricks", "destination/databricks"],
     "bigquery": ["source/bigquery"],
     "snowflake": ["source/snowflake"],
+    "clickhouse": ["source/clickhouse"],
     "csv": ["format/csv", "format/delimited"],
     "fixed_width": ["format/fixed_width"],
     "parquet": ["format/parquet"],

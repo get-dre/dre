@@ -45,7 +45,7 @@ can't be merged until every author has signed.
 ## Building and testing
 
 You need a recent stable Rust toolchain, and Go for the Go packages in `go/` (`databricks`,
-`bigquery`, `snowflake`, and the protocol module they share, `go/plugin`).
+`bigquery`, `snowflake`, `clickhouse`, and the protocol module they share, `go/plugin`).
 
 ```sh
 cargo build --workspace --bins

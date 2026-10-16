@@ -2,7 +2,7 @@
 title: "Fixed-width text"
 description: "The fixed_width format: column layout and options."
 section: plugins
-position: 10
+position: 11
 ---
 
 # Fixed-width text

@@ -137,4 +137,4 @@ identity rather than `externalbrowser`. `query-failed` with a missing current sc
 
 ---
 
-**Previous:** [BigQuery](plugin-bigquery.md) · **Next:** [csv and delimited](plugin-csv.md)
+**Previous:** [BigQuery](plugin-bigquery.md) · **Next:** [ClickHouse](plugin-clickhouse.md)

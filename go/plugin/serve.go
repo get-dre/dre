@@ -99,6 +99,13 @@ type Role struct {
 	IdentifierQuote string
 	// Open starts a source session from the profile target's fields.
 	Open func(conn map[string]any) (Session, error)
+	// OpenReadOnly, when set, starts a session that refuses to change data, for an `open` with
+	// `read_only: true`; a role advertising the read_only capability sets it.
+	OpenReadOnly func(conn map[string]any) (Session, error)
+	// OpenSandboxed, when set, starts a read-only session for core's `dre query` (`sandbox:
+	// true`) that also refuses files, programs and the network outside the database where the
+	// engine can. Without it, such an open is read-only.
+	OpenSandboxed func(conn map[string]any) (Session, error)
 	// Options are what a report's config block for this role takes (checked before Deliver).
 	Options []OptionField
 	// Deliver sends one local file to remote, returning where it landed. opts is the
@@ -626,8 +633,18 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		if err := json.Unmarshal(req["connection"], &conn); err != nil || conn == nil {
 			return fmt.Errorf("unsupported request `open`")
 		}
+		var readOnly, sandbox bool
+		_ = json.Unmarshal(req["read_only"], &readOnly)
+		_ = json.Unmarshal(req["sandbox"], &sandbox)
 		s.closeDB()
-		db, err := s.role.Open(conn)
+		open := s.role.Open
+		if (readOnly || sandbox) && s.role.OpenReadOnly != nil {
+			open = s.role.OpenReadOnly
+		}
+		if sandbox && s.role.OpenSandboxed != nil {
+			open = s.role.OpenSandboxed
+		}
+		db, err := open(conn)
 		if err != nil {
 			return err
 		}

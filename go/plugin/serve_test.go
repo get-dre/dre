@@ -445,3 +445,31 @@ func TestValidateConnectionAnswersWithoutConnecting(t *testing.T) {
 	c.Send(map[string]any{"type": "deliver", "local_path": "/a", "remote_path": "b", "connection": map[string]any{"port": "x"}, "options": map[string]any{}})
 	plugintest.ExpectError(t, c.Reply(), "`port` must be a whole number")
 }
+
+func TestAReadOnlyOpenUsesTheRolesReadOnlyOpener(t *testing.T) {
+	db := &fakeDB{stop: make(chan struct{})}
+	var opened []string
+	role := plugin.Role{
+		Kind: "source", Name: "fake", Capabilities: []string{"sessions", "read_only"},
+		Open: func(map[string]any) (plugin.Session, error) { opened = append(opened, "rw"); return db, nil },
+		OpenReadOnly: func(map[string]any) (plugin.Session, error) {
+			opened = append(opened, "ro")
+			return db, nil
+		},
+	}
+	c := plugintest.Start(t, plugin.Package{Version: "1", Roles: []plugin.Role{role}}, role)
+	c.Hello()
+	c.OpenReadOnly(map[string]any{})
+	c.Open(map[string]any{})
+	// Without a sandboxed opener, a sandboxed open is read-only.
+	c.Send(map[string]any{"type": "open", "connection": map[string]any{}, "read_only": true, "sandbox": true})
+	c.Reply()
+	role.OpenSandboxed = func(map[string]any) (plugin.Session, error) { opened = append(opened, "sandbox"); return db, nil }
+	c = plugintest.Start(t, plugin.Package{Version: "1", Roles: []plugin.Role{role}}, role)
+	c.Hello()
+	c.Send(map[string]any{"type": "open", "connection": map[string]any{}, "read_only": true, "sandbox": true})
+	c.Reply()
+	if fmt.Sprint(opened) != "[ro rw ro sandbox]" {
+		t.Fatalf("%v", opened)
+	}
+}

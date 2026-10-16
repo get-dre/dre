@@ -2,7 +2,7 @@
 title: "csv and delimited"
 description: "The csv and delimited formats: options and quoting."
 section: plugins
-position: 9
+position: 10
 ---
 
 # csv and delimited
@@ -101,4 +101,4 @@ and [format](glossary.md#format) and [output](glossary.md#output).
 
 ---
 
-**Previous:** [Snowflake](plugin-snowflake.md) · **Next:** [Fixed-width text](plugin-fixed_width.md)
+**Previous:** [ClickHouse](plugin-clickhouse.md) · **Next:** [Fixed-width text](plugin-fixed_width.md)

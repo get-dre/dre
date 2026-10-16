@@ -16,11 +16,11 @@ cargo build --release
 ```
 
 The first-party plugin packages are built from the same workspace
-(`target/release/dre-plugin-*`), except the Go packages (`databricks`, `bigquery`, `snowflake`)
-in `go/`:
+(`target/release/dre-plugin-*`), except the Go packages (`databricks`, `bigquery`, `snowflake`,
+`clickhouse`) in `go/`:
 
 ```bash
-for p in databricks bigquery snowflake; do
+for p in databricks bigquery snowflake clickhouse; do
   (cd "go/$p" && go build -o "../../target/release/dre-plugin-$p" .)
 done
 ```

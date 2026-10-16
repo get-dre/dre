@@ -2,7 +2,7 @@
 title: "SFTP"
 description: "The sftp destination: host keys, keys and the RSA advisory."
 section: plugins
-position: 16
+position: 17
 ---
 
 # SFTP

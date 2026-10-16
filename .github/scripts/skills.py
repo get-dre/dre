@@ -67,6 +67,7 @@ DOC_SECTIONS = {
     "source/databricks": [("page", "databricks")] + _WAREHOUSE,
     "source/bigquery": [("page", "bigquery")] + _WAREHOUSE,
     "source/snowflake": [("page", "snowflake")] + _WAREHOUSE,
+    "source/clickhouse": [("page", "clickhouse")] + _WAREHOUSE,
     "format/csv": [("page", "csv")] + _FORMAT,
     "format/delimited": [("page", "csv")] + _FORMAT,
     "format/fixed_width": [("page", "fixed_width")] + _FORMAT,

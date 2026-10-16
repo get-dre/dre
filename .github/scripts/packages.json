@@ -16,6 +16,11 @@
     "provides": ["source/snowflake"],
     "go": "go/snowflake"
   },
+  "clickhouse": {
+    "description": "ClickHouse, self-hosted or ClickHouse Cloud",
+    "provides": ["source/clickhouse"],
+    "go": "go/clickhouse"
+  },
   "csv": {"description": "Comma-separated and other delimited text", "provides": ["format/csv", "format/delimited"]},
   "fixed_width": {"description": "Fixed-width text", "provides": ["format/fixed_width"]},
   "parquet": {"description": "Parquet", "provides": ["format/parquet"]},

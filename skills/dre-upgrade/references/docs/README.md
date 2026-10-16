@@ -54,6 +54,7 @@ Installing plugins, the registry, and every first-party plugin.
 - [Databricks](plugin-databricks.md): The databricks source and destination: SQL warehouses, Volumes and workspace files.
 - [BigQuery](plugin-bigquery.md): The bigquery source: sign-in methods and job settings.
 - [Snowflake](plugin-snowflake.md): The snowflake source: sign-in methods and connection settings.
+- [ClickHouse](plugin-clickhouse.md): The clickhouse source: HTTP or native, TLS, ClickHouse Cloud and SSH bastions.
 - [csv and delimited](plugin-csv.md): The csv and delimited formats: options and quoting.
 - [Fixed-width text](plugin-fixed_width.md): The fixed_width format: column layout and options.
 - [Parquet](plugin-parquet.md): The parquet format.
