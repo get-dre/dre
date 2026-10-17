@@ -334,9 +334,12 @@ fn retry_failed_redoes_only_the_failed_rows_from_the_saved_results() {
         PROFILES.replace("path: data.duckdb", "path: no/such/dir/x.duckdb, read_only: true"),
     )
     .unwrap();
-    p.dre("run", &["statements", "--retry-failed", &first])
-        .ok()
-        .says("1 succeeded, 0 skipped, 0 failed");
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .ok()
+    .says("1 succeeded, 0 skipped, 0 failed");
     assert!(p.path("out/102-bob.csv").is_file());
     // Rows that succeeded the first time aren't sent again.
     assert!(!p.path("out/101-ann.csv").exists());
