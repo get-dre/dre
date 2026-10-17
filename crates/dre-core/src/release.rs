@@ -53,6 +53,9 @@ pub struct HeldEntry {
     /// Files attached to a message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attach: Vec<PathBuf>,
+    /// The destination's `rate:` at the run, which the release keeps unless `--rate` says otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<crate::rate::Rate>,
     /// A message's title and text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<(String, String)>,
@@ -103,6 +106,10 @@ pub struct ReleaseOptions {
     pub exclude_keys: Option<Vec<String>>,
     /// Who releases (`--by`, default `$USER`).
     pub by: String,
+    /// `--rate`: every delivery's rate for this release, over the recorded ones.
+    pub rate: Option<crate::rate::Rate>,
+    /// Ctrl-C or a termination: no delivery starts after it.
+    pub cancel: crate::engine::CancelToken,
 }
 
 /// How a release went.
@@ -193,6 +200,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
     };
     let log = events.plugin_log();
     let mut plugins: HashMap<String, dre_protocol::host::PluginProcess> = HashMap::new();
+    let pacer = crate::rate::Pacer::default();
     for e in held.entries.iter().filter(|e| chosen(e)) {
         if done.contains(&e.id) {
             outcome.already += 1;
@@ -240,10 +248,19 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             path: e.path.clone(),
             options: e.options.clone(),
             hold: false,
-            max_per_minute: None,
+            rate: None,
             attach: e.attach.clone(),
             attach_missing: false,
         };
+        // Paced per destination profile, at the recorded rate or `--rate`.
+        if let Some(rate) = opts.rate.or(e.rate)
+            && !pacer.wait(&e.profile, &rate, &opts.cancel)
+        {
+            break;
+        }
+        if opts.cancel.is_cancelled() {
+            break;
+        }
         let files: Vec<PathBuf> = e.files.iter().map(|f| f.path.clone()).collect();
         match deliver_row(
             project,

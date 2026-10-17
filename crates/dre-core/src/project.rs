@@ -150,7 +150,7 @@ const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
     "file_name",
 ];
 /// The keys of a destination entry core reads; every other key is the plugin's.
-pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "max_per_minute"];
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "name",
     "format",
@@ -586,9 +586,9 @@ pub struct Destination {
     /// `hold: true`: delivered later, by `dre release`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hold: bool,
-    /// `max_per_minute:`: core paces deliveries to this destination.
+    /// `rate:` (and `burst:`): core paces deliveries to this destination.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_per_minute: Option<u64>,
+    pub rate: Option<crate::rate::Rate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -4553,26 +4553,49 @@ impl Loader {
                 false
             }
         };
-        let max_per_minute = match d.max_per_minute {
+        let mut rate = match d.rate {
             None => None,
-            Some(Loose::Ok(n)) if n > 0 => Some(n),
-            Some(_) => {
+            Some(Loose::Ok(s)) => match crate::rate::Rate::parse(&s) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    self.diags
+                        .error(Code::InvalidField, file.clone(), None, format!("{ctx}: destination `{p}`: `rate`: {e}"));
+                    None
+                }
+            },
+            Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
                     file.clone(),
                     None,
-                    format!("{ctx}: destination `{p}`: `max_per_minute` must be a whole number of 1 or more"),
+                    format!("{ctx}: destination `{p}`: `rate` must be a count and a unit, like `100/minute`"),
                 );
                 None
             }
         };
+        match (d.burst, rate.as_mut()) {
+            (None, _) => {}
+            (Some(Loose::Ok(n)), Some(r)) if n > 0 => r.burst = n,
+            (Some(Loose::Ok(_)), None) => self.diags.error(
+                Code::InvalidField,
+                file.clone(),
+                None,
+                format!("{ctx}: destination `{p}`: `burst` needs a `rate`"),
+            ),
+            (Some(_), _) => self.diags.error(
+                Code::InvalidField,
+                file.clone(),
+                None,
+                format!("{ctx}: destination `{p}`: `burst` must be a whole number of 1 or more"),
+            ),
+        }
         Some(Destination {
             profile: p,
             path,
             options,
             attach,
             hold,
-            max_per_minute,
+            rate,
         })
     }
 

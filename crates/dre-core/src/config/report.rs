@@ -289,9 +289,12 @@ pub struct Destination {
     pub attach: Option<Loose<OneOf<String, Vec<String>>>>,
     /// Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination.
     pub hold: Option<Loose<bool>>,
-    /// Deliver to this destination at most this many times a minute (a per-row output's emails, say); DRE paces the deliveries.
+    /// At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it.
+    #[schemars(regex(pattern = "^\\s*[0-9_]+\\s*/\\s*[A-Za-z]+\\s*$"))]
+    pub rate: Option<Loose<String>>,
+    /// With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).
     #[schemars(range(min = 1))]
-    pub max_per_minute: Option<Loose<u64>>,
+    pub burst: Option<Loose<u64>>,
     /// The destination plugin's options.
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]

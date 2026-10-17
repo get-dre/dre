@@ -28,6 +28,7 @@ pub mod parse;
 pub mod plugins;
 pub mod preflight;
 pub mod profiles;
+pub mod rate;
 pub mod project;
 pub mod query;
 pub mod release;

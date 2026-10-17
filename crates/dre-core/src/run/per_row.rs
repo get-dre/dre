@@ -38,7 +38,7 @@ pub(crate) struct RowDest {
     pub path: Option<String>,
     pub options: JsonMap<String, Json>,
     pub hold: bool,
-    pub max_per_minute: Option<u64>,
+    pub rate: Option<crate::rate::Rate>,
     /// Files to attach to a message: the same row's, or an output's shared files.
     pub attach: Vec<PathBuf>,
     /// An attached per-row output's row failed or was skipped: the message is skipped.
@@ -80,32 +80,6 @@ struct Job {
     phase: Phase,
 }
 
-/// Paces deliveries to destinations with `max_per_minute`.
-#[derive(Default)]
-pub(super) struct Pacer {
-    next: Mutex<HashMap<usize, Instant>>,
-}
-
-impl Pacer {
-    /// Wait for destination `dest`'s next slot. `false`: the run was cancelled meanwhile.
-    pub(super) fn wait(&self, dest: usize, per_minute: u64, cancel: &CancelToken) -> bool {
-        let gap = Duration::from_secs_f64(60.0 / per_minute as f64);
-        let until = {
-            let mut next = self.next.lock().unwrap();
-            let now = Instant::now();
-            let at = next.get(&dest).copied().unwrap_or(now).max(now);
-            next.insert(dest, at + gap);
-            at
-        };
-        while Instant::now() < until {
-            if cancel.is_cancelled() {
-                return false;
-            }
-            std::thread::sleep((until - Instant::now()).min(Duration::from_millis(100)));
-        }
-        !cancel.is_cancelled()
-    }
-}
 
 /// What every worker shares.
 struct Shared<'a> {
@@ -123,7 +97,7 @@ struct Shared<'a> {
     log: LogSink,
     events: Events,
     cancel: CancelToken,
-    pacer: Pacer,
+    pacer: crate::rate::Pacer,
     rows_file: Mutex<File>,
 }
 
@@ -373,7 +347,7 @@ impl BindingRun<'_> {
             log: self.ui.plugin_log(),
             events: self.ui.clone(),
             cancel: self.opts.cancel.clone(),
-            pacer: Pacer::default(),
+            pacer: crate::rate::Pacer::default(),
             rows_file: Mutex::new(rows_file),
         };
         let two_pass = fe.on_row_error == RowErrors::Fail;
@@ -529,6 +503,7 @@ impl BindingRun<'_> {
                         path: d.path.clone(),
                         options: d.options.clone(),
                         attach: d.attach.clone(),
+                        rate: d.rate,
                         message: job.message.clone(),
                         files: job
                             .files
@@ -1034,7 +1009,7 @@ impl BindingRun<'_> {
                     path,
                     options,
                     hold: d.hold,
-                    max_per_minute: d.max_per_minute,
+                    rate: self.opts.rate.or(d.rate),
                     attach,
                     attach_missing,
                 })
@@ -1245,8 +1220,8 @@ fn run_job(
         if shared.cancel.is_cancelled() {
             return None;
         }
-        if let Some(n) = d.max_per_minute
-            && !shared.pacer.wait(d.idx, n, &shared.cancel)
+        if let Some(rate) = &d.rate
+            && !shared.pacer.wait(&d.idx.to_string(), rate, &shared.cancel)
         {
             return None;
         }

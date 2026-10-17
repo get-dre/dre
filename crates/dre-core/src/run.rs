@@ -72,6 +72,8 @@ pub struct RunOptions {
     pub limit_rows: Option<usize>,
     /// `--preview --unmask`: show per-row values in the preview as they are.
     pub unmask: bool,
+    /// `--rate`: every destination's rate for this run, over its `rate:`.
+    pub rate: Option<crate::rate::Rate>,
     /// `--preview [N]`: row limit per query.
     pub preview: Option<u64>,
     pub accept_schema_change: bool,
@@ -1121,6 +1123,8 @@ struct RenderedDest {
     attach: Vec<String>,
     /// `hold: true`: recorded for `dre release`, not delivered now.
     hold: bool,
+    /// `rate:` (or `--rate`), recorded with a held delivery.
+    rate: Option<crate::rate::Rate>,
 }
 
 /// Why a Binding (or one of its steps) failed.
@@ -2451,6 +2455,7 @@ impl<'a> BindingRun<'a> {
                     options: JsonMap::new(),
                     attach: Vec::new(),
                     hold: d.hold,
+                    rate: self.opts.rate.or(d.rate),
                 });
                 continue;
             }
@@ -2476,6 +2481,7 @@ impl<'a> BindingRun<'a> {
                     options,
                     attach: d.attach.clone(),
                     hold: d.hold,
+                    rate: self.opts.rate.or(d.rate),
                 })
             })();
             renderer.set_destination(None);
@@ -2920,6 +2926,7 @@ impl<'a> BindingRun<'a> {
             path: d.path.clone(),
             options: d.options.clone(),
             attach,
+            rate: d.rate,
             message: self.outs[oi].message.clone(),
             files: self.outs[oi]
                 .files

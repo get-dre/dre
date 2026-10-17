@@ -267,7 +267,7 @@ fn concurrency_and_pacing() {
     let p = project(
         &REPORT
             .replace("key: member_id}", "key: member_id, concurrency: 3}")
-            .replace("path: \"out/", "max_per_minute: 120, path: \"out/"),
+            .replace("path: \"out/", "rate: 120/minute, path: \"out/"),
         &[],
     );
     let t = std::time::Instant::now();
@@ -427,7 +427,7 @@ fn a_timed_out_run_keeps_its_finished_rows() {
     let p = project(
         &REPORT
             .replace("key: member_id}", "key: member_id, concurrency: 1}")
-            .replace("path: \"out/", "max_per_minute: 20, path: \"out/"),
+            .replace("path: \"out/", "rate: 20/minute, path: \"out/"),
         &[],
     );
     let run = p.dre("run", &["statements", "--timeout", "4"]);

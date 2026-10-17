@@ -123,6 +123,10 @@ struct ReleaseArgs {
     /// Who releases, recorded in the release's run_results.json (default: $USER).
     #[arg(long, value_name = "NAME")]
     by: Option<String>,
+    /// Pace the deliveries at this rate, over each one's recorded `rate:`: a count and a unit,
+    /// like `100/minute`, `5/second` or `20000/hour`, spaced evenly.
+    #[arg(long, value_name = "N/UNIT", value_parser = parse_rate)]
+    rate: Option<dre_core::rate::Rate>,
     #[command(flatten)]
     project: ProjectArgs,
 }
@@ -255,6 +259,10 @@ struct RunArgs {
     /// With --preview: show per-row values (addresses, paths) as they are, not masked.
     #[arg(long, requires = "preview")]
     unmask: bool,
+    /// Pace every destination at this rate for this run, over its `rate:`: a count and a unit,
+    /// like `100/minute`, `5/second` or `20000/hour`, spaced evenly.
+    #[arg(long, value_name = "N/UNIT", value_parser = parse_rate)]
+    rate: Option<dre_core::rate::Rate>,
 }
 
 #[derive(Args)]
@@ -1061,6 +1069,11 @@ pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> 
     }
 }
 
+/// `--rate N/unit`.
+fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
+    dre_core::rate::Rate::parse(s)
+}
+
 /// `dre release`: deliver a run's held deliveries.
 fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
     if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
@@ -1083,6 +1096,12 @@ fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
         only_keys: a.only_keys,
         exclude_keys: a.exclude_keys,
         by: by.clone(),
+        rate: a.rate,
+        cancel: {
+            let cancel = dre_core::engine::CancelToken::new();
+            signals::watch(cancel.clone());
+            cancel
+        },
     };
     let (tx, rx) = std::sync::mpsc::channel();
     let events = dre_core::engine::Events::new(tx);
@@ -1235,6 +1254,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         only_keys: a.only_keys,
         limit_rows: a.limit_rows,
         unmask: a.unmask,
+        rate: a.rate,
         preview: a.preview,
         accept_schema_change: a.accept_schema_change,
         interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
