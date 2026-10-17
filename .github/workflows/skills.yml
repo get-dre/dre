@@ -19,6 +19,8 @@ on:
       - "go/*/describe.json"
       - ".github/scripts/skills.py"
       - ".github/scripts/test_skills.py"
+      - ".github/scripts/test_dre_port.py"
+      - ".github/scripts/fixtures/dre-port/**"
       - ".github/scripts/packages.json"
       - ".github/workflows/skills.yml"
   pull_request:
@@ -31,6 +33,8 @@ on:
       - "go/*/describe.json"
       - ".github/scripts/skills.py"
       - ".github/scripts/test_skills.py"
+      - ".github/scripts/test_dre_port.py"
+      - ".github/scripts/fixtures/dre-port/**"
       - ".github/scripts/packages.json"
       - ".github/workflows/skills.yml"
   workflow_call:
@@ -55,6 +59,8 @@ jobs:
           persist-credentials: false
       - name: Test the checker
         run: python3 .github/scripts/test_skills.py
+      - name: Test dre-port's scripts
+        run: python3 .github/scripts/test_dre_port.py
       # Plugin metadata comes from each package's describe.json and the CLI's from
       # docs/cli-reference.md, both checked against the built programs in CI, so nothing is built.
       - name: Check the skills

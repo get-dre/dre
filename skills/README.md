@@ -13,8 +13,10 @@ undo; and never ask for, repeat or store a password, token or key.
 | `dre-install` | Installs `dre` on macOS, Linux or Windows (install script, Homebrew, Scoop, uv, pipx, pip), and fixes PATH and Python problems. |
 | `dre-setup` | Installs the source plugin, writes the connection profile with a safe sign-in, creates a starter project and validates it. |
 | `dre-ai` | Prepares report descriptions, questions, declared inputs and pipeline context; leaves exposure to the owner. |
-| `dre-report` | Designs and writes a report around your goal: SQL, tabs, variables, format and destinations. Also changes existing reports. |
-| `dre-run` | Validates, previews, runs and delivers, confirming before production runs and real deliveries, and explains failures. |
+| `dre-report` | Designs and writes a report around your goal: SQL, tabs, variables, format, PDF and HTML documents, one copy per member or client, what happens with no data, destinations and schedules. Also changes existing reports. |
+| `dre-run` | Validates, previews, runs and delivers, confirming before production runs and real deliveries; retries failed rows, releases held deliveries, and explains failures. |
+| `dre-port` | Moves reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts, and proves each one with a parity check against the old report's export. Lists a folder of reports first, with an effort estimate and an order. |
+| `dre-explain` | Explains what DRE can do for your goal, what a report's YAML will do when it runs, and what an option does, with its choices and a recommendation. Changes nothing. |
 | `dre-upgrade` | Checks for updates to `dre` and to these skills, and applies the ones you choose. The only skill that uses the network. |
 
 Each skill checks your installed `dre` against the versions it supports before doing anything,
@@ -65,6 +67,8 @@ the plugins'. Each release supports a range of DRE minor versions (every `SKILL.
 | 2.0 | 0.2.x |
 | 2.1, 2.2 | 0.2.1 and later 0.2.x |
 | 2.3 and later 2.x | 0.2.1 and later; messages and the other 0.3 features need 0.3 |
+| 3.x | 0.4.1 and later 0.4, 0.5 and 0.6 |
+| 4.x | 0.6.x |
 
 A new DRE minor gets a skills release that supports it. Dropping support for an older DRE minor
 is a new major skills version, so if you stay on an older DRE, pin the skills release that
@@ -84,6 +88,7 @@ only its own folder. Content shared between skills is therefore written once and
 | `docs/sections.json` and each page's title, description and inline terms/options | `<skill>/references/docs-index.md`, generated |
 | `docs/*.md` and `docs/sections.json` | `<skill>/references/docs/`, generated; local page links stay offline |
 | [`docs/practices.md`](../docs/practices.md) | `<skill>/references/practices.md` |
+| `shared/topics/*.md` (formats, documents, per-row outputs, no data, delivery) | `<skill>/references/topics/`, for the skills `COPIES` in `skills.py` lists |
 | each plugin's `describe` reply (its package's `describe.json`), its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
 
 Never edit the copies. After changing a source, a plugin's fields or options, or the plugin
@@ -111,8 +116,9 @@ that the built `dre` doesn't have, a practice ID that doesn't exist, or a plugin
 exist; a frontmatter is invalid; or a skill's `metadata.version` or `metadata.dre` doesn't
 match the plugin version and the workspace's DRE version.
 
-Rules for the content: only `dre` commands, ordinary shell and questions to the user (no
-agent-specific features); opinions go in the practices file, never only in a skill; nothing is
+Rules for the content: only `dre` commands, ordinary shell, a skill's own bundled scripts
+(Python 3.8+ standard library only, tested by `.github/scripts/test_dre_port.py`) and questions
+to the user (no agent-specific features); opinions go in the practices file, never only in a skill; nothing is
 written about `dre_utils` until it's released.
 
 **Releasing:** bump `version` in `.claude-plugin/plugin.json` and `metadata.version` in every

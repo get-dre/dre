@@ -276,6 +276,16 @@ class ParityCompare(Tmp):
         old, new = self.tables([["id", "v"], ["0042", "1"], ["7.0", "2"]], [["id", "v"], ["42", "1"], ["7", "2"]])
         self.assertTrue(parity.compare(old, new, key=["id"]).ok)
 
+    def test_only_keeps_matching_rows_on_both_sides(self):
+        old, new = self.tables([["store", "v"], ["101", "1"]],
+                               [["store_id", "v"], ["101", "1"], ["102", "5"]])
+        r = parity.compare(old, new, key=["store_id"], column_map={"store": "store_id"},
+                           only={"store_id": "101"})
+        self.assertTrue(r.ok, r.text())
+        self.assertEqual(r.row_counts, (1, 1))
+        with self.assertRaisesRegex(parity.Usage, "nope"):
+            parity.compare(old, new, only={"nope": "1"})
+
     def test_diffs_are_capped_in_text(self):
         old = [["k", "v"]] + [[str(i), "1"] for i in range(50)]
         new = [["k", "v"]] + [[str(i), "2"] for i in range(50)]

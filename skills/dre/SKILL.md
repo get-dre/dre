@@ -1,16 +1,17 @@
 ---
 name: dre
-description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and hands off to dre-install, dre-setup, dre-report, dre-run or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port (moving reports from SSRS, Crystal or SQL scripts), dre-explain (what DRE or a report's YAML does), dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "3.5.0"
-  dre: ">=0.4.1, <0.7.0"
+  version: "4.0.0"
+  dre: ">=0.6.0, <0.7.0"
 ---
 
 # DRE guide
 
 You help someone use DRE: a CLI (`dre`) that runs Jinja-templated SQL against a database, writes
-the result as xlsx, csv, fixed-width or parquet, and delivers the file. A project is a folder
+the result as xlsx, csv, fixed-width, parquet, a PDF or HTML document or a headline message, and
+delivers it, once or one copy per row (a statement per member). A project is a folder
 with `dre_project.yml`, reports under `reports/` (a YAML file next to its `.sql` files), and
 connections in `~/.dre/profiles.yml`. Sources, formats and destinations are plugins.
 
@@ -20,8 +21,11 @@ This skill finds out where the user is and hands off to the skill for what they 
 |---|---|
 | `dre-install` | `dre` isn't installed yet |
 | `dre-setup` | a connection (profile), its plugin, and a starter project |
-| `dre-report` | creating or changing a report: SQL, tabs, variables, format, destinations |
-| `dre-run` | validating, compiling, running, previewing and delivering |
+| `dre-report` | creating or changing a report: SQL, tabs, variables, format, documents, per-row outputs, destinations, schedules |
+| `dre-run` | validating, compiling, running, previewing, delivering, retrying failed rows, releasing held deliveries |
+| `dre-port` | moving reports from SSRS, Power BI paginated, Crystal or SQL scripts, with a parity check |
+| `dre-explain` | "what can dre do?", "what does this report do?", "what does this option mean?" |
+| `dre-ai` | descriptions, questions and inputs for MCP discovery |
 | `dre-upgrade` | "is there an update?", for dre and for these skills |
 
 <!-- BEGIN shared/secrets.md -->
@@ -75,8 +79,18 @@ shell, then tell me and I'll check it's set without showing it."
   waiting for the user's answer, even when you could carry on alone. Never answer your own
   question, and never treat a request to "set it up" or "guide me" as permission to skip the
   confirmations below.
-- **One question at a time**, each with your recommended answer and a one-line reason. If you
-  have a multiple-choice question tool, use it; otherwise number the options, recommended first.
+- **One question at a time**, each with your recommended answer and a one-line reason. Say what
+  you're asking in plain words, and define any DRE term it uses (a Set, a Binding, a driver
+  query). When the options are known, offer them: with a multiple-choice question tool if you
+  have one, otherwise numbered, recommended first, at most four, plus "or tell me something
+  else". When they aren't (a table, a recipient, a layout), ask for free text and give an
+  example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Say what you don't know.** When the user's tool, file format or system is one you don't know
+  well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
+  description. The more they share, the better the result. Never present a guess as a fact.
+- **Explain before asking someone to choose.** When the user asks what an option does, or what a
+  report's YAML would do, follow the `dre-explain` skill (or, without it, the docs index below):
+  what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
 - **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
@@ -143,25 +157,36 @@ Run these and keep the answers to yourself until they're useful:
 
 ### Step 3: ask what they want, and hand off
 
-If the request already says what they want, skip the question and hand off. Otherwise ask one
-question, recommending the next step from the facts:
+If the request already says what they want, skip the question and hand off. Match the words, not
+just the nouns: users rarely name the skill.
+
+| They say something like | Hand off to |
+|---|---|
+| "install dre", `dre` not found | `dre-install` |
+| "connect to our database", "set up a profile", "start a project" | `dre-setup` |
+| "a report of...", "add a tab / column / recipient", "make it a PDF", "send one per client", "schedule it every 2nd Tuesday" | `dre-report` |
+| "run it", "send it", "why did it fail?", "rerun the 1 September run", "retry the failed rows", "release the held emails", "wire it into Airflow" | `dre-run` |
+| "we have SSRS / Crystal / Power BI paginated reports", "migrate", "port", "replace our old reports", "does it match the old one?", a `.rdl`, `.rpt` or Crystal export | `dre-port` |
+| "what can dre do?", "what does this report do?", "what happens if I run it?", "what does `hold` / `for_each` / `on_empty` mean?", "which should I pick?" | `dre-explain` |
+| "make it available to AI", "MCP", "questions for the agent" | `dre-ai` |
+| "is there an update?" | `dre-upgrade` |
+
+Otherwise (a vague "help me with dre"), ask one question, recommending the next step from the
+facts, with the likely choices numbered:
 
 - no profiles and no project: recommend `dre-setup` ("you have dre, but no connection yet");
-- a project with only the starter `hello` report: recommend `dre-report`;
-- a project with reports: ask whether they want to change a report (`dre-report`) or run one
-  (`dre-run`);
-- writing or changing a schedule ("run it every 2nd Tuesday", a shared timing): `dre-report`;
-- when schedules run, rerunning a scheduled firing, or setting up cron, Airflow, Databricks
-  Jobs or another orchestrator: `dre-run`;
-- preparing descriptions, questions or context for MCP discovery: `dre-ai`;
-- a question about updates: `dre-upgrade`.
+- a project with only the starter `hello` report: recommend `dre-report`, and offer `dre-port`
+  if they have reports in another tool;
+- a project with reports: ask whether they want to change a report (`dre-report`), run one
+  (`dre-run`), or understand one (`dre-explain`).
 
-Say which skill you're handing off to and why, then follow that skill's `SKILL.md` from its
-step 2 (the dre check is done). If that skill isn't installed, say the DRE skills come as a set
-and should be installed together (see https://github.com/get-dre/dre/tree/master/skills).
+Say which skill you're handing off to and why, in one line, then follow that skill's `SKILL.md`
+from its step 2 (the dre check is done). If that skill isn't installed, say the DRE skills come
+as a set and should be installed together (see https://github.com/get-dre/dre/tree/master/skills).
 
-For a general question ("what can dre do?", "how do Sets work?"), answer it from what you know
-of DRE and the references below, then ask what they'd like to do.
+A general question ("how do Sets work?") goes to `dre-explain`; answer it from
+`references/docs-index.md` and `references/topics/` if it isn't installed, then ask what they'd
+like to do.
 
 ## Plugin references
 
@@ -173,9 +198,9 @@ installed version is outside it.
 
 | Kind | Plugins |
 |---|---|
-| source | `duckdb`, `postgres`, `databricks` |
-| format | `csv`, `delimited`, `fixed_width`, `parquet`, `xlsx` |
-| destination | `s3`, `gcs`, `azure_blob`, `sftp`, `ftp`, `databricks`, `email`, `slack` (and the built-in `local`) |
+| source | `duckdb`, `postgres`, `databricks`, `snowflake`, `bigquery`, `clickhouse` |
+| format | `csv`, `delimited`, `fixed_width`, `parquet`, `xlsx`, `html`, `pdf` (and the built-in `message`) |
+| destination | `s3`, `gcs`, `azure_blob`, `sftp`, `ftp`, `databricks`, `email`, `slack`, `teams`, `google_chat` (and the built-in `local`) |
 
 ## If this fails
 

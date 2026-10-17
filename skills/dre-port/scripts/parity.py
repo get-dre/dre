@@ -11,6 +11,8 @@
 --key      The column(s) that identify a row, comma-separated (DRE's names). Without a key, rows
            are compared in order, and as a set when only the order differs.
 --map      Rename old columns to DRE's: `Textbox12=region,Total Net=net`. `old=` ignores one.
+--only COL=VALUE Compare only the rows where a column (DRE's name) has this value, on both
+                 sides: one store of a per-row run, one client. Repeat for several columns.
 --skip-rows N    Lines before the old export's header row (titles, run dates).
 --skip-footer N  Lines after its last data row (grand totals, "Page 1 of 1").
 --tolerance X    The largest numeric difference counted as rounding (default 0.005).
@@ -408,11 +410,10 @@ def _fmt(x):
     return f"{x:,.2f}" if abs(x - round(x)) > 1e-9 or abs(x) >= 1000 else f"{x:,.0f}"
 
 
-def compare(old, new, key=None, column_map=None, tolerance=0.005):
+def compare(old, new, key=None, column_map=None, tolerance=0.005, only=None):
     r = Result()
     r.tolerance = tolerance
     column_map = column_map or {}
-    r.row_counts = (len(old.rows), len(new.rows))
 
     # Pair the columns: --map first, then by normalised name.
     dre_by_norm = {_norm_column(c): i for i, c in enumerate(new.columns)}
@@ -433,6 +434,17 @@ def compare(old, new, key=None, column_map=None, tolerance=0.005):
 
     def cell(row, i):
         return row[i] if i < len(row) else ""
+
+    # Only some rows: one store or client of a run that made them all.
+    for column, value in (only or {}).items():
+        pair = [p for p in pairs if _norm_column(new.columns[p[1]]) == _norm_column(column)]
+        if not pair:
+            raise Usage(f"--only {column}: no such column on both sides (DRE has: {', '.join(new.columns)})")
+        i, j = pair[0]
+        want = _key_value(value)
+        old = Table(old.columns, [row for row in old.rows if _key_value(cell(row, i)) == want])
+        new = Table(new.columns, [row for row in new.rows if _key_value(cell(row, j)) == want])
+    r.row_counts = (len(old.rows), len(new.rows))
 
     # Totals of the columns numeric on both sides.
     for i, j in pairs:
@@ -506,7 +518,7 @@ def parse_map(text):
     out = {}
     for part in filter(None, (p.strip() for p in (text or "").split(","))):
         if "=" not in part:
-            raise Usage(f"--map {part!r}: expected old=dre")
+            raise Usage(f"{part!r}: expected name=value")
         a, b = part.split("=", 1)
         out[a.strip()] = b.strip()
     return out
@@ -520,6 +532,7 @@ def main(argv=None):
     ap.add_argument("--sheet")
     ap.add_argument("--key", default="")
     ap.add_argument("--map", default="")
+    ap.add_argument("--only", action="append", default=[])
     ap.add_argument("--skip-rows", type=int, default=0)
     ap.add_argument("--skip-footer", type=int, default=0)
     ap.add_argument("--tolerance", type=float, default=0.005)
@@ -530,7 +543,7 @@ def main(argv=None):
         new = load(a.dre, query=a.query, sheet=a.sheet)
         old = load(a.old, sheet=a.sheet, skip_rows=a.skip_rows, skip_footer=a.skip_footer)
         result = compare(old, new, key=[k.strip() for k in a.key.split(",") if k.strip()],
-                         column_map=parse_map(a.map), tolerance=a.tolerance)
+                         column_map=parse_map(a.map), tolerance=a.tolerance, only=parse_map(",".join(a.only)))
     except Usage as e:
         print(f"parity.py: {e}", file=sys.stderr)
         return 2

@@ -1,10 +1,10 @@
 ---
 name: dre-run
-description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews per-row outputs, retries failed rows, releases held deliveries after review (dre release), paces deliveries with rates, previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "3.5.0"
-  dre: ">=0.4.1, <0.7.0"
+  version: "4.0.0"
+  dre: ">=0.6.0, <0.7.0"
 ---
 
 # Run, check and deliver DRE reports
@@ -64,8 +64,18 @@ shell, then tell me and I'll check it's set without showing it."
   waiting for the user's answer, even when you could carry on alone. Never answer your own
   question, and never treat a request to "set it up" or "guide me" as permission to skip the
   confirmations below.
-- **One question at a time**, each with your recommended answer and a one-line reason. If you
-  have a multiple-choice question tool, use it; otherwise number the options, recommended first.
+- **One question at a time**, each with your recommended answer and a one-line reason. Say what
+  you're asking in plain words, and define any DRE term it uses (a Set, a Binding, a driver
+  query). When the options are known, offer them: with a multiple-choice question tool if you
+  have one, otherwise numbered, recommended first, at most four, plus "or tell me something
+  else". When they aren't (a table, a recipient, a layout), ask for free text and give an
+  example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Say what you don't know.** When the user's tool, file format or system is one you don't know
+  well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
+  description. The more they share, the better the result. Never present a guess as a fact.
+- **Explain before asking someone to choose.** When the user asks what an option does, or what a
+  report's YAML would do, follow the `dre-explain` skill (or, without it, the docs index below):
+  what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
 - **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
@@ -155,6 +165,11 @@ row limit and writes the output to `target/run/`, and **never delivers**. It's s
 without asking, unless a connection reads a production entry (its own `target: prod`, or
 `--target prod`).
 
+For a per-row output (`for_each`), the preview renders the first 3 rows (or `--only-keys 101,102`),
+prints each row's files and destinations with addresses masked, and what a real run would make
+("would make 10,212 row(s) and 10,212 deliveries"). Read that count back to the user. `--unmask`
+shows the values on their terminal only.
+
 For a report with a `message` output, the preview prints each message: its title and text, its
 length against each destination's limit, and whether `when:` passed. Read it with the user before
 anything is posted (RUN-6); its numbers come from the row sample, so totals can be lower than a
@@ -186,6 +201,10 @@ target, where it came from, and each profile's entry), confirm first (RUN-2):
 2. ask for an explicit yes;
 3. run `dre run <report>` with the same selection, Set and target.
 
+For a per-row output that sends to people, also say how many deliveries the preview counted, and
+check that the destination profile delivers nowhere on `dev` (RUN-8); recommend a first
+production run with `--hold` (RUN-9) or `--limit-rows 10`.
+
 If a report hasn't been through steps 3 to 5 and the user wants to schedule it or run it in
 production, that's a warning (RUN-1): explain, and go ahead only after an explicit yes.
 
@@ -207,9 +226,27 @@ End with what ran and what's next: fixing a failure, or scheduling (`dre run --s
 from the user's orchestrator, with `DRE_RUN_AT` for the instant it was scheduled for, RUN-3; a
 lasting `--target-path` on ephemeral runners, RUN-4).
 
-## Schedules and orchestrators
+## Per-row runs, retries and held deliveries
 
-These need dre 0.1.2 or later; if `dre --version` is older, say so and offer `dre-upgrade`.
+Load `references/topics/per-row.md` and `references/topics/delivery.md` first.
+
+- **Some rows only:** `--only-keys 101,102` or `--limit-rows 10` (recorded as `partial`).
+- **Failed rows:** the summary and `run_results.json` (`output_results[].for_each`) give the
+  counts and failed keys; `<output>.rows.jsonl` in the run folder has each row's status and error.
+  Explain the errors, fix the cause, then `dre run <report> --retry-failed <run id>`: it redoes
+  only that run's failed and never-started rows, from the results it saved, with no query, and
+  never re-sends a row that succeeded. Retrying delivers, so confirm first (RUN-2).
+- **Held deliveries** (`hold: true` or `dre run --hold`): the run succeeds and says how many are
+  held, listed in `held.json` in the run folder. After the user has reviewed the files, confirm
+  who is releasing and what, then `dre release <report> --run <run id> --by <name>` (or
+  `--only-keys`, `--exclude-keys`, `--binding <set>`). It sends the reviewed files byte for byte,
+  refuses any that changed, paces at each destination's `rate:` (or `--rate 30/minute`), and
+  never sends one twice.
+- **Too fast for a service:** `--rate 30/minute` paces every destination for one run; a
+  `Retry-After` or rate-limit answer is waited for and tried again (`retries`, `retry_wait`).
+- **Run ids:** `dre history <report>` lists them.
+
+## Schedules and orchestrators
 
 - **When does it run?** `dre schedule ls` lists the next firings of every schedule (5 each);
   `-s <report>` keeps the schedules that run a report, `--schedule <name>` one schedule, and
@@ -273,5 +310,13 @@ Read the error: DRE names the report, Binding, file and line. Then:
   errors: email (no recipients, attachment too large), Slack (bot not in the channel, a missing
   scope, the DM tab turned off), SFTP (unknown host key), FTP (path relative to the login
   folder), object storage (credentials, bucket, region).
+- **Per-row:** "two rows have the same key" or the same file name: the key doesn't identify one
+  row; fix the driver or add a column to the key. `max_population_rows` exceeded: filter or
+  aggregate in SQL. Orphan rows (a key not in the driver) are a warning, or an error with
+  `on_orphan_rows: fail`.
+- **`dre release` refuses a file:** it changed since the run (its SHA-256 differs), or the run
+  was pruned (`keep_runs`). Run again and review the new files.
+- **No data:** an output skipped with `no_data` did what its `on_empty: skip` says; a run that
+  failed with `no-data` had `on_empty: fail` (`topics/no-data.md`).
 - **A plugin can't be installed or started:** `dre deps` installs the project's plugins and says
   what failed; the machine must reach GitHub.

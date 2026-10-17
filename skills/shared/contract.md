@@ -4,8 +4,18 @@
   waiting for the user's answer, even when you could carry on alone. Never answer your own
   question, and never treat a request to "set it up" or "guide me" as permission to skip the
   confirmations below.
-- **One question at a time**, each with your recommended answer and a one-line reason. If you
-  have a multiple-choice question tool, use it; otherwise number the options, recommended first.
+- **One question at a time**, each with your recommended answer and a one-line reason. Say what
+  you're asking in plain words, and define any DRE term it uses (a Set, a Binding, a driver
+  query). When the options are known, offer them: with a multiple-choice question tool if you
+  have one, otherwise numbered, recommended first, at most four, plus "or tell me something
+  else". When they aren't (a table, a recipient, a layout), ask for free text and give an
+  example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Say what you don't know.** When the user's tool, file format or system is one you don't know
+  well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
+  description. The more they share, the better the result. Never present a guess as a fact.
+- **Explain before asking someone to choose.** When the user asks what an option does, or what a
+  report's YAML would do, follow the `dre-explain` skill (or, without it, the docs index below):
+  what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
 - **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
