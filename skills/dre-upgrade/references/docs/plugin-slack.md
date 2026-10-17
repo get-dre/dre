@@ -2,7 +2,7 @@
 title: "Slack"
 description: "The slack destination: tokens, channels and DMs."
 section: plugins
-position: 20
+position: 21
 ---
 
 # Slack
@@ -29,6 +29,8 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: slack`.
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 ### Options
 
@@ -39,6 +41,9 @@ Set in the report's `output.destination` entry.
 | `channel` | string |  | A channel ID (C0123) or #name. |
 | `user` | string |  | A user ID (U0123), for a direct message. |
 | `message` | string |  | The text posted with the files. |
+| `retries` | integer |  | How many times to try again after a temporary error such as a rate limit (0: never) |
+| `retry_wait` | string |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. |
+| `max_retry_wait` | string |  | The longest wait between tries (`10m`) |
 
 <!-- END generated -->
 

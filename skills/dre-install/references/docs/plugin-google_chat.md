@@ -2,7 +2,7 @@
 title: "Google Chat"
 description: "The google_chat destination: space webhooks."
 section: plugins
-position: 22
+position: 23
 ---
 
 # Google Chat
@@ -27,6 +27,8 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: google_cha
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 <!-- END generated -->
 

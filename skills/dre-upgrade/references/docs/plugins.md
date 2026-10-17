@@ -29,6 +29,7 @@ secrets can use `env_var()`.
 | `fixed_width` | the [`fixed_width`](plugin-fixed_width.md) format |
 | `parquet` | the [`parquet`](plugin-parquet.md) format |
 | `xlsx` | the [`xlsx`](plugin-xlsx.md) format |
+| `document` | the [`html` and `pdf`](plugin-document.md) formats: documents from an HTML + CSS template |
 | `object_store` | the `s3`, [`gcs`](plugin-gcs.md) and [`azure_blob`](plugin-azure_blob.md) destinations |
 | `sftp` | the [`sftp`](plugin-sftp.md) destination |
 | `ftp` | the [`ftp`](plugin-ftp.md) destination |
@@ -51,7 +52,7 @@ Each plugin has its own page, with its profile fields, options and notes:
   [databricks](plugin-databricks.md), [bigquery](plugin-bigquery.md),
   [snowflake](plugin-snowflake.md), [clickhouse](plugin-clickhouse.md).
 - Formats: [csv and delimited](plugin-csv.md), [fixed_width](plugin-fixed_width.md),
-  [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), and the built-in
+  [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), [html and pdf](plugin-document.md), and the built-in
   [`message`](#the-message-format).
 - Destinations: [s3](plugin-s3.md), [gcs](plugin-gcs.md), [azure_blob](plugin-azure_blob.md),
   [sftp](plugin-sftp.md), [ftp](plugin-ftp.md), [databricks](plugin-databricks.md#as-a-destination),
@@ -109,6 +110,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](plugin-xlsx.md#column-widths)), `style` (see [Styles](plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
+| `html`, `pdf` | `max_rows`; html `embed_assets`; pdf `page_size`, `orientation`, `margins`, `author`, `subject`; `template` (see [PDF and HTML documents](plugin-document.md)) |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
@@ -184,13 +186,20 @@ run, use the run's timeout (`dre run --timeout`, `DRE_RUN_TIMEOUT`, `flags: run_
 ### Tries again
 
 A temporary failure is tried again: a connection refused, reset or timed out, an HTTP 429 or a
-5xx. The waits are about 1s, 4s and 16s (a little random), or the server's `Retry-After`. Each
+5xx, an SMTP 4xx such as a rate limit. The waits are about 1s, 4s and 16s (a little random), or
+`retry_wait` doubled each try, and never more than `max_retry_wait`; a server's `Retry-After`
+wins. Each
 retry is logged at info level, and a delivery that took several tries has `attempts` in
 `run_results.json`. Refused credentials or permissions, and other 4xx answers, fail at once.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `retries` | `3` | How many times to try again, in the profile entry of every destination and source that talks to a server. `0` never tries again. |
+| `retries` | `3` | How many times to try again, in the profile entry of every destination and source that talks to a server (and in a destination entry, over it). `0` never tries again. |
+| `retry_wait` | about 1s, 4s, 16s | The first wait before trying again (`30s`), doubling each try. Profile or destination entry. New in 0.6. |
+| `max_retry_wait` | `10m` | The longest wait between tries, `Retry-After` included. Profile or destination entry. New in 0.6. |
+
+To stay under a service's rate limit in the first place, give the destination entry a
+[`rate:`](per-row-outputs.md#speed-and-limits) (`rate: 100/minute`).
 
 Nothing is ever sent twice:
 

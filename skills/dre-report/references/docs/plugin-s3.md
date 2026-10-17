@@ -2,7 +2,7 @@
 title: "Amazon S3"
 description: "The s3 destination: credentials and paths."
 section: plugins
-position: 14
+position: 15
 ---
 
 # Amazon S3
@@ -34,6 +34,8 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: s3`.
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 ### Options
 
@@ -92,4 +94,4 @@ See [delivery behavior](plugins.md#a-file-already-at-the-path),
 
 ---
 
-**Previous:** [Excel (xlsx)](plugin-xlsx.md) · **Next:** [Google Cloud Storage](plugin-gcs.md)
+**Previous:** [PDF and HTML documents](plugin-document.md) · **Next:** [Google Cloud Storage](plugin-gcs.md)

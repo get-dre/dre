@@ -21,6 +21,7 @@ Queries, outputs, templates, lookups and messages.
 - [Templates](templates.md): Jinja in SQL, paths and options: connection, destination, source(), profile(), columns(), dates and timezones.
 - [Lookups](lookups.md): Mapping tables kept as files: typed columns, inline or temp table.
 - [Messages](messages.md): Headline numbers to Slack, Teams, Google Chat and email, built from a report's own queries.
+- [Per-row outputs](per-row-outputs.md): One statement, file or email per member, client or account from one run: for_each, each.*, failures, retries, masking and held deliveries.
 - [DRE practices](practices.md): The opinions DRE’s agent skills give, and the reasons behind them.
 - [AI-ready reports](ai-ready-reports.md): Turn reviewed report logic and upstream documentation into trustworthy context for AI.
 - [Project configuration](project-configuration.md): Share defaults, override reports and Sets, and bound template queries.
@@ -59,6 +60,7 @@ Installing plugins, the registry, and every first-party plugin.
 - [Fixed-width text](plugin-fixed_width.md): The fixed_width format: column layout and options.
 - [Parquet](plugin-parquet.md): The parquet format.
 - [Excel (xlsx)](plugin-xlsx.md): The xlsx format: column formats, formulas, totals rows and templates.
+- [PDF and HTML documents](plugin-document.md): The html and pdf formats: a branded document from a Jinja HTML + CSS template, with no browser.
 - [Amazon S3](plugin-s3.md): The s3 destination: credentials and paths.
 - [Google Cloud Storage](plugin-gcs.md): The gcs destination: credentials and paths.
 - [Azure Blob Storage](plugin-azure_blob.md): The azure_blob destination: credentials and paths.
@@ -95,6 +97,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): dre system update, and how each install method updates.
+- [New in 0.6](new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
 - [New in 0.5](new-in-0.5.md): Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone.
 - [New in 0.4](new-in-0.4.md): Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles.
 - [New in 0.3](new-in-0.3.md): Messages, several outputs per report, when:, number filters and locale:, and the teams and google_chat destinations.

@@ -2,7 +2,7 @@
 title: "Email"
 description: "The email destination: SMTP settings and options."
 section: plugins
-position: 19
+position: 20
 ---
 
 # Email
@@ -37,6 +37,8 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: email`.
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 ### Options
 
@@ -50,6 +52,9 @@ Set in the report's `output.destination` entry.
 | `subject` | string |  | The subject line. |
 | `body` | string |  | The message text. |
 | `attachment_name` | string |  | The attachment's file name (single-file outputs) |
+| `retries` | integer |  | How many times to try again after a temporary error such as a rate limit (0: never) |
+| `retry_wait` | string |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. |
+| `max_retry_wait` | string |  | The longest wait between tries (`10m`) |
 
 <!-- END generated -->
 

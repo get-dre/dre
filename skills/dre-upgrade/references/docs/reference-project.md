@@ -16,7 +16,7 @@ Where: dre_project.yml.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.5/project.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.6/project.schema.json
 ```
 
 For copyable examples and common errors, see [Project configuration](project-configuration.md). The [glossary](glossary.md) defines DRE's terms.
@@ -36,6 +36,7 @@ For copyable examples and common errors, see [Project configuration](project-con
 | `lookup_inline_max_rows` | integer | `200` | Lookups over this many rows are loaded into a temp table instead of inlined into the SQL. |
 | `dispatch` | list of map (see below) |  | Which macro packages `dispatch()` searches, and in what order. |
 | `mask_secrets` | boolean | `true` | Whether `DRE_SECRET_*` values are masked as `*****` in the console, logs, JSON events, `run_results.json` and `target/compiled/`. |
+| `mask_row_values` | boolean | `true` | Whether a per-row output's destination values rendered from `each.*` (addresses, paths) are masked in the console, logs, `run_results.json` and `rows.jsonl`. A `for_each` block's own `mask_row_values` wins. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
 | `locale` | string |  | The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`. |
 | `week_start` | `monday` or `sunday` | `monday` | The first day of the week for `run.date` week arithmetic. |
