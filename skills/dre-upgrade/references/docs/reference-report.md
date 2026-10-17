@@ -54,6 +54,7 @@ A query with settings, instead of just its name.
 | `anchor` | string |  | Where the data starts on the sheet (xlsx only). Default: `A1`. |
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
+| `on_empty` | string |  | When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty. |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
 | `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
 
@@ -109,6 +110,9 @@ How a report's result is written and where it goes. Besides the keys below, each
 | `when` | string or boolean |  | A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. |
 | `destination` | map (see below) or list of map (see below) |  | Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. |
 | `template` | map (see below) |  | The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin). |
+| `for_each` | map (see below) or any |  | One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md. |
+| `file_name` | string |  | A per-row output's file name, with Jinja (`"{{ each.member_id }}_statement.pdf"`). Default: the row's key and the format's extension, under a folder named after the output. |
+| `on_empty` | string |  | When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md. |
 | `extension` | string or boolean or null |  | File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
@@ -121,6 +125,8 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 | `profile` (required) | string |  | The destination profile in `profiles.yml` (under `destinations:`) to deliver with. `local` is built in. It uses its entry for the run (`--target`, `DRE_TARGET`, else the profile's own `target:`, else `dev`); a missing entry is an error, and an entry `{deliver: false}` delivers nowhere. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
 | `path` | string |  | Where to put the file: a path, or a URL such as `s3://bucket/key`, depending on the destination. Rendered with Jinja, so it can use `var()`, `run.*`, macros and `destination.*` (this destination's settings). |
 | `attach` | string or list of string |  | On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message. |
+| `hold` | boolean |  | Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination. |
+| `max_per_minute` | integer |  | Deliver to this destination at most this many times a minute (a per-row output's emails, say); DRE paces the deliveries. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `output[].template`
@@ -147,6 +153,21 @@ One block of data in an xlsx template: a table of a query's result, or a single 
 | `cell` | string |  | Makes this a single-cell binding: the cell to write. Needs exactly one of `value`, or `query` with `column`. |
 | `value` | string |  | A fixed value (rendered with Jinja) for a single-cell binding. |
 | `column` | string |  | The column of the query's first row to write into a single-cell binding. |
+
+## `output[].for_each`
+
+One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `query` (required) | string |  | The driver: a query of the report, one row per copy of the output. It isn't a tab or section of the output itself. |
+| `key` | string or list of string |  | The column (or list of columns) that identifies a row, in the driver and in every query of the output. Use an opaque id, never an email or a name: keys appear in file names and logs. |
+| `concurrency` | integer |  | How many rows render and deliver at once. Default: 4. `--row-concurrency` and `DRE_ROW_CONCURRENCY` override it. |
+| `on_row_error` | string |  | `continue` (default): a failed row is recorded and the others carry on; the run ends failed. `fail`: render every row first, and deliver only if all rendered. |
+| `on_orphan_rows` | `warn` or `fail` |  | Rows of a query whose key isn't in the driver: `warn` (default) or `fail`. |
+| `max_population_rows` | integer |  | The most rows across the output's queries before anything renders. Default: 5,000,000. |
+| `keep_results` | boolean |  | Keep the run's query results in its run folder, for `--retry-failed`. Default: true. |
+| `mask_row_values` | boolean |  | Mask destination values rendered from `each.*` (addresses, paths) in the console, logs and results. Default: the project's `mask_row_values`, true. |
 
 ## `sets[]`
 

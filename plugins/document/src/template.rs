@@ -619,6 +619,7 @@ pub fn check(c: &Check) -> (Vec<String>, Vec<String>) {
         vars: Default::default(),
         cli_vars: Default::default(),
         locale: "en".into(),
+        each: None,
     };
     let env = match environment(&ctx, &root, Locale::default()) {
         Ok(e) => e,

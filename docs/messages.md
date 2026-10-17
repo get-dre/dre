@@ -109,6 +109,9 @@ another output's files along with the message, to destinations that take both: t
 arrives with the headline in its body and the workbook attached; in Slack the file goes in the
 same post. Teams and Google Chat take messages only, so link the file instead.
 
+A [per-row](per-row-outputs.md#messages-and-attachments) message (`for_each`) attaching a
+per-row output with the same driver and key sends each row its own file.
+
 ## Sending only when it matters
 
 Any output can carry `when:`, a condition over the results. When it's false the output is
@@ -172,4 +175,4 @@ See [the `message` format](plugins.md#the-message-format) for every option, and
 
 ---
 
-**Previous:** [Lookups](lookups.md) · **Next:** [DRE practices](practices.md)
+**Previous:** [Lookups](lookups.md) · **Next:** [Per-row outputs](per-row-outputs.md)

@@ -90,6 +90,8 @@ pub struct QueryEntry {
     #[serde(default)]
     #[schemars(schema_with = "columns")]
     pub columns: Option<serde_json::Value>,
+    /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
+    pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
     /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
     pub autofit: Option<Loose<bool>>,
     /// How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page.
@@ -254,6 +256,14 @@ pub struct Output {
     #[schemars(schema_with = "destination_or_list")]
     pub destination: Option<Loose<OneOf<Destination, Vec<Loose<Destination>>>>>,
     pub template: Option<Loose<Template>>,
+    /// One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md.
+    #[serde(default)]
+    #[schemars(schema_with = "for_each_or_false")]
+    pub for_each: Option<Loose<OneOf<ForEach, bool>>>,
+    /// A per-row output's file name, with Jinja (`"{{ each.member_id }}_statement.pdf"`). Default: the row's key and the format's extension, under a folder named after the output.
+    pub file_name: Option<Loose<String>>,
+    /// When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md.
+    pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
     /// File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx.
     #[serde(default)]
     #[schemars(schema_with = "extension")]
@@ -277,10 +287,57 @@ pub struct Destination {
     #[serde(default)]
     #[schemars(schema_with = "attach")]
     pub attach: Option<Loose<OneOf<String, Vec<String>>>>,
+    /// Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination.
+    pub hold: Option<Loose<bool>>,
+    /// Deliver to this destination at most this many times a minute (a per-row output's emails, say); DRE paces the deliveries.
+    #[schemars(range(min = 1))]
+    pub max_per_minute: Option<Loose<u64>>,
     /// The destination plugin's options.
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub options: Map<serde_json::Value>,
+}
+
+/// One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "for_each", deny_unknown_fields)]
+pub struct ForEach {
+    /// The driver: a query of the report, one row per copy of the output. It isn't a tab or section of the output itself.
+    #[schemars(required)]
+    pub query: Option<Loose<String>>,
+    /// The column (or list of columns) that identifies a row, in the driver and in every query of the output. Use an opaque id, never an email or a name: keys appear in file names and logs.
+    #[schemars(required)]
+    #[serde(default)]
+    #[schemars(schema_with = "string_or_strings")]
+    pub key: Option<Loose<OneOf<String, Vec<String>>>>,
+    /// How many rows render and deliver at once. Default: 4. `--row-concurrency` and `DRE_ROW_CONCURRENCY` override it.
+    #[schemars(range(min = 1))]
+    pub concurrency: Option<Loose<u64>>,
+    /// `continue` (default): a failed row is recorded and the others carry on; the run ends failed. `fail`: render every row first, and deliver only if all rendered.
+    pub on_row_error: Option<Loose<crate::project::RowErrors>>,
+    /// Rows of a query whose key isn't in the driver: `warn` (default) or `fail`.
+    pub on_orphan_rows: Option<Loose<crate::project::OrphanRows>>,
+    /// The most rows across the output's queries before anything renders. Default: 5,000,000.
+    #[schemars(range(min = 1))]
+    pub max_population_rows: Option<Loose<u64>>,
+    /// Keep the run's query results in its run folder, for `--retry-failed`. Default: true.
+    pub keep_results: Option<Loose<bool>>,
+    /// Mask destination values rendered from `each.*` (addresses, paths) in the console, logs and results. Default: the project's `mask_row_values`, true.
+    pub mask_row_values: Option<Loose<bool>>,
+}
+
+fn string_or_strings(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "oneOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}, "minItems": 1}
+        ]
+    })
+}
+
+fn for_each_or_false(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let f = g.subschema_for::<ForEach>();
+    schemars::json_schema!({"oneOf": [f, {"const": false}]})
 }
 
 /// The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin).

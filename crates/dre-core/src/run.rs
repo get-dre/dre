@@ -37,6 +37,8 @@ use crate::run_results::{self, Delivery, RunResults};
 use crate::selector;
 use crate::sqlsplit::{self, StatementKind};
 
+pub(crate) mod per_row;
+
 /// What the caller asked for.
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -54,6 +56,22 @@ pub struct RunOptions {
     pub no_deliver: bool,
     /// Optional isolated run store, plus typed rows under report/binding/query.json.
     pub output_json: Option<PathBuf>,
+    /// `--from-results <DIR>`: replay results saved with `--output-json` instead of running any
+    /// query (implies `no_deliver`).
+    pub from_results: Option<PathBuf>,
+    /// `--row-concurrency` or `DRE_ROW_CONCURRENCY`: rows of a per-row output at once.
+    pub row_concurrency: Option<usize>,
+    /// `--hold`: hold every delivery for `dre release`.
+    pub hold: bool,
+    /// `--retry-failed <run id>`: redo that run's failed and never-started rows of its per-row
+    /// outputs, from its saved results.
+    pub retry_failed: Option<String>,
+    /// `--only-keys`: make only these rows of each per-row output.
+    pub only_keys: Option<Vec<String>>,
+    /// `--limit-rows`: make at most this many rows of each per-row output.
+    pub limit_rows: Option<usize>,
+    /// `--preview --unmask`: show per-row values in the preview as they are.
+    pub unmask: bool,
     /// `--preview [N]`: row limit per query.
     pub preview: Option<u64>,
     pub accept_schema_change: bool,
@@ -1034,6 +1052,10 @@ struct BindingRun<'a> {
     drift: Vec<String>,
     /// The current schema with stable identities and any protection carried from the baseline.
     protected_snapshot: Option<Json>,
+    /// `--retry-failed`: the run it redoes, and the rows each per-row output already finished.
+    retry: Option<per_row::Retry>,
+    /// Deliveries held for `dre release` (`hold: true`, `--hold`).
+    held: Vec<crate::release::HeldEntry>,
 }
 
 /// One output's progress through the run.
@@ -1053,6 +1075,16 @@ struct OutputRun {
     when: Option<bool>,
     /// A message output's rendered title and text.
     message: Option<(String, String)>,
+    /// Why it was skipped or failed by design (`no_data`).
+    reason: Option<String>,
+    /// Its queries that returned no rows.
+    no_data: Vec<String>,
+    /// Empty queries left out (`on_empty: skip`).
+    dropped: Vec<String>,
+    /// A per-row output's summary.
+    for_each: Option<run_results::ForEachResult>,
+    /// A per-row output's files by row key, for a message that attaches it.
+    row_files: std::collections::HashMap<String, Vec<PathBuf>>,
 }
 
 /// How one output ended, as `run_results.json` records it.
@@ -1064,6 +1096,8 @@ enum OutputStatus {
     /// Its `when:` was false, or its message rendered empty.
     Skipped,
     Failed,
+    /// Its deliveries are held for `dre release`.
+    Held,
 }
 
 impl OutputStatus {
@@ -1073,6 +1107,7 @@ impl OutputStatus {
             OutputStatus::Kept => "kept",
             OutputStatus::Skipped => "skipped",
             OutputStatus::Failed => "failed",
+            OutputStatus::Held => "held",
         }
     }
 }
@@ -1084,6 +1119,8 @@ struct RenderedDest {
     options: JsonMap<String, Json>,
     /// Other outputs whose files go with a message.
     attach: Vec<String>,
+    /// `hold: true`: recorded for `dre release`, not delivered now.
+    hold: bool,
 }
 
 /// Why a Binding (or one of its steps) failed.
@@ -1182,6 +1219,8 @@ impl<'a> BindingRun<'a> {
             attempts: 1,
             drift: Vec::new(),
             protected_snapshot: None,
+            retry: None,
+            held: Vec::new(),
         }
     }
 
@@ -1322,6 +1361,16 @@ impl<'a> BindingRun<'a> {
     }
 
     /// Fail once the run is cancelled, so no further statement, file or delivery starts.
+    /// `--preview`'s row limit per query; none for a Binding with a per-row output, whose
+    /// population the preview counts in full.
+    fn row_limit(&self) -> Option<u64> {
+        if self.b.outputs.iter().any(|o| o.for_each.is_some()) {
+            None
+        } else {
+            self.opts.preview
+        }
+    }
+
     fn not_cancelled(&self) -> Result<(), Fail> {
         match self.opts.cancel.reason() {
             None => Ok(()),
@@ -1384,7 +1433,8 @@ impl<'a> BindingRun<'a> {
                     .ui
                     .warn(&format!("can't move the earlier run's files into runs/: {e}")),
             }
-            self.becomes_current = !self.older_than_current();
+            // A retry redoes some rows of an earlier run: it never replaces the current one.
+            self.becomes_current = !self.older_than_current() && self.opts.retry_failed.is_none();
             // The run's own log, in its folder.
             if std::fs::create_dir_all(&self.run_dir).is_ok() {
                 self.ui.emit(RunEvent::BindingLog(self.run_dir.join("dre.log")));
@@ -1492,7 +1542,16 @@ impl<'a> BindingRun<'a> {
         let mut statements = Vec::new();
         // Reported after the unmanaged-report check, which matters more.
         let mut two_tabs: Option<String> = None;
-        if interleave {
+        let retry_snapshot = match &self.opts.retry_failed {
+            Some(id) => self.start_retry(id)?,
+            None => None,
+        };
+        if let Some(dir) = retry_snapshot {
+            self.render_destinations().map_err(|e| e.or(Code::RenderFailed))?;
+            self.replay_from(&dir, "the saved results")?;
+        } else if let Some(dir) = self.opts.from_results.clone() {
+            self.replay(&dir)?;
+        } else if interleave {
             self.render_destinations().map_err(|e| e.or(Code::RenderFailed))?;
             let mut checked: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for (c, n) in &per_connection {
@@ -1597,6 +1656,11 @@ impl<'a> BindingRun<'a> {
                 .join(&self.report.name)
                 .join(self.b.dir_name());
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let mut index = crate::saved::Index {
+                schema_version: crate::saved::SCHEMA_VERSION.into(),
+                run_id: self.run_id.clone(),
+                results: Vec::new(),
+            };
             for result in &self.produced {
                 crate::rows::write_spool(
                     &result.spool,
@@ -1604,14 +1668,58 @@ impl<'a> BindingRun<'a> {
                     result.rows,
                 )
                 .map_err(|e| e.to_string())?;
+                // The exact Arrow stream too, for `--from-results`.
+                let file = format!("{}.arrows", result.name);
+                crate::saved::spool_to_stream(&result.spool, &dir.join(&file))?;
+                index.results.push(crate::saved::SavedResult {
+                    query: result.query.clone(),
+                    name: result.name.clone(),
+                    connection: result.connection.clone(),
+                    rows: result.rows,
+                    sql_sha256: std::fs::read_to_string(
+                        self.compiled_dir.join(format!("{}.sha256", result.query)),
+                    )
+                    .ok()
+                    .map(|h| h.trim().to_string()),
+                    file,
+                });
             }
+            crate::saved::write_index(&dir, &index).map_err(|e| e.to_string())?;
         }
 
         // 5. Format every file output into target/run/; one whose `when:` is false is skipped.
         let (file_outs, message_outs): (Vec<usize>, Vec<usize>) =
             (0..self.outs.len()).partition(|&i| !self.b.outputs[i].is_message());
+        // A per-row output keeps the run's results, so `--retry-failed` redoes rows from them.
+        if self.retry.is_none()
+            && self.opts.from_results.is_none()
+            && self.opts.preview.is_none()
+            && self
+                .b
+                .outputs
+                .iter()
+                .any(|o| o.for_each.as_ref().is_some_and(|f| f.keep_results))
+        {
+            self.save_snapshot()?;
+        }
+        // `on_empty` first, for every output: a failure stops the run before anything is written.
+        for oi in 0..self.outs.len() {
+            self.has_data(oi)?;
+        }
+        if self.retry.is_some() {
+            for oi in 0..self.outs.len() {
+                if self.b.outputs[oi].for_each.is_none() {
+                    self.skip(oi, "--retry-failed redoes per-row outputs only");
+                    self.outs[oi].reason = Some("retry".into());
+                }
+            }
+        }
         for &oi in &file_outs {
-            if !self.passes_when(oi)? {
+            if self.outs[oi].status == Some(OutputStatus::Skipped) || !self.passes_when(oi)? {
+                continue;
+            }
+            // A per-row output is made and delivered row by row, after the drift check.
+            if self.b.outputs[oi].for_each.is_some() {
                 continue;
             }
             let filename = self.file_names(oi);
@@ -1643,6 +1751,17 @@ impl<'a> BindingRun<'a> {
         let mut failures = Vec::new();
         for oi in file_outs.into_iter().chain(message_outs) {
             if self.outs[oi].status == Some(OutputStatus::Skipped) {
+                continue;
+            }
+            if self.b.outputs[oi].for_each.is_some() {
+                if let Err(e) = self.run_rows(oi) {
+                    if e.code == Code::RunCancelled || e.code == Code::RunTimedOut {
+                        return Err(e);
+                    }
+                    self.outs[oi].status = Some(OutputStatus::Failed);
+                    self.outs[oi].error.get_or_insert_with(|| e.message.clone());
+                    failures.push(e);
+                }
                 continue;
             }
             if self.b.outputs[oi].is_message() {
@@ -1747,6 +1866,55 @@ impl<'a> BindingRun<'a> {
             ("results".to_string(), Value::from(results)),
             ("outputs".to_string(), Value::from(outputs)),
         ]))
+    }
+
+    /// Apply output `oi`'s `on_empty` (and its queries'). `Ok(false)`: skipped for no data;
+    /// an error fails the run (`no-data`).
+    fn has_data(&mut self, oi: usize) -> Result<bool, Fail> {
+        let o = &self.b.outputs[oi];
+        let label = o.label(oi);
+        // A per-row output's population is its driver: each row's slices are checked per row.
+        let queries: Vec<crate::no_data::Query<'_>> = self
+            .produced
+            .iter()
+            .filter(|p| match &o.for_each {
+                Some(f) => p.query == f.query,
+                None => o.feeds(&p.query),
+            })
+            .map(|p| crate::no_data::Query {
+                name: &p.query,
+                rows: p.rows,
+                on_empty: self
+                    .b
+                    .queries
+                    .iter()
+                    .find(|q| q.query == p.query)
+                    .and_then(|q| q.on_empty),
+            })
+            .collect();
+        let droppable = !(o.is_message()
+            || crate::document::FORMATS.contains(&o.format.as_str())
+            || o.for_each.is_some());
+        let d = crate::no_data::decide(o.on_empty, &queries, droppable);
+        self.outs[oi].no_data = d.empty.clone();
+        for w in &d.warnings {
+            self.ui.warn(&format!("  {label}: {w}"));
+        }
+        if let Some(info) = &d.info {
+            self.ui
+                .step(Level::Info, "No data", &format!("{label}: {info}"), None);
+        }
+        if let Some(msg) = d.fail {
+            self.outs[oi].reason = Some("no_data".into());
+            return Err(Fail::new(Code::NoData, format!("{label}: {msg}")));
+        }
+        if let Some(why) = d.skip {
+            self.outs[oi].reason = Some("no_data".into());
+            self.skip(oi, &why);
+            return Ok(false);
+        }
+        self.outs[oi].dropped = d.drop;
+        Ok(true)
     }
 
     /// Evaluate output `oi`'s `when:`. False: the output is skipped (recorded, not a failure).
@@ -2059,7 +2227,7 @@ impl<'a> BindingRun<'a> {
             let (p, _log_scope) = s
                 .statement(st.sensitive)
                 .map_err(|e| Fail::new(Code::ConnectionFailed, e))?;
-            p.execute(&st.text, self.opts.preview, |schema, batch| {
+            p.execute(&st.text, self.row_limit(), |schema, batch| {
                 if writer.is_none() {
                     let f = File::create(&spool_path).map_err(|e| e.to_string())?;
                     writer = Some(FileWriter::try_new(f, schema).map_err(|e| e.to_string())?);
@@ -2135,6 +2303,110 @@ impl<'a> BindingRun<'a> {
         Ok(())
     }
 
+    /// `--from-results`: this Binding's results from `dir` (saved by `--output-json`), as if its
+    /// queries had run. No query runs and no connection opens; a query whose SQL changed since
+    /// is warned about, when its SQL renders without the database.
+    fn replay(&mut self, dir: &Path) -> Result<(), Fail> {
+        let shown = dir.display().to_string();
+        let dir = self
+            .project
+            .root
+            .join(dir)
+            .join(&self.report.name)
+            .join(self.b.dir_name());
+        if let Err(e) = crate::saved::read_index(&dir) {
+            return Err(format!(
+                "--from-results {shown}: no saved results for this report and Set ({e}); save them with `dre run {} --no-deliver --output-json {shown}`",
+                self.report.name
+            )
+            .into());
+        }
+        self.replay_from(&dir, &format!("--from-results {shown}"))
+    }
+
+    /// Replay the saved results in `dir` (an index and its streams); `shown` names them in
+    /// messages.
+    fn replay_from(&mut self, dir: &Path, shown: &str) -> Result<(), Fail> {
+        let dir = dir.to_path_buf();
+        let index = crate::saved::read_index(&dir).map_err(|e| format!("{shown}: {e}"))?;
+        let queries: Vec<QueryEntry> = self.b.queries.iter().filter(|q| q.tab).cloned().collect();
+        let missing: Vec<&str> = queries
+            .iter()
+            .filter(|q| index.find(&q.query).is_none())
+            .map(|q| q.query.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!(
+                "{shown}: no saved result for {} (saved: {}); save them again with `--output-json`",
+                missing
+                    .iter()
+                    .map(|q| format!("`{q}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                index
+                    .results
+                    .iter()
+                    .map(|r| r.query.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .into());
+        }
+        // Warn when a query's SQL changed since the results were saved.
+        for q in &queries {
+            let saved = index.find(&q.query).and_then(|r| r.sql_sha256.clone());
+            let rendered = self
+                .connection_of(&q.query)
+                .and_then(|conn| {
+                    let renderer = self.renderer(Some(&conn))?;
+                    let mut two = None;
+                    self.render_query(&renderer, q, &conn, &mut two)
+                })
+                .map(|_| {
+                    std::fs::read_to_string(self.compiled_dir.join(format!("{}.sha256", q.query)))
+                        .ok()
+                        .map(|h| h.trim().to_string())
+                });
+            match (rendered, saved) {
+                (Ok(Some(now)), Some(then)) if now != then => self.ui.warn(&format!(
+                    "  `{}`'s SQL changed since its results were saved; re-run with `--output-json` to refresh them",
+                    q.query
+                )),
+                (Err(e), _) => self.ui.warn(&format!(
+                    "  `{}`: can't render its SQL to compare with the saved results ({}); using them as saved",
+                    q.query, e.message
+                )),
+                _ => {}
+            }
+        }
+        std::fs::create_dir_all(self.run_dir.join(".spool")).map_err(|e| e.to_string())?;
+        for (i, q) in queries.iter().enumerate() {
+            let r = index.find(&q.query).expect("checked above");
+            let spool = self.run_dir.join(".spool").join(format!("{i}.arrow"));
+            let (schema, rows) = crate::saved::stream_to_spool(&dir.join(&r.file), &spool)?;
+            self.produced.push(Produced {
+                query: q.query.clone(),
+                connection: r.connection.clone(),
+                schema,
+                rows,
+                spool,
+                name: String::new(),
+                anchor: None,
+                header: None,
+                columns: Default::default(),
+                autofit: None,
+                style: None,
+            });
+        }
+        self.ui.step(
+            Level::Info,
+            "Replayed",
+            &format!("{} result(s) from {shown}; no query ran", queries.len()),
+            None,
+        );
+        Ok(())
+    }
+
     /// Each destination's rendered `profile`, `path` and options; `destination.*` is that
     /// destination while its values render.
     fn render_destinations(&mut self) -> Result<(), Fail> {
@@ -2157,6 +2429,10 @@ impl<'a> BindingRun<'a> {
             .map(|(i, (oi, d))| (i, oi, d))
             .collect();
         for (i, oi, d) in numbered {
+            // A per-row output's destinations are rendered for each row, with its `each`.
+            if self.b.outputs[oi].for_each.is_some() {
+                continue;
+            }
             let profile = self
                 .parsed
                 .destinations
@@ -2174,6 +2450,7 @@ impl<'a> BindingRun<'a> {
                     path: None,
                     options: JsonMap::new(),
                     attach: Vec::new(),
+                    hold: d.hold,
                 });
                 continue;
             }
@@ -2198,6 +2475,7 @@ impl<'a> BindingRun<'a> {
                     path,
                     options,
                     attach: d.attach.clone(),
+                    hold: d.hold,
                 })
             })();
             renderer.set_destination(None);
@@ -2352,7 +2630,9 @@ impl<'a> BindingRun<'a> {
         let b = self.b;
         let out = &b.outputs[oi];
         let mine: Vec<usize> = (0..self.produced.len())
-            .filter(|&i| out.feeds(&self.produced[i].query))
+            .filter(|&i| {
+                out.feeds(&self.produced[i].query) && !self.outs[oi].dropped.contains(&self.produced[i].query)
+            })
             .collect();
         if mine.is_empty() {
             let what = if self.outs.len() > 1 {
@@ -2518,6 +2798,7 @@ impl<'a> BindingRun<'a> {
         o.status = Some(match &result {
             Err(_) => OutputStatus::Failed,
             Ok(()) if o.deliveries.iter().any(|d| d.status == "delivered") => OutputStatus::Delivered,
+            Ok(()) if o.deliveries.iter().any(|d| d.status == "held") => OutputStatus::Held,
             Ok(()) => OutputStatus::Kept,
         });
         o.error = result.as_ref().err().map(|f| f.message.clone());
@@ -2550,6 +2831,20 @@ impl<'a> BindingRun<'a> {
                 .target(Role::Destination, &d.profile)
                 .map(|o| o.kind.clone());
             self.attempts = 1;
+            if d.hold || self.opts.hold {
+                self.hold(oi, d);
+                self.outs[oi].deliveries.push(Delivery {
+                    profile: d.profile.clone(),
+                    kind,
+                    target,
+                    status: "held",
+                    location: None,
+                    attempts: None,
+                    error_code: None,
+                    error: None,
+                });
+                continue;
+            }
             let (status, location, error) =
                 match self.deliver_one(oi, d).map_err(|e| e.or(Code::DeliveryFailed)) {
                     Ok(Some(loc)) => ("delivered", Some(loc), None),
@@ -2595,6 +2890,56 @@ impl<'a> BindingRun<'a> {
                 ),
             )),
         }
+    }
+
+    /// Record a held delivery of output `oi` to `d`, for `dre release`.
+    fn hold(&mut self, oi: usize, d: &RenderedDest) {
+        let attach: Vec<PathBuf> = d
+            .attach
+            .iter()
+            .filter_map(|name| {
+                self.b
+                    .outputs
+                    .iter()
+                    .position(|o| o.name.as_deref() == Some(name))
+            })
+            .flat_map(|j| self.outs[j].files.iter().map(|(f, _)| f.clone()))
+            .collect();
+        let idx = self.outs[oi].deliveries.len();
+        self.held.push(crate::release::HeldEntry {
+            id: format!(
+                "{}/{idx}",
+                self.b.outputs[oi]
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("output{}", oi + 1))
+            ),
+            output: self.b.outputs[oi].name.clone(),
+            key: None,
+            profile: d.profile.clone(),
+            path: d.path.clone(),
+            options: d.options.clone(),
+            attach,
+            message: self.outs[oi].message.clone(),
+            files: self.outs[oi]
+                .files
+                .iter()
+                .map(|(f, _)| crate::release::HeldFile {
+                    path: f.clone(),
+                    sha256: crate::release::sha256_file(f).unwrap_or_default(),
+                })
+                .collect(),
+        });
+        self.ui.step(
+            Level::Info,
+            "Held",
+            &format!(
+                "{} to `{}`: held for `dre release`",
+                self.b.outputs[oi].label(oi),
+                d.profile
+            ),
+            None,
+        );
     }
 
     /// Deliver every file to one destination. `Ok(None)`: its entry for this run is
@@ -2853,6 +3198,9 @@ impl<'a> BindingRun<'a> {
 
     fn write_results(&self, status: &Status, error: Option<&Fail>) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.run_dir)?;
+        if !self.held.is_empty() {
+            crate::release::write_held(&self.run_dir, &self.run_id, &self.held)?;
+        }
         // `outputs` lists every file (as before 0.3); `output_results` has one entry per output.
         let mut outputs: Vec<run_results::OutputFile> = Vec::new();
         let mut output_results: Vec<run_results::OutputResult> = Vec::new();
@@ -2895,6 +3243,10 @@ impl<'a> BindingRun<'a> {
                 delivery: run.delivery_note.clone(),
                 deliveries: run.deliveries.clone(),
                 when: run.when,
+                reason: run.reason.clone(),
+                no_data: run.no_data.clone(),
+                dropped: run.dropped.clone(),
+                for_each: run.for_each.clone(),
                 message: run.message.clone().map(|(title, text)| run_results::Message {
                     title: crate::secrets::mask_message_title(&title).into_owned(),
                     text: crate::secrets::mask_markdown(&text).into_owned(),
@@ -2963,6 +3315,10 @@ impl<'a> BindingRun<'a> {
             target_path: self.project.target_dir.clone(),
             settings: self.project.settings.clone(),
             manifest_checksum: self.opts.manifest_checksum.clone(),
+            retry_of: self.retry.as_ref().map(|r| r.original.clone()),
+            release_of: None,
+            released_by: None,
+            released: Vec::new(),
         };
         self.store.write_results(&self.run_dir, &results)
     }

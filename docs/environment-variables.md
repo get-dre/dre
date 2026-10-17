@@ -19,6 +19,7 @@ position: 14
 | `DRE_RUN_TIMEOUT` | How long a `dre run` may take before it's stopped (its Bindings recorded as `timed_out`, exit code 124): a duration such as `2h` or `90m`, or seconds. `--timeout` overrides it; it overrides `flags: run_timeout`. Off by default. New in 0.4. |
 | `DRE_KEEP_RUNS` | How many runs of each report and Set to keep in the target path (default 1; the current run always stays). `--keep-runs` overrides it; it overrides `flags: keep_runs`. New in 0.4. |
 | `DRE_THREADS` | How many Bindings may run at once in a `dre run`, over each connection entry's `threads:` (see [Running Bindings at once](connections.md#running-bindings-at-once)). `--threads` overrides it. New in 0.4. |
+| `DRE_ROW_CONCURRENCY` | How many rows of a [per-row output](per-row-outputs.md) render and deliver at once, over `for_each.concurrency` (default 4). `--row-concurrency` overrides it. New in 0.6. |
 | `DRE_GITHUB_API_URL` | The GitHub API for `github:` plugin sources and `dre system update` (GitHub Enterprise, a mirror). |
 | `DRE_RUN_DATE` | The run date (`YYYY-MM-DD`) behind `run.date`, instead of today. It wins over `DRE_RUN_AT`'s date. |
 | `DRE_RUN_AT` | The instant a run was scheduled for (RFC 3339, e.g. `2026-09-01T06:00:00Z`). It becomes `run.now` and `run.scheduled_at`, gives `run.date` (that instant's date in the run's timezone) when `DRE_RUN_DATE` isn't set, and is recorded as `scheduled_at` in `run_results.json`. `dre schedule ls` puts it in every occurrence's command. |

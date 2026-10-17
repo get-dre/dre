@@ -21,6 +21,7 @@ Queries, outputs, templates, lookups and messages.
 - [Templates](templates.md): Jinja in SQL, paths and options: connection, destination, source(), profile(), columns(), dates and timezones.
 - [Lookups](lookups.md): Mapping tables kept as files: typed columns, inline or temp table.
 - [Messages](messages.md): Headline numbers to Slack, Teams, Google Chat and email, built from a report's own queries.
+- [Per-row outputs](per-row-outputs.md): One statement, file or email per member, client or account from one run: for_each, each.*, failures, retries, masking and held deliveries.
 - [DRE practices](practices.md): The opinions DRE’s agent skills give, and the reasons behind them.
 - [AI-ready reports](ai-ready-reports.md): Turn reviewed report logic and upstream documentation into trustworthy context for AI.
 - [Project configuration](project-configuration.md): Share defaults, override reports and Sets, and bound template queries.

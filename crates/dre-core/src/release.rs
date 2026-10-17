@@ -1,0 +1,320 @@
+//! Held deliveries and `dre release`: a maker/checker step between rendering and sending.
+//!
+//! A destination with `hold: true` (or every destination, with `dre run --hold`) isn't delivered
+//! by the run: the run renders everything, delivers the rest, and records each held delivery in
+//! `held.json` in its run folder, with the files' SHA-256. `dre release <report> --run <id>`
+//! delivers them later from that folder's files, byte for byte what was reviewed: it never
+//! re-renders or re-queries, refuses a file that changed since, takes the Binding's lock, and
+//! never sends a delivery twice. Each release is its own run folder (`release_of`), recording
+//! who released what, and when.
+
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map as JsonMap, Value as Json};
+use sha2::Digest;
+
+use crate::codes::Code;
+use crate::engine::Events;
+use crate::error::Error as Fail;
+use crate::project::Project;
+use crate::run::per_row::{RowDest, deliver_row};
+use crate::run_results::Released;
+use crate::runs::BindingRuns;
+
+/// `held.json` in a run folder.
+pub const HELD: &str = "held.json";
+pub const SCHEMA_VERSION: &str = "dre/held/v1";
+/// In a release's run folder: every entry released so far, this release's included.
+pub const RELEASED: &str = "released.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Held {
+    pub schema_version: String,
+    pub run_id: String,
+    pub entries: Vec<HeldEntry>,
+}
+
+/// One held delivery: the destination entry as rendered (unmasked: it's what will be sent) and
+/// the files it sends.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeldEntry {
+    /// `<output>/<key>/<n>` for a per-row output, `<output>/<n>` otherwise.
+    pub id: String,
+    pub output: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub options: JsonMap<String, Json>,
+    /// Files attached to a message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attach: Vec<PathBuf>,
+    /// A message's title and text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<(String, String)>,
+    pub files: Vec<HeldFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeldFile {
+    pub path: PathBuf,
+    pub sha256: String,
+}
+
+pub fn sha256_file(p: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(p)?;
+    Ok(sha2::Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+pub fn write_held(run_dir: &Path, run_id: &str, entries: &[HeldEntry]) -> std::io::Result<()> {
+    let held = Held {
+        schema_version: SCHEMA_VERSION.into(),
+        run_id: run_id.to_string(),
+        entries: entries.to_vec(),
+    };
+    crate::fs::write_atomic(
+        &run_dir.join(HELD),
+        serde_json::to_string_pretty(&held)?.as_bytes(),
+    )
+}
+
+/// What `dre release` was asked to do.
+#[derive(Debug, Clone, Default)]
+pub struct ReleaseOptions {
+    pub report: String,
+    /// The Binding's folder name: the Set's, or `default`.
+    pub binding: String,
+    pub run_id: String,
+    pub only_keys: Option<Vec<String>>,
+    pub exclude_keys: Option<Vec<String>>,
+    /// Who releases (`--by`, default `$USER`).
+    pub by: String,
+}
+
+/// How a release went.
+#[derive(Debug, Clone, Default)]
+pub struct ReleaseOutcome {
+    pub release_id: String,
+    pub released: Vec<Released>,
+    /// Entries skipped because an earlier release delivered them.
+    pub already: usize,
+}
+
+impl ReleaseOutcome {
+    pub fn failed(&self) -> bool {
+        self.released
+            .iter()
+            .any(|r| r.status != "delivered" && r.status != "not_delivered")
+    }
+}
+
+/// Deliver run `opts.run_id`'s held deliveries.
+pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Result<ReleaseOutcome, Fail> {
+    let store = crate::engine::RunStore::new(&project.target_dir);
+    let runs = BindingRuns::new(&store.run_dir(&opts.report, &opts.binding));
+    let run_dir = runs.run_dir(&opts.run_id);
+    let held_path = run_dir.join(HELD);
+    if !run_dir.is_dir() {
+        return Err(Fail::new(
+            Code::ReleaseFailed,
+            format!(
+                "{} [{}] has no run `{}` in the target path (it may have been pruned: keep it with `keep_runs` for the review window; `dre history` lists the runs)",
+                opts.report, opts.binding, opts.run_id
+            ),
+        ));
+    }
+    let held: Held = match std::fs::read_to_string(&held_path) {
+        Ok(t) => {
+            serde_json::from_str(&t).map_err(|e| format!("{} is malformed: {e}", held_path.display()))?
+        }
+        Err(_) => {
+            return Err(Fail::new(
+                Code::ReleaseFailed,
+                format!(
+                    "run `{}` has no held deliveries (no {HELD} in its folder)",
+                    opts.run_id
+                ),
+            ));
+        }
+    };
+    // Entries an earlier release delivered: the newest release's cumulative list.
+    let mut done: BTreeSet<String> = BTreeSet::new();
+    for id in runs.list() {
+        let dir = runs.run_dir(&id);
+        let is_release = std::fs::read_to_string(dir.join("run_results.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Json>(&t).ok())
+            .is_some_and(|r| r["release_of"].as_str() == Some(opts.run_id.as_str()));
+        if is_release
+            && let Ok(t) = std::fs::read_to_string(dir.join(RELEASED))
+            && let Ok(ids) = serde_json::from_str::<Vec<String>>(&t)
+        {
+            done.extend(ids);
+        }
+    }
+    let started = chrono::Utc::now();
+    let release_id = crate::runs::new_run_id(started);
+    let _guard = runs.lock(&release_id, started).map_err(|e| {
+        Fail::new(
+            Code::RunInProgress,
+            format!(
+                "{} [{}] is busy: {e:?}; release when it finishes",
+                opts.report, opts.binding
+            ),
+        )
+    })?;
+    let release_dir = runs.run_dir(&release_id);
+    std::fs::create_dir_all(&release_dir).map_err(|e| e.to_string())?;
+    let mut outcome = ReleaseOutcome {
+        release_id: release_id.clone(),
+        ..ReleaseOutcome::default()
+    };
+    let chosen = |e: &HeldEntry| match &e.key {
+        Some(k) => {
+            opts.only_keys.as_ref().is_none_or(|ks| ks.contains(k))
+                && opts.exclude_keys.as_ref().is_none_or(|ks| !ks.contains(k))
+        }
+        None => opts.only_keys.is_none(),
+    };
+    let log = events.plugin_log();
+    let mut plugins: HashMap<String, dre_protocol::host::PluginProcess> = HashMap::new();
+    for e in held.entries.iter().filter(|e| chosen(e)) {
+        if done.contains(&e.id) {
+            outcome.already += 1;
+            continue;
+        }
+        // Addresses and paths in messages are masked, as for a per-row run.
+        let mask = if project.mask_row_values {
+            let mut values: JsonMap<String, Json> = e.options.clone();
+            if let Some(p) = &e.path {
+                values.insert("$path".into(), Json::from(p.clone()));
+            }
+            crate::for_each::RowMask::new(&values, &[])
+        } else {
+            crate::for_each::RowMask::default()
+        };
+        let mut r = Released {
+            id: e.id.clone(),
+            output: e.output.clone(),
+            key: e.key.clone(),
+            profile: e.profile.clone(),
+            status: String::new(),
+            location: None,
+            error: None,
+        };
+        // Byte for byte what was reviewed: a changed or missing file is refused.
+        let changed: Vec<String> = e
+            .files
+            .iter()
+            .filter(|f| sha256_file(&f.path).ok().as_deref() != Some(f.sha256.as_str()))
+            .map(|f| f.path.display().to_string())
+            .collect();
+        if !changed.is_empty() {
+            r.status = "refused".into();
+            r.error = Some(format!(
+                "refused: {} changed (or is gone) since the run rendered it; re-run the report to render it again",
+                changed.join(", ")
+            ));
+            events.warn(&format!("  {}: {}", e.id, r.error.as_deref().unwrap_or_default()));
+            outcome.released.push(r);
+            continue;
+        }
+        let dest = RowDest {
+            idx: 0,
+            profile: e.profile.clone(),
+            path: e.path.clone(),
+            options: e.options.clone(),
+            hold: false,
+            max_per_minute: None,
+            attach: e.attach.clone(),
+            attach_missing: false,
+        };
+        let files: Vec<PathBuf> = e.files.iter().map(|f| f.path.clone()).collect();
+        match deliver_row(
+            project,
+            &log,
+            &dest,
+            &files,
+            e.message.as_ref(),
+            &mut plugins,
+            &project.root,
+        ) {
+            Ok(Some(loc)) => {
+                r.status = "delivered".into();
+                r.location = Some(mask.apply(&loc));
+                done.insert(e.id.clone());
+            }
+            Ok(None) => r.status = "not_delivered".into(),
+            Err(err) => {
+                let msg = mask.apply(&err.message);
+                r.status = "failed".into();
+                r.error = Some(msg.clone());
+                events.warn(&format!("  {}: {msg}", e.id));
+            }
+        }
+        outcome.released.push(r);
+    }
+    for (_, p) in plugins {
+        let _ = p.close();
+    }
+    // The release's own record: who, when, what; and every entry released so far.
+    let ids: Vec<&String> = done.iter().collect();
+    crate::fs::write_atomic(
+        &release_dir.join(RELEASED),
+        serde_json::to_string(&ids).unwrap_or_default().as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut record: Json = std::fs::read_to_string(run_dir.join("run_results.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let failed = outcome.failed();
+    if let Json::Object(m) = &mut record {
+        m.insert("run_id".into(), Json::from(release_id.clone()));
+        m.insert(
+            "status".into(),
+            Json::from(if failed { "error" } else { "success" }),
+        );
+        m.insert(
+            "started_at".into(),
+            Json::from(started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        );
+        m.insert(
+            "duration_ms".into(),
+            Json::from((chrono::Utc::now() - started).num_milliseconds().max(0)),
+        );
+        m.insert("release_of".into(), Json::from(opts.run_id.clone()));
+        m.insert("released_by".into(), Json::from(opts.by.clone()));
+        m.insert(
+            "released".into(),
+            serde_json::to_value(&outcome.released).unwrap_or_default(),
+        );
+        m.insert("error".into(), Json::Null);
+        m.insert("error_code".into(), Json::Null);
+        m.insert("error_kind".into(), Json::Null);
+        if failed {
+            m.insert(
+                "error".into(),
+                Json::from("one or more held deliveries failed or were refused"),
+            );
+            m.insert("error_code".into(), Json::from(Code::ReleaseFailed.to_string()));
+        }
+        m.remove("retry_of");
+    }
+    crate::fs::write_atomic(
+        &release_dir.join("run_results.json"),
+        serde_json::to_string_pretty(&record)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    let _ = runs.unlock();
+    Ok(outcome)
+}

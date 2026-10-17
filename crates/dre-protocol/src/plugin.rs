@@ -676,7 +676,8 @@ impl Handler<'_> {
         if errs.is_empty() {
             Ok(())
         } else {
-            Err(errs.join("; ").into())
+            // Wrong options are the project's settings: kind `config`.
+            Err(PluginError::new(ErrorKind::Config, errs.join("; ")).into())
         }
     }
 }

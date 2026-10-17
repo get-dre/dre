@@ -99,6 +99,7 @@ pub const PROJECT_KEYS: &[&str] = &[
     "flags",
     "dispatch",
     "mask_secrets",
+    "mask_row_values",
     "timezone",
     "locale",
     "week_start",
@@ -135,12 +136,21 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
-    "query", "profile", "tab", "tab_name", "anchor", "header", "columns", "autofit", "style",
+    "query", "profile", "tab", "tab_name", "anchor", "header", "columns", "autofit", "style", "on_empty",
 ];
 /// The shared output keys that don't belong to one format: they survive a layer changing `format`.
-const FORMAT_INDEPENDENT_KEYS: &[&str] = &["name", "queries", "when", "destination", "template"];
+const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
+    "name",
+    "queries",
+    "when",
+    "destination",
+    "template",
+    "on_empty",
+    "for_each",
+    "file_name",
+];
 /// The keys of a destination entry core reads; every other key is the plugin's.
-pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach"];
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "max_per_minute"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "name",
     "format",
@@ -149,6 +159,9 @@ pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "destination",
     "template",
     "extension",
+    "on_empty",
+    "for_each",
+    "file_name",
 ];
 /// Keys of one `output.template.bindings` entry.
 pub const TEMPLATE_BINDING_KEYS: &[&str] = &[
@@ -230,6 +243,8 @@ pub struct Project {
     pub packages: Vec<Package>,
     /// Mask `DRE_SECRET_*` values in logs and records (default true).
     pub mask_secrets: bool,
+    /// Mask per-row destination values from `each.*` in logs and records (default true).
+    pub mask_row_values: bool,
     /// The project's default `timezone:` (IANA name); runs default to UTC without one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
@@ -364,6 +379,9 @@ pub struct QueryEntry {
     /// xlsx: how this tab looks, over the output's `style`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<dre_protocol::style::SheetStyle>,
+    /// `on_empty:`: what to do when this query returns no rows; `None`: the output decides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_empty: Option<crate::no_data::OnEmpty>,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -433,6 +451,20 @@ impl Binding {
     }
 }
 
+/// Whether a template reads `each.*`.
+pub fn mentions_each(src: &str) -> bool {
+    let re = regex::Regex::new(r"\beach\s*(\.|\[)").expect("valid");
+    re.is_match(src)
+}
+
+/// Whether an output's `queries:` (as written) includes `query`; no list: every query.
+fn output_feeds(queries: &Option<Loose<Vec<String>>>, query: &str) -> bool {
+    match queries {
+        Some(Loose::Ok(q)) => q.iter().any(|n| n == query),
+        _ => true,
+    }
+}
+
 /// The formats that take `output.template`.
 pub const TEMPLATE_FORMATS: &[&str] = &["xlsx", "html", "pdf"];
 
@@ -462,9 +494,68 @@ pub struct Output {
     /// (`<report>.<extension>`); `Some("")` means no extension. `None`: the format's own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<String>,
+    /// `on_empty:`: what to do when every query returns no rows; `None`: `continue`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_empty: Option<crate::no_data::OnEmpty>,
+    /// `for_each:`: one copy of the output per row of a driver query.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub for_each: Option<ForEach>,
+    /// `file_name:` (Jinja, may use `each.*`): a per-row output's file name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+}
+
+/// `for_each:` on an output.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ForEach {
+    /// The driver query.
+    pub query: String,
+    /// The key column(s).
+    pub key: Vec<String>,
+    /// Rows at once; `None`: the default (4) or `--row-concurrency`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<usize>,
+    pub on_row_error: RowErrors,
+    pub on_orphan_rows: OrphanRows,
+    pub max_population_rows: u64,
+    pub keep_results: bool,
+    /// `None`: the project's `mask_row_values`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask_row_values: Option<bool>,
+}
+
+/// The default `for_each.max_population_rows`.
+pub const DEFAULT_MAX_POPULATION_ROWS: u64 = 5_000_000;
+/// The default `for_each.concurrency`.
+pub const DEFAULT_ROW_CONCURRENCY: usize = 4;
+
+/// `for_each.on_row_error`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RowErrors {
+    /// Record a failed row and carry on; the run ends failed.
+    #[default]
+    Continue,
+    /// Render every row first; deliver only if all rendered.
+    Fail,
+}
+
+/// `for_each.on_orphan_rows`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OrphanRows {
+    #[default]
+    Warn,
+    Fail,
 }
 
 impl Output {
+    /// Whether this output makes a section (a tab, a file, `results.<query>`) of `query`: it
+    /// formats it, and it isn't the output's `for_each` driver.
+    pub fn sections(&self, query: &str) -> bool {
+        self.feeds(query) && self.for_each.as_ref().is_none_or(|f| f.query != query)
+    }
+
     /// Whether this output formats `query`'s result.
     pub fn feeds(&self, query: &str) -> bool {
         self.queries.as_ref().is_none_or(|q| q.iter().any(|n| n == query))
@@ -492,6 +583,12 @@ pub struct Destination {
     /// `attach:` on a message output's entry: other outputs whose files go with the message.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub attach: Vec<String>,
+    /// `hold: true`: delivered later, by `dre release`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hold: bool,
+    /// `max_per_minute:`: core paces deliveries to this destination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_per_minute: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1228,6 +1325,21 @@ impl Loader {
                 true
             }
         };
+        let mask_row_values = match pf.mask_row_values {
+            None => true,
+            Some(de::Located {
+                value: Loose::Ok(b), ..
+            }) => b,
+            Some(v) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    v.line(),
+                    "`mask_row_values` must be true or false",
+                );
+                true
+            }
+        };
         let timezone = pf.timezone.and_then(|v| {
             let line = v.line();
             self.timezone_str(v.value.ok().map(String::as_str), &yf.display, line, "`timezone`")
@@ -1306,6 +1418,7 @@ impl Loader {
             macros: Vec::new(),
             packages: Vec::new(),
             mask_secrets,
+            mask_row_values,
             timezone,
             locale,
             week_start,
@@ -2925,6 +3038,7 @@ impl Loader {
             columns: BTreeMap::new(),
             autofit: None,
             style: None,
+            on_empty: None,
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -3006,6 +3120,19 @@ impl Loader {
                         format!("report `{report}`: `header` of `{name}` must be true or false"),
                     ),
                 }
+            }
+            match &m.on_empty {
+                None => {}
+                Some(Loose::Ok(v)) => e.on_empty = Some(*v),
+                Some(Loose::Bad(_)) => self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    line,
+                    format!(
+                        "report `{report}`: `on_empty` of `{name}` must be one of {}",
+                        crate::no_data::OnEmpty::NAMES.join(", ")
+                    ),
+                ),
             }
             if let Some(a) = &m.autofit {
                 match a {
@@ -3804,7 +3931,19 @@ impl Loader {
                         Some(x) if x.is_message() => Some(format!(
                             "`{a}` is a message; attach file outputs (its `.md` is linked with `outputs.{a}.location`)"
                         )),
-                        Some(_) => None,
+                        Some(x) => match (&o.for_each, &x.for_each) {
+                            (None, Some(_)) => Some(format!(
+                                "`{a}` makes a file per row; attach it from a message with the same `for_each`, so each row's message gets that row's file"
+                            )),
+                            (Some(m), Some(f)) if m.query != f.query || m.key != f.key => Some(format!(
+                                "`{a}` makes a file per row of `{}` by `{}`, but this message is per row of `{}` by `{}`; give them the same `for_each` driver and key so each row's message gets its own file",
+                                f.query,
+                                f.key.join(", "),
+                                m.query,
+                                m.key.join(", ")
+                            )),
+                            _ => None,
+                        },
                     };
                     if let Some(p) = problem {
                         self.diags.error(
@@ -4110,6 +4249,7 @@ impl Loader {
                 None
             }
         };
+        let entries: &[QueryEntry] = queries;
         let queries = match &o.queries {
             Some(Loose::Ok(_)) => Some(queries.iter().map(|q| q.query.clone()).collect()),
             _ => None,
@@ -4122,6 +4262,75 @@ impl Loader {
                 format!("{ctx}: `extension` doesn't apply to xlsx (Excel only opens .xlsx workbooks)"),
             );
         }
+        let on_empty = match o.on_empty {
+            None => None,
+            Some(Loose::Ok(v)) => Some(v),
+            Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!(
+                        "{ctx}: `on_empty` must be one of {}",
+                        crate::no_data::OnEmpty::NAMES.join(", ")
+                    ),
+                );
+                None
+            }
+        };
+        // A document or message template decides its sections: a query can't drop one.
+        if format == MESSAGE_FORMAT || crate::document::FORMATS.contains(&format.as_str()) {
+            for q in entries.iter().filter(|q| {
+                q.on_empty == Some(crate::no_data::OnEmpty::Skip) && output_feeds(&o.queries, &q.query)
+            }) {
+                self.diags.warning(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!(
+                        "{ctx}: query `{}` has `on_empty: skip`, which has no effect on a {format} output (its template decides what to show); use `on_empty` on the output, or `results.{}.row_count` in the template",
+                        q.query, q.query
+                    ),
+                );
+            }
+        }
+        let for_each = match o.for_each {
+            None | Some(Loose::Ok(de::OneOf::B(false))) => None,
+            Some(Loose::Ok(de::OneOf::B(true))) | Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!("{ctx}: `for_each` must be a map with `query` and `key`, or `false` to turn an inherited one off"),
+                );
+                None
+            }
+            Some(Loose::Ok(de::OneOf::A(f))) => {
+                self.typed_for_each(f, ctx, &file, entries, &format, &destinations)
+            }
+        };
+        let file_name = match o.file_name {
+            None => None,
+            Some(Loose::Ok(s)) if for_each.is_some() => Some(s),
+            Some(Loose::Ok(_)) => {
+                self.diags.error(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!("{ctx}: `file_name` names a per-row output's files; it needs `for_each`"),
+                );
+                None
+            }
+            Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!("{ctx}: `file_name` must be a string"),
+                );
+                None
+            }
+        };
         Output {
             name,
             format,
@@ -4131,7 +4340,158 @@ impl Loader {
             destinations,
             template,
             extension,
+            on_empty,
+            for_each,
+            file_name,
         }
+    }
+
+    /// `for_each:`: its driver is a query of the Binding that makes a result, its key is set,
+    /// and every destination with a `path` names each row's own (`each.*`).
+    fn typed_for_each(
+        &mut self,
+        f: config::report::ForEach,
+        ctx: &str,
+        file: &Option<PathBuf>,
+        queries: &[QueryEntry],
+        format: &str,
+        destinations: &[Destination],
+    ) -> Option<ForEach> {
+        let err = |s: &mut Self, msg: String| {
+            s.diags.error(
+                Code::InvalidOutputOption,
+                file.clone(),
+                None,
+                format!("{ctx}: {msg}"),
+            );
+        };
+        let names: Vec<&str> = queries
+            .iter()
+            .filter(|q| q.tab)
+            .map(|q| q.query.as_str())
+            .collect();
+        let query = match f.query {
+            Some(Loose::Ok(q)) if names.contains(&q.as_str()) => q,
+            Some(Loose::Ok(q)) => {
+                err(
+                    self,
+                    format!(
+                        "`for_each.query` `{q}` isn't a query of this report that returns rows (its queries: {})",
+                        names.join(", ")
+                    ),
+                );
+                return None;
+            }
+            _ => {
+                err(
+                    self,
+                    "`for_each` needs `query:`, the driver query (one row per copy of the output)".into(),
+                );
+                return None;
+            }
+        };
+        let key = match f.key {
+            Some(Loose::Ok(de::OneOf::A(k))) if !k.trim().is_empty() => vec![k],
+            Some(Loose::Ok(de::OneOf::B(list)))
+                if !list.is_empty() && list.iter().all(|k| !k.trim().is_empty()) =>
+            {
+                list
+            }
+            _ => {
+                err(
+                    self,
+                    "`for_each` needs `key:`, the column (or list of columns) that identifies a row".into(),
+                );
+                return None;
+            }
+        };
+        for k in &key {
+            let lower = k.to_lowercase();
+            if ["email", "mail", "name", "phone", "mobile"]
+                .iter()
+                .any(|w| lower.contains(w))
+            {
+                self.diags.warning(
+                    Code::InvalidOutputOption,
+                    file.clone(),
+                    None,
+                    format!(
+                        "{ctx}: the `for_each` key `{k}` looks like personal data; keys are never masked (they name files and appear in logs), so use an opaque id such as a member number"
+                    ),
+                );
+            }
+        }
+        let positive = |s: &mut Self, v: Option<Loose<u64>>, what: &str| -> Option<u64> {
+            match v {
+                None => None,
+                Some(Loose::Ok(n)) if n > 0 => Some(n),
+                Some(_) => {
+                    err(
+                        s,
+                        format!("`for_each.{what}` must be a whole number of 1 or more"),
+                    );
+                    None
+                }
+            }
+        };
+        let concurrency = positive(self, f.concurrency, "concurrency").map(|n| n as usize);
+        let max_population_rows = positive(self, f.max_population_rows, "max_population_rows")
+            .unwrap_or(DEFAULT_MAX_POPULATION_ROWS);
+        let flag = |s: &mut Self, v: Option<Loose<bool>>, what: &str| -> Option<bool> {
+            match v {
+                None => None,
+                Some(Loose::Ok(b)) => Some(b),
+                Some(Loose::Bad(_)) => {
+                    err(s, format!("`for_each.{what}` must be true or false"));
+                    None
+                }
+            }
+        };
+        let keep_results = flag(self, f.keep_results, "keep_results").unwrap_or(true);
+        let mask_row_values = flag(self, f.mask_row_values, "mask_row_values");
+        let on_row_error = match f.on_row_error {
+            None => RowErrors::default(),
+            Some(Loose::Ok(v)) => v,
+            Some(Loose::Bad(_)) => {
+                err(
+                    self,
+                    "`for_each.on_row_error` must be `continue` or `fail`".into(),
+                );
+                RowErrors::default()
+            }
+        };
+        let on_orphan_rows = match f.on_orphan_rows {
+            None => OrphanRows::default(),
+            Some(Loose::Ok(v)) => v,
+            Some(Loose::Bad(_)) => {
+                err(self, "`for_each.on_orphan_rows` must be `warn` or `fail`".into());
+                OrphanRows::default()
+            }
+        };
+        for d in destinations {
+            if let Some(p) = &d.path
+                && !mentions_each(p)
+            {
+                err(
+                    self,
+                    format!(
+                        "destination `{}`: a per-row output's `path` must differ per row, but `{p}` doesn't use `each.*`; every row would overwrite the last (add e.g. `{{{{ each.{} }}}}`)",
+                        d.profile, key[0]
+                    ),
+                );
+            }
+        }
+        let _ = format;
+        Some(ForEach {
+            query,
+            key,
+            concurrency,
+            on_row_error,
+            on_orphan_rows,
+            max_population_rows,
+            keep_results,
+            mask_row_values,
+        })
     }
 
     /// One `output.destination` entry: `profile`, optional `path`, and plugin options.
@@ -4180,11 +4540,39 @@ impl Loader {
                 Vec::new()
             }
         };
+        let hold = match d.hold {
+            None => false,
+            Some(Loose::Ok(b)) => b,
+            Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    None,
+                    format!("{ctx}: destination `{p}`: `hold` must be true or false"),
+                );
+                false
+            }
+        };
+        let max_per_minute = match d.max_per_minute {
+            None => None,
+            Some(Loose::Ok(n)) if n > 0 => Some(n),
+            Some(_) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    None,
+                    format!("{ctx}: destination `{p}`: `max_per_minute` must be a whole number of 1 or more"),
+                );
+                None
+            }
+        };
         Some(Destination {
             profile: p,
             path,
             options,
             attach,
+            hold,
+            max_per_minute,
         })
     }
 
@@ -4381,6 +4769,7 @@ impl Loader {
             columns: BTreeMap::new(),
             autofit: None,
             style: None,
+            on_empty: None,
         };
         let base = BindingBase {
             profile: profile.clone(),

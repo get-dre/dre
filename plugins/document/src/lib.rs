@@ -21,7 +21,9 @@ use std::sync::Arc;
 
 use dre_core::document::{Check, Context};
 use dre_protocol::options::{OptionField, OptionType};
-use dre_protocol::plugin::{About, Format, Plugin, Result, ResultSets, WriteRequest, serve_package};
+use dre_protocol::plugin::{
+    About, ErrorKind, Format, Plugin, PluginError, Result, ResultSets, WriteRequest, serve_package,
+};
 use serde_json::{Map, Value};
 
 pub use template::Data;
@@ -138,9 +140,12 @@ impl Format for Document {
             Some(t) => serde_json::from_value(t.clone())
                 .map_err(|e| format!("the template context from core is malformed: {e}; update DRE"))?,
             None => {
-                return Err(format!(
-                    "`{}` needs DRE 0.6.0 or later, which sends the template context",
-                    req.format
+                return Err(PluginError::new(
+                    ErrorKind::Config,
+                    format!(
+                        "`{}` needs DRE 0.6.0 or later, which sends the template context",
+                        req.format
+                    ),
                 )
                 .into());
             }

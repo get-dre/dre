@@ -496,6 +496,21 @@ codes! {
     NoResultSet = "no-result-set", Config,
         "A query that makes a tab returned no result set.",
         "The query's last statement returned no rows to write (it created a view, set a variable). If it only prepares data for later queries, give it `tab: false` in the YAML.";
+    ForEachFailed = "for-each-failed", Config,
+        "A per-row output can't be split by its key.",
+        "Before anything renders, a `for_each` output's driver must give one row per key (no duplicates), every query of the output must have the key columns, the rows' file names must differ, the population must fit `max_population_rows`, and with `on_orphan_rows: fail` no row may have a key missing from the driver. The message says which. Nothing was written or delivered.";
+    RowsFailed = "rows-failed", Delivery,
+        "Rows of a per-row output failed.",
+        "One or more rows of a `for_each` output failed to render or deliver. With `on_row_error: continue` (the default) the other rows were made and delivered; with `fail`, nothing was delivered. Each failed row's key, code and message are in `run_results.json` (`output_results[].for_each.failed_keys`) and in the `<output>.rows.jsonl` sidecar. Fix the cause and run `dre run <report> --retry-failed <run id>` to redo only those rows, from the same saved results.";
+    ReleaseFailed = "release-failed", Delivery,
+        "`dre release` couldn't deliver every held delivery.",
+        "`dre release` delivers a run's held deliveries from the files in its run folder. It fails when the run isn't in the target path (keep it with `keep_runs` for the review window), has no `held.json`, or when a delivery failed or was refused because its file changed since the run rendered it (the SHA-256 recorded at the run must match). Delivered entries are recorded, so releasing again sends only what's still held.";
+    RetryFailed = "retry-failed", Usage,
+        "`--retry-failed` can't redo that run.",
+        "`dre run --retry-failed <run id>` redoes a run's failed and never-started rows from the query results it saved in its run folder. The run must still be in the target path (`keep_runs` prunes older runs; `dre history` lists them) with its `results/` folder. A run whose per-row outputs have `keep_results: false` saved none, and a retry of it runs the queries again.";
+    NoData = "no-data", Query,
+        "An output with `on_empty: fail` had no data.",
+        "Every query of the output returned no rows (or a query with `on_empty: fail` returned none), and `on_empty: fail` makes that a failure, so nothing was delivered. Check the data upstream; if empty is acceptable, use `on_empty: skip` (deliver nothing) or `continue` (deliver it empty). A `count(*)` returning 0 is one row, not empty. See \"When there's no data\" in docs/building-reports.md.";
     RenderFailed = "render-failed", Config,
         "A template failed to render during the run.",
         "A destination, message or `when:` template failed to render with the run's results. The message has the cause.";

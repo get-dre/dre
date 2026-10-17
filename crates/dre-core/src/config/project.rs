@@ -54,6 +54,9 @@ pub struct ProjectFile {
     /// Whether `DRE_SECRET_*` values are masked as `*****` in the console, logs, JSON events, `run_results.json` and `target/compiled/`.
     #[schemars(extend("default" = true))]
     pub mask_secrets: Option<Located<Loose<bool>>>,
+    /// Whether a per-row output's destination values rendered from `each.*` (addresses, paths) are masked in the console, logs, `run_results.json` and `rows.jsonl`. A `for_each` block's own `mask_row_values` wins.
+    #[schemars(extend("default" = true))]
+    pub mask_row_values: Option<Located<Loose<bool>>>,
     /// The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC.
     pub timezone: Option<Located<Loose<String>>>,
     /// The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`.

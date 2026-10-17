@@ -2,7 +2,7 @@
 title: "Project configuration"
 description: "Share defaults, override reports and Sets, and bound template queries."
 section: build-reports
-position: 7
+position: 8
 ---
 
 # Project configuration

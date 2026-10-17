@@ -41,6 +41,9 @@ pub struct Context {
     pub cli_vars: BTreeMap<String, String>,
     /// The Binding's `locale:` tag, for the number filters.
     pub locale: String,
+    /// A per-row output's driver row: `each.<column>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub each: Option<JsonMap<String, Json>>,
 }
 
 /// What `validate` sends the plugin for an html or pdf output, so `dre validate` checks its
@@ -108,6 +111,7 @@ impl Context {
             vars,
             cli_vars,
             locale: run.locale.tag.to_string(),
+            each: None,
         }
     }
 
@@ -154,6 +158,9 @@ pub fn environment(ctx: &Context) -> Result<Environment<'static>, String> {
         ctx.vars.clone(),
         ctx.cli_vars.clone(),
     );
+    if let Some(each) = &ctx.each {
+        env.add_global("each", Value::from(minijinja::value::Serde(each.clone())));
+    }
     Ok(env)
 }
 
@@ -219,6 +226,7 @@ mod tests {
             vars: JsonMap::from_iter([("client".to_string(), Json::from("Acme"))]),
             cli_vars: BTreeMap::from([("terms".to_string(), "30".to_string())]),
             locale: "de-DE".into(),
+            each: None,
         }
     }
 

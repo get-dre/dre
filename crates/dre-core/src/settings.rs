@@ -37,6 +37,10 @@ pub const KEEP_RUNS: &str = "DRE_KEEP_RUNS";
 /// connection entry's `threads:`.
 pub const THREADS: &str = "DRE_THREADS";
 
+/// How many rows of a per-row output render and deliver at once: `--row-concurrency`,
+/// `DRE_ROW_CONCURRENCY`, over `for_each.concurrency`.
+pub const ROW_CONCURRENCY: &str = "DRE_ROW_CONCURRENCY";
+
 /// A `DRE_*` environment variable's value; set but empty counts as unset.
 pub fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())

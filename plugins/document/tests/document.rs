@@ -38,6 +38,7 @@ fn ctx(root: &Path, file: Option<PathBuf>) -> Context {
         ]),
         cli_vars: Default::default(),
         locale: "en-AU".into(),
+        each: None,
     }
 }
 

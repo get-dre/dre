@@ -194,6 +194,21 @@ by a literal name, checks its images and stylesheets exist, its filters exist, a
 computed (`{% include "terms/" ~ var('client') ~ ".html" %}`) gets a warning that it isn't checked
 until the run.
 
+##### Designing a template
+
+A template takes many tweaks. Save the results once, then re-render from them, with no query and
+no connection, in about a second:
+
+```bash
+dre run statement --set acme --no-deliver --output-json design   # runs the queries once
+dre run statement --set acme --from-results design               # each tweak: re-render only
+```
+
+`--from-results` reads the results `--output-json` saved (`design/<report>/<binding>/`, see
+[the manifest page](../docs/manifest.md)), renders every output of the report (xlsx and messages too),
+and implies `--no-deliver`. It fails when a query has no saved result, and warns when a query's
+SQL changed since they were saved.
+
 ##### Delivery
 
 File destinations send a `.pdf` as `application/pdf` and an `.html` as `text/html`; an email
