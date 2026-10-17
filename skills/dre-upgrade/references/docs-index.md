@@ -140,6 +140,8 @@ Search this index for the question's terms, then open the linked page. These loc
 
 - [Updating DRE](docs/updating.md): dre system update, and how each install method updates.
   Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `dre`, `dre-cli`.
+- [New in 0.6](docs/new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
+  Terms/options: `--limit-rows`, `--only-keys`, `--output-json`, `--preview`, `--rate`, `application/pdf`, `burst:`, `dependencies.yml`, `document`, `for_each`, `hold`, `html`, `max_retry_wait`, `on_empty`, `pdf`, `retry_wait`, `run.date.yyyymm`, `template.file`, `text/html`.
 - [New in 0.5](docs/new-in-0.5.md): Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone.
   Terms/options: `--output-file`, `--output-json`, `-4`, `-foo`, `-foo.bar`, `bar`, `clickhouse`, `dependencies.yml`, `false`, `float`, `foo.bar`, `int`, `join`, `max`, `min`, `plugins:`, `round`, `string_literal`, `title`, `true`.
 - [New in 0.4](docs/new-in-0.4.md): Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles.

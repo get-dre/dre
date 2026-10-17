@@ -97,6 +97,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): dre system update, and how each install method updates.
+- [New in 0.6](new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
 - [New in 0.5](new-in-0.5.md): Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone.
 - [New in 0.4](new-in-0.4.md): Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles.
 - [New in 0.3](new-in-0.3.md): Messages, several outputs per report, when:, number filters and locale:, and the teams and google_chat destinations.
