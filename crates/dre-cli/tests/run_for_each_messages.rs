@@ -76,7 +76,13 @@ fn each_member_gets_a_message_with_only_their_statement() {
     assert!(d[0]["message"]["text"].as_str().unwrap().contains("1000.5"));
     let files = d[0]["files"].as_array().unwrap();
     assert_eq!(files.len(), 1);
-    assert!(files[0]["local"].as_str().unwrap().ends_with("statement/101.csv"));
+    assert!(
+        files[0]["local"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("statement/101.csv")
+    );
     assert!(
         files[0]["content"].as_str().unwrap().contains("Growth")
             && !files[0]["content"].as_str().unwrap().contains("Cash")
