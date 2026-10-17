@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition">
+  <DataSources>
+    <DataSource Name="Warehouse"><DataSourceReference>Warehouse</DataSourceReference></DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="List">
+      <Query>
+        <DataSourceName>Warehouse</DataSourceName>
+        <CommandText>SELECT StoreName, City FROM dbo.Stores</CommandText>
+      </Query>
+    </DataSet>
+  </DataSets>
+  <Body><ReportItems><Tablix Name="T"><DataSetName>List</DataSetName></Tablix></ReportItems></Body>
+</Report>

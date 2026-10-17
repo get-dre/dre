@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <DataSources>
+    <DataSource Name="Warehouse">
+      <DataSourceReference>/Shared/Warehouse</DataSourceReference>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="Sales">
+      <Query>
+        <DataSourceName>Warehouse</DataSourceName>
+        <QueryParameters>
+          <QueryParameter Name="@StartDate"><Value>=Parameters!StartDate.Value</Value></QueryParameter>
+          <QueryParameter Name="@EndDate"><Value>=Parameters!EndDate.Value</Value></QueryParameter>
+        </QueryParameters>
+        <CommandText>SELECT r.RegionName, COUNT(*) AS Orders, SUM(l.Qty * l.UnitPrice) AS Net
+FROM dbo.Orders o
+JOIN dbo.OrderLines l ON l.OrderId = o.OrderId
+JOIN dbo.Regions r ON r.RegionId = o.RegionId
+WHERE o.OrderDate &gt;= @StartDate AND o.OrderDate &lt; @EndDate
+GROUP BY r.RegionName</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="RegionName"><DataField>RegionName</DataField></Field>
+        <Field Name="Orders"><DataField>Orders</DataField></Field>
+        <Field Name="Net"><DataField>Net</DataField></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Tablix Name="Tablix1">
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember><KeepWithGroup>After</KeepWithGroup></TablixMember>
+                <TablixMember><Group Name="Details" /></TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <DataSetName>Sales</DataSetName>
+          </Tablix>
+        </ReportItems>
+      </Body>
+    </ReportSection>
+  </ReportSections>
+  <ReportParameters>
+    <ReportParameter Name="StartDate">
+      <DataType>DateTime</DataType>
+      <Prompt>Start date</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="EndDate">
+      <DataType>DateTime</DataType>
+      <Prompt>End date</Prompt>
+    </ReportParameter>
+  </ReportParameters>
+</Report>

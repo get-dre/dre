@@ -27,7 +27,9 @@ def anchors(md):
 
 def problems():
     found = []
-    files = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md")), *sorted((ROOT / "skills").rglob("*.md"))]
+    # skills/shared/topics/ link as their copies in <skill>/references/topics/ do; the copies are checked.
+    files = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md")),
+             *sorted(p for p in (ROOT / "skills").rglob("*.md") if "shared/topics" not in p.as_posix())]
     cache = {}
     for f in files:
         md = re.sub(r"`[^`\n]*`", "", FENCE.sub("", f.read_text()))
