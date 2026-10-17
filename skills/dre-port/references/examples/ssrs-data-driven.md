@@ -26,7 +26,6 @@ queries: [managers, store_lines]
 output:
   - name: statement
     format: pdf
-    queries: [store_lines]
     template: {file: store_statement.html}
     for_each: {query: managers, key: store_id, on_row_error: continue}
   - name: email

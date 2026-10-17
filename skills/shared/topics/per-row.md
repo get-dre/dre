@@ -52,6 +52,7 @@ output:
       - {profile: member_mail, to: "{{ each.email }}", attach: statement, rate: 120/minute, hold: true}
 ```
 
+- An output with its own `queries:` list must list the driver too; it isn't shown as a section.
 - `each.<column>` is the driver row, in templates, titles, texts, paths and addresses; not in SQL.
 - Each row's file is `<output>/<key>.<ext>` in the run folder, or what `file_name:` renders.
 - Other `for_each` keys: `concurrency` (default 4), `on_orphan_rows` (`warn` or `fail` for rows
