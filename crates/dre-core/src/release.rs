@@ -85,6 +85,13 @@ pub fn write_held(run_dir: &Path, run_id: &str, entries: &[HeldEntry]) -> std::i
     )
 }
 
+/// `released.json` in a release's folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReleasedFile {
+    release_of: String,
+    released: Vec<String>,
+}
+
 /// What `dre release` was asked to do.
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseOptions {
@@ -146,26 +153,27 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
     };
     // Entries an earlier release delivered: the newest release's cumulative list.
     let mut done: BTreeSet<String> = BTreeSet::new();
+    // Each release keeps every entry released so far (written as each one goes out).
     for id in runs.list() {
-        let dir = runs.run_dir(&id);
-        let is_release = std::fs::read_to_string(dir.join("run_results.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<Json>(&t).ok())
-            .is_some_and(|r| r["release_of"].as_str() == Some(opts.run_id.as_str()));
-        if is_release
-            && let Ok(t) = std::fs::read_to_string(dir.join(RELEASED))
-            && let Ok(ids) = serde_json::from_str::<Vec<String>>(&t)
+        if let Ok(t) = std::fs::read_to_string(runs.run_dir(&id).join(RELEASED))
+            && let Ok(r) = serde_json::from_str::<ReleasedFile>(&t)
+            && r.release_of == opts.run_id
         {
-            done.extend(ids);
+            done.extend(r.released);
         }
     }
     let started = chrono::Utc::now();
     let release_id = crate::runs::new_run_id(started);
     let _guard = runs.lock(&release_id, started).map_err(|e| {
+        let why = match e {
+            crate::runs::LockError::Held(h) => format!("{} holds its lock", h.describe()),
+            crate::runs::LockError::Unreadable(p) => format!("its lock file {} is unreadable", p.display()),
+            crate::runs::LockError::Io(e) => format!("its lock can't be taken: {e}"),
+        };
         Fail::new(
             Code::RunInProgress,
             format!(
-                "{} [{}] is busy: {e:?}; release when it finishes",
+                "{} [{}] is busy: {why}; release when it finishes",
                 opts.report, opts.binding
             ),
         )
@@ -250,6 +258,8 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
                 r.status = "delivered".into();
                 r.location = Some(mask.apply(&loc));
                 done.insert(e.id.clone());
+                // Recorded at once: a release stopped part-way never sends this one again.
+                write_released(&release_dir, &opts.run_id, &done)?;
             }
             Ok(None) => r.status = "not_delivered".into(),
             Err(err) => {
@@ -265,12 +275,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
         let _ = p.close();
     }
     // The release's own record: who, when, what; and every entry released so far.
-    let ids: Vec<&String> = done.iter().collect();
-    crate::fs::write_atomic(
-        &release_dir.join(RELEASED),
-        serde_json::to_string(&ids).unwrap_or_default().as_bytes(),
-    )
-    .map_err(|e| e.to_string())?;
+    write_released(&release_dir, &opts.run_id, &done)?;
     let mut record: Json = std::fs::read_to_string(run_dir.join("run_results.json"))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -315,6 +320,18 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             .as_bytes(),
     )
     .map_err(|e| e.to_string())?;
-    let _ = runs.unlock();
     Ok(outcome)
+}
+
+/// Every entry released so far, this release's included, in the release's folder.
+fn write_released(release_dir: &Path, run_id: &str, done: &BTreeSet<String>) -> Result<(), Fail> {
+    let file = ReleasedFile {
+        release_of: run_id.to_string(),
+        released: done.iter().cloned().collect(),
+    };
+    crate::fs::write_atomic(
+        &release_dir.join(RELEASED),
+        serde_json::to_string(&file).unwrap_or_default().as_bytes(),
+    )
+    .map_err(|e| Fail::from(e.to_string()))
 }

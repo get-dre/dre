@@ -352,3 +352,27 @@ fn validate_checks_the_template() {
     );
     let _ = p.close();
 }
+
+#[test]
+fn css_page_size_wins_over_the_options() {
+    let dir = project();
+    let t = dir.path().join("reports/a5.html");
+    std::fs::write(
+        &t,
+        "<html><head><style>@page { size: A5; margin: 10mm }</style></head><body><p>x</p></body></html>",
+    )
+    .unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(t), json!({"page_size": "Letter"}), 1).unwrap();
+    let s = String::from_utf8_lossy(&pdf);
+    // A5 is 419.53 x 595.28 points; Letter would be 612 x 792.
+    let mb: Vec<&str> = s.match_indices("/MediaBox").map(|(i, _)| &s[i..i + 40]).collect();
+    assert!(s.contains("/MediaBox [0 0 419.5"), "not A5: {mb:?}");
+    // With no @page, the option applies.
+    let t = dir.path().join("reports/plain.html");
+    std::fs::write(&t, "<html><body><p>x</p></body></html>").unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(t), json!({"page_size": "Letter"}), 1).unwrap();
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 612"),
+        "not Letter"
+    );
+}

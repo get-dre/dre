@@ -15,6 +15,8 @@ use crate::{assets, fonts};
 /// The `page_size` choices.
 pub const PAGE_SIZES: &[&str] = &["A3", "A4", "A5", "Letter", "Legal"];
 
+/// An `@page` rule's declarations (before any nested margin box).
+static PAGE_RULE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)@page\b[^{]*\{([^{}]*)").unwrap());
 static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<title\b[^>]*>(.*?)</title>").unwrap());
 static LANG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)<html\b[^>]*?\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap()
@@ -62,15 +64,23 @@ pub fn render_pdf(
         "Legal" => PageSize::LEGAL,
         _ => PageSize::A4,
     };
+    // The template's CSS decides the page; the options fill in only what it leaves unset.
+    let css_sets = |prop: &str| {
+        let decl = Regex::new(&format!(r"(?i)(^|[;\s]){prop}\s*:")).expect("valid");
+        PAGE_RULE.captures_iter(&html).any(|c| decl.is_match(&c[1]))
+    };
     let mut b = Engine::builder()
         .system_fonts(false)
-        .page_size(size)
-        .landscape(page.landscape)
-        .margin(parse_margins(&page.margins)?)
         .creation_date(ctx.run.now.format("%Y-%m-%dT%H:%M:%SZ").to_string())
         .creator(format!("DRE {}", env!("CARGO_PKG_VERSION")))
         .producer("DRE document plugin")
         .assets(bundle);
+    if !css_sets("size") {
+        b = b.page_size(size).landscape(page.landscape);
+    }
+    if !css_sets("margin") {
+        b = b.margin(parse_margins(&page.margins)?);
+    }
     if let Some(t) = TITLE.captures(&html) {
         let t = unescape(t[1].trim());
         if !t.is_empty() {

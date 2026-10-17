@@ -31,7 +31,10 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("explain", "dre explain unknown-key"),
     ("history", "dre history monthly_revenue --latest --path"),
     ("unlock", "dre unlock monthly_revenue --binding client_a"),
-    ("release", "dre release statements --run 20261017T060000Z-k3f9 --by jane"),
+    (
+        "release",
+        "dre release statements --run 20261017T060000Z-k3f9 --by jane",
+    ),
 ];
 
 /// The page for `cli`, the top-level command.

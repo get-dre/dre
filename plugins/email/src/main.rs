@@ -432,15 +432,7 @@ fn file_name(p: &Path) -> String {
 }
 
 fn content_type(name: &str) -> &'static str {
-    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-    match ext.as_deref() {
-        Some("csv") => "text/csv",
-        Some("txt" | "dat" | "tsv") => "text/plain",
-        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        Some("parquet") => "application/vnd.apache.parquet",
-        Some("json") => "application/json",
-        _ => "application/octet-stream",
-    }
+    dre_protocol::delivery::content_type(name)
 }
 
 fn main() {

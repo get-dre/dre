@@ -967,3 +967,30 @@ mod tests {
         assert_eq!(names, ["r.csv", "r_2.csv", "r_3.csv"]);
     }
 }
+
+/// The media type of a delivered file, by its extension: what an email attachment or an
+/// uploaded object is labelled, so the recipient's mail client or browser opens it.
+pub fn content_type(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("csv") => "text/csv",
+        Some("txt" | "dat" | "tsv" | "aba") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("html" | "htm") => "text/html",
+        Some("pdf") => "application/pdf",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("parquet") => "application/vnd.apache.parquet",
+        Some("json") => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod content_type_tests {
+    #[test]
+    fn documents_have_their_types() {
+        assert_eq!(super::content_type("s/101.PDF"), "application/pdf");
+        assert_eq!(super::content_type("a.html"), "text/html");
+        assert_eq!(super::content_type("a.bin"), "application/octet-stream");
+    }
+}
