@@ -2,7 +2,7 @@
 title: "Email"
 description: "The email destination: SMTP settings and options."
 section: plugins
-position: 19
+position: 20
 ---
 
 # Email

@@ -2,7 +2,7 @@
 title: "Google Chat"
 description: "The google_chat destination: space webhooks."
 section: plugins
-position: 22
+position: 23
 ---
 
 # Google Chat

@@ -29,6 +29,7 @@ secrets can use `env_var()`.
 | `fixed_width` | the [`fixed_width`](plugin-fixed_width.md) format |
 | `parquet` | the [`parquet`](plugin-parquet.md) format |
 | `xlsx` | the [`xlsx`](plugin-xlsx.md) format |
+| `document` | the [`html` and `pdf`](plugin-document.md) formats: documents from an HTML + CSS template |
 | `object_store` | the `s3`, [`gcs`](plugin-gcs.md) and [`azure_blob`](plugin-azure_blob.md) destinations |
 | `sftp` | the [`sftp`](plugin-sftp.md) destination |
 | `ftp` | the [`ftp`](plugin-ftp.md) destination |
@@ -51,7 +52,7 @@ Each plugin has its own page, with its profile fields, options and notes:
   [databricks](plugin-databricks.md), [bigquery](plugin-bigquery.md),
   [snowflake](plugin-snowflake.md), [clickhouse](plugin-clickhouse.md).
 - Formats: [csv and delimited](plugin-csv.md), [fixed_width](plugin-fixed_width.md),
-  [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), and the built-in
+  [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), [html and pdf](plugin-document.md), and the built-in
   [`message`](#the-message-format).
 - Destinations: [s3](plugin-s3.md), [gcs](plugin-gcs.md), [azure_blob](plugin-azure_blob.md),
   [sftp](plugin-sftp.md), [ftp](plugin-ftp.md), [databricks](plugin-databricks.md#as-a-destination),
@@ -109,6 +110,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](plugin-xlsx.md#column-widths)), `style` (see [Styles](plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
+| `html`, `pdf` | `max_rows`; html `embed_assets`; pdf `page_size`, `orientation`, `margins`, `author`, `subject`; `template` (see [PDF and HTML documents](plugin-document.md)) |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or

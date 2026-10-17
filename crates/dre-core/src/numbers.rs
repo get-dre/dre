@@ -120,6 +120,11 @@ impl Locale {
     /// `x` rounded half away from zero to `decimals` places, with group and decimal separators.
     /// Negative numbers get a leading `-`.
     pub fn number(&self, x: f64, decimals: usize) -> String {
+        self.format_number(x, decimals, true)
+    }
+
+    /// As [`Locale::number`], with or without group separators (an Excel format without `,`).
+    pub fn format_number(&self, x: f64, decimals: usize, group: bool) -> String {
         let scale = 10f64.powi(decimals as i32);
         let rounded = (x.abs() * scale).round() / scale;
         let text = format!("{rounded:.decimals$}");
@@ -129,7 +134,7 @@ impl Locale {
         };
         let mut grouped = String::new();
         for (i, c) in int.chars().enumerate() {
-            if i > 0 && (int.len() - i).is_multiple_of(3) {
+            if group && i > 0 && (int.len() - i).is_multiple_of(3) {
                 grouped.push_str(self.group);
             }
             grouped.push(c);

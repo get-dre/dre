@@ -433,6 +433,9 @@ impl Binding {
     }
 }
 
+/// The formats that take `output.template`.
+pub const TEMPLATE_FORMATS: &[&str] = &["xlsx", "html", "pdf"];
+
 /// The built-in format that renders query results into a short headline.
 pub const MESSAGE_FORMAT: &str = "message";
 
@@ -4031,15 +4034,26 @@ impl Loader {
         let template = match o.template {
             None => None,
             Some(t) => {
-                if format != "xlsx" {
+                if !TEMPLATE_FORMATS.contains(&format.as_str()) {
                     self.diags.error(
                         Code::InvalidOutputOption,
                         file.clone(),
                         None,
-                        format!("{ctx}: `output.template` only applies to the xlsx format"),
+                        format!("{ctx}: `output.template` only applies to the xlsx, html and pdf formats"),
                     );
                 }
-                self.typed_template(t, ctx, &file, queries)
+                let t = self.typed_template(t, ctx, &file, queries);
+                if format != "xlsx" && t.as_ref().is_some_and(|t| !t.bindings.is_empty()) {
+                    self.diags.error(
+                        Code::InvalidTemplate,
+                        file.clone(),
+                        None,
+                        format!(
+                            "{ctx}: `output.template.bindings` is for xlsx templates; an {format} template reads `results.<query>` itself"
+                        ),
+                    );
+                }
+                t
             }
         };
         let extension = match o.extension {
@@ -5505,23 +5519,29 @@ impl Loader {
     fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
         for r in &project.reports {
-            for t in r
-                .bindings
-                .iter()
-                .flat_map(|b| b.outputs.iter().filter_map(|o| o.template.as_ref()))
-            {
+            for (format, t) in r.bindings.iter().flat_map(|b| {
+                b.outputs
+                    .iter()
+                    .filter_map(|o| Some((o.format.as_str(), o.template.as_ref()?)))
+            }) {
                 if !seen.insert((r.name.clone(), t.file.clone(), format!("{:?}", t.bindings))) {
                     continue;
                 }
-                let Some(path) = find_template(&self.root, &t.file) else {
-                    self.diags.error(
-                        Code::MissingTemplate,
-                        Some(r.file.clone()),
-                        None,
-                        format!("report `{}`: template file `{}` doesn't exist", r.name, t.file),
-                    );
-                    continue;
+                let path = match resolve_template(&self.root, &r.file, &t.file) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.diags.error(
+                            Code::MissingTemplate,
+                            Some(r.file.clone()),
+                            None,
+                            format!("report `{}`: {e}", r.name),
+                        );
+                        continue;
+                    }
                 };
+                if format != "xlsx" {
+                    continue;
+                }
                 match template_sheets(&path) {
                     Ok(sheets) => {
                         for tb in &t.bindings {
@@ -5551,6 +5571,14 @@ impl Loader {
             }
         }
     }
+}
+
+/// Resolve an output's `template.file`, looked up from the folder of `yaml` (the report's file)
+/// by the rule in [`crate::template_file`].
+pub fn resolve_template(root: &Path, yaml: &Path, file: &str) -> Result<PathBuf, String> {
+    let yaml = root.join(yaml);
+    let from = yaml.parent().unwrap_or(root);
+    crate::template_file::resolve(root, from, file)
 }
 
 /// Sheet names in an xlsx template, read without modifying it.

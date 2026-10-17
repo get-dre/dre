@@ -25,6 +25,7 @@
   "fixed_width": {"description": "Fixed-width text", "provides": ["format/fixed_width"]},
   "parquet": {"description": "Parquet", "provides": ["format/parquet"]},
   "xlsx": {"description": "Excel workbooks, including templates", "provides": ["format/xlsx"]},
+  "document": {"description": "PDF and HTML documents from an HTML + CSS template", "provides": ["format/html", "format/pdf"]},
   "object_store": {
     "description": "Amazon S3 (and S3-compatible), Google Cloud Storage and Azure Blob Storage",
     "provides": ["destination/s3", "destination/gcs", "destination/azure_blob"]

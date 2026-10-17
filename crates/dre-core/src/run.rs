@@ -2396,6 +2396,9 @@ impl<'a> BindingRun<'a> {
             .start(self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
         let template = match &out.template {
+            _ if crate::document::FORMATS.contains(&out.format.as_str()) => {
+                Some(self.document_payload(out.template.as_ref())?)
+            }
             Some(t) => Some(self.template_payload(t)?),
             None => None,
         };
@@ -2470,8 +2473,7 @@ impl<'a> BindingRun<'a> {
     }
 
     fn template_payload(&mut self, t: &crate::project::Template) -> Result<Json, Fail> {
-        let file = crate::project::find_template(&self.project.root, &t.file)
-            .ok_or_else(|| format!("template file `{}` doesn't exist", t.file))?;
+        let file = crate::project::resolve_template(&self.project.root, &self.report.file, &t.file)?;
         let renderer = self.renderer(None)?;
         let mut values = JsonMap::new();
         for b in &t.bindings {
@@ -2483,6 +2485,29 @@ impl<'a> BindingRun<'a> {
             }
         }
         Ok(json!({"file": file.to_string_lossy(), "bindings": t.bindings, "values": values}))
+    }
+
+    /// An html or pdf output's `template`: the template file (if any) and the context it's rendered with
+    /// ([`crate::document::Context`]).
+    fn document_payload(&mut self, t: Option<&crate::project::Template>) -> Result<Json, Fail> {
+        let file = match t {
+            Some(t) => Some(crate::project::resolve_template(
+                &self.project.root,
+                &self.report.file,
+                &t.file,
+            )?),
+            None => None,
+        };
+        let run =
+            crate::parse::run_context(self.project, self.report, self.b, &self.inputs(), self.started_at);
+        let ctx = crate::document::Context::new(
+            file.as_deref(),
+            &self.project.root,
+            &run,
+            self.vars.clone(),
+            self.opts.vars.clone(),
+        );
+        Ok(serde_json::to_value(ctx).map_err(|e| e.to_string())?)
     }
 
     /// Deliver output `oi` to each of its destinations in order. A failure is recorded and the

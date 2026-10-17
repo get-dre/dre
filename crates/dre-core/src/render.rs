@@ -725,6 +725,36 @@ fn add_vars(env: &mut Environment<'static>, vars: JsonMap<String, Json>, cli: BT
     });
 }
 
+/// What every DRE template reads, for an environment built outside core's renderers (the
+/// `document` plugin's html and pdf templates): `var()`, `raise_error()`, the date functions,
+/// the number filters, `run.*`, `target.name` and Python-style methods. `env_var()` isn't
+/// available: a document is data that's delivered, and environment variables hold secrets.
+pub fn add_common(
+    env: &mut Environment<'static>,
+    context: RunContext,
+    vars: JsonMap<String, Json>,
+    cli_vars: BTreeMap<String, String>,
+) {
+    crate::mutable::register(env);
+    add_vars(env, vars, cli_vars);
+    env.add_function(
+        "env_var",
+        |name: String, _default: Option<Value>| -> Result<Value, Error> {
+            Err(Error::new(
+                ErrorKind::InvalidOperation,
+                format!("`env_var('{name}')` can't be used in a document template; pass the value as a var"),
+            ))
+        },
+    );
+    env.add_function("raise_error", |message: String| -> Result<Value, Error> {
+        Err(Error::new(ErrorKind::InvalidOperation, message))
+    });
+    crate::dates::register(env, context.calendar, context.date);
+    crate::numbers::register(env, context.locale);
+    env.add_global("target", Value::from_object(Target(context.target.clone())));
+    env.add_global("run", Value::from_object(Run(context)));
+}
+
 /// Renders the values that choose a connection or a source: every `profile:` value and a
 /// source's `profile`, `database`, `schema` and `identifier`. Only `var()`, `env_var()`, `run.*`,
 /// `target.name` and the calendar functions exist, because these are rendered before any

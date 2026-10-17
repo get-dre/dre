@@ -33,6 +33,7 @@ PAGES = {
     "fixed_width": ["format/fixed_width"],
     "parquet": ["format/parquet"],
     "xlsx": ["format/xlsx"],
+    "document": ["format/html", "format/pdf"],
     "s3": ["destination/s3"],
     "gcs": ["destination/gcs"],
     "azure_blob": ["destination/azure_blob"],

@@ -283,14 +283,14 @@ pub struct Destination {
     pub options: Map<serde_json::Value>,
 }
 
-/// Fills a branded Excel workbook instead of creating a new one (xlsx only).
+/// The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin).
 #[derive(Deserialize, JsonSchema)]
 #[schemars(rename = "template", deny_unknown_fields)]
 pub struct Template {
-    /// Path of the `.xlsx` template, relative to the project.
+    /// The template file (`.xlsx` for xlsx, `.html` for html and pdf): a bare file name, found next to the report's YAML, then in each parent folder, then anywhere in the project (it must be unique); or a path with `/`, relative to the project root.
     #[schemars(required)]
     pub file: Option<Loose<String>>,
-    /// Where each query's data goes in the template. Default: none, so the template is copied as it is.
+    /// xlsx only: where each query's data goes in the template. Default: none, so the template is copied as it is.
     pub bindings: Option<Loose<Vec<Loose<TemplateBinding>>>>,
 }
 

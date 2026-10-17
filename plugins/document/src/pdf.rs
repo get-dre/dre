@@ -1,0 +1,159 @@
+//! The PDF engine, behind [`render_pdf`] alone: fulgur (Blitz for HTML and CSS layout, Krilla
+//! for the PDF), in-process, offline. Nothing else in the plugin touches it, so it can be
+//! replaced.
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
+use std::sync::LazyLock;
+
+use dre_core::document::Context;
+use fulgur::{AssetBundle, Engine, Margin, PageSize};
+use regex::Regex;
+
+use crate::{assets, fonts};
+
+/// The `page_size` choices.
+pub const PAGE_SIZES: &[&str] = &["A3", "A4", "A5", "Letter", "Legal"];
+
+static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<title\b[^>]*>(.*?)</title>").unwrap());
+static LANG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<html\b[^>]*?\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap()
+});
+
+/// The page options, used where the template's CSS sets no `@page`.
+pub struct PageOptions {
+    pub size: String,
+    pub landscape: bool,
+    pub margins: String,
+    pub author: Option<String>,
+    pub subject: Option<String>,
+}
+
+/// Lay the rendered html out into a PDF. Assets resolve from `base` (the template's folder),
+/// inside `root`. `warnings` gets fonts that fell back.
+pub fn render_pdf(
+    html: &str,
+    root: &Path,
+    base: &Path,
+    page: &PageOptions,
+    ctx: &Context,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, String> {
+    let (html, files) = assets::for_pdf(html, root, base)?;
+    let (html, project_fonts) = fonts::prepare(&html, &files, warnings)?;
+    let mut bundle = AssetBundle::new();
+    for f in fonts::BUNDLED {
+        bundle
+            .add_font_bytes(f.to_vec())
+            .map_err(|e| format!("the bundled font: {e}"))?;
+    }
+    for f in project_fonts {
+        bundle
+            .add_font_bytes(f.bytes)
+            .map_err(|e| format!("a project font: {e}"))?;
+    }
+    for (name, bytes) in files {
+        bundle.add_image(name, bytes);
+    }
+    let size = match page.size.as_str() {
+        "A3" => PageSize::A3,
+        "A5" => PageSize::A5,
+        "Letter" => PageSize::LETTER,
+        "Legal" => PageSize::LEGAL,
+        _ => PageSize::A4,
+    };
+    let mut b = Engine::builder()
+        .system_fonts(false)
+        .page_size(size)
+        .landscape(page.landscape)
+        .margin(parse_margins(&page.margins)?)
+        .creation_date(ctx.run.now.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .creator(format!("DRE {}", env!("CARGO_PKG_VERSION")))
+        .producer("DRE document plugin")
+        .assets(bundle);
+    if let Some(t) = TITLE.captures(&html) {
+        let t = unescape(t[1].trim());
+        if !t.is_empty() {
+            b = b.title(t);
+        }
+    }
+    if let Some(l) = LANG.captures(&html) {
+        b = b.lang(l.get(1).or(l.get(2)).or(l.get(3)).map_or("", |m| m.as_str()));
+    }
+    if let Some(a) = &page.author {
+        b = b.author(a.clone());
+    }
+    if let Some(s) = &page.subject {
+        b = b.description(s.clone());
+    }
+    let engine = b.build();
+    match catch_unwind(AssertUnwindSafe(|| engine.render(&html))) {
+        Ok(Ok(pdf)) => Ok(pdf),
+        Ok(Err(e)) => Err(format!("the PDF layout failed: {e}")),
+        Err(_) => Err(
+            "the PDF layout failed inside the layout engine; a very long table (over about 30,000 rows) does this: split it, or aggregate in SQL"
+                .into(),
+        ),
+    }
+}
+
+/// CSS-style margins: one to four lengths (`20mm`, `15mm 20mm`), in mm, cm, in, pt or px.
+pub fn parse_margins(s: &str) -> Result<Margin, String> {
+    let pts: Vec<f32> = s
+        .split_whitespace()
+        .map(length_pt)
+        .collect::<Option<_>>()
+        .ok_or_else(|| format!("`margins` `{s}` isn't one to four lengths"))?;
+    let [top, right, bottom, left] = match pts.as_slice() {
+        [a] => [*a; 4],
+        [v, h] => [*v, *h, *v, *h],
+        [t, h, b] => [*t, *h, *b, *h],
+        [t, r, b, l] => [*t, *r, *b, *l],
+        _ => return Err(format!("`margins` `{s}` isn't one to four lengths")),
+    };
+    Ok(Margin {
+        top,
+        right,
+        bottom,
+        left,
+    })
+}
+
+fn length_pt(s: &str) -> Option<f32> {
+    let unit_at = s.find(|c: char| c.is_ascii_alphabetic())?;
+    let (n, unit) = s.split_at(unit_at);
+    let n: f32 = n.parse().ok()?;
+    if n < 0.0 {
+        return None;
+    }
+    Some(match unit {
+        "mm" => n * 72.0 / 25.4,
+        "cm" => n * 72.0 / 2.54,
+        "in" => n * 72.0,
+        "pt" => n,
+        "px" => n * 0.75,
+        _ => return None,
+    })
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&amp;", "&")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn margins() {
+        let m = parse_margins("10mm 1in").unwrap();
+        assert!((m.top - 28.346).abs() < 0.01 && (m.right - 72.0).abs() < 0.01);
+        assert!(parse_margins("10").is_err());
+        assert!(parse_margins("1mm 2mm 3mm 4mm 5mm").is_err());
+    }
+}

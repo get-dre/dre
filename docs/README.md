@@ -59,6 +59,7 @@ Installing plugins, the registry, and every first-party plugin.
 - [Fixed-width text](plugin-fixed_width.md): The fixed_width format: column layout and options.
 - [Parquet](plugin-parquet.md): The parquet format.
 - [Excel (xlsx)](plugin-xlsx.md): The xlsx format: column formats, formulas, totals rows and templates.
+- [PDF and HTML documents](plugin-document.md): The html and pdf formats: a branded document from a Jinja HTML + CSS template, with no browser.
 - [Amazon S3](plugin-s3.md): The s3 destination: credentials and paths.
 - [Google Cloud Storage](plugin-gcs.md): The gcs destination: credentials and paths.
 - [Azure Blob Storage](plugin-azure_blob.md): The azure_blob destination: credentials and paths.
