@@ -2,7 +2,7 @@
 title: "Azure Blob Storage"
 description: "The azure_blob destination: credentials and paths."
 section: plugins
-position: 16
+position: 17
 ---
 
 # Azure Blob Storage

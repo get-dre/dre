@@ -1,0 +1,85 @@
+{
+  "format/html": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [],
+    "option_fields": [
+      {
+        "name": "max_rows",
+        "type": "integer",
+        "description": "the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it)",
+        "required": false,
+        "default": 50000,
+        "min": 1.0
+      },
+      {
+        "name": "embed_assets",
+        "type": "boolean",
+        "description": "inline images, stylesheets and fonts as data URIs, so the file works wherever it's delivered",
+        "required": false,
+        "default": true
+      }
+    ]
+  },
+  "format/pdf": {
+    "capabilities": [
+      "validate"
+    ],
+    "connection_fields": [],
+    "option_fields": [
+      {
+        "name": "max_rows",
+        "type": "integer",
+        "description": "the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it)",
+        "required": false,
+        "default": 50000,
+        "min": 1.0
+      },
+      {
+        "name": "page_size",
+        "type": "string",
+        "description": "paper size, used when the template's CSS sets no `@page { size }`",
+        "required": false,
+        "default": "A4",
+        "choices": [
+          "A3",
+          "A4",
+          "A5",
+          "Letter",
+          "Legal"
+        ]
+      },
+      {
+        "name": "orientation",
+        "type": "string",
+        "description": "used when the CSS sets no `@page { size }`",
+        "required": false,
+        "default": "portrait",
+        "choices": [
+          "portrait",
+          "landscape"
+        ]
+      },
+      {
+        "name": "margins",
+        "type": "string",
+        "description": "page margins as in CSS (`20mm`, `15mm 20mm`), used when the CSS sets no `@page { margin }`",
+        "required": false,
+        "default": "20mm"
+      },
+      {
+        "name": "author",
+        "type": "string",
+        "description": "the PDF's author metadata",
+        "required": false
+      },
+      {
+        "name": "subject",
+        "type": "string",
+        "description": "the PDF's subject metadata",
+        "required": false
+      }
+    ]
+  }
+}

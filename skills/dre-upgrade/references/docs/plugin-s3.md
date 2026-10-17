@@ -2,7 +2,7 @@
 title: "Amazon S3"
 description: "The s3 destination: credentials and paths."
 section: plugins
-position: 14
+position: 15
 ---
 
 # Amazon S3
@@ -92,4 +92,4 @@ See [delivery behavior](plugins.md#a-file-already-at-the-path),
 
 ---
 
-**Previous:** [Excel (xlsx)](plugin-xlsx.md) · **Next:** [Google Cloud Storage](plugin-gcs.md)
+**Previous:** [PDF and HTML documents](plugin-document.md) · **Next:** [Google Cloud Storage](plugin-gcs.md)

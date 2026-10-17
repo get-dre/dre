@@ -108,7 +108,7 @@ How a report's result is written and where it goes. Besides the keys below, each
 | `queries` | list of string |  | Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs. |
 | `when` | string or boolean |  | A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. |
 | `destination` | map (see below) or list of map (see below) |  | Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. |
-| `template` | map (see below) |  | Fills a branded Excel workbook instead of creating a new one (xlsx only). |
+| `template` | map (see below) |  | The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin). |
 | `extension` | string or boolean or null |  | File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
@@ -125,12 +125,12 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 
 ## `output[].template`
 
-Fills a branded Excel workbook instead of creating a new one (xlsx only).
+The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `file` (required) | string |  | Path of the `.xlsx` template, relative to the project. |
-| `bindings` | list of map (see below) |  | Where each query's data goes in the template. Default: none, so the template is copied as it is. |
+| `file` (required) | string |  | The template file (`.xlsx` for xlsx, `.html` for html and pdf): a bare file name, found next to the report's YAML, then in each parent folder, then anywhere in the project (it must be unique); or a path with `/`, relative to the project root. |
+| `bindings` | list of map (see below) |  | xlsx only: where each query's data goes in the template. Default: none, so the template is copied as it is. |
 
 ## `output[].template.bindings[]`
 

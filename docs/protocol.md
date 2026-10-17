@@ -306,6 +306,11 @@ core; core asks the plugin to update DRE when it names a style core doesn't know
 in the service after translation. `dre run --preview` shows it next to each message's length.
 It may be omitted. Added in DRE 0.3.
 
+`validate` may carry a `template` (DRE 0.6, formats only): for the `html` and `pdf` formats,
+`{"file": "<absolute path>" or null, "project_root", "queries": [...]}`, so the plugin checks the
+template too (syntax, includes, assets, `results.<name>`), replying template problems in `errors`
+and `warnings`. A plugin that doesn't know the field ignores it.
+
 `validate` checks one config block of options and replies `validated` with every problem found,
 each a sentence naming the key; `errors` is empty when the block is fine. The plugin doesn't
 connect, read or write anything. A destination's string values may still hold Jinja
@@ -413,9 +418,15 @@ nothing more. Core stops sending data when it sees the error, so a large result 
 into a plugin that gave up. That error is the request's only reply.
 
 `options` are the report's resolved format options (see the YAML schema). `template` is present
-only for an xlsx template output: `{"file": "<absolute path>", "bindings": [...],
+for an xlsx template output: `{"file": "<absolute path>", "bindings": [...],
 "values": {"<sheet>!<cell>": "<rendered value>"}}`, with single-cell `value`s already rendered
-by core.
+by core. For the `html` and `pdf` formats it's always present, as the document template's
+context (DRE 0.6): `{"file": "<absolute path>" or null, "project_root", "run": {"report", "set",
+"target", "schedule", "date", "now", "scheduled_at", "timezone", "week_start",
+"week_numbering"}, "vars": {...}, "cli_vars": {...}, "locale"}`. `vars` holds every resolved var
+(the Binding's, with the schedule's on top) and `cli_vars` the `--var` values as typed, which
+`var()` reads first. The plugin renders the template itself; `dre_core::document` builds the same
+`var()`, `run.*`, date and number filters core's templates have.
 
 ### Destination
 
@@ -485,7 +496,9 @@ only messages or only files. Older plugins, which advertise neither, keep workin
 
 - A plugin that exits, crashes or closes stdout unexpectedly is reported with its exit status and
   its last stderr lines.
-- A malformed frame from the plugin is reported as a protocol error.
+- A malformed frame from the plugin is reported as a protocol error. A plugin's stdout carries
+  frames only: the Rust SDK keeps the original stdout for frames and points the process's stdout
+  at stderr, so a dependency that prints can't corrupt the stream (dre-protocol 0.7).
 - A plugin that panics or hits an internal error should reply `error` before exiting. The SDK
   does this.
 

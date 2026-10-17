@@ -46,6 +46,11 @@ pub enum Request {
     /// without doing anything. Replies `validated`.
     Validate {
         options: Map<String, Value>,
+        /// Format: what the plugin needs to check the output's template too. For the html and
+        /// pdf formats, `{"file": <absolute path or null>, "project_root", "queries": [...]}`.
+        /// Optional; older plugins ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        template: Option<Value>,
     },
     /// Source or destination (protocol 1): check a profile entry's connection settings without
     /// connecting: the declared fields' generic checks, then the plugin's own rules. Keys in

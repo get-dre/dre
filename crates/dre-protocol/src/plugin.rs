@@ -15,7 +15,7 @@
 //!   (or when core goes away) [`cancelled`] turns true and the hook set with [`on_cancel`] runs,
 //!   e.g. to cancel a query on the server.
 
-use std::io::{BufReader, BufWriter, Stdout};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -108,7 +108,7 @@ impl std::error::Error for PluginError {}
 /// The SDK's process-wide state, shared by the request loop, the stdin reader, and logging
 /// from any thread.
 struct Shared {
-    out: Mutex<BufWriter<Stdout>>,
+    out: Mutex<BufWriter<Box<dyn std::io::Write + Send>>>,
     /// The protocol version settled on (0 until the handshake).
     version: AtomicU32,
     /// The request running now (0: none).
@@ -125,13 +125,48 @@ type CancelHook = Arc<dyn Fn() + Send + Sync>;
 fn shared() -> &'static Shared {
     static SHARED: OnceLock<Shared> = OnceLock::new();
     SHARED.get_or_init(|| Shared {
-        out: Mutex::new(BufWriter::new(std::io::stdout())),
+        out: Mutex::new(BufWriter::new(protocol_out())),
         version: AtomicU32::new(0),
         current: AtomicU64::new(0),
         cancelled: AtomicU64::new(0),
         hook: Mutex::new(None),
         name: OnceLock::new(),
     })
+}
+
+/// Where frames go: the process's original stdout, kept for the protocol alone. Stdout itself is
+/// pointed at stderr, so a dependency that prints (`println!`) can't corrupt the frame stream;
+/// core keeps stderr for crash reports.
+fn protocol_out() -> Box<dyn std::io::Write + Send> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::FromRawFd;
+        // SAFETY: plain descriptor calls on fds 1 and 2, made once before any frame is written.
+        unsafe {
+            let fd = libc::dup(1);
+            if fd >= 0 && libc::dup2(2, 1) >= 0 {
+                return Box::new(std::fs::File::from_raw_fd(fd));
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+        };
+        // SAFETY: the process's own standard handles, swapped once before any frame is written;
+        // Rust's stdout looks its handle up on every write, so `println!` then reaches stderr.
+        unsafe {
+            let out = GetStdHandle(STD_OUTPUT_HANDLE);
+            let err = GetStdHandle(STD_ERROR_HANDLE);
+            if !out.is_null() && out != INVALID_HANDLE_VALUE && SetStdHandle(STD_OUTPUT_HANDLE, err) != 0 {
+                return Box::new(std::fs::File::from_raw_handle(out as _));
+            }
+        }
+    }
+    Box::new(std::io::stdout())
 }
 
 /// Whether core has cancelled the request running now. Long loops check it between steps.
@@ -459,6 +494,15 @@ pub trait Format {
     fn validate(&self, _options: &Map<String, Value>) -> Vec<String> {
         Vec::new()
     }
+    /// Problems with the output's template (`validate`'s `template`, sent for the formats core
+    /// gives a template context): errors, then warnings. Only called when the options passed.
+    fn validate_template(
+        &self,
+        _options: &Map<String, Value>,
+        _template: &Value,
+    ) -> (Vec<String>, Vec<String>) {
+        (Vec::new(), Vec::new())
+    }
     /// Write every result set to `req.path` (and siblings, if the format needs several files);
     /// return the files written.
     fn write(&mut self, req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>>;
@@ -679,6 +723,8 @@ impl Plugin {
 /// wants; without one, the first is served.
 pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     assert!(!plugins.is_empty(), "a package serves at least one plugin");
+    // Take stdout for frames before anything else can print to it.
+    shared();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || read_stdin(tx));
     let mut input = Input { rx };
@@ -910,11 +956,15 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
         });
         return Ok(());
     }
-    if let Request::Validate { options } = req {
-        out.send(&Response::Validated {
-            errors: h.check(name, &options),
-            warnings: Vec::new(),
-        });
+    if let Request::Validate { options, template } = req {
+        let mut errors = h.check(name, &options);
+        let mut warnings = Vec::new();
+        if let (Handler::Format(f), Some(t), true) = (&*h, &template, errors.is_empty()) {
+            let (e, w) = f.validate_template(&options, t);
+            errors.extend(e);
+            warnings.extend(w);
+        }
+        out.send(&Response::Validated { errors, warnings });
         return Ok(());
     }
     if let Request::ValidateConnection {

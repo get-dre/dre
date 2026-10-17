@@ -38,8 +38,9 @@ struct Route {
     attach: bool,
 }
 
-/// One plugin's distinct option blocks (keyed by their JSON), each with where it's used.
-type Blocks = BTreeMap<String, (Map<String, Value>, Vec<Use>)>;
+/// One plugin's distinct option blocks (keyed by their JSON and template), each with its
+/// template check (html and pdf outputs) and where it's used.
+type Blocks = BTreeMap<String, (Map<String, Value>, Option<Value>, Vec<Use>)>;
 
 /// Ask each format and destination plugin to check every config block the project gives it,
 /// found by kind and name alone: core knows nothing of any plugin's options. Each destination
@@ -50,14 +51,18 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
     let mut blocks: BTreeMap<(PluginKind, String), Blocks> = BTreeMap::new();
     // Destination type -> what each entry of it sends: checked against its capabilities.
     let mut routes: BTreeMap<String, Vec<Route>> = BTreeMap::new();
-    let mut add = |kind, name: &str, options: &Map<String, Value>, u: Use| {
-        let key = serde_json::to_string(options).unwrap_or_default();
+    let mut add = |kind, name: &str, options: &Map<String, Value>, template: Option<Value>, u: Use| {
+        let key = format!(
+            "{}{}",
+            serde_json::to_string(options).unwrap_or_default(),
+            template.as_ref().map(Value::to_string).unwrap_or_default()
+        );
         blocks
             .entry((kind, name.to_string()))
             .or_default()
             .entry(key)
-            .or_insert_with(|| (options.clone(), Vec::new()))
-            .1
+            .or_insert_with(|| (options.clone(), template, Vec::new()))
+            .2
             .push(u);
     };
     for (format, options) in &project.format_options {
@@ -66,7 +71,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             file: PathBuf::from(crate::project::PROJECT_FILE),
             profile: None,
         };
-        add(PluginKind::Format, format, options, u);
+        add(PluginKind::Format, format, options, None, u);
     }
     for r in &project.reports {
         for b in &r.bindings {
@@ -80,7 +85,31 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 profile: profile.map(str::to_string),
             };
             for o in b.outputs.iter().filter(|o| !o.is_message()) {
-                add(PluginKind::Format, &o.format, &o.options, at(None));
+                let template = crate::document::FORMATS.contains(&o.format.as_str()).then(|| {
+                    // A file that can't be resolved is reported by the template checks.
+                    let file = o
+                        .template
+                        .as_ref()
+                        .and_then(|t| crate::project::resolve_template(&project.root, &r.file, &t.file).ok());
+                    let queries: Vec<String> = b
+                        .queries
+                        .iter()
+                        .filter(|q| q.tab && o.feeds(&q.query))
+                        .map(|q| q.query.clone())
+                        .collect();
+                    serde_json::to_value(crate::document::Check {
+                        file: file.map(|f| f.to_string_lossy().into_owned()),
+                        project_root: project.root.to_string_lossy().into_owned(),
+                        queries,
+                    })
+                    .unwrap_or_default()
+                });
+                if template.as_ref().is_some_and(|t| t["file"].is_null()) && o.template.is_some() {
+                    // Its file is missing: nothing to check.
+                    add(PluginKind::Format, &o.format, &o.options, None, at(None));
+                    continue;
+                }
+                add(PluginKind::Format, &o.format, &o.options, template, at(None));
             }
             let message_of: Vec<&crate::project::Output> = b
                 .outputs
@@ -103,7 +132,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                         None => continue,
                     }
                 };
-                add(PluginKind::Destination, kind, &d.options, at(Some(profile)));
+                add(PluginKind::Destination, kind, &d.options, None, at(Some(profile)));
                 routes.entry(kind.to_string()).or_default().push(Route {
                     at: at(Some(profile)),
                     format: message_of[i].format.clone(),
@@ -134,7 +163,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                     "`attach:` needs a destination that takes messages and files, but `local` takes files only",
                 );
             }
-            for (options, uses) in blocks.values() {
+            for (options, _, uses) in blocks.values() {
                 for e in local_option_errors(options) {
                     for u in uses {
                         report(diags, u, &e);
@@ -148,7 +177,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             // Already an error (`undeclared-plugin`).
             Err(crate::plugins::LocateError::NotProvided(_)) => continue,
             Err(e) => {
-                let first = blocks.values().flat_map(|(_, u)| u).next();
+                let first = blocks.values().flat_map(|(_, _, u)| u).next();
                 let file = first.map(|u| u.file.clone());
                 let at = first.map(|u| format!("{}: ", u.ctx)).unwrap_or_default();
                 if offline {
@@ -206,7 +235,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             }
         }
         if !p.has(dre_protocol::CAP_VALIDATE) {
-            if blocks.values().any(|(o, _)| !o.is_empty()) {
+            if blocks.values().any(|(o, _, _)| !o.is_empty()) {
                 diags.warning(
                     Code::OptionsUnchecked,
                     None,
@@ -220,12 +249,16 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             let _ = p.close();
             continue;
         }
-        for (options, uses) in blocks.into_values() {
-            match p.validate(options) {
-                Ok(errors) => {
+        for (options, template, uses) in blocks.into_values() {
+            match p.validate_with(options, template) {
+                Ok((errors, warnings)) => {
                     for u in &uses {
                         for e in &errors {
                             report(diags, u, e);
+                        }
+                        for w in &warnings {
+                            let at = format!("{}: {w}", u.ctx);
+                            diags.warning(Code::InvalidTemplate, Some(u.file.clone()), None, at);
                         }
                     }
                 }

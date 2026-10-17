@@ -238,7 +238,10 @@ output:
         columns: [region, revenue]
 ```
 
-`file` is relative to the project root; `sheet` must exist in the template. A table uses
+`file` is found by name: a bare file name (`monthly.xlsx`) next to the report's YAML, then in each
+parent folder, then anywhere in the project where it's unique; a path with `/` is relative to the
+project root (see [Finding a template](plugin-document.md#finding-a-template)). `sheet` must exist
+in the template. A table uses
 `anchor` and optionally selected `columns`; a scalar uses `cell` with either `value`, or
 `query` and `column`. `result_index` is one-based and defaults to the last result set.
 Do not put both `value` and `query` on a scalar binding. The placeholder cells keep their
@@ -255,4 +258,4 @@ See [template binding keys](reference-report.md#outputtemplatebindings),
 
 ---
 
-**Previous:** [Parquet](plugin-parquet.md) · **Next:** [Amazon S3](plugin-s3.md)
+**Previous:** [Parquet](plugin-parquet.md) · **Next:** [PDF and HTML documents](plugin-document.md)

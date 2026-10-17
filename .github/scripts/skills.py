@@ -73,6 +73,8 @@ DOC_SECTIONS = {
     "format/fixed_width": [("page", "fixed_width")] + _FORMAT,
     "format/parquet": [("page", "parquet")] + _FORMAT,
     "format/xlsx": [("page", "xlsx")] + _FORMAT,
+    "format/html": [("page", "document")] + _FORMAT,
+    "format/pdf": [("page", "document")] + _FORMAT,
     "destination/s3": [("page", "s3")] + _DEST + _EXISTS,
     "destination/gcs": [("page", "gcs")] + _DEST + _EXISTS,
     "destination/azure_blob": [("page", "azure_blob")] + _DEST + _EXISTS,

@@ -820,9 +820,19 @@ impl PluginProcess {
 
     /// Check a config block of options (needs `validate`); returns every problem found.
     pub fn validate(&mut self, options: Map<String, Value>) -> Result<Vec<String>> {
-        self.send(&Request::Validate { options })?;
+        Ok(self.validate_with(options, None)?.0)
+    }
+
+    /// Check a format's config block together with its `template` (as `write` would send it);
+    /// returns the errors, then the warnings.
+    pub fn validate_with(
+        &mut self,
+        options: Map<String, Value>,
+        template: Option<Value>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        self.send(&Request::Validate { options, template })?;
         match self.recv_json("a validate reply")? {
-            Response::Validated { errors, .. } => Ok(errors),
+            Response::Validated { errors, warnings } => Ok((errors, warnings)),
             other => Err(self.unexpected("a validate reply", &Incoming::Json(other))),
         }
     }
