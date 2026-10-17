@@ -44,9 +44,10 @@ select store_id, store_name, manager_email from shop.stores where active
 
 ```sql
 -- store_lines.sql: every store's lines at once, with the key (was filtered by @StoreId)
-select o.store_id, o.order_date, l.qty * l.unit_price as net
+select o.store_id, o.order_id, o.order_date, sum(l.qty * l.unit_price) as net
 from shop.orders o join shop.order_lines l on l.order_id = o.order_id
 where o.order_date between '{{ run.date.prev_month.start.date }}' and '{{ run.date.prev_month.end.date }}'
+group by o.store_id, o.order_id, o.order_date
 ```
 
 ```yaml
@@ -70,8 +71,8 @@ of DRE's run, which holds every store:
 ```bash
 dre run store_statement --no-deliver --output-json parity
 python3 <skill>/scripts/parity.py --dre parity/store_statement/default/store_lines.json \
-  --old store_101.csv --map "StoreId=store_id,OrderDate=order_date,Net=net" \
-  --only store_id=101 --key store_id,order_date
+  --old store_101.csv --map "StoreId=store_id,OrderId=order_id,OrderDate=order_date,Net=net" \
+  --only store_id=101 --key order_id
 ```
 
 Repeat for two or three stores, including the largest. The driver gets its own check: the old

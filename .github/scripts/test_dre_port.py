@@ -145,6 +145,18 @@ class ParityLoad(Tmp):
         self.assertEqual(t.columns, ["Region", "Net"])
         self.assertEqual(t.rows, [["North", "1,5"]])
 
+    def test_reads_cp1252_and_never_crashes_on_odd_bytes(self):
+        p = self.tmp / "old.csv"
+        p.write_bytes("Name,Net\nCaf\u00e9,1\n".encode("cp1252"))
+        self.assertEqual(parity.load(p).rows, [["Caf\u00e9", "1"]])
+        p.write_bytes(b"Name,Net\nA\x81,1\n")
+        self.assertEqual(parity.load(p).columns, ["Name", "Net"])
+
+    def test_reads_utf16_with_a_bom(self):
+        p = self.tmp / "old.csv"
+        p.write_bytes("Name,Net\nA,1\n".encode("utf-16"))
+        self.assertEqual(parity.load(p).rows, [["A", "1"]])
+
     def test_reads_xlsx_first_sheet_or_named(self):
         p = xlsx(self.tmp / "old.xlsx", {"Summary": [["Region", "Net"], ["North", 10.5]],
                                          "Detail": [["Order", "Date"], [1, 46296]]},
@@ -166,6 +178,9 @@ class ParityValues(unittest.TestCase):
                            ("1.234,5", 1234.5), (" 3 ", 3.0), ("", None), ("abc", None),
                            ("2026-10-01", None)]:
             self.assertEqual(parity.number(text), want, text)
+        self.assertEqual(parity.number("5-"), -5.0)
+        self.assertEqual(parity.number("-$1,234.00"), -1234.0)
+        self.assertEqual(parity.number("$-1,234.00"), -1234.0)
 
     def test_dates_in_export_styles(self):
         for text in ["2026-10-01", "01/10/2026", "1 Oct 2026", "01-Oct-2026", "2026-10-01 00:00:00",
@@ -226,6 +241,11 @@ class ParityCompare(Tmp):
         r = parity.compare(old, new, key=["k"])
         self.assertTrue(r.ok, r.text())
         self.assertEqual(sorted(d.kind for d in r.diffs), ["formatting", "formatting"])
+
+    def test_times_that_differ_are_values(self):
+        self.assertEqual(parity.classify("2026-10-01 13:00", "2026-10-01 09:00", 0.005), "value")
+        self.assertEqual(parity.classify("01/10/2026 13:00:00", "2026-10-01T13:00:00", 0.005), "formatting")
+        self.assertEqual(parity.classify("01/10/2026", "2026-10-01 00:00:00", 0.005), "formatting")
 
     def test_real_value_difference_fails(self):
         old, new = self.tables([["k", "v"], ["1", "10"]], [["k", "v"], ["1", "11"]])
@@ -407,6 +427,33 @@ class InventoryEstate(unittest.TestCase):
         self.assertEqual(order[0], "old_list")
         i = order.index("invoice_summary")
         self.assertEqual(order[i + 1], "invoice_summary_west")
+
+    def test_same_file_name_in_two_folders_stays_two_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for folder in ("finance", "sales"):
+                (root / folder).mkdir()
+                (root / folder / "summary.rdl").write_text(
+                    (FIXTURES / "estate" / "sales_by_region.rdl").read_text())
+            reports = inventory.scan(root)
+            self.assertEqual(sorted(r.name for r in reports), ["finance/summary", "sales/summary"])
+            self.assertEqual(len(inventory.suggest_order(reports)), 2)
+            self.assertEqual(inventory.duplicate_groups(reports), [["finance/summary", "sales/summary"]])
+
+    def test_crystal_text_export_is_listed_for_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "aged.txt").write_text("Crystal Reports\nReport Definition\n\nFormula Fields\n")
+            (root / "notes.txt").write_text("just notes")
+            reports = inventory.scan(root)
+            self.assertEqual([(r.name, r.kind) for r in reports], [("aged", "crystal-text")])
+            self.assertIn("read", reports[0].problem)
+
+    def test_missing_subscriptions_file_is_a_usage_error(self):
+        r = subprocess.run([sys.executable, str(SCRIPTS / "inventory.py"), str(FIXTURES / "estate"),
+                            "--subscriptions", "/nope.csv"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
 
     def test_scan_takes_one_file(self):
         reports = inventory.scan(FIXTURES / "estate" / "sales_by_region.rdl")

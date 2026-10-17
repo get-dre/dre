@@ -119,7 +119,8 @@ class Docs:
         return (h3.strip("`") if h3 else h2), doc_section(self.overview, h2, h3), "plugins.md"
 
 
-# Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).
+# Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery), SCH
+# (schedules), PORT (porting from other tools), AI (AI context).
 PRACTICE_PREFIXES = ("SEC", "SET", "REP", "RUN", "SCH", "PORT", "AI")
 CITED = re.compile(r"\b(?:%s)-\d+\b" % "|".join(PRACTICE_PREFIXES))
 DEFINED = re.compile(r"^#{2,4} ((?:%s)-\d+)\b" % "|".join(PRACTICE_PREFIXES), re.M)

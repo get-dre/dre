@@ -54,7 +54,7 @@ output:
 | Key (destination entry) | What it does |
 |---|---|
 | `rate: 100/minute` (`/second`, `/hour`) | spaces deliveries evenly across every worker; `burst: 20` lets 20 go back to back |
-| `retries` (default 3), `retry_wait` (`30s`), `max_retry_wait` (default `10m`) | temporary failures (429, 5xx, SMTP 4xx) are tried again; also in the profile entry |
+| `retries` (default 3), `retry_wait` (default about 1s, doubling; e.g. `30s`), `max_retry_wait` (default `10m`) | temporary failures (429, 5xx, SMTP 4xx) are tried again; also in the profile entry |
 | `hold: true` | renders and records the delivery, sends nothing until `dre release` |
 | `{deliver: false}` (a profile's target entry) | delivers nowhere on that target, e.g. `dev` (RUN-8) |
 

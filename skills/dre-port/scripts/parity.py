@@ -108,12 +108,13 @@ def _text(v):
 
 def _load_csv(path, skip_rows):
     raw = path.read_bytes()
-    for enc in ("utf-8-sig", "utf-16", "cp1252"):
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = raw.decode("utf-16")
+    else:
         try:
-            text = raw.decode(enc)
-            break
+            text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
-            continue
+            text = raw.decode("cp1252", errors="replace")  # Windows exports
     lines = text.splitlines(keepends=True)[skip_rows:]
     body = "".join(lines)
     if not body.strip():
@@ -233,10 +234,13 @@ def number(text):
         return None
     negative = s.startswith("(") and s.endswith(")")
     s = s.strip("()").strip()
+    if s.startswith("-") or s.endswith("-"):  # -$1,234.00 and 1,234.00- (trailing minus)
+        negative = not negative
+        s = s.strip("-").strip()
     percent = s.endswith("%")
     s = s.rstrip("%").strip()
     s = re.sub(r"^[^\d\-+.,]+|[^\d.,]+$", "", s).strip()  # currency signs and codes
-    s = s.replace(" ", " ").replace("'", "")
+    s = s.replace("\u00a0", " ").replace("'", "")  # no-break spaces and Swiss apostrophes
     if not re.fullmatch(r"[-+]?[\d][\d ,.]*|[-+]?[.,]\d+", s):
         return None
     if " " in s:
@@ -263,16 +267,30 @@ _DATE_PATTERNS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%d-%m-%Y", "%
 
 
 def dates(text):
-    """Every calendar date `text` could mean (both, for 10/01/2026), as ISO strings."""
+    """Every date or timestamp `text` could mean (both, for 10/01/2026), as ISO strings:
+    `2026-10-01`, or `2026-10-01 13:00:00` (with its offset, if any) when there's a time of day."""
     s = str(text or "").strip()
     if not s or not re.search(r"\d", s):
         return set()
-    s = re.sub(r"[T ](\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?)( ?[AP]M)?(Z|[+-]\d{2}:?\d{2})?$", "", s, flags=re.I)
-    s = re.sub(r" 12:00:00 AM$", "", s)
+    time = ""
+    m = re.search(r"[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?(?: ?([AP]M))?\s*(Z|[+-]\d{2}:?\d{2})?$", s, re.I)
+    if m:
+        s = s[:m.start()]
+        hour, minute, second = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        ampm = (m.group(5) or "").upper()
+        if ampm == "PM" and hour < 12:
+            hour += 12
+        elif ampm == "AM" and hour == 12:
+            hour = 0
+        offset = (m.group(6) or "").upper().replace("Z", "+00:00")
+        if offset and ":" not in offset:
+            offset = offset[:3] + ":" + offset[3:]
+        if (hour, minute, second, m.group(4)) != (0, 0, 0, None) or offset:
+            time = f" {hour:02d}:{minute:02d}:{second:02d}{(m.group(4) or '')}{offset}"
     out = set()
     for p in _DATE_PATTERNS:
         try:
-            out.add(dt.datetime.strptime(s, p).date().isoformat())
+            out.add(dt.datetime.strptime(s, p).date().isoformat() + time)
         except ValueError:
             pass
     return out

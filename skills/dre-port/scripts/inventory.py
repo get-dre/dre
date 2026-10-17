@@ -23,7 +23,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-REPORT_SUFFIXES = {".rdl", ".rdlc", ".xml", ".rpt"}
+REPORT_SUFFIXES = {".rdl", ".rdlc", ".xml", ".rpt", ".txt"}
 HEAVY_FUNCTIONS = {"Lookup", "LookupSet", "MultiLookup", "RunningValue", "Previous", "Switch", "Choose",
                    "InScope", "Level", "Aggregate"}
 FUNCTIONS = re.compile(
@@ -93,12 +93,12 @@ class Report:
         """(score, size, reasons)."""
         if self.problem:
             return 0, "?", [self.problem]
-        score, why = 1, []
+        # Weights: roughly what each thing adds to a port, against 2 for a one-query table.
+        score, why = 2, []
         n = len(self.datasets) or (1 if self.tables else 0)
         if n > 1:
             score += n - 1
             why.append(f"{n} datasets")
-        score += 1
         if self.parameters:
             score += len(self.parameters) * 0.5
             why.append(f"{len(self.parameters)} parameter(s)")
@@ -178,6 +178,14 @@ class Report:
 
 def read_report(path):
     path = pathlib.Path(path)
+    if path.suffix.lower() == ".txt":
+        head = path.read_text(encoding="utf-8", errors="replace")[:4096]
+        if "Report Definition" not in head and "Crystal" not in head:
+            return Report(path, "unknown")
+        r = Report(path, "crystal-text")
+        r.problem = ("a Crystal Report Definition text export: the script doesn't parse these; read it "
+                     "yourself (tables, formulas, groups, sections) to port it")
+        return r
     if path.suffix.lower() == ".rpt":
         r = Report(path, "rpt")
         r.problem = ("binary Crystal .rpt: not readable without SAP's SDK; export it to XML (or send "
@@ -281,11 +289,13 @@ def _crystal(path, root):
 
 
 def read_subscriptions(path):
+    """{report name, lower-case: [subscription, ...]}; each keeps its report's full `path`."""
     out = {}
     with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            name = pathlib.PurePosixPath((row.get("report") or "").replace("\\", "/")).stem
-            out.setdefault(name.lower(), []).append({
+            full = (row.get("report") or "").replace("\\", "/")
+            out.setdefault(pathlib.PurePosixPath(full).stem.lower(), []).append({
+                "path": full,
                 "description": row.get("description", ""),
                 "delivery": (row.get("delivery") or "").strip().lower(),
                 "schedule": row.get("schedule", ""),
@@ -302,13 +312,23 @@ def scan(folder, subscriptions=None):
     for path in [folder] if folder.is_file() else sorted(folder.rglob("*")):
         if path.is_file() and path.suffix.lower() in REPORT_SUFFIXES:
             r = read_report(path)
-            if path.suffix.lower() == ".xml" and r.kind == "unknown":
-                continue  # some other XML file
+            if path.suffix.lower() in (".xml", ".txt") and r.kind == "unknown":
+                continue  # some other XML or text file
             reports.append(r)
+    # Names are file names; two reports with one name are told apart by their folders.
+    counts = {}
+    for r in reports:
+        counts[r.name.lower()] = counts.get(r.name.lower(), 0) + 1
+    for r in reports:
+        if counts[r.name.lower()] > 1:
+            r.name = r.path.relative_to(folder).with_suffix("").as_posix()
     if subscriptions:
         subs = read_subscriptions(subscriptions)
         for r in reports:
-            r.subscriptions = subs.get(r.name.lower(), [])
+            mine = subs.get(r.path.stem.lower(), [])
+            if "/" in r.name:  # several reports have this file name: match the folder too
+                mine = [s for s in mine if s["path"].lower().endswith("/" + r.name.lower())]
+            r.subscriptions = mine
     return reports
 
 
@@ -400,12 +420,16 @@ def main(argv=None):
     if not folder.exists():
         print(f"inventory.py: {folder}: no such file or folder", file=sys.stderr)
         return 2
+    if a.subscriptions and not pathlib.Path(a.subscriptions).is_file():
+        print(f"inventory.py: {a.subscriptions}: no such file", file=sys.stderr)
+        return 2
     reports = scan(folder, a.subscriptions)
     if a.json:
         print(json.dumps({"reports": [r.as_dict() for r in suggest_order(reports)],
                           "candidate_sets": duplicate_groups(reports)}, indent=2))
     else:
-        print(markdown(suggest_order(reports)) if reports else "No .rdl, .rdlc, .rpt or Crystal XML files found.")
+        print(markdown(suggest_order(reports)) if reports else
+              "No .rdl, .rdlc, .rpt, Crystal XML or Crystal text export files found.")
     return 0
 
 
