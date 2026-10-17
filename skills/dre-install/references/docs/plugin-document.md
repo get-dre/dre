@@ -23,7 +23,7 @@ Set in a report's `output:` (or `format_options.html` in `dre_project.yml`).
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `max_rows` | integer | `50000` | The most rows across the output's queries; more fails the run (aggregate in SQL, or raise it) |
+| `max_rows` | integer | `50000` | The most rows across the output's queries; more fails the run. |
 | `embed_assets` | boolean | `true` | Inline images, stylesheets and fonts as data URIs, so the file works wherever it's delivered. |
 
 ### `pdf` format: options
@@ -32,10 +32,10 @@ Set in a report's `output:` (or `format_options.pdf` in `dre_project.yml`).
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `max_rows` | integer | `50000` | The most rows across the output's queries; more fails the run (aggregate in SQL, or raise it) |
-| `page_size` | string | `A4` | Paper size, used when the template's CSS sets no `@page { size }` One of `A3`, `A4`, `A5`, `Letter`, `Legal`. |
-| `orientation` | string | `portrait` | Used when the CSS sets no `@page { size }` One of `portrait`, `landscape`. |
-| `margins` | string | `20mm` | Page margins as in CSS (`20mm`, `15mm 20mm`), used when the CSS sets no `@page { margin }` |
+| `max_rows` | integer | `50000` | The most rows across the output's queries; more fails the run. |
+| `page_size` | string | `A4` | Paper size, used when the template's CSS sets no `@page` size. One of `A3`, `A4`, `A5`, `Letter`, `Legal`. |
+| `orientation` | string | `portrait` | Used when the template's CSS sets no `@page` size. One of `portrait`, `landscape`. |
+| `margins` | string | `20mm` | Page margins as in CSS, like `20mm` or `15mm 20mm`; used when the CSS sets no `@page` margin. |
 | `author` | string |  | The PDF's author metadata. |
 | `subject` | string |  | The PDF's subject metadata. |
 

@@ -8,7 +8,7 @@
       {
         "name": "max_rows",
         "type": "integer",
-        "description": "the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it)",
+        "description": "the most rows across the output's queries; more fails the run",
         "required": false,
         "default": 50000,
         "min": 1.0
@@ -31,7 +31,7 @@
       {
         "name": "max_rows",
         "type": "integer",
-        "description": "the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it)",
+        "description": "the most rows across the output's queries; more fails the run",
         "required": false,
         "default": 50000,
         "min": 1.0
@@ -39,7 +39,7 @@
       {
         "name": "page_size",
         "type": "string",
-        "description": "paper size, used when the template's CSS sets no `@page { size }`",
+        "description": "paper size, used when the template's CSS sets no `@page` size",
         "required": false,
         "default": "A4",
         "choices": [
@@ -53,7 +53,7 @@
       {
         "name": "orientation",
         "type": "string",
-        "description": "used when the CSS sets no `@page { size }`",
+        "description": "used when the template's CSS sets no `@page` size",
         "required": false,
         "default": "portrait",
         "choices": [
@@ -64,7 +64,7 @@
       {
         "name": "margins",
         "type": "string",
-        "description": "page margins as in CSS (`20mm`, `15mm 20mm`), used when the CSS sets no `@page { margin }`",
+        "description": "page margins as in CSS, like `20mm` or `15mm 20mm`; used when the CSS sets no `@page` margin",
         "required": false,
         "default": "20mm"
       },

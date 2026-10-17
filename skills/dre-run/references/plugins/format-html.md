@@ -25,7 +25,7 @@ Set in the report's `output:` block.
 
 | Option | Type | Required | Default | Allowed | Description |
 |---|---|---|---|---|---|
-| `max_rows` | integer | no | `50000` | min 1.0 | the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it) |
+| `max_rows` | integer | no | `50000` | min 1.0 | the most rows across the output's queries; more fails the run |
 | `embed_assets` | boolean | no | `true` |  | inline images, stylesheets and fonts as data URIs, so the file works wherever it's delivered |
 
 ## From the plugin docs

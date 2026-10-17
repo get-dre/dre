@@ -25,10 +25,10 @@ Set in the report's `output:` block.
 
 | Option | Type | Required | Default | Allowed | Description |
 |---|---|---|---|---|---|
-| `max_rows` | integer | no | `50000` | min 1.0 | the most rows across the output's queries; more fails the run (aggregate in SQL, or raise it) |
-| `page_size` | string | no | `A4` | `A3`, `A4`, `A5`, `Letter`, `Legal` | paper size, used when the template's CSS sets no `@page { size }` |
-| `orientation` | string | no | `portrait` | `portrait`, `landscape` | used when the CSS sets no `@page { size }` |
-| `margins` | string | no | `20mm` |  | page margins as in CSS (`20mm`, `15mm 20mm`), used when the CSS sets no `@page { margin }` |
+| `max_rows` | integer | no | `50000` | min 1.0 | the most rows across the output's queries; more fails the run |
+| `page_size` | string | no | `A4` | `A3`, `A4`, `A5`, `Letter`, `Legal` | paper size, used when the template's CSS sets no `@page` size |
+| `orientation` | string | no | `portrait` | `portrait`, `landscape` | used when the template's CSS sets no `@page` size |
+| `margins` | string | no | `20mm` |  | page margins as in CSS, like `20mm` or `15mm 20mm`; used when the CSS sets no `@page` margin |
 | `author` | string | no |  |  | the PDF's author metadata |
 | `subject` | string | no |  |  | the PDF's subject metadata |
 
