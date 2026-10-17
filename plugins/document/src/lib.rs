@@ -155,6 +155,12 @@ impl Format for Document {
         let mut data = Data::default();
         while let Some(mut rs) = sets.next_set()? {
             let columns: Vec<String> = rs.schema.fields().iter().map(|f| f.name().clone()).collect();
+            let types: Vec<(String, String)> = rs
+                .schema
+                .fields()
+                .iter()
+                .map(|f| (f.name().clone(), f.data_type().to_string()))
+                .collect();
             let mut batches = Vec::new();
             while let Some(b) = rs.next_batch()? {
                 data.rows += b.num_rows() as u64;
@@ -174,7 +180,7 @@ impl Format for Document {
                 .filter_map(|(c, opts)| Some((c.clone(), opts.format.clone()?)))
                 .collect();
             let result = dre_core::document::query_result(columns, &batches, cal);
-            data.push(rs.meta.query.clone(), Arc::new(result), formats);
+            data.push(rs.meta.query.clone(), Arc::new(result), formats, types);
         }
         let rendered = template::render(&ctx, &data)?;
         for w in &rendered.warnings {

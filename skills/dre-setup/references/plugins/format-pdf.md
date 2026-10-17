@@ -100,7 +100,7 @@ Everything a [message](../docs/messages.md#what-a-message-template-reads) templa
 
 | | |
 |---|---|
-| `results.<query>` | each query of the output, in YAML order: `value`, `first.<column>`, `rows`, `row_count`, `columns`, `sets[n]` |
+| `results.<query>` | each query of the output, in YAML order: `value`, `first.<column>`, `rows`, `row_count`, `columns`, `column_types` (each column's type, `{amount: Decimal128(18, 2)}`), `sets[n]` |
 | `var('name')` | every resolved var: `--var`, the schedule's, the Set's, the report's, its folders' and the project's, whether or not a query uses it |
 | `run.*`, `target.name` | the report, Set, date, timezone and the rest of [`run`](../docs/templates.md) |
 | `locale` | the run's [`locale:`](../docs/templates.md#locale) tag, for `<html lang>` |
@@ -115,6 +115,10 @@ Filters and functions:
   `percent`, `signed`, `currency` and `compact`, in the run's `locale:`, as in messages.
 - `date(format)`: a date or timestamp in an Excel-style format (`dd/mm/yyyy`, `d mmm yyyy`,
   `yyyy-mm-dd hh:mm`); default `yyyy-mm-dd`.
+- `row.fmt('amount')` (on a row of `rows`, or `first`) shows a value in its column's YAML
+  `format`, the [xlsx format codes](../docs/plugin-xlsx.md#column-formats) (`$#,##0.00`, `d mmm yyyy`);
+  a column with no format is shown as `table()` shows it. `row.amount` stays the raw value, for
+  comparisons and arithmetic.
 - `table(results.<query>)` writes a styled `<table class="dre-table">` of the query's rows, each
   value shown with its column's YAML `format` (the [xlsx format codes](../docs/plugin-xlsx.md#column-formats),
   such as `$#,##0.00` or `d mmm yyyy`). `table(results.q, ['fund', 'amount'])` picks and orders

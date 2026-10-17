@@ -55,20 +55,29 @@ struct Query {
     name: String,
     result: Arc<QueryResult>,
     /// Column -> its YAML `format` (an Excel format code).
-    formats: BTreeMap<String, String>,
+    formats: Arc<BTreeMap<String, String>>,
+    /// Each column and its Arrow type, in order.
+    types: Vec<(String, String)>,
 }
 
 impl Data {
-    pub fn push(&mut self, name: String, result: Arc<QueryResult>, formats: BTreeMap<String, String>) {
+    pub fn push(
+        &mut self,
+        name: String,
+        result: Arc<QueryResult>,
+        formats: BTreeMap<String, String>,
+        types: Vec<(String, String)>,
+    ) {
         self.queries.push(Query {
             name,
             result,
-            formats,
+            formats: Arc::new(formats),
+            types,
         });
     }
 
     /// `results`: each query's result, iterating in YAML order.
-    fn value(&self) -> Value {
+    fn value(&self, locale: Locale) -> Value {
         Value::from_object(Results(
             self.queries
                 .iter()
@@ -77,6 +86,8 @@ impl Data {
                         name: q.name.clone(),
                         inner: q.result.clone().value(),
                         formats: q.formats.clone(),
+                        types: q.types.clone(),
+                        locale,
                     });
                     (q.name.clone(), v)
                 })
@@ -121,10 +132,76 @@ impl Object for Results {
 struct Res {
     name: String,
     inner: Value,
-    formats: BTreeMap<String, String>,
+    formats: Arc<BTreeMap<String, String>>,
+    types: Vec<(String, String)>,
+    locale: Locale,
+}
+
+impl Res {
+    /// A row that can show its values in their columns' YAML formats (`row.fmt('amount')`).
+    fn row(&self, inner: Value) -> Value {
+        Value::from_object(FmtRow {
+            inner,
+            formats: self.formats.clone(),
+            locale: self.locale,
+        })
+    }
 }
 
 impl Object for Res {
+    fn repr(self: &Arc<Self>) -> ObjectRepr {
+        ObjectRepr::Map
+    }
+
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        match key.as_str()? {
+            "column_types" => Some(Value::from_object(Results(
+                self.types
+                    .iter()
+                    .map(|(c, t)| (c.clone(), Value::from(t.as_str())))
+                    .collect(),
+            ))),
+            "first" => {
+                let f = self
+                    .inner
+                    .get_attr("first")
+                    .ok()
+                    .filter(|v| !v.is_none() && !v.is_undefined())?;
+                Some(self.row(f))
+            }
+            "rows" => {
+                let rows = self.inner.get_attr("rows").ok()?;
+                let wrapped: Vec<Value> = rows.try_iter().ok()?.map(|r| self.row(r)).collect();
+                Some(Value::from(wrapped))
+            }
+            "sets" => Some(Value::from(vec![Value::from_dyn_object(self.clone())])),
+            _ => self.inner.get_item(key).ok().filter(|v| !v.is_undefined()),
+        }
+    }
+
+    fn enumerate(self: &Arc<Self>) -> Enumerator {
+        Enumerator::Str(&[
+            "value",
+            "first",
+            "rows",
+            "row_count",
+            "columns",
+            "column_types",
+            "sets",
+        ])
+    }
+}
+
+/// A row of a document's results: core's row, plus `fmt('column')`, the value in its column's
+/// YAML `format` (an Excel format code), else as `table()` shows it.
+#[derive(Debug)]
+struct FmtRow {
+    inner: Value,
+    formats: Arc<BTreeMap<String, String>>,
+    locale: Locale,
+}
+
+impl Object for FmtRow {
     fn repr(self: &Arc<Self>) -> ObjectRepr {
         ObjectRepr::Map
     }
@@ -134,7 +211,31 @@ impl Object for Res {
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
-        Enumerator::Str(&["value", "first", "rows", "row_count", "columns", "sets"])
+        match self.inner.try_iter() {
+            Ok(keys) => Enumerator::Values(keys.collect()),
+            Err(_) => Enumerator::Empty,
+        }
+    }
+
+    fn call_method(
+        self: &Arc<Self>,
+        _state: &mut minijinja::State<'_, '_>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        if method != "fmt" {
+            return Err(Error::from(ErrorKind::UnknownMethod));
+        }
+        let (column,): (&str,) = minijinja::value::from_args(args)?;
+        let v = self.inner.get_attr(column)?;
+        if v.is_undefined() {
+            return Err(Error::new(
+                ErrorKind::UndefinedError,
+                format!("`fmt('{column}')`: the row has no column `{column}`"),
+            ));
+        }
+        let (text, _) = shown_cell(&v, self.formats.get(column).map(String::as_str), self.locale);
+        Ok(Value::from(text))
     }
 }
 
@@ -157,7 +258,7 @@ pub fn render(ctx: &Context, data: &Data) -> Result<Rendered, String> {
     };
     let tmpl = env.get_template(&name).map_err(|e| message(&e, &root, None))?;
     let globals = minijinja::context! {
-        results => data.value(),
+        results => data.value(locale),
         locale => locale.tag,
     };
     let html = tmpl.render(globals).map_err(|e| message(&e, &root, Some(data)))?;
