@@ -85,9 +85,16 @@ impl Context {
         vars: JsonMap<String, Json>,
         cli_vars: BTreeMap<String, String>,
     ) -> Context {
+        // Absolute: the plugin checks every file it loads is inside the project root.
+        let abs = |p: &std::path::Path| {
+            std::path::absolute(p)
+                .unwrap_or_else(|_| p.to_path_buf())
+                .to_string_lossy()
+                .into_owned()
+        };
         Context {
-            file: file.map(|f| f.to_string_lossy().into_owned()),
-            project_root: project_root.to_string_lossy().into_owned(),
+            file: file.map(abs),
+            project_root: abs(project_root),
             run: RunInfo {
                 report: run.report.clone(),
                 set: run.set.clone(),
@@ -250,6 +257,7 @@ mod tests {
             out,
             "statement|acme|prod|2026-09-30|Australia/Sydney|Acme|31|1.234,50|d"
         );
+        assert_eq!(env.render_str("{{ run.date.yyyymm }}", ()).unwrap(), "202609");
         let e = env.render_str("{{ var('missing') }}", ()).unwrap_err();
         assert!(e.to_string().contains("no value and no default"), "{e}");
         let e = env.render_str("{{ env_var('HOME') }}", ()).unwrap_err();

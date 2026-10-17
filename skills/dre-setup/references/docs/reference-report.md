@@ -194,6 +194,7 @@ A query with settings.
 | `query` (required) | string |  | The query's name. |
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
+| `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `var_schema.<name>`

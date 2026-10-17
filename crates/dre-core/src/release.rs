@@ -50,9 +50,9 @@ pub struct HeldEntry {
     pub path: Option<String>,
     #[serde(default)]
     pub options: JsonMap<String, Json>,
-    /// Files attached to a message.
+    /// Files attached to a message, with their SHA-256 at the run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attach: Vec<PathBuf>,
+    pub attach: Vec<HeldFile>,
     /// The destination's `rate:` at the run, which the release keeps unless `--rate` says otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate: Option<crate::rate::Rate>,
@@ -74,6 +74,14 @@ pub fn sha256_file(p: &Path) -> std::io::Result<String> {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect())
+}
+
+/// A file and its SHA-256 now, for a held delivery.
+pub fn held_file(path: &Path) -> HeldFile {
+    HeldFile {
+        path: path.to_path_buf(),
+        sha256: sha256_file(path).unwrap_or_default(),
+    }
 }
 
 pub fn write_held(run_dir: &Path, run_id: &str, entries: &[HeldEntry]) -> std::io::Result<()> {
@@ -229,6 +237,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
         let changed: Vec<String> = e
             .files
             .iter()
+            .chain(&e.attach)
             .filter(|f| sha256_file(&f.path).ok().as_deref() != Some(f.sha256.as_str()))
             .map(|f| f.path.display().to_string())
             .collect();
@@ -249,7 +258,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             options: e.options.clone(),
             hold: false,
             rate: None,
-            attach: e.attach.clone(),
+            attach: e.attach.iter().map(|f| f.path.clone()).collect(),
             attach_missing: false,
         };
         // Paced per destination profile, at the recorded rate or `--rate`.

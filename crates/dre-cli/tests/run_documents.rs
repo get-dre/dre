@@ -110,3 +110,24 @@ fn template_bindings_are_for_xlsx_only() {
         .failed()
         .says("`output.template.bindings` is for xlsx templates");
 }
+
+#[test]
+fn a_relative_project_dir_works() {
+    let p = project(REPORT, &[]);
+    let mut c = assert_cmd::Command::cargo_bin("dre").unwrap();
+    c.current_dir(p.root())
+        .args(["run", "statement", "--set", "acme", "--project-dir", "."])
+        .arg("--profiles-dir")
+        .arg(p.dir.path().join("profiles"))
+        .env("DRE_PLUGINS_DIR", &p.plugins)
+        .env("HOME", p.dir.path().join("home"))
+        .env_remove("DRE_PROFILES_DIR")
+        .env_remove("DRE_TARGET")
+        .env("DRE_RUN_DATE", "2026-09-30");
+    let out = c.output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        p.read("target/run/statement/acme/statement.html")
+            .contains("<h1>Acme</h1>")
+    );
+}

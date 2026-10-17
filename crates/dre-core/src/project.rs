@@ -3686,6 +3686,19 @@ impl Loader {
                                             if let Some(Loose::Ok(b)) = &e.tab {
                                                 q.tab = *b;
                                             }
+                                            match &e.on_empty {
+                                                None => {}
+                                                Some(Loose::Ok(v)) => q.on_empty = Some(*v),
+                                                Some(Loose::Bad(_)) => self.diags.error(
+                                                    Code::InvalidField,
+                                                    file.clone(),
+                                                    line,
+                                                    format!(
+                                                        "{ctx}: `on_empty` of `{qn}` must be one of {}",
+                                                        crate::no_data::OnEmpty::NAMES.join(", ")
+                                                    ),
+                                                ),
+                                            }
                                         }
                                         sub.push(q);
                                     }

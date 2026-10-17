@@ -298,3 +298,27 @@ fn release_by_keys_and_a_plain_output() {
         .failed()
         .says("has no run");
 }
+
+#[test]
+fn a_tampered_attachment_is_refused_at_release() {
+    let (p, rec) = project(
+        &format!(
+            "queries: [members, holdings]\noutput:\n{STATEMENT}\
+             \x20 - name: email\n    format: message\n    for_each: {{query: members, key: member_id}}\n    text: hi\n    destination: {{profile: mail, to: \"{{{{ each.email }}}}\", attach: statement, hold: true}}\n"
+        ),
+        &[],
+    );
+    p.dre("run", &["statements", "--row-concurrency", "1"]).ok();
+    let id = run_id(&p);
+    std::fs::write(
+        p.path("target/run/statements/default/statement/101.csv"),
+        "changed",
+    )
+    .unwrap();
+    p.dre("release", &["statements", "--run", &id])
+        .failed()
+        .says("refused");
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0]["options"]["to"], "bob.ray@example.com");
+}

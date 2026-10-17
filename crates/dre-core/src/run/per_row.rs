@@ -23,9 +23,11 @@ pub(super) struct Retry {
     pub done: HashMap<String, std::collections::HashSet<String>>,
 }
 
-/// A row status that's finished: never made again by `--retry-failed`.
-fn finished(status: &str) -> bool {
-    matches!(status, "succeeded" | "skipped" | "held")
+/// A row that's finished: never made again by `--retry-failed`. A message skipped because its
+/// attachment failed isn't: the retry may make the attachment.
+fn finished(r: &RowRecord) -> bool {
+    matches!(r.status.as_str(), "succeeded" | "skipped" | "held")
+        && r.reason.as_deref() != Some("attachment_failed")
 }
 
 /// A destination entry of one row, rendered with its `each` (or a held delivery's, for
@@ -146,7 +148,7 @@ impl BindingRun<'_> {
                 thousands(pop.orphan_rows),
                 fe.query,
                 pop.orphan_samples.join(", "),
-                if pop.orphan_rows as usize > pop.orphan_samples.len() {
+                if pop.orphan_keys as usize > pop.orphan_samples.len() {
                     ", ..."
                 } else {
                     ""
@@ -501,7 +503,7 @@ impl BindingRun<'_> {
                         profile: d.profile.clone(),
                         path: d.path.clone(),
                         options: d.options.clone(),
-                        attach: d.attach.clone(),
+                        attach: d.attach.iter().map(|f| crate::release::held_file(f)).collect(),
                         rate: d.rate,
                         message: job.message.clone(),
                         files: job
@@ -563,7 +565,7 @@ impl BindingRun<'_> {
             all.extend(
                 records
                     .iter()
-                    .filter(|(_, _, r)| finished(&r.status))
+                    .filter(|(_, _, r)| finished(r))
                     .map(|(_, j, _)| j.key.clone()),
             );
             let path = self.run_dir.join(format!("{stem}.done.json"));
@@ -706,7 +708,7 @@ impl BindingRun<'_> {
             if let Ok(text) = std::fs::read_to_string(original_dir.join(format!("{stem}.rows.jsonl"))) {
                 for line in text.lines() {
                     if let Ok(r) = serde_json::from_str::<RowRecord>(line)
-                        && finished(&r.status)
+                        && finished(&r)
                     {
                         set.insert(r.key);
                     }

@@ -2900,7 +2900,7 @@ impl<'a> BindingRun<'a> {
 
     /// Record a held delivery of output `oi` to `d`, for `dre release`.
     fn hold(&mut self, oi: usize, d: &RenderedDest) {
-        let attach: Vec<PathBuf> = d
+        let attach: Vec<crate::release::HeldFile> = d
             .attach
             .iter()
             .filter_map(|name| {
@@ -2909,7 +2909,12 @@ impl<'a> BindingRun<'a> {
                     .iter()
                     .position(|o| o.name.as_deref() == Some(name))
             })
-            .flat_map(|j| self.outs[j].files.iter().map(|(f, _)| f.clone()))
+            .flat_map(|j| {
+                self.outs[j]
+                    .files
+                    .iter()
+                    .map(|(f, _)| crate::release::held_file(f))
+            })
             .collect();
         let idx = self.outs[oi].deliveries.len();
         self.held.push(crate::release::HeldEntry {

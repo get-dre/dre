@@ -74,8 +74,10 @@ pub struct Population {
     pub data: Vec<(Table, HashMap<String, Vec<u32>>)>,
     /// The driver rows' keys (index form), in driver order.
     index_keys: Vec<String>,
-    /// Rows of data queries whose key isn't in the driver: how many, and up to 10 keys.
+    /// Rows of data queries whose key isn't in the driver: how many, how many keys, and up to
+    /// 10 of them.
     pub orphan_rows: u64,
+    pub orphan_keys: u64,
     pub orphan_samples: Vec<String>,
 }
 
@@ -96,6 +98,7 @@ impl Population {
             }
         }
         let mut orphan_rows = 0;
+        let mut orphans: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut orphan_samples = Vec::new();
         let mut indexed = Vec::new();
         for t in data {
@@ -104,6 +107,7 @@ impl Population {
             for (r, (k, shown)) in t.keys(&cols)?.into_iter().enumerate() {
                 if !seen.contains_key(k.as_str()) {
                     orphan_rows += 1;
+                    orphans.insert(k.clone());
                     if orphan_samples.len() < 10 && !orphan_samples.contains(&shown) {
                         orphan_samples.push(shown);
                     }
@@ -120,6 +124,7 @@ impl Population {
             data: indexed,
             index_keys,
             orphan_rows,
+            orphan_keys: orphans.len() as u64,
             orphan_samples,
         })
     }

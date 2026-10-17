@@ -189,3 +189,15 @@ fn an_unknown_on_empty_is_an_error() {
         .failed()
         .says("`on_empty` must be one of continue, skip, fail");
 }
+
+#[test]
+fn a_sets_query_entry_can_set_on_empty() {
+    let p = project(
+        "queries: [accounts, exceptions]\noutput: {format: xlsx}\nsets:\n  - {name: lax}\n  - {name: drop, queries: [accounts, {query: exceptions, on_empty: skip}]}\n",
+    );
+    p.dre("run", &["r", "--set", "drop"])
+        .ok()
+        .says("left out (`on_empty: skip`)");
+    let wb: Xlsx<_> = open_workbook(p.path("target/run/r/drop/r.xlsx")).unwrap();
+    assert_eq!(wb.sheet_names(), vec!["accounts".to_string()]);
+}

@@ -682,6 +682,14 @@
                   "tab_name": {
                     "type": "string",
                     "description": "The tab name."
+                  },
+                  "on_empty": {
+                    "enum": [
+                      "continue",
+                      "skip",
+                      "fail"
+                    ],
+                    "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."
                   }
                 },
                 "required": [

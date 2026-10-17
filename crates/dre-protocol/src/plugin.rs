@@ -240,8 +240,10 @@ pub fn progress(message: Option<&str>, done: Option<u64>, total: Option<u64>) {
 struct FrameLogger;
 
 impl ::log::Log for FrameLogger {
+    /// The plugin's own records down to debug; a dependency's (a driver, an HTTP client, a
+    /// layout engine) down to info only: their debug output can run to millions of lines.
     fn enabled(&self, m: &::log::Metadata) -> bool {
-        m.level() <= ::log::Level::Debug
+        m.level() <= ::log::Level::Info || (m.level() <= ::log::Level::Debug && m.target().starts_with("dre"))
     }
 
     fn log(&self, r: &::log::Record) {

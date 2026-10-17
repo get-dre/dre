@@ -193,6 +193,7 @@ pub struct SetQuery {
     pub query: Option<Loose<String>>,
     pub tab: Option<Loose<bool>>,
     pub tab_name: Option<Loose<String>>,
+    pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
 }
 
 fn any_map(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -223,7 +224,8 @@ fn set_queries(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
                     "properties": {
                         "query": {"type": "string", "description": "The query's name."},
                         "tab": {"type": "boolean", "description": "Whether the query makes a tab."},
-                        "tab_name": {"type": "string", "description": "The tab name."}
+                        "tab_name": {"type": "string", "description": "The tab name."},
+                        "on_empty": {"enum": ["continue", "skip", "fail"], "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."}
                     },
                     "required": ["query"],
                     "additionalProperties": true
