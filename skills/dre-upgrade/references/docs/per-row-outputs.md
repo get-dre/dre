@@ -31,7 +31,7 @@ output:
     title: "Your statement, {{ each.first_name }}"
     text: "Your statement for {{ run.date.month_name }} is attached."
     destination:
-      - {profile: member_mail, to: "{{ each.email }}", attach: statement, max_per_minute: 120}
+      - {profile: member_mail, to: "{{ each.email }}", attach: statement, rate: 120/minute}
   - name: run_summary                 # one file for the whole run
     format: xlsx
     queries: [holdings]
@@ -80,8 +80,13 @@ new rows from starting; finished rows stay recorded. See [the manifest page](man
 Rows render and deliver `for_each.concurrency` at a time (default 4; `--row-concurrency` or
 `DRE_ROW_CONCURRENCY` override it), each worker reusing its plugin processes from row to row.
 This is separate from `--threads`, and opens no extra warehouse connections.
-`max_per_minute:` on a destination entry paces its deliveries (an SMTP relay's or Slack's
-limits); the email and Slack plugins also back off when the service says to slow down.
+`rate:` on a destination entry paces its deliveries across every worker, to stay under an SMTP
+relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`, spaced
+evenly (`60/minute` sends one a second). `burst: 20` lets up to 20 go back to back while keeping
+the same average. `dre run --rate` and `dre release --rate` override every destination's rate
+for one command. If a service still says to slow down, the delivery is tried again after
+`retry_wait` (doubling, up to `max_retry_wait`) or the service's `Retry-After`, up to `retries`
+times (see [Tries again](plugins.md#tries-again)).
 
 The population is held in memory to split it. `for_each.max_population_rows` (default 5,000,000
 rows across the output's queries) fails the run before anything renders when a query returns
@@ -163,7 +168,8 @@ dre release statements --run 20261017T060000Z-k3f9 --only-keys 101,102
 dre release statements --run 20261017T060000Z-k3f9 --exclude-keys 103
 ```
 
-`dre release` delivers from the run folder's files, byte for byte what was reviewed: it never
+`dre release` paces deliveries at each destination's recorded `rate:` (or `--rate 30/minute`),
+and delivers from the run folder's files, byte for byte what was reviewed: it never
 re-renders or re-queries, and refuses a file whose SHA-256 changed since the run. It takes the
 Binding's lock, is its own run folder (`release_of`, `released_by`, and each delivery's result in
 `released`), and never sends a delivery twice: releasing again sends only what's still held. It

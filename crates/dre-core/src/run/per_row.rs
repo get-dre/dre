@@ -80,7 +80,6 @@ struct Job {
     phase: Phase,
 }
 
-
 /// What every worker shares.
 struct Shared<'a> {
     project: &'a Project,

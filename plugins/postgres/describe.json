@@ -109,6 +109,23 @@
         "default": 3,
         "manual": true,
         "kind": "integer"
+      },
+      {
+        "name": "retry_wait",
+        "description": "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "max_retry_wait",
+        "description": "the longest wait between tries (`10m`)",
+        "required": false,
+        "secret": false,
+        "default": "10m",
+        "manual": true,
+        "kind": "duration"
       }
     ],
     "option_fields": [],

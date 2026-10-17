@@ -29,7 +29,11 @@ fn one() -> u64 {
 impl Rate {
     /// Parse `N/unit`: the unit is `second`, `minute` or `hour` (or `s`, `m`, `h`, plurals).
     pub fn parse(s: &str) -> Result<Rate, String> {
-        let bad = || format!("`{s}` isn't a rate; write a count and a unit, like `100/minute`, `5/second` or `20000/hour`");
+        let bad = || {
+            format!(
+                "`{s}` isn't a rate; write a count and a unit, like `100/minute`, `5/second` or `20000/hour`"
+            )
+        };
         let (n, unit) = s.split_once('/').ok_or_else(bad)?;
         let count: u64 = n.trim().replace('_', "").parse().map_err(|_| bad())?;
         if count == 0 {
@@ -101,9 +105,18 @@ mod tests {
 
     #[test]
     fn parses_rates() {
-        assert_eq!(Rate::parse("100/minute").unwrap().interval(), Duration::from_millis(600));
-        assert_eq!(Rate::parse("5/second").unwrap().interval(), Duration::from_millis(200));
-        assert_eq!(Rate::parse("3600/hour").unwrap().interval(), Duration::from_secs(1));
+        assert_eq!(
+            Rate::parse("100/minute").unwrap().interval(),
+            Duration::from_millis(600)
+        );
+        assert_eq!(
+            Rate::parse("5/second").unwrap().interval(),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            Rate::parse("3600/hour").unwrap().interval(),
+            Duration::from_secs(1)
+        );
         assert_eq!(Rate::parse("60 / Minutes").unwrap().shown(), "60/minute");
         assert_eq!(Rate::parse("20_000/h").unwrap().count, 20_000);
         for bad in ["100", "0/minute", "x/minute", "10/day"] {
@@ -122,7 +135,10 @@ mod tests {
         }
         // Four gaps of 50 ms.
         assert!(t.elapsed() >= Duration::from_millis(190), "{:?}", t.elapsed());
-        let burst = Rate { burst: 5, ..Rate::parse("2/second").unwrap() };
+        let burst = Rate {
+            burst: 5,
+            ..Rate::parse("2/second").unwrap()
+        };
         let t = Instant::now();
         for _ in 0..5 {
             assert!(p.wait("b", &burst, &cancel));

@@ -4558,8 +4558,12 @@ impl Loader {
             Some(Loose::Ok(s)) => match crate::rate::Rate::parse(&s) {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    self.diags
-                        .error(Code::InvalidField, file.clone(), None, format!("{ctx}: destination `{p}`: `rate`: {e}"));
+                    self.diags.error(
+                        Code::InvalidField,
+                        file.clone(),
+                        None,
+                        format!("{ctx}: destination `{p}`: `rate`: {e}"),
+                    );
                     None
                 }
             },

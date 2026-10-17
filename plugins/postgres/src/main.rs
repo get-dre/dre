@@ -33,7 +33,7 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use bytes::Bytes;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
-use dre_protocol::delivery::{self, Retry, retry};
+use dre_protocol::delivery::{self, Retry, retry_rules};
 use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
@@ -372,8 +372,9 @@ struct Settings {
     host: String,
     port: u16,
     connect_timeout: Option<Duration>,
-    /// `retries`: how many times to try connecting again after a temporary failure.
-    retries: u32,
+    /// `retries`, `retry_wait`, `max_retry_wait`: trying to connect again after a temporary
+    /// failure.
+    rules: delivery::Rules,
     tls: Option<native_tls::TlsConnector>,
     /// The bastion from the `ssh:` block.
     ssh: Option<Ssh>,
@@ -460,7 +461,7 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
         host,
         port,
         connect_timeout,
-        retries: rules.retries,
+        rules: rules.clone(),
         tls,
         ssh,
     })
@@ -685,7 +686,7 @@ impl Source for Postgres {
             None => db.clone(),
         };
         // Tried again (`retries`) only while connecting, never once a query is sent.
-        let session = retry(s.retries, &format!("connecting to Postgres at {at}"), || {
+        let session = retry_rules(&s.rules, &format!("connecting to Postgres at {at}"), || {
             self.rt.block_on(async {
                 match s.connect_timeout {
                     Some(t) => tokio::time::timeout(t, connect(&s, &db, &at))

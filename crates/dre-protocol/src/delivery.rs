@@ -265,7 +265,11 @@ pub fn retry_option_fields() -> Vec<OptionField> {
             OptionType::String,
             "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
         ),
-        OptionField::new("max_retry_wait", OptionType::String, "the longest wait between tries (`10m`)"),
+        OptionField::new(
+            "max_retry_wait",
+            OptionType::String,
+            "the longest wait between tries (`10m`)",
+        ),
     ]
 }
 
@@ -1093,12 +1097,21 @@ mod retry_wait_tests {
     #[test]
     fn waits_double_from_retry_wait_capped_and_retry_after_wins() {
         let opts = json!({"retry_wait": "30s", "max_retry_wait": "2m"});
-        let (r, _) = Rules::from_settings(Rules::default(), &Default::default(), opts.as_object().unwrap(), &[]).unwrap();
+        let (r, _) = Rules::from_settings(
+            Rules::default(),
+            &Default::default(),
+            opts.as_object().unwrap(),
+            &[],
+        )
+        .unwrap();
         assert_eq!(r.wait(1, None), Duration::from_secs(30));
         assert_eq!(r.wait(2, None), Duration::from_secs(60));
         assert_eq!(r.wait(3, None), Duration::from_secs(120));
         assert_eq!(r.wait(4, None), Duration::from_secs(120));
         assert_eq!(r.wait(1, Some(Duration::from_secs(5))), Duration::from_secs(5));
-        assert_eq!(r.wait(1, Some(Duration::from_secs(900))), Duration::from_secs(120));
+        assert_eq!(
+            r.wait(1, Some(Duration::from_secs(900))),
+            Duration::from_secs(120)
+        );
     }
 }

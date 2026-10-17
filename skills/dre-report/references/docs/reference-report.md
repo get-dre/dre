@@ -126,7 +126,8 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 | `path` | string |  | Where to put the file: a path, or a URL such as `s3://bucket/key`, depending on the destination. Rendered with Jinja, so it can use `var()`, `run.*`, macros and `destination.*` (this destination's settings). |
 | `attach` | string or list of string |  | On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message. |
 | `hold` | boolean |  | Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination. |
-| `max_per_minute` | integer |  | Deliver to this destination at most this many times a minute (a per-row output's emails, say); DRE paces the deliveries. |
+| `rate` | string |  | At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it. |
+| `burst` | integer |  | With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced). |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `output[].template`

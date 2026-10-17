@@ -99,6 +99,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--only-keys <KEYS>` |  | Make only these rows of each per-row output (keys, comma-separated); recorded as partial. |
 | `--limit-rows <N>` |  | Make at most this many rows of each per-row output; recorded as partial. |
 | `--unmask` |  | With --preview: show per-row values (addresses, paths) as they are, not masked. |
+| `--rate <N/UNIT>` |  | Pace every destination at this rate for this run, over its `rate:`: a count and a unit, like `100/minute`, `5/second` or `20000/hour`, spaced evenly. |
 
 Example:
 
@@ -576,6 +577,7 @@ dre release [OPTIONS] --run <RUN_ID> <REPORT>
 | `--only-keys <KEYS>` |  | Release only these rows of a per-row output (keys, comma-separated). |
 | `--exclude-keys <KEYS>` |  | Release every held delivery but these rows' (keys, comma-separated). |
 | `--by <NAME>` |  | Who releases, recorded in the release's run_results.json (default: $USER). |
+| `--rate <N/UNIT>` |  | Pace the deliveries at this rate, over each one's recorded `rate:`: a count and a unit, like `100/minute`, `5/second` or `20000/hour`, spaced evenly. |
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
 | `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
