@@ -7,6 +7,7 @@
 //! - html with `embed_assets`: stylesheets are inlined and every file becomes a data URI, so the
 //!   file works wherever it's delivered ([`embed`]).
 //! - pdf: stylesheets are inlined and every file is handed to the PDF engine by name ([`for_pdf`]).
+//!   An `<img>` of an SVG file becomes that SVG, inline: the engine draws SVG only inline.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -18,6 +19,18 @@ static ATTR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)\b(rel|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap());
 static IMG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)(<img\b[^>]*?\bsrc\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).unwrap());
+static IMG_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>"#).unwrap());
+static IMG_ATTR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)\b(src|width|height|style|class|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+        .unwrap()
+});
+static SVG_PROLOG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?").unwrap()
+});
+static SVG_ROOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)^<svg\b").unwrap());
+static SVG_SIZE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)\s(width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap());
 static STYLE_BLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").unwrap());
 static STYLE_ATTR: LazyLock<Regex> =
@@ -179,6 +192,23 @@ fn process(html: &str, root: &Path, base: &Path, mode: &mut Mode<'_>) -> Result<
     if let Some(e) = err {
         return Err(e);
     }
+    let html = match mode {
+        Mode::Pdf(_) => {
+            let html = IMG_TAG.replace_all(&html, |c: &Captures| match inline_svg(&c[0], root, base) {
+                Ok(Some(svg)) => svg,
+                Ok(None) => c[0].to_string(),
+                Err(e) => {
+                    err.get_or_insert(e);
+                    String::new()
+                }
+            });
+            if let Some(e) = err {
+                return Err(e);
+            }
+            html.into_owned()
+        }
+        _ => html.into_owned(),
+    };
     let html = IMG.replace_all(&html, |c: &Captures| {
         let (q, src) = match c.get(2) {
             Some(v) => ('"', v.as_str()),
@@ -196,6 +226,52 @@ fn process(html: &str, root: &Path, base: &Path, mode: &mut Mode<'_>) -> Result<
         Some(e) => Err(e),
         None => Ok(html.into_owned()),
     }
+}
+
+/// An `<img>` of an SVG file as the SVG itself, sized and styled as the `<img>` was; `None` for
+/// any other image.
+fn inline_svg(tag: &str, root: &Path, base: &Path) -> Result<Option<String>, String> {
+    let mut attrs = Vec::new();
+    let mut src = None;
+    for a in IMG_ATTR.captures_iter(tag) {
+        let v = a
+            .get(2)
+            .or(a.get(3))
+            .or(a.get(4))
+            .map_or("", |m| m.as_str())
+            .to_string();
+        match a[1].to_ascii_lowercase().as_str() {
+            "src" => src = Some(v),
+            "alt" => attrs.push(("aria-label".to_string(), v)),
+            name => attrs.push((name.to_string(), v)),
+        }
+    }
+    let Some(src) = src else { return Ok(None) };
+    let Some(path) = resolve(&src, root, base)? else {
+        return Ok(None);
+    };
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg")) {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("can't read `{src}`: {e}"))?;
+    let body = SVG_PROLOG.replace(&text, "");
+    if !SVG_ROOT.is_match(&body) {
+        return Err(format!("`{src}` isn't an SVG image (no <svg> element)"));
+    }
+    // The <img>'s own width and height win over the file's.
+    let root_end = body.find('>').unwrap_or(body.len());
+    let (open, rest) = body.split_at(root_end);
+    let sized = attrs.iter().any(|(n, _)| n == "width" || n == "height");
+    let open = if sized {
+        SVG_SIZE.replace_all(open, "").into_owned()
+    } else {
+        open.to_string()
+    };
+    let extra: String = attrs
+        .iter()
+        .map(|(n, v)| format!(" {n}=\"{}\"", v.replace('"', "&quot;")))
+        .collect();
+    Ok(Some(format!("{open}{extra}{rest}")))
 }
 
 /// CSS with each `url()` handled by `mode`.

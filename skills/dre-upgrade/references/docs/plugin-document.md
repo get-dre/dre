@@ -175,6 +175,10 @@ body { font-family: Brand, sans-serif; }
 A `font-family` that's neither bundled nor declared falls back to IBM Plex Sans, with a warning
 naming it. Fonts are subset: the PDF holds only the characters it uses.
 
+Text inside an SVG is the exception: it's drawn with the machine's fonts. For a logo that looks the
+same everywhere, convert its text to outlines (paths) in your design tool, or write the name in
+the html next to an icon-only SVG.
+
 ## Page setup
 
 Set the page in CSS, as for print: `@page { size: A4 landscape; margin: 15mm }`, page-margin boxes
@@ -217,6 +221,16 @@ dre run statement --set acme --from-results design               # each tweak: r
 [the manifest page](manifest.md)), renders every output of the report (xlsx and messages too),
 and implies `--no-deliver`. It fails when a query has no saved result, and warns when a query's
 SQL changed since they were saved.
+
+### What the PDF engine draws differently
+
+The PDF is laid out by [fulgur](https://github.com/fulgur-rs/fulgur), not a browser, so check a
+design in the PDF itself. One difference: a box's borders share one colour, its top border's. For
+a coloured line on one side only, set the colour for every side and the width for that side:
+
+```css
+header { border: 0 solid #e8873a; border-bottom-width: 2pt; }
+```
 
 ## Delivery
 
