@@ -9,7 +9,7 @@
 //! text, in the Markdown Teams renders. Over the limit, the text is cut short with a marker. A
 //! rate-limited post is retried once, after `Retry-After`.
 
-use dre_protocol::delivery::{self, Retry, Rules, retry};
+use dre_protocol::delivery::{self, Retry, Rules, retry_rules};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, serve_destination};
@@ -115,7 +115,7 @@ fn post(url: &str, payload: &Value, connection: &Map<String, Value>) -> Result<(
         .build()
         .into();
     let body = payload.to_string();
-    let done = retry(rules.retries, "Teams webhook", || {
+    let done = retry_rules(&rules, "Teams webhook", || {
         let resp = agent
             .post(url)
             .header("Content-Type", "application/json")

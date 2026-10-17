@@ -13,7 +13,7 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use dre_protocol::delivery::{Retry, retry};
+use dre_protocol::delivery::{Retry, retry_rules};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::options::{OptionField, OptionType, is_template};
@@ -77,6 +77,9 @@ impl Destination for Email {
                 "the attachment's file name (single-file outputs)",
             ),
         ]
+        .into_iter()
+        .chain(dre_protocol::delivery::retry_option_fields())
+        .collect()
     }
 
     /// Recipient addresses are checked unless they hold Jinja, which core renders later.
@@ -124,7 +127,7 @@ impl Email {
             .get_raw("Message-ID")
             .unwrap_or_default()
             .to_string();
-        let smtp = Smtp::from_connection(&d.connection)?;
+        let smtp = Smtp::from_connection(&d.connection, &d.options)?;
         smtp.send(&message)?;
         let n = plan.recipients();
         Ok(format!(
@@ -296,12 +299,13 @@ struct Smtp {
     accept_invalid_certs: bool,
     /// `timeout`: how long connecting, or any read or write, may take.
     timeout: std::time::Duration,
-    /// `retries`: how many times to try again when the message certainly wasn't accepted.
-    retries: u32,
+    /// `retries`, `retry_wait`, `max_retry_wait`: trying again when the message certainly
+    /// wasn't accepted (a 4xx such as a rate limit).
+    rules: dre_protocol::delivery::Rules,
 }
 
 impl Smtp {
-    fn from_connection(c: &Map<String, Value>) -> Result<Smtp> {
+    fn from_connection(c: &Map<String, Value>, options: &Map<String, Value>) -> Result<Smtp> {
         let host = conn_required(c, "host")?.to_string();
         let (tls, default_port) = match conn_str(c, "tls").unwrap_or("starttls") {
             "starttls" => (TlsMode::StartTls, 587),
@@ -331,7 +335,7 @@ impl Smtp {
         let (rules, _) = dre_protocol::delivery::Rules::from_settings(
             dre_protocol::delivery::Rules::default(),
             c,
-            &Map::new(),
+            options,
             &[],
         )?;
         Ok(Smtp {
@@ -341,7 +345,7 @@ impl Smtp {
             credentials,
             accept_invalid_certs: conn_bool(c, "tls_accept_invalid_certs") == Some(true),
             timeout: rules.timeout,
-            retries: rules.retries,
+            rules,
         })
     }
 
@@ -370,7 +374,7 @@ impl Smtp {
         // before the session started, or the server answered 4xx (try later). A connection
         // dropped mid-session isn't, as the server may already have accepted the message.
         let what = format!("SMTP server {at}");
-        retry(self.retries, &what, || {
+        retry_rules(&self.rules, &what, || {
             transport.send(message).map(|_| ()).map_err(|e| {
                 let m = format!("sending through SMTP server {at} failed: {e}");
                 if e.is_transient() || e.to_string().starts_with("Connection error") {

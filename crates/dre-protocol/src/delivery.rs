@@ -58,6 +58,11 @@ pub struct Rules {
     pub temp_dir: Option<String>,
     /// How many times to try again after a temporary error (0: never).
     pub retries: u32,
+    /// The first wait before trying again, doubling each try; `None`: about 1s, then 4s, then
+    /// 16s. A server's `Retry-After` wins.
+    pub retry_wait: Option<Duration>,
+    /// The longest wait between tries, `Retry-After` included.
+    pub max_retry_wait: Duration,
     /// For the plugin's client: how long to wait for a connection.
     pub connect_timeout: Duration,
     /// For the plugin's client: how long a read or write may make no progress.
@@ -67,6 +72,7 @@ pub struct Rules {
 pub const DEFAULT_RETRIES: u32 = 3;
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_MAX_RETRY_WAIT: Duration = Duration::from_secs(600);
 
 impl Default for Rules {
     fn default() -> Rules {
@@ -75,6 +81,8 @@ impl Default for Rules {
             atomic: true,
             temp_dir: None,
             retries: DEFAULT_RETRIES,
+            retry_wait: None,
+            max_retry_wait: DEFAULT_MAX_RETRY_WAIT,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             timeout: DEFAULT_TIMEOUT,
         }
@@ -143,6 +151,12 @@ impl Rules {
                 .and_then(|n| u32::try_from(n).ok())
                 .ok_or_else(|| format!("`retries` must be a whole number, got {v}"))?;
         }
+        if let Some(v) = get("retry_wait", &mut warnings) {
+            r.retry_wait = Some(parse_duration(&v).map_err(|e| format!("`retry_wait` {e}"))?);
+        }
+        if let Some(v) = get("max_retry_wait", &mut warnings) {
+            r.max_retry_wait = parse_duration(&v).map_err(|e| format!("`max_retry_wait` {e}"))?;
+        }
         if let Some(v) = get("connect_timeout", &mut warnings) {
             r.connect_timeout = parse_duration(&v).map_err(|e| format!("`connect_timeout` {e}"))?;
         }
@@ -150,6 +164,18 @@ impl Rules {
             r.timeout = parse_duration(&v).map_err(|e| format!("`timeout` {e}"))?;
         }
         Ok((r, warnings))
+    }
+}
+
+impl Rules {
+    /// How long to wait before try `attempt + 1`: the server's `Retry-After`, else `retry_wait`
+    /// doubled each try (or the default backoff), never more than `max_retry_wait`.
+    pub fn wait(&self, attempt: u32, retry_after: Option<Duration>) -> Duration {
+        let w = retry_after.unwrap_or_else(|| match self.retry_wait {
+            Some(first) => first.saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1))),
+            None => backoff(attempt),
+        });
+        w.min(self.max_retry_wait)
     }
 }
 
@@ -210,6 +236,36 @@ pub fn connection_fields() -> Vec<ConnectionField> {
         .default(DEFAULT_RETRIES)
         .kind(FieldKind::Integer)
         .manual(),
+        ConnectionField::new(
+            "retry_wait",
+            "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        )
+        .kind(FieldKind::Duration)
+        .manual(),
+        ConnectionField::new("max_retry_wait", "the longest wait between tries (`10m`)")
+            .default("10m")
+            .kind(FieldKind::Duration)
+            .manual(),
+    ]
+}
+
+/// The retry options a destination entry may set over its profile's: `retries`, `retry_wait`
+/// and `max_retry_wait`, for the plugin's `options()` (file destinations get them through
+/// [`option_fields`]).
+pub fn retry_option_fields() -> Vec<OptionField> {
+    vec![
+        OptionField::new(
+            "retries",
+            OptionType::Integer,
+            "how many times to try again after a temporary error such as a rate limit (0: never)",
+        )
+        .range(Some(0.0), None),
+        OptionField::new(
+            "retry_wait",
+            OptionType::String,
+            "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        ),
+        OptionField::new("max_retry_wait", OptionType::String, "the longest wait between tries (`10m`)"),
     ]
 }
 
@@ -235,6 +291,9 @@ pub fn option_fields() -> Vec<OptionField> {
             "where the temporary file goes (on the same server), for receivers that pick up any new file",
         ),
     ]
+    .into_iter()
+    .chain(retry_option_fields())
+    .collect()
 }
 
 /// What a store can do in one step.
@@ -331,6 +390,34 @@ pub fn retry<T, E: std::fmt::Display>(
     f: impl FnMut() -> Result<T, Retry<E>>,
 ) -> Result<T, E> {
     retry_with(retries, what, &mut std::thread::sleep, f)
+}
+
+/// [`retry`] with a destination's [`Rules`]: its `retries`, `retry_wait` and `max_retry_wait`.
+pub fn retry_rules<T, E: std::fmt::Display>(
+    rules: &Rules,
+    what: &str,
+    mut f: impl FnMut() -> Result<T, Retry<E>>,
+) -> Result<T, E> {
+    let mut attempt = 1;
+    loop {
+        let r = f();
+        note_attempts(attempt);
+        match r {
+            Ok(v) => return Ok(v),
+            Err(Retry::Temporary(e, retry_after)) if attempt <= rules.retries => {
+                let wait = rules.wait(attempt, retry_after);
+                crate::log::info!(
+                    "{what}: {e}; trying again in {}s (attempt {} of {})",
+                    wait.as_secs(),
+                    attempt + 1,
+                    rules.retries + 1
+                );
+                std::thread::sleep(wait);
+                attempt += 1;
+            }
+            Err(Retry::Temporary(e, _) | Retry::Fail(e)) => return Err(e),
+        }
+    }
 }
 
 /// [`retry`], with the wait between tries supplied (tests don't wait).
@@ -449,7 +536,7 @@ pub fn deliver_with(
                 });
             }
             Err(StoreError::Temporary { message, retry_after }) if attempt <= rules.retries => {
-                let wait = retry_after.unwrap_or_else(|| backoff(attempt));
+                let wait = rules.wait(attempt, retry_after);
                 crate::log::info!(
                     "{remote}: {message}; trying again in {}s (attempt {} of {})",
                     wait.as_secs(),
@@ -992,5 +1079,26 @@ mod content_type_tests {
         assert_eq!(super::content_type("s/101.PDF"), "application/pdf");
         assert_eq!(super::content_type("a.html"), "text/html");
         assert_eq!(super::content_type("a.bin"), "application/octet-stream");
+    }
+}
+
+#[cfg(test)]
+mod retry_wait_tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::Rules;
+
+    #[test]
+    fn waits_double_from_retry_wait_capped_and_retry_after_wins() {
+        let opts = json!({"retry_wait": "30s", "max_retry_wait": "2m"});
+        let (r, _) = Rules::from_settings(Rules::default(), &Default::default(), opts.as_object().unwrap(), &[]).unwrap();
+        assert_eq!(r.wait(1, None), Duration::from_secs(30));
+        assert_eq!(r.wait(2, None), Duration::from_secs(60));
+        assert_eq!(r.wait(3, None), Duration::from_secs(120));
+        assert_eq!(r.wait(4, None), Duration::from_secs(120));
+        assert_eq!(r.wait(1, Some(Duration::from_secs(5))), Duration::from_secs(5));
+        assert_eq!(r.wait(1, Some(Duration::from_secs(900))), Duration::from_secs(120));
     }
 }
