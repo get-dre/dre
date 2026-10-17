@@ -59,7 +59,9 @@ python3 <skill>/scripts/parity.py --dre parity/<report>/default/<query>.json \
 | `--json` | the full result as JSON |
 
 Columns are matched ignoring case, spaces and underscores (`Net Sales` = `net_sales`). DRE's
-side can also be a csv or xlsx it wrote (`target/run/...`) when there's no JSON.
+side can also be a csv or xlsx it wrote (with `--output-json parity`, under
+`parity/run/<report>/<binding>/runs/<run id>/`), but prefer the JSON: it holds the typed values,
+and an xlsx totals row would count as a row.
 
 Exit codes: `0` MATCH (only rounding and formatting differ), `1` DIFFERENT, `2` a usage error.
 
