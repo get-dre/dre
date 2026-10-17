@@ -50,4 +50,4 @@ See [CLI reference](cli-reference.md#dre-system-update),
 
 ---
 
-**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.5](new-in-0.5.md)
+**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.6](new-in-0.6.md)

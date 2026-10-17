@@ -2,7 +2,7 @@
 title: "New in 0.5"
 description: "Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.5
@@ -55,4 +55,4 @@ result. Run `dre compile` on your reports before and after updating and compare 
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.4](new-in-0.4.md)
+**Previous:** [New in 0.6](new-in-0.6.md) · **Next:** [New in 0.4](new-in-0.4.md)
