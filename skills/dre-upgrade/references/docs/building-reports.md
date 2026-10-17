@@ -156,6 +156,68 @@ commits are pinned in `dre.lock`. Package macros are called through the package'
 (`{{ dre_utils.star(ref('customers'), except=['ssn']) }}`), and `dispatch()` lets a package offer per-database variants
 that a project can override. See [the registry docs](registry.md).
 
+## When there's no data
+
+Some days a query returns nothing: no exceptions, no new members, a closed market. `on_empty`
+says what an output does then, so "the data was empty" is never mistaken for "DRE didn't work".
+*New in 0.6.*
+
+| `on_empty` | When every query of the output returns no rows | Exit code | `run_results.json` |
+|---|---|---|---|
+| `continue` (default) | written and delivered empty, with a warning naming the queries | 0 | the output's status, `no_data: [queries]` |
+| `skip` | nothing is written or delivered; a "skipped" line names the queries | 0 | `status: skipped`, `reason: no_data` |
+| `fail` | the run fails before anything is written or delivered | 1 | `error_code: no-data` |
+
+Set it on an output, or on a query entry for that query alone. It's inherited like other output
+keys (`default_output`, a folder's `+output`, the report, a Set), so a Set can make one client's
+statement strict:
+
+```yaml
+queries:
+  - holdings
+  - {query: exceptions, on_empty: skip}    # no exceptions: no Exceptions tab
+output:
+  format: xlsx
+  on_empty: skip                           # nothing at all: send nothing
+sets:
+  - {name: regulator, output: {on_empty: fail}}
+```
+
+Each empty query applies its own setting first: `continue` keeps its empty tab, `skip` leaves its
+tab (or its file, for a single-table format) out, `fail` fails the run even when other queries
+have data. Then, if every query of the output is empty or left out, the output's setting
+decides. A query's own setting wins on conflict, with a warning:
+
+| Output | Queries | Result |
+|---|---|---|
+| any | some have rows; an empty one has no setting | written; an info line names the empty one |
+| any | an empty one has `skip` | its tab is left out; the rest is written |
+| any | an empty one has `fail` | the run fails |
+| `continue` | all empty, every one `skip` | skipped, with a warning (the queries win) |
+| `skip` or `fail` | all empty, one has `continue` | written empty, with a warning (the query wins) |
+
+An empty file keeps its shape, so a downstream reader doesn't break on a quiet day: a csv has its
+header row, an xlsx tab its column names (a template keeps its layout), a parquet file its full
+schema, a fixed-width file its header record with `header: true`. An html or pdf document renders
+with `results.<query>.row_count == 0`, so the template can show an empty state:
+
+```html
+{% if results.transactions.row_count == 0 %}<p>No transactions this period.</p>
+{% else %}{{ table(results.transactions) }}{% endif %}
+```
+
+A query's `skip` can't leave a section out of an html, pdf or message output (the template
+decides what to show), so `dre validate` warns that it has no effect there; its `fail` still
+applies.
+
+For a [per-row output](per-row-outputs.md#no-data-and-orphan-rows), the output's `on_empty`
+decides what an empty driver does, and the query and output settings apply to each row's slice:
+a skipped row is `skipped` with reason `no_data`, a failing one is a failed row.
+
+**`count(*)` is never empty.** `select count(*) from exceptions` returns one row holding 0, so
+`on_empty` doesn't fire. Return the rows themselves, or use [`when:`](messages.md#sending-only-when-it-matters)
+on the count (`when: results.exceptions.value > 0`).
+
 ## Inspect a selection before running
 
 Use `dre ls` to see what selectors match; listing defaults to every declared Binding, whereas

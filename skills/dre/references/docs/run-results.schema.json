@@ -224,6 +224,34 @@
         "null"
       ],
       "description": "The SHA-256 of the manifest.json bytes this run wrote."
+    },
+    "retry_of": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "`dre run --retry-failed <run id>`: the run whose failed and never-started rows this one redid."
+    },
+    "release_of": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "`dre release`: the run whose held deliveries this one delivered."
+    },
+    "released_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "`dre release --by` (default `$USER`): who released them."
+    },
+    "released": {
+      "type": "array",
+      "description": "Each held delivery a release delivered (or refused), with its result.",
+      "items": {
+        "$ref": "#/$defs/Released"
+      }
     }
   },
   "required": [
@@ -492,7 +520,8 @@
             "delivered",
             "kept",
             "skipped",
-            "failed"
+            "failed",
+            "held"
           ]
         },
         "error": {
@@ -525,6 +554,38 @@
             "null"
           ],
           "description": "Its `when:`, evaluated."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why it was skipped or failed, when that's by design: `no_data` (`on_empty`)."
+        },
+        "no_data": {
+          "type": "array",
+          "description": "Its queries that returned no rows (a `no_data` warning when the output still went out).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dropped": {
+          "type": "array",
+          "description": "Queries whose tab (or file) was left out because they were empty (`on_empty: skip`).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "for_each": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForEachResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A per-row output's summary; its rows are in the `sidecar`, not in `files` or `deliveries`."
         },
         "message": {
           "anyOf": [
@@ -597,7 +658,8 @@
           "enum": [
             "delivered",
             "not_delivered",
-            "failed"
+            "failed",
+            "held"
           ]
         },
         "location": {
@@ -637,6 +699,114 @@
         "status"
       ]
     },
+    "ForEachResult": {
+      "type": "object",
+      "description": "A per-row output's summary: `output_results[].for_each`. Each row's detail is a line of the\n`<output>.rows.jsonl` sidecar in the run folder.",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The driver query."
+        },
+        "key": {
+          "type": "array",
+          "description": "The key column(s).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "integer",
+          "description": "Driver rows this run was asked to make (all, or the ones `--retry-failed`, `--only-keys` or `--limit-rows` chose).",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "Rows with nothing to send (`on_empty`), or whose attachment failed.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "held": {
+          "type": "integer",
+          "description": "Rows with deliveries held for `dre release`.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "not_started": {
+          "type": "integer",
+          "description": "Rows that never started (the run was cancelled or timed out).",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "orphan_rows": {
+          "type": "integer",
+          "description": "Rows of the output's queries whose key isn't in the driver.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failed_keys": {
+          "type": "array",
+          "description": "Each failed row: its key, error code and message (masked).",
+          "items": {
+            "$ref": "#/$defs/FailedKey"
+          }
+        },
+        "sidecar": {
+          "type": "string",
+          "description": "The sidecar with every row's result, relative to the project root (or the target path)."
+        },
+        "partial": {
+          "type": "boolean",
+          "description": "True when this run made only some rows (`--retry-failed`, `--only-keys`, `--limit-rows`).",
+          "default": false
+        }
+      },
+      "required": [
+        "query",
+        "key",
+        "rows",
+        "succeeded",
+        "skipped",
+        "failed",
+        "held",
+        "not_started",
+        "orphan_rows",
+        "failed_keys",
+        "sidecar",
+        "partial"
+      ]
+    },
+    "FailedKey": {
+      "type": "object",
+      "description": "A failed row.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "code",
+        "message"
+      ]
+    },
     "Message": {
       "type": "object",
       "description": "A message output's rendered title and text.",
@@ -651,6 +821,54 @@
       "required": [
         "title",
         "text"
+      ]
+    },
+    "Released": {
+      "type": "object",
+      "description": "One held delivery, as `dre release` delivered it.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The held entry's id in the run's `held.json`."
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A per-row output's row key."
+        },
+        "profile": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "`delivered`, `failed`, `refused` (a file changed since it was rendered) or `not_delivered`."
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "output",
+        "profile",
+        "status"
       ]
     }
   }

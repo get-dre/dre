@@ -198,6 +198,50 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
         })(),
     );
 
+    if id.kind == crate::Kind::Format {
+        check(
+            "a write of an empty result set makes a valid file (or asks for options)",
+            (|| {
+                let dir =
+                    std::env::temp_dir().join(format!("dre-conformance-{}-{}", id.name, std::process::id()));
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let file = dir.join(format!("empty.{}", id.name));
+                let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+                    arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int64, true),
+                    arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, true),
+                ]));
+                let meta = crate::msg::ResultSetMeta {
+                    name: "empty".into(),
+                    query: "empty".into(),
+                    result_index: 1,
+                    anchor: None,
+                    header: None,
+                    columns: Default::default(),
+                    autofit: None,
+                    style: None,
+                };
+                let mut p = start(path).map_err(|e| e.to_string())?;
+                p.write_begin(&file.to_string_lossy(), &id.name, Map::new(), vec![meta], None)
+                    .map_err(|e| e.to_string())?;
+                let empty = arrow::array::RecordBatch::new_empty(schema.clone());
+                let result = p
+                    .write_result_set(&schema, vec![empty])
+                    .and_then(|_| p.write_finish());
+                let r = match result {
+                    Ok(files) if files.iter().all(|f| Path::new(f).is_file()) && !files.is_empty() => Ok(()),
+                    Ok(files) => Err(format!("`written` lists files that don't exist: {files:?}")),
+                    // A format that needs options (fixed_width's `columns`) or a template context
+                    // refuses as a config problem.
+                    Err(HostError::Plugin { kind: Some(k), .. }) if k == "config" => Ok(()),
+                    Err(e) => Err(format!("an empty result set failed: {e}")),
+                };
+                let _ = p.close();
+                let _ = std::fs::remove_dir_all(&dir);
+                r
+            })(),
+        );
+    }
+
     if id.kind == crate::Kind::Source {
         check(
             "describe gives the identifier quote character",

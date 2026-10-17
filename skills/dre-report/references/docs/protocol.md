@@ -263,7 +263,7 @@ reply. `level` is `error`, `warn`, `info`, `debug` or `trace`. Core shows `info`
 `done` and `total` are each optional, and core shows the latest.
 
 The SDKs bridge each language's logging: in Rust the `log` crate (re-exported as
-`dre_protocol::log`; records from the plugin's dependencies are kept for `-v`), in Go `log/slog`.
+`dre_protocol::log`; a dependency's info, warning and error records are kept for `-v`, its debug and trace records dropped), in Go `log/slog`.
 
 ### All kinds
 

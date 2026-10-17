@@ -86,6 +86,36 @@ pub struct RunResults {
     pub settings: Settings,
     /// The SHA-256 of the manifest.json bytes this run wrote.
     pub manifest_checksum: Option<String>,
+    /// `dre run --retry-failed <run id>`: the run whose failed and never-started rows this one redid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
+    /// `dre release`: the run whose held deliveries this one delivered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_of: Option<String>,
+    /// `dre release --by` (default `$USER`): who released them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub released_by: Option<String>,
+    /// Each held delivery a release delivered (or refused), with its result.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub released: Vec<Released>,
+}
+
+/// One held delivery, as `dre release` delivered it.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
+pub struct Released {
+    /// The held entry's id in the run's `held.json`.
+    pub id: String,
+    pub output: Option<String>,
+    /// A per-row output's row key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub profile: String,
+    /// `delivered`, `failed`, `refused` (a file changed since it was rendered) or `not_delivered`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// How a Binding ended.
@@ -167,9 +197,100 @@ pub struct OutputResult {
     /// Its `when:`, evaluated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<bool>,
+    /// Why it was skipped or failed, when that's by design: `no_data` (`on_empty`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Its queries that returned no rows (a `no_data` warning when the output still went out).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub no_data: Vec<String>,
+    /// Queries whose tab (or file) was left out because they were empty (`on_empty: skip`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<String>,
+    /// A per-row output's summary; its rows are in the `sidecar`, not in `files` or `deliveries`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub for_each: Option<ForEachResult>,
     /// A message output's rendered title and text, as sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<Message>,
+}
+
+/// A per-row output's summary: `output_results[].for_each`. Each row's detail is a line of the
+/// `<output>.rows.jsonl` sidecar in the run folder.
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize, JsonSchema)]
+pub struct ForEachResult {
+    /// The driver query.
+    pub query: String,
+    /// The key column(s).
+    pub key: Vec<String>,
+    /// Driver rows this run was asked to make (all, or the ones `--retry-failed`, `--only-keys` or `--limit-rows` chose).
+    pub rows: u64,
+    pub succeeded: u64,
+    /// Rows with nothing to send (`on_empty`), or whose attachment failed.
+    pub skipped: u64,
+    pub failed: u64,
+    /// Rows with deliveries held for `dre release`.
+    pub held: u64,
+    /// Rows that never started (the run was cancelled or timed out).
+    #[serde(default)]
+    pub not_started: u64,
+    /// Rows of the output's queries whose key isn't in the driver.
+    pub orphan_rows: u64,
+    /// Each failed row: its key, error code and message (masked).
+    pub failed_keys: Vec<FailedKey>,
+    /// The sidecar with every row's result, relative to the project root (or the target path).
+    pub sidecar: PathBuf,
+    /// True when this run made only some rows (`--retry-failed`, `--only-keys`, `--limit-rows`).
+    #[serde(default)]
+    pub partial: bool,
+}
+
+/// A failed row.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
+pub struct FailedKey {
+    pub key: String,
+    pub code: String,
+    pub message: String,
+}
+
+/// One line of `<output>.rows.jsonl`: one row of a per-row output.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
+pub struct RowRecord {
+    pub key: String,
+    /// `succeeded`, `skipped`, `failed` or `held`.
+    pub status: String,
+    /// Why a row was skipped: `no_data` or `attachment_failed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The files made for the row, with their SHA-256.
+    #[serde(default)]
+    pub files: Vec<RowFile>,
+    /// Each destination of the row.
+    #[serde(default)]
+    pub deliveries: Vec<RowDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<FailedKey>,
+}
+
+/// One file of a row.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
+pub struct RowFile {
+    pub path: PathBuf,
+    pub sha256: String,
+}
+
+/// One delivery of a row. Values rendered from `each.*` are masked unless `mask_row_values: false`.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
+pub struct RowDelivery {
+    pub profile: String,
+    /// The rendered path, or the destination's address options (`to`, `channel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// `delivered`, `failed`, `held`, `kept` (not delivered by design) or `not_delivered`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// One file of an output.
@@ -216,11 +337,11 @@ fn schema_version(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 }
 
 fn output_status(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"enum": ["delivered", "kept", "skipped", "failed"]})
+    schemars::json_schema!({"enum": ["delivered", "kept", "skipped", "failed", "held"]})
 }
 
 fn delivery_status(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"enum": ["delivered", "not_delivered", "failed"]})
+    schemars::json_schema!({"enum": ["delivered", "not_delivered", "failed", "held"]})
 }
 
 fn settings(_: &mut schemars::SchemaGenerator) -> schemars::Schema {

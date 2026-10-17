@@ -41,6 +41,9 @@ pub struct Context {
     pub cli_vars: BTreeMap<String, String>,
     /// The Binding's `locale:` tag, for the number filters.
     pub locale: String,
+    /// A per-row output's driver row: `each.<column>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub each: Option<JsonMap<String, Json>>,
 }
 
 /// What `validate` sends the plugin for an html or pdf output, so `dre validate` checks its
@@ -82,9 +85,16 @@ impl Context {
         vars: JsonMap<String, Json>,
         cli_vars: BTreeMap<String, String>,
     ) -> Context {
+        // Absolute: the plugin checks every file it loads is inside the project root.
+        let abs = |p: &std::path::Path| {
+            std::path::absolute(p)
+                .unwrap_or_else(|_| p.to_path_buf())
+                .to_string_lossy()
+                .into_owned()
+        };
         Context {
-            file: file.map(|f| f.to_string_lossy().into_owned()),
-            project_root: project_root.to_string_lossy().into_owned(),
+            file: file.map(abs),
+            project_root: abs(project_root),
             run: RunInfo {
                 report: run.report.clone(),
                 set: run.set.clone(),
@@ -108,6 +118,7 @@ impl Context {
             vars,
             cli_vars,
             locale: run.locale.tag.to_string(),
+            each: None,
         }
     }
 
@@ -154,6 +165,9 @@ pub fn environment(ctx: &Context) -> Result<Environment<'static>, String> {
         ctx.vars.clone(),
         ctx.cli_vars.clone(),
     );
+    if let Some(each) = &ctx.each {
+        env.add_global("each", Value::from(minijinja::value::Serde(each.clone())));
+    }
     Ok(env)
 }
 
@@ -219,6 +233,7 @@ mod tests {
             vars: JsonMap::from_iter([("client".to_string(), Json::from("Acme"))]),
             cli_vars: BTreeMap::from([("terms".to_string(), "30".to_string())]),
             locale: "de-DE".into(),
+            each: None,
         }
     }
 
@@ -242,6 +257,7 @@ mod tests {
             out,
             "statement|acme|prod|2026-09-30|Australia/Sydney|Acme|31|1.234,50|d"
         );
+        assert_eq!(env.render_str("{{ run.date.yyyymm }}", ()).unwrap(), "202609");
         let e = env.render_str("{{ var('missing') }}", ()).unwrap_err();
         assert!(e.to_string().contains("no value and no default"), "{e}");
         let e = env.render_str("{{ env_var('HOME') }}", ()).unwrap_err();

@@ -36,6 +36,8 @@ Set in `profiles.yml`, under `connections:`, in a target with `type: postgres`.
 | `ssh` |  | Reach the server through an SSH bastion (a block of settings) Secret: use `env_var()`. |
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 <!-- END generated -->
 
@@ -50,6 +52,8 @@ Set in `profiles.yml`, under `connections:`, in a target with `type: postgres`.
 | `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
 | `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
 | `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](plugins.md#tries-again)). |
+| `retry_wait` | The first wait before trying to connect again (`30s`), doubling each try. Default about 1s, then 4s, then 16s. |
+| `max_retry_wait` | The longest wait between tries. Default `10m`. |
 | `schema` | Put first on the search path. |
 | `role` | `SET ROLE` after connecting. |
 | `ssh` | Reach the server through an SSH bastion: a block of settings, below. |

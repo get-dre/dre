@@ -252,7 +252,7 @@ A date renders as `YYYY-MM-DD`.
 | Neighbours | `prev_day`, `next_day`, `add(days=, weeks=, months=, years=)` (negative to go back; 31 Jan + 1 month is 28/29 Feb) |
 | Boundaries | `week_start`, `week_end`, `month_start`, `month_end`, `quarter_start`, `quarter_end`, `year_start`, `year_end` |
 | Periods | `this_week`, `prev_week`, `next_week`, `this_month`, `prev_month`, `next_month`, `this_quarter`, `prev_quarter`, `next_quarter`, `this_year`, `prev_year`, `next_year`, `as_period()` (the day itself) |
-| Formats | `iso`, `yyyymmdd`, `ddmmyyyy`, `yyyy`, `mm`, `dd`, `format('%d/%m/%Y')` (strftime) |
+| Formats | `iso`, `yyyymmdd`, `yyyymm` (new in 0.6), `ddmmyyyy`, `yyyy`, `mm`, `dd`, `format('%d/%m/%Y')` (strftime) |
 | As time | `start`, `end` (its first and last instant), `unix`, `unix_ms` (its midnight) |
 
 ### Periods

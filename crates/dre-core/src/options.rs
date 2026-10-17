@@ -97,9 +97,15 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                         .filter(|q| q.tab && o.feeds(&q.query))
                         .map(|q| q.query.clone())
                         .collect();
+                    let abs = |p: &std::path::Path| {
+                        std::path::absolute(p)
+                            .unwrap_or_else(|_| p.to_path_buf())
+                            .to_string_lossy()
+                            .into_owned()
+                    };
                     serde_json::to_value(crate::document::Check {
-                        file: file.map(|f| f.to_string_lossy().into_owned()),
-                        project_root: project.root.to_string_lossy().into_owned(),
+                        file: file.as_deref().map(abs),
+                        project_root: abs(&project.root),
                         queries,
                     })
                     .unwrap_or_default()

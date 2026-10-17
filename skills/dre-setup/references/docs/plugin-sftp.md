@@ -38,6 +38,8 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: sftp`.
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. A duration (`30s`, `2m`) or seconds. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) A duration (`30s`, `2m`) or seconds. |
 
 ### Options
 
@@ -48,6 +50,9 @@ Set in the report's `output.destination` entry.
 | `if_exists` | string | `overwrite` | When a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one. One of `overwrite`, `error`, `number`. |
 | `atomic` | boolean | `true` | Upload under a temporary name, then rename, so no half-written file appears. |
 | `temp_dir` | string |  | Where the temporary file goes (on the same server), for receivers that pick up any new file. |
+| `retries` | integer |  | How many times to try again after a temporary error such as a rate limit (0: never) |
+| `retry_wait` | string |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. |
+| `max_retry_wait` | string |  | The longest wait between tries (`10m`) |
 
 <!-- END generated -->
 

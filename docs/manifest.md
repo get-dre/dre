@@ -174,7 +174,11 @@ Declared `var_schema` records types, descriptions, defaults, required inputs and
 Existing projects keep working without those optional declarations.
 
 An isolated `dre run --no-deliver --output-json <dir>` also exports typed rows per query and
-normal formatted outputs, with run results outside the scheduled report's history. Each compiled
+normal formatted outputs, with run results outside the scheduled report's history. Beside each
+query's typed `<query>.json` in `<dir>/<report>/<binding>/` it saves the exact Arrow IPC stream
+DRE received (`<query>.arrows`: decimals, timezones and nulls as they were; it opens directly in
+DuckDB, Polars or pandas) and an index, `results.json` (`dre/saved-results/v1`: each query's
+name, connection, rows, file and its SQL's SHA-256). `dre run --from-results <dir>` replays them. Each compiled
 query has a SHA-256 companion file identifying exact SQL before secret masking. Displayed SQL
 may be masked; hashes and run provenance preserve the execution reference. Live catalogue
 metadata is obtained separately through configured connections and their upstream comments.
@@ -244,9 +248,15 @@ drift, the resolved
 With several outputs, `outputs` (every file) and `deliveries` (every destination) cover all of
 them, and each file names its `output`. `output_results` has one entry per output, in declared
 order: its `name`, `format`, the `queries` it formatted, its `status` (`delivered`, `kept` when
-it stays in the target path, `skipped` when its `when:` was false or its message rendered empty,
-or `failed`), any `error`, its `files`, `delivery` note and `deliveries`; `when` (true or false)
-when it has a `when:`; and for a message output, `message` with the full rendered `title` and
+it stays in the target path, `skipped` when its `when:` was false, its message rendered empty
+or it had no data, or `failed`), any `error`, its `files`, `delivery` note and `deliveries`;
+`when` (true or false) when it has a `when:`; `reason: no_data` when [`on_empty`](building-reports.md#when-theres-no-data)
+skipped or failed it, `no_data` (its queries that returned no rows) and `dropped` (empty queries
+left out with `on_empty: skip`); for a [per-row output](per-row-outputs.md), `for_each` with
+its driver `query`, `key`, row counts (`rows`, `succeeded`, `skipped`, `failed`, `held`,
+`not_started`, `orphan_rows`), `failed_keys` (each `key`, `code`, `message`) and the `sidecar`,
+`<output>.rows.jsonl`, with one line per row (its `key`, `status`, `reason`, `files` with their
+`sha256`, `deliveries` and `error`); and for a message output, `message` with the full rendered `title` and
 `text` that were sent. A report's checksum covers a message output's `file:` template, like an
 xlsx template.
 

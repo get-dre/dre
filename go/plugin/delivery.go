@@ -42,6 +42,11 @@ type Rules struct {
 	TempDir string
 	// Retries is how many times to try again after a temporary error (0: never).
 	Retries int
+	// RetryWait is the first wait before trying again, doubling each try; 0: about 1s, then
+	// 4s, then 16s. A server's Retry-After wins.
+	RetryWait time.Duration
+	// MaxRetryWait is the longest wait between tries, Retry-After included.
+	MaxRetryWait time.Duration
 	// ConnectTimeout and Timeout are for the plugin's client: how long to wait for a
 	// connection, and how long a read or write may make no progress.
 	ConnectTimeout time.Duration
@@ -50,7 +55,7 @@ type Rules struct {
 
 // DefaultRules are the rules a destination gets when nothing is set.
 func DefaultRules() Rules {
-	return Rules{IfExists: IfExistsOverwrite, Atomic: true, Retries: 3, ConnectTimeout: 30 * time.Second, Timeout: 60 * time.Second}
+	return Rules{IfExists: IfExistsOverwrite, Atomic: true, Retries: 3, MaxRetryWait: 10 * time.Minute, ConnectTimeout: 30 * time.Second, Timeout: 60 * time.Second}
 }
 
 // LegacyRules are how destinations delivered before these rules: replace, straight to the final
@@ -111,6 +116,20 @@ func RulesFrom(base Rules, conn, opts map[string]any, aliases map[string]string)
 			return r, warnings, fmt.Errorf("`retries` must be a whole number, got %v", v)
 		}
 		r.Retries = n
+	}
+	if v, ok := get("retry_wait"); ok {
+		d, err := ParseDuration(v)
+		if err != nil {
+			return r, warnings, fmt.Errorf("`retry_wait` %w", err)
+		}
+		r.RetryWait = d
+	}
+	if v, ok := get("max_retry_wait"); ok {
+		d, err := ParseDuration(v)
+		if err != nil {
+			return r, warnings, fmt.Errorf("`max_retry_wait` %w", err)
+		}
+		r.MaxRetryWait = d
 	}
 	if v, ok := get("connect_timeout"); ok {
 		d, err := ParseDuration(v)
@@ -178,7 +197,26 @@ func DeliveryFields() []Field {
 		{Name: "connect_timeout", Description: "how long to wait for a connection (`30s`, `2m`, or seconds)", Default: "30s", Manual: true},
 		{Name: "timeout", Description: "how long a read or write may make no progress before it fails", Default: "60s", Manual: true},
 		{Name: "retries", Description: "how many times to try again after a temporary error (0: never)", Default: 3, Manual: true},
+		{Name: "retry_wait", Description: "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins", Manual: true},
+		{Name: "max_retry_wait", Description: "the longest wait between tries (`10m`)", Default: "10m", Manual: true},
 	}
+}
+
+// Wait is how long to wait before try attempt+1: the server's Retry-After, else RetryWait
+// doubled each try (or the default backoff), never more than MaxRetryWait.
+func (r Rules) Wait(attempt int, retryAfter time.Duration) time.Duration {
+	w := retryAfter
+	if w == 0 {
+		if r.RetryWait > 0 {
+			w = r.RetryWait << uint(attempt-1)
+		} else {
+			w = backoff(attempt)
+		}
+	}
+	if r.MaxRetryWait > 0 && w > r.MaxRetryWait {
+		w = r.MaxRetryWait
+	}
+	return w
 }
 
 // DeliveryOptions are the options a destination entry takes for these rules: if_exists, atomic
@@ -188,6 +226,9 @@ func DeliveryOptions() []OptionField {
 		{Name: "if_exists", Type: "string", Description: "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one", Default: "overwrite", Choices: []string{"overwrite", "error", "number"}},
 		{Name: "atomic", Type: "boolean", Description: "upload under a temporary name, then rename, so no half-written file appears", Default: true},
 		{Name: "temp_dir", Type: "string", Description: "where the temporary file goes (on the same server), for receivers that pick up any new file"},
+		{Name: "retries", Type: "integer", Description: "how many times to try again after a temporary error such as a rate limit (0: never)"},
+		{Name: "retry_wait", Type: "string", Description: "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins"},
+		{Name: "max_retry_wait", Type: "string", Description: "the longest wait between tries (`10m`)"},
 	}
 }
 
@@ -329,10 +370,7 @@ func deliverWith(s Store, local, remote string, r Rules, sleep func(time.Duratio
 		}
 		var temp *TemporaryError
 		if errors.As(err, &temp) && attempt <= r.Retries {
-			wait := temp.RetryAfter
-			if wait == 0 {
-				wait = backoff(attempt)
-			}
+			wait := r.Wait(attempt, temp.RetryAfter)
 			slog.Info(fmt.Sprintf("%s: %v; trying again in %ds (attempt %d of %d)", remote, err, int(wait.Seconds()), attempt+1, r.Retries+1))
 			if rs, ok := s.(Resetter); ok {
 				rs.Reset()

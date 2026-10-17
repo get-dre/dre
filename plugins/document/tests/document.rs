@@ -38,6 +38,7 @@ fn ctx(root: &Path, file: Option<PathBuf>) -> Context {
         ]),
         cli_vars: Default::default(),
         locale: "en-AU".into(),
+        each: None,
     }
 }
 
@@ -350,4 +351,57 @@ fn validate_checks_the_template() {
         "{errors:?} {warnings:?}"
     );
     let _ = p.close();
+}
+
+#[test]
+fn css_page_size_wins_over_the_options() {
+    let dir = project();
+    let t = dir.path().join("reports/a5.html");
+    std::fs::write(
+        &t,
+        "<html><head><style>@page { size: A5; margin: 10mm }</style></head><body><p>x</p></body></html>",
+    )
+    .unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(t), json!({"page_size": "Letter"}), 1).unwrap();
+    let s = String::from_utf8_lossy(&pdf);
+    // A5 is 419.53 x 595.28 points; Letter would be 612 x 792.
+    let mb: Vec<&str> = s.match_indices("/MediaBox").map(|(i, _)| &s[i..i + 40]).collect();
+    assert!(s.contains("/MediaBox [0 0 419.5"), "not A5: {mb:?}");
+    // With no @page, the option applies.
+    let t = dir.path().join("reports/plain.html");
+    std::fs::write(&t, "<html><body><p>x</p></body></html>").unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(t), json!({"page_size": "Letter"}), 1).unwrap();
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 612"),
+        "not Letter"
+    );
+}
+
+#[test]
+fn rows_format_columns_by_their_yaml_format_and_types_are_listed() {
+    let dir = project();
+    let t = dir.path().join("reports/fmt.html");
+    std::fs::write(
+        &t,
+        "{% for r in results.holdings.rows %}[{{ r.fmt('amount') }}|{{ r.fmt('as_of') }}|{{ r.fmt('fund') }}|{{ r.amount }}]{% endfor %}\
+         first={{ results.holdings.first.fmt('amount') }} \
+         types={% for c, t in results.holdings.column_types | items %}{{ c }}:{{ t }};{% endfor %} \
+         plain={{ results.headline.first.fmt('balance') }}",
+    )
+    .unwrap();
+    let (bytes, _) = write("html", dir.path(), Some(t), json!({}), 2).unwrap();
+    let html = String::from_utf8(bytes).unwrap();
+    // YAML formats: `$#,##0.00` and `d mmm yyyy`; text as it is; the raw value stays a number.
+    assert!(html.contains("[$1,000.50|1 Oct 2026|Fund 1|1000.5]"), "{html}");
+    assert!(html.contains("first=$0.00"), "{html}");
+    assert!(
+        html.contains("types=fund:Utf8;amount:Float64;as_of:Date32;"),
+        "{html}"
+    );
+    // No YAML format: shown as table() shows it.
+    assert!(html.contains("plain=12,345.68"), "{html}");
+    let t = dir.path().join("reports/bad.html");
+    std::fs::write(&t, "{{ results.holdings.first.fmt('nope') }}").unwrap();
+    let e = write("html", dir.path(), Some(t), json!({}), 1).unwrap_err();
+    assert!(e.contains("the row has no column `nope`"), "{e}");
 }

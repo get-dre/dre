@@ -108,6 +108,23 @@
         "default": 3,
         "manual": true,
         "kind": "integer"
+      },
+      {
+        "name": "retry_wait",
+        "description": "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        "required": false,
+        "secret": false,
+        "manual": true,
+        "kind": "duration"
+      },
+      {
+        "name": "max_retry_wait",
+        "description": "the longest wait between tries (`10m`)",
+        "required": false,
+        "secret": false,
+        "default": "10m",
+        "manual": true,
+        "kind": "duration"
       }
     ],
     "option_fields": [
@@ -145,6 +162,25 @@
         "name": "attachment_name",
         "type": "string",
         "description": "the attachment's file name (single-file outputs)",
+        "required": false
+      },
+      {
+        "name": "retries",
+        "type": "integer",
+        "description": "how many times to try again after a temporary error such as a rate limit (0: never)",
+        "required": false,
+        "min": 0.0
+      },
+      {
+        "name": "retry_wait",
+        "type": "string",
+        "description": "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        "required": false
+      },
+      {
+        "name": "max_retry_wait",
+        "type": "string",
+        "description": "the longest wait between tries (`10m`)",
         "required": false
       }
     ]

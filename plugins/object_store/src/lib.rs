@@ -483,6 +483,7 @@ impl Store for ObjStore<'_> {
                     .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
                 let opts = PutOptions {
                     mode: PutMode::Create,
+                    attributes: content_type_attribute(key),
                     ..Default::default()
                 };
                 return match self.store.put_opts(&path, bytes.into(), opts).await {
@@ -495,7 +496,8 @@ impl Store for ObjStore<'_> {
             let mut file = tokio::fs::File::open(local)
                 .await
                 .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
-            let mut w = BufWriter::with_capacity(self.store.clone(), path, 8 * 1024 * 1024);
+            let mut w = BufWriter::with_capacity(self.store.clone(), path, 8 * 1024 * 1024)
+                .with_attributes(content_type_attribute(key));
             if let Err(e) = tokio::io::copy(&mut file, &mut w).await {
                 let _ = w.abort().await;
                 return Err(store_error(&format!("upload to {location}"), &e));
@@ -530,6 +532,16 @@ const GCS_CHUNK: usize = 8 * 1024 * 1024;
 
 /// Upload to GCS with the JSON API's resumable protocol, `GCS_CHUNK` bytes at a time.
 /// Credentials (service-account key, application default credentials) come from object_store.
+/// The object's `Content-Type`, from its name, so a browser opens a PDF or an HTML file.
+fn content_type_attribute(key: &str) -> object_store::Attributes {
+    let mut a = object_store::Attributes::new();
+    a.insert(
+        object_store::Attribute::ContentType,
+        delivery::content_type(key).into(),
+    );
+    a
+}
+
 fn gcs_upload(
     bucket: &str,
     key: &str,
@@ -612,6 +624,7 @@ fn gcs_upload(
     let mut req = agent
         .post(&start)
         .header("X-Upload-Content-Length", &size.to_string())
+        .header("X-Upload-Content-Type", delivery::content_type(key))
         .header("Content-Type", "application/json");
     if let Some(a) = &auth {
         req = req.header("Authorization", a);

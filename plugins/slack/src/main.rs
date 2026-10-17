@@ -16,7 +16,7 @@
 //! limit, it's one upload post instead: the files (plus the full `.md` when the text was cut short)
 //! with the text as its comment.
 
-use dre_protocol::delivery::{self, Retry, Rules, retry};
+use dre_protocol::delivery::{self, Retry, Rules, retry_rules};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
 use dre_protocol::options::{OptionField, OptionType};
@@ -59,6 +59,9 @@ impl Destination for Slack {
             ),
             OptionField::new("message", OptionType::String, "the text posted with the files"),
         ]
+        .into_iter()
+        .chain(delivery::retry_option_fields())
+        .collect()
     }
 
     fn validate(&self, o: &Map<String, Value>) -> Vec<String> {
@@ -80,7 +83,7 @@ impl Destination for Slack {
 
     fn deliver_message(&mut self, d: &Delivery, m: &Message) -> Result<String> {
         let target = Target::from(&d.options, &d.connection)?;
-        let api = Api::new(&d.connection)?;
+        let api = Api::new(&d.connection, &d.options)?;
         let channel_id = api.channel_of(&target)?;
         let title = format!("*{}*", markdown::to_slack(&markdown::escape(&m.title)));
         let (text, cut) = markdown::fit(
@@ -116,7 +119,7 @@ impl Destination for Slack {
             Some(Value::String(s)) => Some(s.clone()),
             Some(v) => return Err(format!("slack option `message` must be a string, got {v}").into()),
         };
-        let api = Api::new(&d.connection)?;
+        let api = Api::new(&d.connection, &d.options)?;
         let channel_id = api.channel_of(&target)?;
         let files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
         api.share(&files, &channel_id, message, &target)
@@ -233,19 +236,20 @@ struct Api {
     base: String,
     token: String,
     agent: ureq::Agent,
-    /// `retries`: how many times to try again a call Slack certainly didn't act on.
-    retries: u32,
+    /// `retries`, `retry_wait`, `max_retry_wait`: trying again a call Slack certainly didn't
+    /// act on (a 429 or 503 waits for its `Retry-After`).
+    rules: Rules,
 }
 
 impl Api {
-    fn new(c: &Map<String, Value>) -> Result<Api> {
+    fn new(c: &Map<String, Value>, options: &Map<String, Value>) -> Result<Api> {
         let token = conn_required(c, "token")?.to_string();
         // `api_url` points the plugin at a proxy or, in tests, a fake Slack.
         let base = conn_str(c, "api_url")
             .unwrap_or(DEFAULT_API)
             .trim_end_matches('/')
             .to_string();
-        let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[])?;
+        let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_connect(Some(rules.connect_timeout))
@@ -256,7 +260,7 @@ impl Api {
             base,
             token,
             agent,
-            retries: rules.retries,
+            rules,
         })
     }
 
@@ -275,7 +279,7 @@ impl Api {
     /// `Retry-After`), or no connection made.
     fn send(&self, method: &str, form: &[(&str, String)]) -> Result<Value> {
         let url = format!("{}/{method}", self.base);
-        let done = retry(self.retries, &format!("Slack {method}"), || {
+        let done = retry_rules(&self.rules, &format!("Slack {method}"), || {
             let mut resp = self
                 .agent
                 .post(&url)

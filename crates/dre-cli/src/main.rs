@@ -99,6 +99,36 @@ enum Command {
     /// Remove a Binding's lock left by a run that's no longer going on (it shows the holder and
     /// asks first).
     Unlock(history::UnlockArgs),
+    /// Deliver a run's held deliveries (`hold: true`, `dre run --hold`) from its run folder,
+    /// byte for byte what was rendered; never re-renders or re-queries, and never sends twice.
+    Release(ReleaseArgs),
+}
+
+#[derive(Args)]
+struct ReleaseArgs {
+    /// The report.
+    report: String,
+    /// The run whose held deliveries to deliver (its id, as `dre history` lists it).
+    #[arg(long = "run", value_name = "RUN_ID")]
+    run: String,
+    /// The Binding: the Set's name, or `default` for a report without Sets.
+    #[arg(long, default_value = "default")]
+    binding: String,
+    /// Release only these rows of a per-row output (keys, comma-separated).
+    #[arg(long, value_name = "KEYS", value_delimiter = ',')]
+    only_keys: Option<Vec<String>>,
+    /// Release every held delivery but these rows' (keys, comma-separated).
+    #[arg(long, value_name = "KEYS", value_delimiter = ',')]
+    exclude_keys: Option<Vec<String>>,
+    /// Who releases, recorded in the release's run_results.json (default: $USER).
+    #[arg(long, value_name = "NAME")]
+    by: Option<String>,
+    /// Pace the deliveries at this rate, over each one's recorded `rate:`: a count and a unit,
+    /// like `100/minute`, `5/second` or `20000/hour`, spaced evenly.
+    #[arg(long, value_name = "N/UNIT", value_parser = parse_rate)]
+    rate: Option<dre_core::rate::Rate>,
+    #[command(flatten)]
+    project: ProjectArgs,
 }
 
 #[derive(Args)]
@@ -184,6 +214,10 @@ struct RunArgs {
     /// Write typed JSON rows per query and isolate this run's outputs/history in DIR.
     #[arg(long, value_name = "DIR", conflicts_with = "dry_run")]
     output_json: Option<PathBuf>,
+    /// Re-render the outputs from results saved with `--output-json DIR`, without running any
+    /// query or opening a connection; implies --no-deliver. For designing a template.
+    #[arg(long, value_name = "DIR", conflicts_with_all = ["dry_run", "output_json", "preview"])]
+    from_results: Option<PathBuf>,
     /// Execute with a row limit (default 100); output stays in target/ and is never delivered.
     #[arg(long, value_name = "ROWS", num_args = 0..=1, default_missing_value = "100")]
     preview: Option<u64>,
@@ -205,6 +239,30 @@ struct RunArgs {
     /// connection entry's `threads:`, default 1). `--threads 1` runs them one at a time.
     #[arg(long, value_name = "N")]
     threads: Option<String>,
+    /// How many rows of a per-row (`for_each`) output render and deliver at once, over
+    /// `for_each.concurrency` (default: $DRE_ROW_CONCURRENCY, then `for_each.concurrency`, then 4).
+    #[arg(long, value_name = "N")]
+    row_concurrency: Option<String>,
+    /// Hold every delivery: render and record them, and deliver them later with `dre release`.
+    #[arg(long, conflicts_with_all = ["dry_run", "preview", "no_deliver"])]
+    hold: bool,
+    /// Redo a run's failed and never-started rows of its per-row outputs, from the query results
+    /// it saved, with no query; other outputs are skipped. The new run doesn't become current.
+    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["dry_run", "from_results", "output_json"])]
+    retry_failed: Option<String>,
+    /// Make only these rows of each per-row output (keys, comma-separated); recorded as partial.
+    #[arg(long, value_name = "KEYS", value_delimiter = ',')]
+    only_keys: Option<Vec<String>>,
+    /// Make at most this many rows of each per-row output; recorded as partial.
+    #[arg(long, value_name = "N")]
+    limit_rows: Option<usize>,
+    /// With --preview: show per-row values (addresses, paths) as they are, not masked.
+    #[arg(long, requires = "preview")]
+    unmask: bool,
+    /// Pace every destination at this rate for this run, over its `rate:`: a count and a unit,
+    /// like `100/minute`, `5/second` or `20000/hour`, spaced evenly.
+    #[arg(long, value_name = "N/UNIT", value_parser = parse_rate)]
+    rate: Option<dre_core::rate::Rate>,
 }
 
 #[derive(Args)]
@@ -416,6 +474,7 @@ fn main() -> ExitCode {
         Command::Explain(a) => explain(&a.code),
         Command::History(a) => history::history(a),
         Command::Unlock(a) => history::unlock(a),
+        Command::Release(a) => release(a, printer),
         Command::Validate(a) => validate(a, &printer),
         Command::Run(a) => run(*a, printer),
         Command::Compile(a) => compile(a, printer),
@@ -1010,6 +1069,87 @@ pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> 
     }
 }
 
+/// `--rate N/unit`.
+fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
+    dre_core::rate::Rate::parse(s)
+}
+
+/// `dre release`: deliver a run's held deliveries.
+fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
+    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
+        return exit::not_started();
+    }
+    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+        return exit::not_started();
+    };
+    if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
+        return exit::not_started();
+    }
+    let by =
+        a.by.or_else(|| std::env::var("USER").ok())
+            .or_else(|| std::env::var("USERNAME").ok())
+            .unwrap_or_else(|| "unknown".into());
+    let opts = dre_core::release::ReleaseOptions {
+        report: a.report.clone(),
+        binding: a.binding.clone(),
+        run_id: a.run.clone(),
+        only_keys: a.only_keys,
+        exclude_keys: a.exclude_keys,
+        by: by.clone(),
+        rate: a.rate,
+        cancel: {
+            let cancel = dre_core::engine::CancelToken::new();
+            signals::watch(cancel.clone());
+            cancel
+        },
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let events = dre_core::engine::Events::new(tx);
+    let result = dre_core::release::release(&project, &opts, &events);
+    drop(events);
+    for e in rx.try_iter() {
+        if let dre_core::engine::RunEvent::Warn(m) = e {
+            printer.line(output::Tone::Warn, "Warning", m.trim());
+        }
+    }
+    match result {
+        Err(e) => {
+            printer.error(&e.message);
+            exit::failed()
+        }
+        Ok(o) => {
+            let n = |s: &str| o.released.iter().filter(|r| r.status == s).count();
+            for r in o.released.iter().filter(|r| r.status == "delivered") {
+                printer.detail(
+                    output::Tone::Good,
+                    "Released",
+                    &format!("{} → {}", r.id, r.location.as_deref().unwrap_or("")),
+                );
+            }
+            let summary = format!(
+                "release {} of run {} by {by}: {} delivered, {} failed, {} refused{}",
+                o.release_id,
+                a.run,
+                n("delivered"),
+                n("failed"),
+                n("refused"),
+                if o.already > 0 {
+                    format!(", {} already released", o.already)
+                } else {
+                    String::new()
+                }
+            );
+            if o.failed() {
+                printer.line(output::Tone::Bad, "Failed", &summary);
+                exit::failed()
+            } else {
+                printer.line(output::Tone::Good, "Released", &summary);
+                exit::ok()
+            }
+        }
+    }
+}
+
 fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     use std::io::IsTerminal;
     // Signals from the start: one that arrives while the project loads still cancels the run.
@@ -1060,6 +1200,21 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
             return exit::not_started();
         }
     };
+    // `--row-concurrency`, else `DRE_ROW_CONCURRENCY`.
+    let row_concurrency = match dre_core::settings::flag_or_env(
+        a.row_concurrency.as_deref(),
+        "--row-concurrency",
+        dre_core::settings::ROW_CONCURRENCY,
+    ) {
+        None => None,
+        Some((v, from)) => match v.trim().parse::<usize>() {
+            Ok(n) if n > 0 => Some(n),
+            _ => {
+                printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
+                return exit::not_started();
+            }
+        },
+    };
     // `--threads`, else `DRE_THREADS`.
     let threads =
         match dre_core::settings::flag_or_env(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)
@@ -1090,8 +1245,16 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         output_name: a.output_name,
         output_path: a.output_path,
         dry_run: a.dry_run,
-        no_deliver: a.no_deliver,
+        no_deliver: a.no_deliver || a.from_results.is_some(),
         output_json: a.output_json,
+        from_results: a.from_results,
+        row_concurrency,
+        hold: a.hold,
+        retry_failed: a.retry_failed,
+        only_keys: a.only_keys,
+        limit_rows: a.limit_rows,
+        unmask: a.unmask,
+        rate: a.rate,
         preview: a.preview,
         accept_schema_change: a.accept_schema_change,
         interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),

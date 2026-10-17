@@ -241,6 +241,10 @@
             "minLength": 1
           }
         },
+        "on_empty": {
+          "description": "When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.",
+          "$ref": "#/$defs/OnEmpty"
+        },
         "autofit": {
           "type": "boolean",
           "description": "Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on."
@@ -339,6 +343,26 @@
       ],
       "additionalProperties": false
     },
+    "OnEmpty": {
+      "description": "`on_empty:` on an output or a query entry.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Write the output (an empty section) and deliver it, with a warning.",
+          "const": "continue"
+        },
+        {
+          "type": "string",
+          "description": "Drop the query's tab or file; for an output: write and deliver nothing.",
+          "const": "skip"
+        },
+        {
+          "type": "string",
+          "description": "Fail the run.",
+          "const": "fail"
+        }
+      ]
+    },
     "output": {
       "type": "object",
       "description": "How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`, `text` for `message`); they are documented with the formats.",
@@ -385,6 +409,25 @@
         "template": {
           "$ref": "#/$defs/template"
         },
+        "for_each": {
+          "description": "One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/for_each"
+            },
+            {
+              "const": false
+            }
+          ]
+        },
+        "file_name": {
+          "type": "string",
+          "description": "A per-row output's file name, with Jinja (`\"{{ each.member_id }}_statement.pdf\"`). Default: the row's key and the format's extension, under a folder named after the output."
+        },
+        "on_empty": {
+          "description": "When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See \"When there's no data\" in docs/building-reports.md.",
+          "$ref": "#/$defs/OnEmpty"
+        },
         "extension": {
           "type": [
             "string",
@@ -422,6 +465,20 @@
               "minItems": 1
             }
           ]
+        },
+        "hold": {
+          "type": "boolean",
+          "description": "Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination."
+        },
+        "rate": {
+          "type": "string",
+          "description": "At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it.",
+          "pattern": "^\\s*[0-9_]+\\s*/\\s*[A-Za-z]+\\s*$"
+        },
+        "burst": {
+          "type": "integer",
+          "description": "With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).",
+          "minimum": 1
         }
       },
       "required": [
@@ -499,6 +556,84 @@
       ],
       "additionalProperties": false
     },
+    "for_each": {
+      "type": "object",
+      "description": "One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The driver: a query of the report, one row per copy of the output. It isn't a tab or section of the output itself."
+        },
+        "key": {
+          "description": "The column (or list of columns) that identifies a row, in the driver and in every query of the output. Use an opaque id, never an email or a name: keys appear in file names and logs.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "How many rows render and deliver at once. Default: 4. `--row-concurrency` and `DRE_ROW_CONCURRENCY` override it.",
+          "minimum": 1
+        },
+        "on_row_error": {
+          "description": "`continue` (default): a failed row is recorded and the others carry on; the run ends failed. `fail`: render every row first, and deliver only if all rendered.",
+          "$ref": "#/$defs/RowErrors"
+        },
+        "on_orphan_rows": {
+          "description": "Rows of a query whose key isn't in the driver: `warn` (default) or `fail`.",
+          "$ref": "#/$defs/OrphanRows"
+        },
+        "max_population_rows": {
+          "type": "integer",
+          "description": "The most rows across the output's queries before anything renders. Default: 5,000,000.",
+          "minimum": 1
+        },
+        "keep_results": {
+          "type": "boolean",
+          "description": "Keep the run's query results in its run folder, for `--retry-failed`. Default: true."
+        },
+        "mask_row_values": {
+          "type": "boolean",
+          "description": "Mask destination values rendered from `each.*` (addresses, paths) in the console, logs and results. Default: the project's `mask_row_values`, true."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "RowErrors": {
+      "description": "`for_each.on_row_error`.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Record a failed row and carry on; the run ends failed.",
+          "const": "continue"
+        },
+        {
+          "type": "string",
+          "description": "Render every row first; deliver only if all rendered.",
+          "const": "fail"
+        }
+      ]
+    },
+    "OrphanRows": {
+      "type": "string",
+      "description": "`for_each.on_orphan_rows`.",
+      "enum": [
+        "warn",
+        "fail"
+      ]
+    },
     "setEntry": {
       "type": "object",
       "description": "A Set declared in the report: a named variant of it.",
@@ -547,6 +682,14 @@
                   "tab_name": {
                     "type": "string",
                     "description": "The tab name."
+                  },
+                  "on_empty": {
+                    "enum": [
+                      "continue",
+                      "skip",
+                      "fail"
+                    ],
+                    "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."
                   }
                 },
                 "required": [

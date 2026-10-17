@@ -127,6 +127,9 @@ pub fn history(a: HistoryArgs) -> ExitCode {
                 "scheduled_at": results.get("scheduled_at").cloned().unwrap_or(Value::Null),
                 "duration_ms": results.get("duration_ms").cloned().unwrap_or(Value::Null),
                 "error": results.get("error").cloned().unwrap_or(Value::Null),
+                // A `--retry-failed` run and a `dre release` name the run they act on.
+                "retry_of": results.get("retry_of").cloned().unwrap_or(Value::Null),
+                "release_of": results.get("release_of").cloned().unwrap_or(Value::Null),
                 "path": shown(&a.project_dir, &folder),
             }));
         }
@@ -155,8 +158,13 @@ pub fn history(a: HistoryArgs) -> ExitCode {
     } else {
         for r in &rows {
             let mark = if r["current"] == true { "*" } else { " " };
+            let of = match (r["retry_of"].as_str(), r["release_of"].as_str()) {
+                (Some(id), _) => format!("  (retry of {id})"),
+                (_, Some(id)) => format!("  (release of {id})"),
+                _ => String::new(),
+            };
             let line = format!(
-                "{mark} {:<10} {:<24} {:<12} {}",
+                "{mark} {:<10} {:<24} {:<12} {}{of}",
                 r["binding"].as_str().unwrap_or_default(),
                 r["run_id"].as_str().unwrap_or_default(),
                 r["status"].as_str().unwrap_or_default(),

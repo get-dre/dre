@@ -2,7 +2,7 @@
 title: "DRE practices"
 description: "The opinions DRE’s agent skills give, and the reasons behind them."
 section: build-reports
-position: 5
+position: 6
 ---
 
 # DRE practices
@@ -300,6 +300,39 @@ sum rows in Jinja.
 of each query (`max_rows`), and a long message is cut short in chat while people stop reading a
 noisy channel.
 
+### REP-10: Aggregate in SQL, not in a document template
+
+**Level:** advise
+
+Give an html or pdf document's headline numbers their own small query (a total, a balance, a
+count), and pass detail tables to `table()` or a loop as they are. Don't sum, count or group rows
+in Jinja.
+
+*Why:* the database does the arithmetic on every row, exactly, with the types it knows; a
+template that adds up rows is slow, easy to get subtly wrong, and checked by nobody.
+
+### REP-11: Keep legal text in files, not vars
+
+**Level:** advise
+
+Put terms, disclaimers and other legal wording in their own template files (`terms.html`,
+`terms_acme.html`) and include them, choosing the file per Set or per client. Use vars for short
+values (a client's name, a fee rate), not paragraphs.
+
+*Why:* wording in a file is reviewed, versioned and diffed like code; a paragraph in a var hides
+in YAML, is easy to change by accident, and can't be checked by `dre validate`.
+
+### REP-12: An opaque key for per-row outputs
+
+**Level:** warn
+
+Use an opaque id (a member or account number) as a `for_each` key, never an email address, a
+name or a phone number. Aggregate each member's figures in SQL, by that key.
+
+*Why:* the key names each row's files and appears in logs and `run_results.json` unmasked, so it
+must not be personal data; DRE masks values rendered from `each.*` in destinations, but never the
+key.
+
 ## Running and delivering
 
 ### RUN-1: Test before you schedule
@@ -384,6 +417,28 @@ every copy.
 *Why:* a delivery replaces a file already at its path by default. With the period in the name,
 only a rerun of the same period replaces its file, which is usually what's wanted after a fix;
 without it, every run overwrites the last.
+
+### RUN-8: A `{deliver: false}` dev target for per-row sends
+
+**Level:** warn
+
+Before running a per-row output that emails or messages people, give its destination profiles a
+`dev: {deliver: false}` entry, and try it with `--preview`, `--only-keys` or `--limit-rows`
+before a production run.
+
+*Why:* a per-row output sends one delivery per row, so a test run against real addresses can
+email thousands of people; a dev entry that delivers nowhere renders every row and sends nothing.
+
+### RUN-9: Hold regulatory sends for review
+
+**Level:** advise
+
+Put `hold: true` on the destinations of a regulatory or client-facing batch (or run with
+`--hold`), review the rendered files, then deliver them with `dre release`. Keep the run in the
+target path for the review window (`keep_runs`, a shared target path).
+
+*Why:* a maker/checker step catches a wrong figure before anyone receives it, and `dre release`
+sends exactly the files that were reviewed, refusing any that changed.
 
 ## Schedules
 
@@ -489,4 +544,4 @@ the reviewed query while the answer still looks verified.
 
 ---
 
-**Previous:** [Messages](messages.md) · **Next:** [AI-ready reports](ai-ready-reports.md)
+**Previous:** [Per-row outputs](per-row-outputs.md) · **Next:** [AI-ready reports](ai-ready-reports.md)
