@@ -474,6 +474,67 @@ date, and every timing a time of day.
 *Why:* cron and recurrence rules are easy to get subtly wrong (both cron day fields, `BYSETPOS`,
 DST), and a rule without an anchor fires on dates that depend on when you look.
 
+## Porting reports from other tools
+
+For moving reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts (the `dre-port`
+skill).
+
+### PORT-1: Port the logic to SQL, not to templates
+
+**Level:** advise
+
+Turn the old report's expressions and formulas (`IIf`, `Switch`, `RunningValue`, Crystal
+`{@formulas}` and running totals) into SQL columns and window functions, and its number and date
+formats into the output's column formats. Keep a document template for layout only.
+
+*Why:* the database computes every row the same way, with the types it knows, and the logic can
+be read and tested in one place; expressions spread over text boxes and template code are how
+old reports drifted from what anyone could check.
+
+### PORT-2: Prove parity before switching over
+
+**Level:** warn
+
+A port is done when its parity check against an export of the old report, for the same
+parameters, matches (or every remaining difference is explained and accepted), and the owner has
+compared the layout. Keep the old report and its subscriptions running until one full cycle of
+both has matched.
+
+*Why:* a port that "looks right" can still drop rows at a period's edge, round differently or
+read another time zone; readers notice weeks later, when the old report is gone and nothing is
+left to compare with.
+
+### PORT-3: One report at a time, simplest first
+
+**Level:** advise
+
+Port an estate one report at a time, starting with the simplest, and finish each one, parity
+check included, before the next. Near-duplicates (a copy per region or client) become one report
+with Sets (REP-4).
+
+*Why:* the first, simple port settles the connection, folders and conventions every later one
+uses, and a finished report is worth more than ten half-ported ones.
+
+### PORT-4: First deliveries held or on dev
+
+**Level:** warn
+
+Give a ported report's destinations a `{deliver: false}` entry on `dev` and `hold: true` on the
+real ones until the owner signs off on its first runs.
+
+*Why:* while the old report still runs, an unreviewed new one sends recipients a second copy, or
+a wrong one; holding the first runs costs a review, and a recalled email can't be.
+
+### PORT-5: Record where a report came from
+
+**Level:** advise
+
+Put the old report's path or name in the ported report's `meta` (`ported_from:`), give it a
+`description`, and name columns for what they hold (`region_name`, not `Textbox12`).
+
+*Why:* during a migration people ask "which DRE report replaced /Finance/Invoice summary?", and
+the answer should be in the project, not in someone's memory.
+
 ## AI context and owner decisions
 
 ### AI-1: Describe the reviewed business answer

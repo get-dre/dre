@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">
+  <DataSources>
+    <DataSource Name="Billing">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=billing-db;Initial Catalog=Billing</ConnectString>
+      </ConnectionProperties>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="Regions">
+      <Query>
+        <DataSourceName>Billing</DataSourceName>
+        <CommandText>SELECT RegionCode, RegionName FROM dbo.Regions ORDER BY RegionName</CommandText>
+      </Query>
+    </DataSet>
+    <DataSet Name="Invoices">
+      <Query>
+        <DataSourceName>Billing</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>dbo.usp_InvoiceSummary</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Month"><Value>=Parameters!Month.Value</Value></QueryParameter>
+          <QueryParameter Name="@Region"><Value>=Join(Parameters!Region.Value, ",")</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="RegionName"><DataField>RegionName</DataField></Field>
+        <Field Name="StoreName"><DataField>StoreName</DataField></Field>
+        <Field Name="InvoiceNo"><DataField>InvoiceNo</DataField></Field>
+        <Field Name="Amount"><DataField>Amount</DataField></Field>
+      </Fields>
+      <Filters>
+        <Filter>
+          <FilterExpression>=Fields!RegionName.Value</FilterExpression>
+          <Operator>NotEqual</Operator>
+          <FilterValues><FilterValue>Head office</FilterValue></FilterValues>
+        </Filter>
+      </Filters>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Tablix Name="Invoices">
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <Group Name="Region"><GroupExpressions><GroupExpression>=Fields!RegionName.Value</GroupExpression></GroupExpressions></Group>
+                  <TablixMembers>
+                    <TablixMember>
+                      <Group Name="Store"><GroupExpressions><GroupExpression>=Fields!StoreName.Value</GroupExpression></GroupExpressions></Group>
+                      <TablixMembers><TablixMember><Group Name="Details" /></TablixMember></TablixMembers>
+                    </TablixMember>
+                    <TablixMember><KeepWithGroup>Before</KeepWithGroup></TablixMember>
+                  </TablixMembers>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <TablixBody>
+              <TablixRows>
+                <TablixRow><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="Textbox7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!Amount.Value)</Value></TextRun></TextRuns></Paragraph></Paragraphs></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="Textbox8"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!Amount.Value, "C2")</Value></TextRun></TextRuns></Paragraph></Paragraphs></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="Textbox9"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIf(Fields!Amount.Value &lt; 0, "Credit", "Invoice")</Value></TextRun></TextRuns></Paragraph></Paragraphs></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <DataSetName>Invoices</DataSetName>
+          </Tablix>
+        </ReportItems>
+      </Body>
+      <Page>
+        <PageHeader><ReportItems><Textbox Name="Title"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Invoice summary</Value></TextRun></TextRuns></Paragraph></Paragraphs></Textbox></ReportItems></PageHeader>
+        <PageFooter><ReportItems><Textbox Name="PageNo"><Paragraphs><Paragraph><TextRuns><TextRun><Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value></TextRun></TextRuns></Paragraph></Paragraphs></Textbox></ReportItems></PageFooter>
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportParameters>
+    <ReportParameter Name="Month">
+      <DataType>DateTime</DataType>
+      <DefaultValue><Values><Value>=DateAdd("m", -1, Today())</Value></Values></DefaultValue>
+      <Prompt>Month</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="Region">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <ValidValues>
+        <DataSetReference><DataSetName>Regions</DataSetName><ValueField>RegionCode</ValueField><LabelField>RegionName</LabelField></DataSetReference>
+      </ValidValues>
+      <Prompt>Regions</Prompt>
+    </ReportParameter>
+  </ReportParameters>
+</Report>

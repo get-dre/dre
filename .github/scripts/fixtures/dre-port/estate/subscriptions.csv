@@ -1,0 +1,4 @@
+report,description,delivery,schedule,data_driven,recipients
+/Finance/invoice_summary,Monthly to finance,email,"Monthly on day 1 at 06:00",false,finance@example.com
+/Finance/invoice_summary,Per region manager,email,"Monthly on day 1 at 07:00",true,=query:select ManagerEmail from dbo.Regions
+/Sales/sales_by_region,Weekly,email,"Weekly on Monday at 07:00",false,sales@example.com

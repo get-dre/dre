@@ -262,6 +262,10 @@ class PluginNames(unittest.TestCase):
         md = "```yaml\ndev: {type: postgres}\noutput: {format: xlsx}\nx: {type: mysql}\ny:\n  format: pdf\n```\n"
         self.assertEqual(skills.unknown_plugins(md, {"postgres", "xlsx"}), ["`type: mysql`", "`format: pdf`"])
 
+    def test_var_schema_types_are_not_plugins(self):
+        md = "```yaml\nvar_schema:\n  as_at: {type: date}\n  regions:\n    type: array\n```\n"
+        self.assertEqual(skills.unknown_plugins(md, {"postgres"}), [])
+
 
 class Serving(unittest.TestCase):
     def test_newest_stable_moves_skills_latest(self):
@@ -388,6 +392,26 @@ class BundledDocs(unittest.TestCase):
             self.assertFalse((references / "docs/stale.md").exists())
             (references / "docs/glossary.md").unlink()
             self.assertTrue(skills.docs_link_problems(references))
+
+
+class Topics(unittest.TestCase):
+    def test_copied_only_where_listed_and_stale_ones_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "skills"
+            (root / "shared/topics").mkdir(parents=True)
+            (root / "shared/topics/formats.md").write_text("# Formats\n[xlsx](../docs/plugin-xlsx.md)\n")
+            for name in ("takes", "skips"):
+                (root / name / "references/topics").mkdir(parents=True)
+                (root / name / "SKILL.md").write_text("# x\n")
+            (root / "takes/references/topics/old.md").write_text("stale")
+            (root / "skips/references/topics/formats.md").write_text("stale")
+            skills.copy_topics(root, {"takes": ["topics"], "skips": []})
+            self.assertEqual(sorted(p.name for p in (root / "takes/references/topics").iterdir()), ["formats.md"])
+            self.assertFalse((root / "skips/references/topics").exists())
+            # Topic links are checked like the bundled docs'.
+            problems = skills.docs_link_problems(root / "takes/references")
+            self.assertEqual(len(problems), 1)
+            self.assertIn("plugin-xlsx.md", problems[0])
 
 
 if __name__ == "__main__":

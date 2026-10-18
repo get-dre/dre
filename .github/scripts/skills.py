@@ -14,6 +14,8 @@ folder on its own (installers copy or link each one separately):
 - `skills/shared/*.md` are inlined into each SKILL.md between `<!-- BEGIN shared/<file> -->` and
   `<!-- END shared/<file> -->`.
 - `docs/practices.md` is copied to `<skill>/references/practices.md`.
+- `skills/shared/topics/*.md` are copied to `<skill>/references/topics/`, for the skills that
+  take them.
 - Each first-party plugin's reference, `<skill>/references/plugins/<kind>-<name>.md`, is generated
   from the plugin's `describe` reply, its sections of docs/plugins.md, and the hand-written
   `skills/shared/guide-notes/<kind>-<name>.md`.
@@ -42,13 +44,16 @@ PLUGIN_DOCS = "docs/plugins.md"
 PRACTICES = "docs/practices.md"
 
 # What each skill gets copied into its references/ folder. Every skill folder must be listed.
+# "topics" is skills/shared/topics/*.md, the focused references a skill loads on demand.
 COPIES = {
-    "dre": ["practices", "plugins"],
+    "dre": ["practices", "plugins", "topics"],
     "dre-install": [],
     "dre-setup": ["practices", "plugins"],
-    "dre-report": ["practices", "plugins"],
+    "dre-report": ["practices", "plugins", "topics"],
+    "dre-explain": ["practices", "plugins", "topics"],
+    "dre-port": ["practices", "plugins", "topics"],
     "dre-ai": ["practices", "ai-ready"],
-    "dre-run": ["practices", "plugins"],
+    "dre-run": ["practices", "plugins", "topics"],
     "dre-upgrade": [],
 }
 
@@ -114,8 +119,9 @@ class Docs:
         return (h3.strip("`") if h3 else h2), doc_section(self.overview, h2, h3), "plugins.md"
 
 
-# Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery).
-PRACTICE_PREFIXES = ("SEC", "SET", "REP", "RUN")
+# Practice IDs: SEC (secrets), SET (setup), REP (reports), RUN (running and delivery), SCH
+# (schedules), PORT (porting from other tools), AI (AI context).
+PRACTICE_PREFIXES = ("SEC", "SET", "REP", "RUN", "SCH", "PORT", "AI")
 CITED = re.compile(r"\b(?:%s)-\d+\b" % "|".join(PRACTICE_PREFIXES))
 DEFINED = re.compile(r"^#{2,4} ((?:%s)-\d+)\b" % "|".join(PRACTICE_PREFIXES), re.M)
 
@@ -323,10 +329,15 @@ class Cli:
         return None
 
 
+# `var_schema` types, which are written `type: <name>` too.
+VAR_TYPES = {"string", "integer", "number", "boolean", "date", "array", "object", "enum"}
+
+
 def unknown_plugins(md, known):
     """`type: x` and `format: x` in a file's code that name no known plugin."""
     return [f"`{m.group(0)}`" for code in _code(md)
-            for m in re.finditer(r"\b(?:type|format):\s*([a-z_]+)\b", code) if m.group(1) not in known]
+            for m in re.finditer(r"\b(type|format):\s*([a-z_]+)\b", code)
+            if m.group(2) not in known and not (m.group(1) == "type" and m.group(2) in VAR_TYPES)]
 
 
 def command_problems(cli, rel, md):
@@ -627,7 +638,7 @@ def docs_link_problems(references):
     """Every relative file linked from bundled docs, plugins or the index ships locally."""
     problems = []
     for path in [references / "docs-index.md", *sorted((references / "docs").glob("*.md")),
-                 *sorted((references / "plugins").glob("*.md"))]:
+                 *sorted((references / "plugins").glob("*.md")), *sorted((references / "topics").glob("*.md"))]:
         if not path.exists():
             continue  # The generation drift check reports missing files.
         prose = re.sub(r"^(`{3,}|~{3,}).*?^\1[^\n]*$", "", path.read_text(), flags=re.M | re.S)
@@ -638,6 +649,19 @@ def docs_link_problems(references):
                 if not (path.parent / target).exists():
                     problems.append(f"{path}: local docs link `{target}` has no bundled file")
     return problems
+
+
+def copy_topics(skills_root, copies=COPIES):
+    """The shared topic references, into each skill that takes them; removed from the others."""
+    topics = sorted((skills_root / "shared" / "topics").glob("*.md"))
+    for skill in skill_dirs(skills_root):
+        folder = skills_root / skill / "references" / "topics"
+        if folder.exists():
+            shutil.rmtree(folder)
+        if "topics" in copies.get(skill, []):
+            folder.mkdir(parents=True)
+            for path in topics:
+                shutil.copy(path, folder / path.name)
 
 
 def sync(root):
@@ -659,6 +683,7 @@ def sync(root):
             guide = skills_root / skill / "references" / "ai-ready-reports.md"
             guide.parent.mkdir(parents=True, exist_ok=True)
             guide.write_text(_relink(strip_nav((root / "docs/ai-ready-reports.md").read_text()), "ai-ready-reports.md"))
+    copy_topics(skills_root)
     bundle_docs(root)
 
 

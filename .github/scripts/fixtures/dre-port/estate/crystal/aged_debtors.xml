@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A Crystal Reports report definition exported as XML (an RptToXml-style export). -->
+<Report Name="aged_debtors">
+  <Database>
+    <Tables>
+      <Table Name="Customer" ClassName="CrystalReports.Table" Location="dbo.Customer">
+        <Fields>
+          <Field Name="CustomerID" ValueType="Int32sField" />
+          <Field Name="Name" ValueType="StringField" />
+          <Field Name="Region" ValueType="StringField" />
+        </Fields>
+      </Table>
+      <Table Name="Invoice" ClassName="CrystalReports.Table" Location="dbo.Invoice">
+        <Fields>
+          <Field Name="CustomerID" ValueType="Int32sField" />
+          <Field Name="DueDate" ValueType="DateField" />
+          <Field Name="Balance" ValueType="CurrencyField" />
+        </Fields>
+      </Table>
+    </Tables>
+    <TableLinks>
+      <TableLink JoinType="Equal"><SourceFields><Field FormulaName="{Invoice.CustomerID}" /></SourceFields><DestinationFields><Field FormulaName="{Customer.CustomerID}" /></DestinationFields></TableLink>
+    </TableLinks>
+  </Database>
+  <DataDefinition>
+    <GroupNameFieldDefinitions />
+    <Groups>
+      <Group ConditionField="{Customer.Region}" />
+    </Groups>
+    <RecordSelectionFormula>{Invoice.Balance} &lt;&gt; 0</RecordSelectionFormula>
+    <FormulaFieldDefinitions>
+      <FormulaFieldDefinition FormulaName="{@DaysOverdue}" Name="DaysOverdue" ValueType="NumberField">DateDiff("d", {Invoice.DueDate}, {?AsAt})</FormulaFieldDefinition>
+      <FormulaFieldDefinition FormulaName="{@Bucket}" Name="Bucket" ValueType="StringField">if {@DaysOverdue} &lt;= 30 then "Current" else if {@DaysOverdue} &lt;= 60 then "31-60" else "60+"</FormulaFieldDefinition>
+    </FormulaFieldDefinitions>
+    <ParameterFieldDefinitions>
+      <ParameterFieldDefinition Name="AsAt" ParameterValueKind="DateParameter" AllowMultipleValue="false" />
+    </ParameterFieldDefinitions>
+    <SummaryFields>
+      <SummaryFieldDefinition FormulaName="Sum ({Invoice.Balance}, {Customer.Region})" Operation="Sum" />
+    </SummaryFields>
+  </DataDefinition>
+  <ReportDefinition>
+    <Areas>
+      <Area Kind="PageHeader" />
+      <Area Kind="GroupHeader" />
+      <Area Kind="Detail" />
+      <Area Kind="GroupFooter" />
+      <Area Kind="PageFooter" />
+    </Areas>
+  </ReportDefinition>
+</Report>
