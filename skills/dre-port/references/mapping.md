@@ -85,29 +85,36 @@ applies to all three.
 | Float, `CurrencyParameter` | `number` | |
 | DateTime, `DateParameter`, `DateTimeParameter` | `date` | a time of day is rare in report parameters; ask |
 | Boolean, `BooleanParameter` | `boolean` | |
-| multi-value, `AllowMultipleValue` | `array` | with `allowed` when the values are known |
+| multi-value, `AllowMultipleValue` | `array` | `allowed` on an `array` lists whole lists, not items: `allowed: [[APAC], [APAC, EMEA]]`. Usually leave it out and escape each item in SQL (below) |
 | available values from a list | `enum` with `allowed` | |
 | available values from a query | ask: an `allowed` list now, or a lookup table (REP-6) when it changes |
 | a default of `Today()`, last month, a fiscal period | no fixed default: `run.date`, `period()` (REP-2) |
 
 ```yaml
 vars:
-  regions: [NORTH, SOUTH]
+  regions: [NORTH, SOUTH, EAST, WEST]
 var_schema:
   regions:
     type: array
-    description: Region codes to include
-    allowed: [NORTH, SOUTH, EAST, WEST]
+    description: Region codes to include (NORTH, SOUTH, EAST, WEST)
   as_at:
     type: date
     description: The day balances are taken
 ```
 
-A multi-value parameter in SQL (its values constrained by `allowed`):
+DRE checks an `array` variable's `allowed` against the whole list, not each item, so it can't
+say "any of these codes". Write each item into the SQL as an escaped literal instead, and filter
+through the lookup or dimension table so an unknown code matches nothing:
 
 ```sql
-where region_code in ({% for r in var('regions') %}'{{ r }}'{% if not loop.last %}, {% endif %}{% endfor %})
+where r.region_code in (
+  {%- for c in var('regions') %}'{{ c | replace("'", "''") }}'{% if not loop.last %}, {% endif %}{% endfor -%}
+)
 ```
+
+On Databricks escape with a backslash instead (see the templates docs, "String literals and
+Databricks"). A free-form array also keeps a report from being exposed to AI agents (AI-6); a
+few fixed selections can instead be Sets (REP-4).
 
 ## T-SQL to the warehouse
 

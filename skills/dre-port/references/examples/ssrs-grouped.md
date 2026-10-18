@@ -9,10 +9,11 @@ and "Page N of M" in the footer. It's sent as a PDF.
 
 1. The procedure's source (the DBA sent `dbo.usp_InvoiceSummary`): it filters invoices by month
    and a comma-separated region list, joins stores and regions, and returns detail rows. Its
-   logic becomes SQL on the warehouse (Databricks here).
+   logic becomes SQL on the warehouse (Postgres here).
 2. Format: the report is read on paper, so pdf, with the groups and subtotals as in the old
    layout (the user sent the old PDF).
-3. `Region`: the values change rarely, so `allowed` in `var_schema`, defaulting to every region.
+3. `Region`: a list variable defaulting to every region. DRE's `allowed` checks a list as a
+   whole, so each code is escaped in the SQL instead (see the mapping's Parameters).
 4. `Month`: always last month in the subscription, so `period('last_month')` from `run.date`
    (REP-2). A rerun for another month pins the date: `DRE_RUN_DATE=2026-10-01` gives September.
 
@@ -25,7 +26,7 @@ meta: {ported_from: /Finance/Invoice summary}
 vars:
   regions: [NORTH, SOUTH, EAST, WEST]
 var_schema:
-  regions: {type: array, description: Region codes to include, allowed: [NORTH, SOUTH, EAST, WEST]}
+  regions: {type: array, description: "Region codes to include: NORTH, SOUTH, EAST, WEST"}
 queries:
   - query: invoices
     columns: {amount: {format: "$#,##0.00"}}      # was Format(..., "C2"); table() and row.fmt() use it
@@ -46,7 +47,7 @@ from billing.invoices i
 join billing.stores s on s.store_id = i.store_id
 join billing.regions r on r.region_id = s.region_id
 where i.invoice_date between '{{ m.start.date }}' and '{{ m.end.date }}'
-  and r.region_code in ({% for c in var('regions') %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %})
+  and r.region_code in ({% for c in var('regions') %}'{{ c | replace("'", "''") }}'{% if not loop.last %}, {% endif %}{% endfor %})
   and r.region_name <> 'Head office'                                         -- was the dataset filter
 order by r.region_name, s.store_name, i.invoice_no
 ```
@@ -60,7 +61,7 @@ from billing.invoices i
 join billing.stores s on s.store_id = i.store_id
 join billing.regions r on r.region_id = s.region_id
 where i.invoice_date between '{{ m.start.date }}' and '{{ m.end.date }}'
-  and r.region_code in ({% for c in var('regions') %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %})
+  and r.region_code in ({% for c in var('regions') %}'{{ c | replace("'", "''") }}'{% if not loop.last %}, {% endif %}{% endfor %})
   and r.region_name <> 'Head office'
 group by rollup (r.region_name, s.store_name)
 ```
