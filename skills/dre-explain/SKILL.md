@@ -72,6 +72,8 @@ shell, then tell me and I'll check it's set without showing it."
   have one, otherwise numbered, recommended first, at most four, plus "or tell me something
   else". When they aren't (a table, a recipient, a layout), ask for free text and give an
   example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Several open decisions?** List them in a line each if that helps, but ask only the first
+  one, and the next after the user answers. A summary at the end of a step is no exception.
 - **Say what you don't know.** When the user's tool, file format or system is one you don't know
   well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
   description. The more they share, the better the result. Never present a guess as a fact.
@@ -187,6 +189,10 @@ Explain in this order, one short paragraph or list each, skipping what doesn't a
    own rows"; the number of rows isn't known until it runs (`dre run <report> --preview` prints
    "would make N row(s)", and sends nothing).
 3. **When there's no data:** what `on_empty` (or the default, `continue`) does for each output.
+   On a per-row output it applies twice: an empty driver makes nothing at all, and each row whose
+   slice is empty follows it too (`skip`: that row gets no file, recorded `skipped`, reason
+   `no_data`). A per-row message that attaches a skipped or failed row's file is skipped for
+   that row (`attachment_failed`), so that person gets no email.
 4. **Where it goes:** each destination with its recipients, channel or path, on which target;
    which deliver nowhere on `dev`; `rate:` as plain timing ("about 2 a second; 10,000 emails take
    about 1 h 23 min"); `retries`; `hold: true` as "rendered and recorded, sent only when someone

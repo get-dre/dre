@@ -85,6 +85,8 @@ shell, then tell me and I'll check it's set without showing it."
   have one, otherwise numbered, recommended first, at most four, plus "or tell me something
   else". When they aren't (a table, a recipient, a layout), ask for free text and give an
   example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Several open decisions?** List them in a line each if that helps, but ask only the first
+  one, and the next after the user answers. A summary at the end of a step is no exception.
 - **Say what you don't know.** When the user's tool, file format or system is one you don't know
   well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
   description. The more they share, the better the result. Never present a guess as a fact.

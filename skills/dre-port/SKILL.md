@@ -82,6 +82,8 @@ shell, then tell me and I'll check it's set without showing it."
   have one, otherwise numbered, recommended first, at most four, plus "or tell me something
   else". When they aren't (a table, a recipient, a layout), ask for free text and give an
   example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Several open decisions?** List them in a line each if that helps, but ask only the first
+  one, and the next after the user answers. A summary at the end of a step is no exception.
 - **Say what you don't know.** When the user's tool, file format or system is one you don't know
   well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
   description. The more they share, the better the result. Never present a guess as a fact.
@@ -269,7 +271,9 @@ The port isn't done until it matches (PORT-2). Follow `references/parity.md`:
 Summarise: the files written, the parity result (rows, totals, differences and why), what had no
 equivalent and what you did instead, and the next steps: a first real run held for review with
 `dre-run` (RUN-9), running both reports in parallel for one cycle, and only then switching the
-old subscription off (PORT-2). With an inventory, offer the next report in the order.
+old subscription off (PORT-2). If decisions are still open (a difference to accept, a timezone,
+a profile to set up), list them, and ask only the first. With an inventory, offer the next
+report in the order.
 
 ## If this fails
 

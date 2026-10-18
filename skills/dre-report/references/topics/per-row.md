@@ -57,6 +57,8 @@ output:
 - Each row's file is `<output>/<key>.<ext>` in the run folder, or what `file_name:` renders.
 - Other `for_each` keys: `concurrency` (default 4), `on_orphan_rows` (`warn` or `fail` for rows
   whose key isn't in the driver), `max_population_rows`, `keep_results`.
+- `on_empty` applies to the driver (empty: nothing is made) and to each row's slice (`skip`: no
+  file for that row). A message attaching a row's skipped or failed file is skipped for that row.
 - Addresses and other `each.*` values are masked in logs and results; the key isn't.
 
 ## Test before anyone gets anything (RUN-8)
