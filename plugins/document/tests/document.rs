@@ -405,3 +405,79 @@ fn rows_format_columns_by_their_yaml_format_and_types_are_listed() {
     let e = write("html", dir.path(), Some(t), json!({}), 1).unwrap_err();
     assert!(e.contains("the row has no column `nope`"), "{e}");
 }
+
+/// Every stream of a PDF, inflated where it's compressed.
+fn streams(pdf: &[u8]) -> String {
+    use std::io::Read;
+    let mut out = String::new();
+    let mut at = 0;
+    while let Some(i) = pdf[at..].windows(6).position(|w| w == b"stream") {
+        let start = at + i;
+        at = start + 6;
+        if start >= 3 && &pdf[start - 3..start] == b"end" {
+            continue;
+        }
+        let body_at = at + if pdf[at..].starts_with(b"\r\n") { 2 } else { 1 };
+        let end = pdf[body_at..]
+            .windows(9)
+            .position(|w| w == b"endstream")
+            .map_or(pdf.len(), |e| body_at + e);
+        let body = &pdf[body_at..end];
+        let mut text = String::new();
+        if flate2::read::ZlibDecoder::new(body)
+            .read_to_string(&mut text)
+            .is_err()
+        {
+            text = String::from_utf8_lossy(body).into_owned();
+        }
+        out.push_str(&text);
+        out.push('\n');
+        at = end;
+    }
+    out
+}
+
+#[test]
+fn image_files_appear_in_the_pdf() {
+    let dir = project();
+    // The logo's fill, #1f7a4d, as a PDF colour operand.
+    let drawn = |body: &str| {
+        let t = dir.path().join("templates/img.html");
+        std::fs::write(&t, format!("<html><body><p>x</p>{body}</body></html>")).unwrap();
+        let (pdf, _) = write("pdf", dir.path(), Some(t), json!({}), 1).unwrap();
+        let s = streams(&pdf);
+        s.contains("0.12156863 0.4784313")
+    };
+    assert!(!drawn(""), "the logo's colour in a PDF without it");
+    assert!(
+        drawn(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#1f7a4d"/></svg>"##
+        ),
+        "inline svg"
+    );
+    let svg_file = drawn(r#"<img src="assets/logo.svg" alt="logo">"#);
+    // A 1x1 PNG: a raster image is an image XObject.
+    std::fs::write(
+        dir.path().join("templates/assets/dot.png"),
+        [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+            0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+            0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D, 0xB0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
+            0x44, 0xAE, 0x42, 0x60, 0x82,
+        ],
+    )
+    .unwrap();
+    let t = dir.path().join("templates/png.html");
+    std::fs::write(
+        &t,
+        r#"<html><body><p>x</p><img src="assets/dot.png" alt="dot" width="20" height="20"></body></html>"#,
+    )
+    .unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(t), json!({}), 1).unwrap();
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/Image") || streams(&pdf).contains("/Image"),
+        "a PNG file"
+    );
+    assert!(svg_file, "an SVG file");
+}

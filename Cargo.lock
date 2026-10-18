@@ -2311,12 +2311,13 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-document"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
  "dre-core",
  "dre-protocol",
+ "flate2",
  "fulgur",
  "minijinja 3.0.1",
  "regex",
