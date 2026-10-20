@@ -8,7 +8,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/get-dre/dre/go/plugin v0.0.0
 	golang.org/x/oauth2 v0.37.0
-	google.golang.org/api v0.302.0
+	google.golang.org/api v0.304.0
 )
 
 require (
