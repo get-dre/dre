@@ -189,10 +189,11 @@ Do this before anything else. It needs no network.
      `<version>`, so some advice may be out of date", and offer to update the skills (the
      `dre-upgrade` skill). If the user declines, carry on, and end every step's summary with
      "(skills written for dre `<range>`)" so the warning stays visible.
-   - **Older than the range:** offer to update dre (`dre-upgrade`), or to install the skills
-     release that matches their dre (each `skills-v*` release on
-     https://github.com/get-dre/dre/releases states its range). Carry on only if they choose
-     to, with the same visible warning.
+   - **Older than the range:** start your first reply with it, before anything else you
+     answer: "These skills need dre `<range>` and you have `<version>`." Then offer to update
+     dre (`dre-upgrade`), or to install the skills release that matches their dre (each
+     `skills-v*` release on https://github.com/get-dre/dre/releases states its range). Carry on
+     only if they choose to, with the same visible warning.
    - **`dre` not found:** hand off to the `dre-install` skill. If it isn't installed, point to
      https://github.com/get-dre/dre#install and stop here.
 3. Don't repeat the check in this conversation unless dre has been installed or updated since.
@@ -215,8 +216,11 @@ No project yet? Hand off to `dre-setup` first.
 
 Ask, one at a time, only what the request didn't say:
 
-1. **What it shows**: the questions it answers, the tables it reads from. Offer to look at the
-   tables' columns with a query the user approves, rather than guessing column names.
+1. **What it shows**: the questions it answers, the tables it reads from. Look up the
+   tables' columns rather than guessing them: on a `dev` or local connection (a DuckDB file,
+   a dev database), run a read-only lookup without asking (`dre catalog`, or `dre query` with a
+   `describe`/`information_schema` query). Ask first only when the connection reads
+   production (RUN-2).
 2. **Who gets it, and as what** (`topics/formats.md`): people working with numbers (xlsx), people
    reading a branded document (pdf, `topics/documents.md`), people who only want the number (a
    headline message, step 6b), or a system (an exact csv or fixed-width layout: ask for the spec).
