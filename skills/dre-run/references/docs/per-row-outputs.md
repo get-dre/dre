@@ -88,6 +88,29 @@ for one command. If a service still says to slow down, the delivery is tried aga
 `retry_wait` (doubling, up to `max_retry_wait`) or the service's `Retry-After`, up to `retries`
 times (see [Tries again](plugins.md#tries-again)).
 
+### Watching a long send
+
+At a terminal, each per-row output (and `dre release`) shows a bar as rows finish, with the
+measured speed (over the last 30 seconds), the `rate:` it's capped at, and the time left:
+
+```text
+     email [██████████████░░░░░░░░] 250/400 rows · 35/s (rate 100/s) · ~5s left
+```
+
+The speed is what the destination actually took: below the rate here, because the mail server
+accepted about 35 a second. A row counts once all its deliveries are done; held rows count in
+`dre run`, and `dre release` counts each row once all its held deliveries have gone. Without a
+terminal (cron, CI, a pipe), a `Progress` line comes at most every 30 seconds instead, so a
+three-hour send shows it's alive:
+
+```text
+  Progress  output `email`: 1,200/20,000 rows, 0 failed, 98/min (rate 100/min), ~3h11m left
+```
+
+A send under 30 seconds prints no extra line. `--output json` writes a `rows_progress` event
+(`output`, `done`, `total`, `failed`, `rate`, `rows_per_second`, `seconds_left`) on the same
+schedule, and `-q` shows neither.
+
 The population is held in memory to split it. `for_each.max_population_rows` (default 5,000,000
 rows across the output's queries) fails the run before anything renders when a query returns
 more: filter or aggregate in SQL. A document's own [`max_rows`](plugin-document.md#how-big-a-document-can-be)

@@ -250,7 +250,8 @@ fn held_deliveries_are_released_later_byte_for_byte_and_once() {
     std::fs::write(&ann, "member_id,fund,amount\r\n101,Growth,9999999\r\n").unwrap();
     p.dre("release", &["statements", "--run", &id, "--by", "checker"])
         .failed()
-        .says("refused");
+        .says("refused")
+        .lacks("Progress");
     let d = deliveries(&rec);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0]["options"]["to"], "bob.ray@example.com");

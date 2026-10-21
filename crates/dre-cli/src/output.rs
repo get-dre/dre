@@ -493,6 +493,18 @@ fn fmt_secs(s: f64) -> String {
     }
 }
 
+/// `text`'s first line, at most `max` characters, ending in `…` when cut.
+fn one_line(text: &str, max: usize) -> String {
+    let line = text.lines().next().unwrap_or("");
+    if line.chars().count() <= max {
+        line.to_string()
+    } else {
+        let mut cut: String = line.chars().take(max.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    }
+}
+
 fn timing(d: Duration) -> String {
     format!("[{:>6}]", fmt_secs(d.as_secs_f64()))
 }
@@ -576,8 +588,11 @@ impl Ui for Printer {
 
     fn step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
         let mut i = self.inner.lock().unwrap();
-        if let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty()) {
-            b.set_message(format!("{} · {verb} {detail}", i.current));
+        // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
+        if level == Level::Info
+            && let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty())
+        {
+            b.set_message(one_line(&format!("{} · {verb} {detail}", i.current), 60));
         }
         let text = match elapsed {
             Some(d) => format!("{} {detail}", i.paint(DIM, &timing(d))),

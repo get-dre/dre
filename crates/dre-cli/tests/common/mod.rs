@@ -241,6 +241,16 @@ impl Run {
         self
     }
 
+    pub fn lacks(&self, needle: &str) -> &Self {
+        assert!(
+            !self.stderr.contains(needle) && !self.stdout.contains(needle),
+            "expected output without {needle:?}\nstdout:\n{}\nstderr:\n{}",
+            self.stdout,
+            self.stderr
+        );
+        self
+    }
+
     pub fn says(&self, needle: &str) -> &Self {
         assert!(
             self.stderr.contains(needle) || self.stdout.contains(needle),
