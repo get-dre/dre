@@ -161,12 +161,30 @@ pub trait Ui {
     /// Bindings running at once: `label` started (`running`) or finished. Its own events come
     /// later, together.
     fn running(&mut self, _label: &str, _running: bool) {}
+    /// A per-row output's or a release's progress: rows done so far, sent as each one finishes.
+    fn rows(&mut self, _progress: &RowProgress) {}
     /// Where plugin stderr goes.
     fn plugin_log(&self) -> LogSink;
     /// Where the full text of every statement sent to a source goes: `(label, sql)`.
     fn sql_log(&self) -> LogSink {
         Arc::new(|_, _| {})
     }
+}
+
+/// How far a per-row output (or a `dre release`) has got. A row is done once all its deliveries
+/// are (delivered, held, skipped or failed).
+#[derive(Debug, Clone, Serialize)]
+pub struct RowProgress {
+    /// What's progressing, e.g. ``output `email` ``.
+    pub output: String,
+    pub done: u64,
+    pub failed: u64,
+    pub total: u64,
+    /// The rate the deliveries are paced at, if any: a ceiling, not the speed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<crate::rate::Rate>,
+    /// The last event for this output: every row is done, or the run stopped.
+    pub finished: bool,
 }
 
 /// A message `--preview` shows.

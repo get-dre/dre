@@ -100,6 +100,41 @@ struct Shared<'a> {
     cancel: CancelToken,
     pacer: crate::rate::Pacer,
     rows_file: Mutex<File>,
+    progress: Progress,
+}
+
+/// Rows done so far, sent to the UI as each one finishes.
+struct Progress {
+    output: String,
+    total: u64,
+    rate: Option<crate::rate::Rate>,
+    /// Done and failed.
+    counts: Mutex<(u64, u64)>,
+}
+
+impl Progress {
+    fn event(&self, finished: bool) -> crate::run::RowProgress {
+        let (done, failed) = *self.counts.lock().unwrap();
+        crate::run::RowProgress {
+            output: self.output.clone(),
+            done,
+            failed,
+            total: self.total,
+            rate: self.rate,
+            finished,
+        }
+    }
+
+    fn row_done(&self, events: &Events, failed: bool) {
+        {
+            let mut c = self.counts.lock().unwrap();
+            c.0 += 1;
+            if failed {
+                c.1 += 1;
+            }
+        }
+        events.rows(self.event(false));
+    }
 }
 
 impl BindingRun<'_> {
@@ -350,6 +385,18 @@ impl BindingRun<'_> {
             cancel: self.opts.cancel.clone(),
             pacer: crate::rate::Pacer::default(),
             rows_file: Mutex::new(rows_file),
+            progress: Progress {
+                output: label.clone(),
+                total: rows.len() as u64,
+                // The pace sends go at, when they go now (held ones are paced by `dre release`).
+                rate: self.opts.rate.or_else(|| {
+                    o.destinations
+                        .iter()
+                        .filter(|d| !(d.hold || self.opts.hold))
+                        .find_map(|d| d.rate)
+                }),
+                counts: Mutex::new((0, 0)),
+            },
         };
         let two_pass = fe.on_row_error == RowErrors::Fail;
         let started = Instant::now();
@@ -363,6 +410,7 @@ impl BindingRun<'_> {
             ),
             None,
         );
+        shared.events.rows(shared.progress.event(false));
 
         // Prepare each row's job (rendering its Jinja here, on the run's thread), and let the
         // workers make and deliver them.
@@ -433,6 +481,7 @@ impl BindingRun<'_> {
                             message: "not delivered: another row failed and `on_row_error: fail` delivers all or nothing".into(),
                         });
                         write_record(&shared, r);
+                        shared.progress.row_done(&shared.events, true);
                     }
                 }
             } else {
@@ -468,6 +517,7 @@ impl BindingRun<'_> {
             }
         }
         drop(res_tx);
+        shared.events.rows(shared.progress.event(true));
         records.sort_by_key(|(i, _, _)| *i);
 
         // The summary, and what a message attaching this output finds.
@@ -1102,6 +1152,9 @@ fn worker(
         };
         if record.status != "rendered" {
             write_record(shared, &record);
+            shared
+                .progress
+                .row_done(&shared.events, record.status == "failed");
         }
         if record.status == "failed" {
             let msg = record.error.as_ref().map(|e| e.message.as_str()).unwrap_or("");

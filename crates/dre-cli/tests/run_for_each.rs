@@ -51,7 +51,9 @@ fn one_file_per_driver_row_with_only_its_rows() {
     let p = project(REPORT, &[]);
     p.dre("run", &["statements"])
         .ok()
-        .says("3 succeeded, 0 skipped, 0 failed");
+        .says("3 succeeded, 0 skipped, 0 failed")
+        // Without a terminal, progress is a line every 30 s: a short run prints none.
+        .lacks("Progress");
     // Each file holds only its member's holdings; the driver isn't a section.
     assert_eq!(
         p.read("target/run/statements/default/statement/101.csv"),

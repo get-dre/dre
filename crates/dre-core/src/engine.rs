@@ -60,6 +60,8 @@ pub enum RunEvent {
         label: String,
         running: bool,
     },
+    /// A per-row output's progress. Sent as it happens, never held in a block.
+    Rows(crate::run::RowProgress),
     /// One Binding's events, in order, when Bindings run at once: shown together so their lines
     /// don't interleave.
     Block(Vec<RunEvent>),
@@ -128,6 +130,11 @@ impl Events {
         self.emit(RunEvent::Warn(msg.to_string()));
     }
 
+    /// Progress is live even when the Binding's other events are held for a block.
+    pub fn rows(&self, progress: crate::run::RowProgress) {
+        self.emit_now(RunEvent::Rows(progress));
+    }
+
     pub fn compiled(&self, plan: &BindingPlan) {
         self.emit(RunEvent::Compiled(plan.clone()));
     }
@@ -188,6 +195,7 @@ pub fn dispatch(ui: &mut dyn Ui, e: RunEvent, plugin_log: &LogSink, sql_log: &Lo
         RunEvent::PluginLog(plugin, line) => plugin_log(&plugin, &line),
         RunEvent::Sql(label, sql) => sql_log(&label, &sql),
         RunEvent::Running { label, running } => ui.running(&label, running),
+        RunEvent::Rows(p) => ui.rows(&p),
         RunEvent::Block(events) => {
             for e in events {
                 dispatch(ui, e, plugin_log, sql_log);
