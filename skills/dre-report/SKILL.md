@@ -1,16 +1,23 @@
 ---
 name: dre-report
-description: Create or change a DRE report - the SQL files and report YAML, its tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat), headline messages built from the results (several outputs per report, conditional sends with when:, number filters) and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, to add a tab, a column format, a variable, a destination or a recipient to an existing one, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Create or change a DRE report, guided - the SQL and report YAML, tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet, PDF and HTML documents from a template), one copy per member or client (for_each), what happens with no data (on_empty), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat) with rates, retries and held deliveries, headline messages, and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, variable, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "3.5.0"
-  dre: ">=0.4.1, <0.7.0"
+  version: "4.0.0"
+  dre: ">=0.6.0, <0.7.0"
 ---
 
 # Write or change a DRE report
 
-You design a report around what the user needs, then write its files following DRE's
-conventions, and end with `dre validate` passing.
+You design a report around what the user needs, asking one question at a time, then write its
+files following DRE's conventions, and end with `dre validate` passing.
+
+DRE's options are many, so load only the topic you need, from `references/topics/`, when the
+conversation reaches it: `formats.md` (choosing and setting up a format), `documents.md` (pdf and
+html), `per-row.md` (`for_each`), `no-data.md` (`on_empty`), `delivery.md` (destinations,
+messages, `rate`, retries, `hold`). Each lists the questions to ask, with recommended answers, and
+the YAML they write. When the user asks what an option means, explain it the `dre-explain` way
+before they choose.
 
 <!-- BEGIN shared/secrets.md -->
 ### Secrets: rules no request overrides
@@ -63,8 +70,20 @@ shell, then tell me and I'll check it's set without showing it."
   waiting for the user's answer, even when you could carry on alone. Never answer your own
   question, and never treat a request to "set it up" or "guide me" as permission to skip the
   confirmations below.
-- **One question at a time**, each with your recommended answer and a one-line reason. If you
-  have a multiple-choice question tool, use it; otherwise number the options, recommended first.
+- **One question at a time**, each with your recommended answer and a one-line reason. Say what
+  you're asking in plain words, and define any DRE term it uses (a Set, a Binding, a driver
+  query). When the options are known, offer them: with a multiple-choice question tool if you
+  have one, otherwise numbered, recommended first, at most four, plus "or tell me something
+  else". When they aren't (a table, a recipient, a layout), ask for free text and give an
+  example answer. When the choice changes the YAML, show the few lines each option would write.
+- **Several open decisions?** List them in a line each if that helps, but ask only the first
+  one, and the next after the user answers. A summary at the end of a step is no exception.
+- **Say what you don't know.** When the user's tool, file format or system is one you don't know
+  well, say so plainly and ask for what would help: an export, a screenshot, a sample file, a
+  description. The more they share, the better the result. Never present a guess as a fact.
+- **Explain before asking someone to choose.** When the user asks what an option does, or what a
+  report's YAML would do, follow the `dre-explain` skill (or, without it, the docs index below):
+  what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
 - **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
@@ -140,8 +159,11 @@ output:
 - Report keys: `queries`, `output`, `vars`, `profile` (a connection other than the project's
   `default_profile`), `sets`, `default_set`, `tags`, `timezone`, `description`, `meta`, `var_schema`. Schedules live in `schedules.yml`,
   never in a report (see Scheduling a report). Query entry keys:
-  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`. Output keys DRE owns: `format`,
-  `destination`, `template`, `extension`; every other output key is the format plugin's option.
+  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`, `on_empty`. Output keys DRE
+  owns: `name`, `format`, `queries`, `when`, `destination`, `template`, `for_each`, `file_name`,
+  `on_empty`, `extension`; every other output key is the format plugin's option. Destination
+  entry keys DRE owns: `profile`, `path`, `attach`, `hold`, `rate`, `burst`; the rest are the
+  destination plugin's.
 
 ## AI context
 
@@ -167,10 +189,11 @@ Do this before anything else. It needs no network.
      `<version>`, so some advice may be out of date", and offer to update the skills (the
      `dre-upgrade` skill). If the user declines, carry on, and end every step's summary with
      "(skills written for dre `<range>`)" so the warning stays visible.
-   - **Older than the range:** offer to update dre (`dre-upgrade`), or to install the skills
-     release that matches their dre (each `skills-v*` release on
-     https://github.com/get-dre/dre/releases states its range). Carry on only if they choose
-     to, with the same visible warning.
+   - **Older than the range:** start your first reply with it, before anything else you
+     answer: "These skills need dre `<range>` and you have `<version>`." Then offer to update
+     dre (`dre-upgrade`), or to install the skills release that matches their dre (each
+     `skills-v*` release on https://github.com/get-dre/dre/releases states its range). Carry on
+     only if they choose to, with the same visible warning.
    - **`dre` not found:** hand off to the `dre-install` skill. If it isn't installed, point to
      https://github.com/get-dre/dre#install and stop here.
 3. Don't repeat the check in this conversation unless dre has been installed or updated since.
@@ -193,17 +216,25 @@ No project yet? Hand off to `dre-setup` first.
 
 Ask, one at a time, only what the request didn't say:
 
-1. **What it shows**: the questions it answers, the tables it reads from. Offer to look at the
-   tables' columns with a query the user approves, rather than guessing column names.
-2. **Who gets it**: people (who read xlsx), people who only want the number (a headline message
-   in chat or an email body, often next to the file; see step 6b), or a system (which needs an
-   exact csv or fixed-width layout; ask for the spec).
-3. **Format**: recommend xlsx for people, csv or delimited for most systems, fixed-width when a
-   spec demands it, parquet for data tools.
-4. **How often**, and for what period: daily, monthly... This decides the date variables (REP-2)
+1. **What it shows**: the questions it answers, the tables it reads from. Look up the
+   tables' columns rather than guessing them: on a `dev` or local connection (a DuckDB file,
+   a dev database), run a read-only lookup without asking (`dre catalog`, or `dre query` with a
+   `describe`/`information_schema` query). Ask first only when the connection reads
+   production (RUN-2).
+2. **Who gets it, and as what** (`topics/formats.md`): people working with numbers (xlsx), people
+   reading a branded document (pdf, `topics/documents.md`), people who only want the number (a
+   headline message, step 6b), or a system (an exact csv or fixed-width layout: ask for the spec).
+3. **How often**, and for what period: daily, monthly... This decides the date variables (REP-2)
    and later the schedule.
-5. **Variants**: the same report for several clients or regions? Then Sets (REP-4).
-6. **Where it goes**: the local `target/run/` folder only (a good start), or destinations too.
+4. **Variants**: the same report for a few clients or regions with their own settings (Sets,
+   REP-4), or one copy per row of the data, such as a statement per member (`for_each`,
+   `topics/per-row.md`)?
+5. **Quiet days**: can a query return nothing, and what should happen then (`topics/no-data.md`)?
+6. **Where it goes** (`topics/delivery.md`): the local `target/run/` folder only (a good start),
+   or destinations too, and whether real sends need a review first (`hold`, RUN-9).
+
+Someone moving a report from SSRS, Crystal or another tool: hand off to `dre-port`, which reads
+the old report and checks the new one against it.
 
 Then propose the design in a few lines: the folder, the tabs in order with what each shows,
 the variables with their defaults, the format and its options, the destinations. Ask for a yes
@@ -231,13 +262,18 @@ before writing.
 
 ### Step 5: the format
 
-Use only options from `references/plugins/format-<format>.md`. For xlsx:
+Load `references/topics/formats.md` (and `documents.md` for pdf or html). Use only options from
+`references/plugins/format-<format>.md`. For xlsx:
 
 - number and date formats per column (`columns: {amount: {format: "#,##0.00"}}`, per query or
   output-wide), and `date_format` for every date column;
 - row formulas (`formula: "={qty}*{price}"`, with a placeholder column selected in SQL) and
   totals rows (`total: sum`), explained in the reference's docs section;
 - a branded template (`template:`) when they have an Excel file to fill.
+
+For pdf and html: a template next to the YAML, its headline numbers from their own small query
+(REP-10), legal text in files (REP-11), and the design loop (`--output-json` once, then
+`--from-results` for each tweak), all in `topics/documents.md`.
 
 For fixed-width, take the layout from the user's spec, column by column (`width` or `picture`,
 alignment, padding, decimals, sign); confirm the layout back to them as a table. For csv and
@@ -246,7 +282,7 @@ expects.
 
 ### Step 6: destinations
 
-Each entry of `output.destination` names a destination profile, an optional `path`, and that
+Load `references/topics/delivery.md`. Each entry of `output.destination` names a destination profile, an optional `path`, and that
 plugin's options (recipients, channel, message). Use only options and fields from
 `references/plugins/destination-<type>.md`. Several destinations are a list, delivered in order.
 
@@ -258,13 +294,14 @@ plugin's options (recipients, channel, message). Use only options and fields fro
 - Recipients and channels belong to the report; credentials stay in the profile.
 - Delivering to real people is for `dre-run` to confirm (RUN-2); writing the YAML delivers
   nothing.
+- Many sends (a per-row output, a long list): ask the service's limit and set `rate:`; for
+  regulatory or client-facing sends, recommend `hold: true` (RUN-9).
 
-### Step 6b: messages and several outputs (dre 0.3 and later)
+### Step 6b: messages and several outputs
 
 When people want the number rather than the file ("post yesterday's revenue to #finance"), add a
 `message` output. It's built into dre (no plugin): it renders the results into a title and a few
-lines of text. Check `dre --version` first: messages, `output:` lists, `when:`, `attach:`, the
-number filters and `locale:` need 0.3; on 0.2, say so and offer `dre-upgrade`.
+lines of text.
 
 - **Aggregate in SQL** (REP-9): write a small headline query (one row: the total, the change),
   rather than pointing the message at the detail query.
@@ -302,6 +339,13 @@ output:
       - {profile: team_slack, channel: "#finance", attach: [workbook]}
 ```
 
+### Step 6c: one copy per row, and no data
+
+- **Per-row** (`topics/per-row.md`): a driver query, an opaque key (REP-12), `each.*` in paths
+  and addresses, `on_row_error`, and a `{deliver: false}` dev entry before any test (RUN-8).
+- **No data** (`topics/no-data.md`): `on_empty` on the output or a query; `count(*)` is never
+  empty, so use `when:` on a count.
+
 ### Step 7: validate
 
 Run `dre validate -s <report>`. It checks the YAML, the SQL's templates, every format and
@@ -320,6 +364,10 @@ Read it first. Change only what was asked; keep the rest byte for byte. Common c
 - **Add a destination:** turn a single `destination:` map into a list if needed, and add the
   entry; the existing one stays first (it names the local file).
 - **Add a recipient:** extend `to`, `cc` or `bcc` on the email entry.
+- **Make it a PDF or HTML document:** add `document` to `dependencies.yml`, a template next to the
+  YAML, and `format: pdf` (or a second output, to keep the xlsx); `topics/documents.md`.
+- **One per client or member:** `for_each` on the output, with a driver query and a key;
+  `topics/per-row.md`.
 - **Add a headline message:** turn `output:` into a list, name the existing output (its file is
   then `<name>.<ext>`; keep the report's name as `name:` if file names matter), add a headline
   query and a `message` output (step 6b).
@@ -329,10 +377,7 @@ Show the diff before writing when the change touches more than one file. Then st
 ## Scheduling a report
 
 DRE doesn't fire schedules; the user's orchestrator runs `dre run --schedule <name>`. You write
-the schedule and prove it fires when they mean. Shared timings, `except`/`also`, `enabled`,
-`starting`/`at` on rules and `dre schedule ls` need dre 0.1.2 or later: if `dre --version` is
-older, say so and offer `dre-upgrade` first; without it, write a plain cron schedule and say it
-can't be previewed.
+the schedule and prove it fires when they mean.
 
 1. **Turn the words into a timing**, and ask (one question) only what's missing: the time of
    day and the timezone. Recommend the user's own timezone, never UTC by default (SCH-1).
@@ -393,6 +438,11 @@ Then point to `dre-run` for running a firing or wiring the orchestrator.
   `attach:` sent to `teams`/`google_chat`; deliver the file elsewhere and link it with
   `outputs.<name>.location`. "it inherits 2 outputs, so it's unclear which one to change": give
   the Set's `output:` override the `name:` of the output it changes.
+- **Documents:** a template or include not found (it's looked for next to the YAML, then in
+  each parent folder, then anywhere unique in the project); an image or stylesheet URL (refused:
+  use a file in the project); a value that isn't there (`results.q.first.amout`) names the line.
+- **Per-row:** a file destination's `path` without `each.*`; a key missing from one of the
+  output's queries; attaching a per-row output with a different driver or key.
 - **`schedule-needs-anchor`, `schedule-no-time`:** add `starting` (the first date) or `at`
   (`HH:MM`). **`unknown-timing`:** the name isn't in `timings.yml`. **A schedule using `timing:`
   can't set** `cron`, `timezone`...: move those into the timing, or drop `timing:`.

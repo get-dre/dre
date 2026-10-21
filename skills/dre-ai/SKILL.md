@@ -3,8 +3,8 @@ name: dre-ai
 description: "Prepare AI context for DRE reports: descriptions, business questions, declared inputs, inherited context and upstream table documentation. Use when an analyst wants reports ready for MCP discovery or needs to improve retrieval. Does not enable exposure."
 license: GPL-3.0-only
 metadata:
-  version: "3.5.0"
-  dre: ">=0.4.1, <0.7.0"
+  version: "4.0.0"
+  dre: ">=0.6.0, <0.7.0"
 ---
 
 # Prepare AI context for DRE reports
@@ -26,10 +26,11 @@ Do this before anything else. It needs no network.
      `<version>`, so some advice may be out of date", and offer to update the skills (the
      `dre-upgrade` skill). If the user declines, carry on, and end every step's summary with
      "(skills written for dre `<range>`)" so the warning stays visible.
-   - **Older than the range:** offer to update dre (`dre-upgrade`), or to install the skills
-     release that matches their dre (each `skills-v*` release on
-     https://github.com/get-dre/dre/releases states its range). Carry on only if they choose
-     to, with the same visible warning.
+   - **Older than the range:** start your first reply with it, before anything else you
+     answer: "These skills need dre `<range>` and you have `<version>`." Then offer to update
+     dre (`dre-upgrade`), or to install the skills release that matches their dre (each
+     `skills-v*` release on https://github.com/get-dre/dre/releases states its range). Carry on
+     only if they choose to, with the same visible warning.
    - **`dre` not found:** hand off to the `dre-install` skill. If it isn't installed, point to
      https://github.com/get-dre/dre#install and stop here.
 3. Don't repeat the check in this conversation unless dre has been installed or updated since.
@@ -60,8 +61,7 @@ defaults so context compilation resolves tables. Record business definitions in 
 Constrain every input the agent may vary (AI-6). Prefer `date`, `integer`, `number` or
 `boolean`. For a string, propose an `allowed` list when the values are known (regions, product
 lines), else a `pattern` matching the whole value plus a `max_length` (a customer code:
-`pattern: '[A-Z]{3}[0-9]{4}'`, `max_length: 7`); ask the user to confirm it. `pattern` and
-`max_length` need dre 0.4.3 or later; on an older dre use `allowed`. Explain that a free-text
+`pattern: '[A-Z]{3}[0-9]{4}'`, `max_length: 7`); ask the user to confirm it. Explain that a free-text
 string, or an array or object without `allowed`, keeps the report from being exposed: the
 value is rendered into the SQL, so the model could change the reviewed query.
 
