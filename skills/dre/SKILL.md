@@ -135,10 +135,11 @@ Do this before anything else. It needs no network.
      `<version>`, so some advice may be out of date", and offer to update the skills (the
      `dre-upgrade` skill). If the user declines, carry on, and end every step's summary with
      "(skills written for dre `<range>`)" so the warning stays visible.
-   - **Older than the range:** offer to update dre (`dre-upgrade`), or to install the skills
-     release that matches their dre (each `skills-v*` release on
-     https://github.com/get-dre/dre/releases states its range). Carry on only if they choose
-     to, with the same visible warning.
+   - **Older than the range:** start your first reply with it, before anything else you
+     answer: "These skills need dre `<range>` and you have `<version>`." Then offer to update
+     dre (`dre-upgrade`), or to install the skills release that matches their dre (each
+     `skills-v*` release on https://github.com/get-dre/dre/releases states its range). Carry on
+     only if they choose to, with the same visible warning.
    - **`dre` not found:** hand off to the `dre-install` skill. If it isn't installed, point to
      https://github.com/get-dre/dre#install and stop here.
 3. Don't repeat the check in this conversation unless dre has been installed or updated since.
