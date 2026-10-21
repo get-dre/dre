@@ -209,6 +209,11 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
     let log = events.plugin_log();
     let mut plugins: HashMap<String, dre_protocol::host::PluginProcess> = HashMap::new();
     let pacer = crate::rate::Pacer::default();
+    let mut progress = RowsLeft::new(
+        held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
+        opts.rate,
+    );
+    progress.start(events);
     for e in held.entries.iter().filter(|e| chosen(e)) {
         if done.contains(&e.id) {
             outcome.already += 1;
@@ -249,6 +254,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             ));
             events.warn(&format!("  {}: {}", e.id, r.error.as_deref().unwrap_or_default()));
             outcome.released.push(r);
+            progress.entry_done(e, true, events);
             continue;
         }
         let dest = RowDest {
@@ -295,8 +301,10 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
                 events.warn(&format!("  {}: {msg}", e.id));
             }
         }
+        progress.entry_done(e, r.status == "failed", events);
         outcome.released.push(r);
     }
+    progress.finish(events);
     for (_, p) in plugins {
         let _ = p.close();
     }
@@ -360,4 +368,150 @@ fn write_released(release_dir: &Path, run_id: &str, done: &BTreeSet<String>) -> 
         serde_json::to_string(&file).unwrap_or_default().as_bytes(),
     )
     .map_err(|e| Fail::from(e.to_string()))
+}
+
+/// A release's progress in rows, per output: a row is done once each of its held deliveries
+/// this release sends has gone (or failed, or was refused).
+struct RowsLeft {
+    outputs: Vec<crate::run::RowProgress>,
+    /// Per (output label, row): deliveries still to go, and whether one failed.
+    rows: HashMap<(String, String), (usize, bool)>,
+}
+
+impl RowsLeft {
+    fn label(e: &HeldEntry) -> String {
+        match &e.output {
+            Some(o) => format!("output `{o}`"),
+            None => "output".to_string(),
+        }
+    }
+
+    /// A row's key: an entry without one (not a per-row output) is a row of its own.
+    fn row(e: &HeldEntry) -> (String, String) {
+        (Self::label(e), e.key.clone().unwrap_or_else(|| e.id.clone()))
+    }
+
+    fn new<'a>(pending: impl Iterator<Item = &'a HeldEntry>, rate: Option<crate::rate::Rate>) -> RowsLeft {
+        let mut p = RowsLeft {
+            outputs: Vec::new(),
+            rows: HashMap::new(),
+        };
+        for e in pending {
+            let label = Self::label(e);
+            let slot = p.rows.entry(Self::row(e)).or_insert((0, false));
+            slot.0 += 1;
+            let new_row = slot.0 == 1;
+            match p.outputs.iter_mut().find(|o| o.output == label) {
+                Some(o) => {
+                    if new_row {
+                        o.total += 1;
+                    }
+                    o.rate = o.rate.or(rate.or(e.rate));
+                }
+                None => p.outputs.push(crate::run::RowProgress {
+                    output: label,
+                    done: 0,
+                    failed: 0,
+                    total: 1,
+                    rate: rate.or(e.rate),
+                    finished: false,
+                }),
+            }
+        }
+        p
+    }
+
+    fn start(&self, events: &Events) {
+        for o in &self.outputs {
+            events.rows(o.clone());
+        }
+    }
+
+    fn entry_done(&mut self, e: &HeldEntry, failed: bool, events: &Events) {
+        let Some(slot) = self.rows.get_mut(&Self::row(e)) else {
+            return;
+        };
+        slot.0 = slot.0.saturating_sub(1);
+        slot.1 |= failed;
+        if slot.0 > 0 {
+            return;
+        }
+        let row_failed = slot.1;
+        let label = Self::label(e);
+        if let Some(o) = self.outputs.iter_mut().find(|o| o.output == label) {
+            o.done += 1;
+            if row_failed {
+                o.failed += 1;
+            }
+            events.rows(o.clone());
+        }
+    }
+
+    fn finish(&mut self, events: &Events) {
+        for o in &mut self.outputs {
+            o.finished = true;
+            events.rows(o.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::RunEvent;
+
+    fn entry(output: &str, key: &str, n: usize) -> HeldEntry {
+        HeldEntry {
+            id: format!("{output}/{key}/{n}"),
+            output: Some(output.into()),
+            key: Some(key.into()),
+            profile: "mail".into(),
+            path: None,
+            options: JsonMap::new(),
+            attach: Vec::new(),
+            rate: Some(crate::rate::Rate::parse("50/second").unwrap()),
+            message: None,
+            files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_row_is_done_once_all_its_deliveries_are() {
+        // Row `a` has two deliveries (email and a copy), row `b` one.
+        let entries = [
+            entry("email", "a", 0),
+            entry("email", "a", 1),
+            entry("email", "b", 0),
+        ];
+        let (tx, rx) = std::sync::mpsc::channel();
+        let events = Events::new(tx);
+        let mut p = RowsLeft::new(entries.iter(), None);
+        p.start(&events);
+        p.entry_done(&entries[0], false, &events);
+        p.entry_done(&entries[1], true, &events);
+        p.entry_done(&entries[2], false, &events);
+        p.finish(&events);
+        drop(events);
+        let seen: Vec<(u64, u64, u64, bool)> = rx
+            .try_iter()
+            .map(|e| match e {
+                RunEvent::Rows(r) => {
+                    assert_eq!(r.output, "output `email`");
+                    assert_eq!(r.rate.map(|r| r.shown()).as_deref(), Some("50/second"));
+                    (r.done, r.failed, r.total, r.finished)
+                }
+                _ => panic!("only progress"),
+            })
+            .collect();
+        // Started; `a` done (one delivery failed, so the row failed); `b` done; finished.
+        assert_eq!(
+            seen,
+            vec![
+                (0, 0, 2, false),
+                (1, 1, 2, false),
+                (2, 1, 2, false),
+                (2, 1, 2, true)
+            ]
+        );
+    }
 }

@@ -7,6 +7,7 @@ mod init;
 mod ls;
 mod output;
 mod plugins;
+mod progress;
 mod schedule;
 mod signals;
 mod system;
@@ -1104,14 +1105,22 @@ fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
         },
     };
     let (tx, rx) = std::sync::mpsc::channel();
-    let events = dre_core::engine::Events::new(tx);
-    let result = dre_core::release::release(&project, &opts, &events);
-    drop(events);
-    for e in rx.try_iter() {
-        if let dre_core::engine::RunEvent::Warn(m) = e {
-            printer.line(output::Tone::Warn, "Warning", m.trim());
+    // The release runs on its own thread; its warnings and progress show as they happen.
+    let result = std::thread::scope(|s| {
+        let worker = s.spawn(|| {
+            let events = dre_core::engine::Events::new(tx);
+            dre_core::release::release(&project, &opts, &events)
+        });
+        let mut ui = printer.clone();
+        for e in rx {
+            match e {
+                dre_core::engine::RunEvent::Warn(m) => printer.line(output::Tone::Warn, "Warning", m.trim()),
+                dre_core::engine::RunEvent::Rows(p) => dre_core::run::Ui::rows(&mut ui, &p),
+                _ => {}
+            }
         }
-    }
+        worker.join().expect("the release thread doesn't panic")
+    });
     match result {
         Err(e) => {
             printer.error(&e.message);

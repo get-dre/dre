@@ -4,8 +4,9 @@
 //! database. It goes with its run when runs are pruned, so it never needs rotating; overlapping
 //! runs each write their own. Other commands write to the console only.
 //!
-//! Lines go to stdout. The progress bar goes to stderr and only appears when stderr is a
-//! terminal. Colour follows `--color`, `NO_COLOR` and whether stdout is a terminal.
+//! Lines go to stdout. The progress bars (Bindings, and each per-row output's rows) go to stderr
+//! and only appear when stderr is a terminal; without one, row progress is a `Progress` line at
+//! most every 30 seconds. Colour follows `--color`, `NO_COLOR` and whether stdout is a terminal.
 
 use std::fs::File;
 use std::io::{IsTerminal, Write};
@@ -16,7 +17,9 @@ use std::time::{Duration, Instant};
 use anstyle::{AnsiColor, Effects, Style};
 use dre_core::run::{BindingOutcome, Level, Status, Ui};
 use dre_protocol::host::LogSink;
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+
+use crate::progress::{RowMeter, describe, short_name};
 use serde_json::json;
 
 // Protect strings and keys while they still hold literal values, including JSON fragments
@@ -71,11 +74,21 @@ fn style(t: Tone) -> Style {
 
 const DIM: Style = Style::new().effects(Effects::DIMMED);
 
+/// One per-row output's progress: its meter, and its bar on a terminal.
+struct Rows {
+    meter: RowMeter,
+    bar: Option<ProgressBar>,
+}
+
 struct Inner {
     verbosity: Verbosity,
     format: LogFormat,
     color: bool,
     bar: Option<ProgressBar>,
+    /// Draws the Bindings bar and the row bars together (a terminal only).
+    multi: Option<MultiProgress>,
+    /// Each per-row output in progress, by its label.
+    rows: std::collections::HashMap<String, Rows>,
     log: Option<LogFile>,
     /// `dre run`: each Binding logs to `dre.log` in its run folder.
     run_logs: bool,
@@ -114,6 +127,8 @@ impl Printer {
                 format,
                 color,
                 bar: None,
+                multi: None,
+                rows: Default::default(),
                 log: None,
                 run_logs: false,
                 header: Vec::new(),
@@ -270,6 +285,11 @@ impl Printer {
         if let Some(b) = i.bar.take() {
             b.finish_and_clear();
         }
+        for (_, r) in i.rows.drain() {
+            if let Some(b) = r.bar {
+                b.finish_and_clear();
+            }
+        }
         let (ok, failed) = (i.succeeded, i.failed);
         let secs = i.started.elapsed().as_secs_f64();
         let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
@@ -307,9 +327,81 @@ impl Inner {
             .collect::<Vec<_>>()
             .join("\n");
         let out = format!("{verb}  {text}");
-        match &self.bar {
-            Some(b) => b.suspend(|| println_stdout(&out)),
-            None => println_stdout(&out),
+        self.suspend(|| println_stdout(&out));
+    }
+
+    /// Run `f` (which prints) with the progress bars out of the way.
+    fn suspend<R>(&self, f: impl FnOnce() -> R) -> R {
+        match (&self.multi, &self.bar) {
+            (Some(m), _) => m.suspend(f),
+            (None, Some(b)) => b.suspend(f),
+            (None, None) => f(),
+        }
+    }
+
+    /// The bars' shared drawing area, made on first use.
+    fn multi(&mut self) -> MultiProgress {
+        self.multi
+            .get_or_insert_with(|| MultiProgress::with_draw_target(ProgressDrawTarget::stderr()))
+            .clone()
+    }
+
+    fn rows(&mut self, p: &dre_core::run::RowProgress) {
+        if self.verbosity == Verbosity::Quiet {
+            return;
+        }
+        let now = Instant::now();
+        if p.finished {
+            if let Some(Rows { bar: Some(b), .. }) = self.rows.remove(&p.output) {
+                b.finish_and_clear();
+            }
+            return;
+        }
+        let tty = self.format == LogFormat::Text && std::io::stderr().is_terminal();
+        if tty && !self.rows.get(&p.output).is_some_and(|r| r.bar.is_some()) {
+            let bar = self.multi().add(ProgressBar::new(p.total));
+            bar.set_style(
+                ProgressStyle::with_template("{prefix:>10.cyan.bold} [{bar:28.green/dim}] {wide_msg}")
+                    .unwrap()
+                    .progress_chars("█▉░"),
+            );
+            bar.set_prefix(short_name(&p.output).to_string());
+            bar.enable_steady_tick(Duration::from_millis(250));
+            self.rows.insert(
+                p.output.clone(),
+                Rows {
+                    meter: RowMeter::new(now),
+                    bar: Some(bar),
+                },
+            );
+        }
+        let r = self.rows.entry(p.output.clone()).or_insert_with(|| Rows {
+            meter: RowMeter::new(now),
+            bar: None,
+        });
+        r.meter.record(now, p.done);
+        let speed = r.meter.speed(now);
+        if let Some(b) = &r.bar {
+            b.set_length(p.total);
+            b.set_position(p.done);
+            b.set_message(describe(p, speed, " · "));
+            return;
+        }
+        if !r.meter.line_due(now) {
+            return;
+        }
+        if self.format == LogFormat::Json {
+            let left = speed
+                .filter(|s| *s > 0.0)
+                .map(|s| ((p.total - p.done) as f64 / s).ceil() as u64);
+            self.json(json!({
+                "event": "rows_progress", "output": p.output, "done": p.done, "total": p.total,
+                "failed": p.failed, "rate": p.rate.map(|r| r.shown()), "rows_per_second": speed,
+                "seconds_left": left,
+            }));
+        } else {
+            let text = format!("{}: {}", p.output, describe(p, speed, ", "));
+            self.line(Tone::Step, "Progress", &text, Level::Info);
         }
     }
 
@@ -339,10 +431,7 @@ impl Inner {
     fn json(&self, mut v: serde_json::Value) {
         v["ts"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         let line = dre_core::secrets::to_json_line(&v).expect("serializing a serde_json::Value cannot fail");
-        match &self.bar {
-            Some(b) => b.suspend(|| print_line(&line)),
-            None => print_line(&line),
-        }
+        self.suspend(|| print_line(&line));
     }
 
     fn file_log(&mut self, level: &str, msg: &str) {
@@ -444,7 +533,7 @@ impl Ui for Printer {
             i.print(Tone::Note, "Running", &text);
         }
         if i.verbosity != Verbosity::Quiet && std::io::stderr().is_terminal() && bindings > 0 {
-            let bar = ProgressBar::with_draw_target(Some(bindings as u64), ProgressDrawTarget::stderr());
+            let bar = i.multi().add(ProgressBar::new(bindings as u64));
             bar.set_style(
                 ProgressStyle::with_template("{spinner:.green} [{bar:28.green/dim}] {pos}/{len} {wide_msg}")
                     .unwrap()
@@ -637,7 +726,10 @@ impl Ui for Printer {
     }
 
     fn choose_set(&mut self, report: &str, sets: &[String]) -> Result<Option<String>, String> {
-        let bar = self.inner.lock().unwrap().bar.clone();
+        let (multi, bar) = {
+            let i = self.inner.lock().unwrap();
+            (i.multi.clone(), i.bar.clone())
+        };
         let ask = || -> Result<Option<String>, String> {
             eprintln!("Report `{report}` has several Sets:");
             for (i, s) in sets.iter().enumerate() {
@@ -665,9 +757,10 @@ impl Ui for Printer {
                 }
             }
         };
-        match bar {
-            Some(b) => b.suspend(ask),
-            None => ask(),
+        match (multi, bar) {
+            (Some(m), _) => m.suspend(ask),
+            (None, Some(b)) => b.suspend(ask),
+            (None, None) => ask(),
         }
     }
 
@@ -680,6 +773,10 @@ impl Ui for Printer {
                 .unwrap()
                 .file_log("DEBUG", &format!("SQL {label}:{body}"));
         })
+    }
+
+    fn rows(&mut self, progress: &dre_core::run::RowProgress) {
+        self.inner.lock().unwrap().rows(progress);
     }
 
     fn plugin_log(&self) -> LogSink {
