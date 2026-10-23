@@ -74,7 +74,9 @@ output:
 ```
 
 - **What goes in:** the output's files and every `attach:`ed output's files, flat (no folders).
-  Two files with one name are an error, never renamed. A message can't go in a zip.
+  Two files with one name are an error, never renamed: `dre validate` reports it, or for a
+  per-row output (whose names render per row) the row fails before anything is delivered. A
+  message can't go in a zip.
 - **Name:** the destination's `path` (it must end in `.zip`), or the email's `attachment_name`;
   with neither, `<output>.zip` (a per-row output: the row file's name, like `101.zip`).
 - **Every destination:** local, S3, Azure, GCS, SFTP, FTP, Databricks Volumes and email all
@@ -99,9 +101,20 @@ never masked in what DRE delivers: the PDFs, zips and messages, and the held fil
 `dre release`, are the data. A password read with `env_var()` in `password:` or
 `zip.password` is masked the same way.
 
-`dre validate` warns when `password:` or `zip.password` reads `each.<column>` of a column not
-in the driver query's `secret_columns`. Like other secret masking, values shorter than 4
-characters aren't masked; don't use passwords that short.
+Every secret value is masked, however short. One under 4 characters (a two-digit PIN) is masked
+where it stands alone, not inside a longer word or number, so `PIN 73` becomes `PIN *****` while
+the year `2073` stays readable. `mask_secrets: false` in `dre_project.yml` turns all masking off.
+
+`dre validate` warns when a password would show:
+
+- `password:` or `zip.password` reads `each.<column>` or `results.<query>` of a column not in
+  that query's `secret_columns`;
+- it's written in the YAML as plain text (it's masked in DRE's output, but anyone who reads the
+  project sees it), or reads `var()` (vars show in the run's log): use `env_var()` or a secret
+  column;
+- a message, title or path of a per-row output prints a driver column named like a password
+  (`password`, `pwd`, `pin`, `passcode`, `secret`, or ending in `_password`...) that isn't secret;
+- a password list goes to the destination profile that receives the files it unlocks.
 
 `--output-json` saves secret columns masked, so a later `--from-results` replays `*****`
 instead of the passwords.

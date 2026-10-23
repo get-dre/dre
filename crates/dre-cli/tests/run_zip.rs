@@ -235,16 +235,16 @@ fn zip_mistakes_are_validate_errors_or_run_errors() {
         format!("{PACK}    destination: {{profile: outbox, path: out/p.csv, attach: workbook}}\n");
     let (p, _) = project(&no_zip_attach);
     p.dre("validate", &[]).failed().says("or to an entry with `zip:`");
-    // Two files of one name: the run fails before delivering anything (zip_pack's unit tests
-    // cover a clash only the zip sees).
+    // Two files of one name in one zip: a validate error, so nothing runs.
     let clash = "queries: [summary, fees]\noutput:\n\
         \x20 - name: detail_summary\n    format: csv\n    queries: [summary]\n\
         \x20 - name: detail\n    format: csv\n    queries: [summary, fees]\n\
         \x20   destination: {profile: outbox, path: out/p.zip, zip: true, attach: detail_summary}\n";
     let (p, _) = project(clash);
-    p.dre("run", &["pack"])
+    p.dre("validate", &[])
         .failed()
-        .says("both write detail_summary.csv");
+        .says("two files named `detail_summary.csv` would go into the zip");
+    p.dre("run", &["pack"]).failed();
     assert!(!p.path("out/p.zip").exists());
     // A password list sent where the protected pack goes: warned.
     let list = format!(

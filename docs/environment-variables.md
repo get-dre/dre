@@ -26,7 +26,7 @@ position: 14
 | `DRE_TIMEZONE` | The run's timezone (IANA name), above every `timezone:` setting. `--timezone` overrides it. |
 | `DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS` | How long to wait for a plugin to start (default 30,000). |
 | `NO_COLOR` | Turns off coloured output. |
-| `DRE_SECRET_*` | Values are masked as `*****` in the console, logs, JSON events, the manifest, `run_results.json`, schema snapshots and `target/compiled/`. If a source rejects SQL containing a secret, its opaque error detail is omitted because databases may truncate or transform the value. Variables that `profiles.yml` reads through `env_var()` into a secret field (`password`, `token`, `api_key`, or a field the plugin marks secret) are masked the same way; paths and hosts are not. `mask_secrets: false` in `dre_project.yml` turns masking off. Query result files are not altered. |
+| `DRE_SECRET_*` | Values are masked as `*****` in the console, logs, JSON events, the manifest, `run_results.json`, schema snapshots and `target/compiled/`. If a source rejects SQL containing a secret, its opaque error detail is omitted because databases may truncate or transform the value. Variables that `profiles.yml` reads through `env_var()` into a secret field (`password`, `token`, `api_key`, or a field the plugin marks secret) are masked the same way; paths and hosts are not. A value under 4 characters is masked only where it stands alone (not inside a longer word or number). `mask_secrets: false` in `dre_project.yml` turns masking off. Query result files are not altered. |
 
 ## Give a scheduled run stable inputs
 

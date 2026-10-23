@@ -414,3 +414,64 @@ fn validate_warns_when_a_password_column_isnt_secret() {
     v.ok();
     assert!(!v.stdout.contains("secret_columns"), "{}", v.stdout);
 }
+
+#[test]
+fn validate_warns_about_passwords_dre_would_show() {
+    let base = "queries: [members, holdings]\noutput:\n";
+    let cases = [
+        (
+            "  - name: statement\n    format: pdf\n    queries: [holdings]\n    password: Literal-pw-1\n",
+            "`password` is written in the YAML",
+        ),
+        (
+            "  - name: statement\n    format: pdf\n    queries: [holdings]\n    password: \"{{ var('pw') }}\"\n",
+            "`password` reads `var()`",
+        ),
+        (
+            "  - name: statement\n    format: pdf\n    queries: [holdings]\n    password: \"{{ results.members.first.email }}\"\n",
+            "`password` reads `results.members`, but `email` isn't in `secret_columns` of query `members`",
+        ),
+        (
+            "  - name: pin_mail\n    format: message\n    for_each: {query: members, key: member_id}\n    text: \"PIN {{ each.pin }}\"\n    destination: {profile: mail, to: \"{{ each.email }}\"}\n",
+            "`each.pin` looks like a password but isn't in `secret_columns` of query `members`",
+        ),
+    ];
+    for (output, want) in cases {
+        let (p, _) = project(&format!("{base}{output}"), &[]);
+        p.dre("validate", &[]).ok().says(want);
+    }
+    // Marked secret: no warning.
+    let (p, _) = project(
+        "queries: [{query: members, secret_columns: [email]}, holdings]\noutput:\n  - name: statement\n    format: pdf\n    queries: [holdings]\n    password: \"{{ results.members.first.email }}\"\n",
+        &[],
+    );
+    let v = p.dre("validate", &[]);
+    v.ok();
+    assert!(!v.stdout.contains("secret_columns"), "{}", v.stdout);
+}
+
+#[test]
+fn short_secret_values_are_masked_where_they_stand_alone() {
+    let (p, rec) = project(
+        "queries: [{query: members, secret_columns: [pin]}, holdings]\noutput:\n  - name: pin_mail\n    format: message\n    queries: [members]\n    title: \"PIN {{ results.members.first.pin }}\"\n    text: \"Your PIN is {{ results.members.first.pin }}, from 2073.\"\n    destination: {profile: mail, to: a@example.com}\n",
+        &[],
+    );
+    p.duckdb(
+        "data.duckdb",
+        "create or replace table members as select * from (values (101, 'Ann Lee', 'ann.lee@example.com', '73')) t(member_id, name, email, pin);",
+    );
+    let run = p.dre("run", &["statements", "-v"]);
+    run.ok();
+    let results = p.read("target/run/statements/default/run_results.json");
+    let seen = format!("{}{}{results}", run.stdout, run.stderr);
+    assert!(!seen.contains("PIN 73") && !seen.contains("is 73,"), "{seen}");
+    // Masked where it stands alone; the year that contains it stays readable.
+    assert!(results.contains("Your PIN is *****, from 2073."), "{results}");
+    // Delivered as is.
+    let d = deliveries(&rec);
+    assert!(
+        d.iter()
+            .any(|x| x["message"]["text"] == "Your PIN is 73, from 2073."),
+        "{d:?}"
+    );
+}

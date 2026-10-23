@@ -1680,10 +1680,21 @@ impl<'a> BindingRun<'a> {
         // A password option (`password:`, `zip: {password}`) read through `env_var()` is a secret.
         for o in &self.b.outputs {
             crate::secrets::register_secret_fields(&o.options, &[]);
+            let mut passwords: Vec<&str> = o
+                .options
+                .get("password")
+                .and_then(Json::as_str)
+                .into_iter()
+                .collect();
             for d in &o.destinations {
                 crate::secrets::register_secret_fields(&d.options, &[]);
-                if let Some(pw) = d.zip.as_ref().and_then(|z| z.password.as_ref()) {
-                    crate::secrets::register_secret_field(&Json::String(pw.clone()));
+                passwords.extend(d.zip.as_ref().and_then(|z| z.password.as_deref()));
+            }
+            for pw in passwords {
+                crate::secrets::register_secret_field(&Json::String(pw.to_string()));
+                // A password written in the YAML is a secret too (validate warns about it).
+                if !crate::preflight::is_templated(pw) {
+                    crate::secrets::register_values([pw.to_string()]);
                 }
             }
         }

@@ -465,7 +465,8 @@ and passwords are at least 8 characters.
 *Why:* without the mark, the passwords show in the console, `dre.log`, `run_results.json`, the
 saved results and dre-mcp's answers, which are kept and copied far more widely than the files.
 
-*Warned when:* `dre validate` reports a password column that isn't secret.
+*Warned when:* `dre validate` reports a password column that isn't secret, a password written in
+the YAML, or one read through `var()`.
 
 ### RUN-12: Prefer AES-256 zips
 
