@@ -10,7 +10,7 @@
 //! Options (defaults): `max_rows` (50,000 rows across the output's queries; more is an error,
 //! never a truncated document). html: `embed_assets` (true). pdf: `page_size` (`A4`),
 //! `orientation` (`portrait`), `margins` (`20mm`), used only where the template's CSS sets no
-//! `@page`; `author`, `subject`.
+//! `@page`; `author`, `subject`; `password` (an open password: AES-256, after rendering).
 
 mod assets;
 mod fonts;
@@ -48,6 +48,8 @@ pub struct Options {
     pub max_rows: u64,
     pub embed_assets: bool,
     pub page: pdf::PageOptions,
+    /// pdf: the open password, rendered by core.
+    pub password: Option<String>,
 }
 
 impl Options {
@@ -66,6 +68,7 @@ impl Options {
                 author: s("author"),
                 subject: s("subject"),
             },
+            password: s("password"),
         }
     }
 }
@@ -102,6 +105,11 @@ impl Format for Document {
                 .default("20mm"),
                 OptionField::new("author", String, "the PDF's author metadata"),
                 OptionField::new("subject", String, "the PDF's subject metadata"),
+                OptionField::new(
+                    "password",
+                    String,
+                    "an open password: the PDF is encrypted with AES-256 and opens only with it; Jinja like `{{ each.pdf_password }}`",
+                ),
             ]);
         } else {
             v.push(
@@ -117,12 +125,27 @@ impl Format for Document {
     }
 
     fn validate(&self, o: &Map<String, Value>) -> Vec<String> {
-        match o.get("margins").and_then(Value::as_str) {
-            Some(m) if pdf::parse_margins(m).is_err() => vec![format!(
+        let mut errs = Vec::new();
+        if let Some(m) = o.get("margins").and_then(Value::as_str)
+            && pdf::parse_margins(m).is_err()
+        {
+            errs.push(format!(
                 "`margins` `{m}` must be one to four lengths, like `20mm` or `15mm 20mm` (units mm, cm, in, pt, px)"
-            )],
-            _ => Vec::new(),
+            ));
         }
+        if o.get("password").and_then(Value::as_str) == Some("") {
+            errs.push(
+                "`password` is empty; an empty password would leave the PDF unencrypted: set one, or remove the key"
+                    .into(),
+            );
+        }
+        errs
+    }
+
+    fn unknown_option_hint(&self, key: &str) -> Option<String> {
+        (!self.pdf && key == "password").then(|| {
+            "an HTML file can't carry a password: use `format: pdf`, or zip it with `zip: {password: ...}` on the destination".into()
+        })
     }
 
     fn validate_template(&self, _options: &Map<String, Value>, t: &Value) -> (Vec<String>, Vec<String>) {
@@ -190,7 +213,23 @@ impl Format for Document {
         let base = rendered.base_dir.as_path();
         if self.pdf {
             let mut warnings = Vec::new();
-            let bytes = pdf::render_pdf(&rendered.html, root, base, &o.page, &ctx, &mut warnings)?;
+            let mut bytes = pdf::render_pdf(&rendered.html, root, base, &o.page, &ctx, &mut warnings)?;
+            if let Some(pw) = &o.password {
+                if dre_protocol::options::is_template(pw) {
+                    return Err(PluginError::new(
+                        ErrorKind::Config,
+                        "`password` holds Jinja that wasn't rendered: a templated password needs DRE 0.7.0 or later",
+                    )
+                    .into());
+                }
+                if !pw.is_ascii() {
+                    sets.warn(
+                        "the PDF password has non-ASCII characters: macOS Preview and Safari can't open such files; keep passwords to ASCII letters, digits and punctuation"
+                            .to_string(),
+                    );
+                }
+                bytes = pdf::encrypt(&bytes, pw)?;
+            }
             for w in warnings {
                 sets.warn(w);
             }

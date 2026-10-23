@@ -1,7 +1,7 @@
 [package]
 name = "dre-plugin-document"
 description = "DRE format plugins: html and pdf documents from a Jinja HTML + CSS template"
-version = "1.0.1"
+version = "1.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -21,7 +21,13 @@ chrono.workspace = true
 # repeated table headers landed after 0.40.0. Move to the first crates.io release that has them.
 fulgur = { git = "https://github.com/fulgur-rs/fulgur", rev = "8392d70ff2f79866250246d1659ed7abc6583cbb" }
 ttf-parser = "0.25"
+# PDF open passwords (`password:`): AES-256 (PDF 2.0, R6) on fulgur's output. Already in the tree
+# through fulgur. MIT.
+lopdf = { version = "0.45", default-features = false }
+# The random file key and owner password. MIT or Apache-2.0.
+getrandom = "0.4"
 
 [dev-dependencies]
 tempfile.workspace = true
 flate2 = "1.1"
+lopdf = { version = "0.45", default-features = false }
