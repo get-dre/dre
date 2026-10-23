@@ -16,7 +16,7 @@ Where: `timings.yml`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.6/timings.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.7/timings.schema.json
 ```
 
 For copyable examples and common errors, see [Shared timings](schedules.md#share-a-timing). The [glossary](glossary.md) defines DRE's terms.

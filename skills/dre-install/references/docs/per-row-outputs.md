@@ -143,6 +143,12 @@ its domain (`j***@example.com`), anything else is `*****`. The key is never mask
 files themselves are the data and are never masked. `mask_row_values: false` in
 `dre_project.yml`, or under `for_each`, shows them as they are.
 
+Passwords and other secrets in the data go further: `secret_columns:` on the driver query's entry
+masks those columns' values as `*****` everywhere DRE reports, whatever `mask_row_values` says,
+and `--output-json` saves them masked. See [Password-protect PDFs and zip report
+packs](password-protected-outputs.md), which also covers `password:` on per-row PDFs and a zip
+per row.
+
 ## Retrying failed rows
 
 A per-row run keeps its query results in its run folder (`results/`, Arrow IPC, as
@@ -217,4 +223,4 @@ destinations:
 
 ---
 
-**Previous:** [Messages](messages.md) · **Next:** [DRE practices](practices.md)
+**Previous:** [Messages](messages.md) · **Next:** [Password-protect PDFs and zip report packs](password-protected-outputs.md)

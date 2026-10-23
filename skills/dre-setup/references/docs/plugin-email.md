@@ -145,6 +145,11 @@ keep their profile defaults. Preview locally, then validate with `--target prod`
 `invalid-destination-option` identifies bad addresses or options; `delivery-failed` can mean SMTP
 authentication, server policy or an oversized attachment. Lower row counts or deliver a large
 file to storage instead. `attachment_name` applies only to a single-file output.
+
+**Zips** (DRE 0.7): `zip:` on the entry sends one zip of the output's files and every `attach:`ed
+output's, optionally with a password, so a workbook and its csvs arrive as one attachment.
+`attachment_name` (ending in `.zip`) names it, else `<output>.zip`; `max_attachment_mb` checks
+the zip. See [Password-protect PDFs and zip report packs](password-protected-outputs.md).
 See [messages](messages.md), [destination keys](reference-report.md#outputdestination),
 [error codes](reference-error-codes.md) and [destination](glossary.md#destination).
 

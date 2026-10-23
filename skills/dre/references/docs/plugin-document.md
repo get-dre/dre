@@ -38,6 +38,7 @@ Set in a report's `output:` (or `format_options.pdf` in `dre_project.yml`).
 | `margins` | string | `20mm` | Page margins as in CSS, like `20mm` or `15mm 20mm`; used when the CSS sets no `@page` margin. |
 | `author` | string |  | The PDF's author metadata. |
 | `subject` | string |  | The PDF's subject metadata. |
+| `password` | string |  | An open password: the PDF is encrypted with AES-256 and opens only with it; Jinja like `{{ each.pdf_password }}` |
 
 <!-- END generated -->
 
@@ -231,6 +232,31 @@ a coloured line on one side only, set the colour for every side and the width fo
 ```css
 header { border: 0 solid #e8873a; border-bottom-width: 2pt; }
 ```
+
+## Password-protected PDFs
+
+`password:` on a `pdf` output encrypts the file after it's laid out: it opens only with that
+password. AES-256 (PDF 2.0), with a random owner password nobody keeps, so the encryption can't
+be lifted with a blank owner password. *New in `document` 1.1.0.*
+
+```yaml
+output:
+  - name: statement
+    format: pdf
+    template: {file: statement.html}
+    for_each: {query: members, key: member_id}
+    password: "{{ each.pdf_password }}"        # or "{{ env_var('STATEMENT_PW') }}"
+```
+
+- The password is Jinja like other output values: `each.*` for one per row, `env_var()`, `var()`.
+  A templated password needs DRE 0.7.0 or later; a literal one works on 0.6.
+- An empty password is an error, never an unencrypted file. `html` takes no password: zip it
+  with a password on the destination instead ([zip packs](password-protected-outputs.md)).
+- Keep passwords to ASCII letters, digits and punctuation: macOS Preview and Safari can't open a
+  PDF whose password has other characters (Acrobat, Chrome, Edge and Firefox can). The run warns.
+- Mark the password's column in [`secret_columns:`](password-protected-outputs.md#keep-passwords-out-of-dres-records) so it never shows in
+  DRE's logs, results or previews, and send the password by another route than the file.
+- Only an open password: no print, copy or edit restrictions (readers honour those voluntarily).
 
 ## Delivery
 
