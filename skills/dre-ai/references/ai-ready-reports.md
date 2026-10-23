@@ -2,7 +2,7 @@
 title: "AI-ready reports"
 description: "Turn reviewed report logic and upstream documentation into trustworthy context for AI."
 section: build-reports
-position: 7
+position: 8
 ---
 
 # AI-ready reports

@@ -2,7 +2,7 @@
 title: "New in 0.5"
 description: "Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone."
 section: upgrading
-position: 3
+position: 4
 ---
 
 # New in 0.5

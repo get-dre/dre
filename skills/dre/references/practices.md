@@ -2,7 +2,7 @@
 title: "DRE practices"
 description: "The opinions DRE’s agent skills give, and the reasons behind them."
 section: build-reports
-position: 6
+position: 7
 ---
 
 # DRE practices
@@ -439,6 +439,43 @@ target path for the review window (`keep_runs`, a shared target path).
 
 *Why:* a maker/checker step catches a wrong figure before anyone receives it, and `dre release`
 sends exactly the files that were reviewed, refusing any that changed.
+
+### RUN-10: Send a password by another route than the file
+
+**Level:** warn
+
+A password-protected PDF or zip and its password never travel together: the password goes to
+another address (a second email, a phone number on file), or not at all because the recipient
+already knows it (a date of birth, a member number). A file → password list goes to a
+destination the client controls, never the one that receives the files.
+
+*Why:* a password that arrives with the file protects nothing from whoever intercepts or
+misdirects that delivery.
+
+*Warned when:* a password message goes to the same `to:` as the file it unlocks, or a password
+list goes to the same destination profile as the files.
+
+### RUN-11: Mark password columns secret
+
+**Level:** warn
+
+Every column a `password:` or `zip.password` reads is listed in its query's `secret_columns:`,
+and passwords are at least 8 characters.
+
+*Why:* without the mark, the passwords show in the console, `dre.log`, `run_results.json`, the
+saved results and dre-mcp's answers, which are kept and copied far more widely than the files.
+
+*Warned when:* `dre validate` reports a password column that isn't secret.
+
+### RUN-12: Prefer AES-256 zips
+
+**Level:** advise
+
+Use the default `encryption: aes256` and tell recipients to open the zip with 7-Zip, WinRAR,
+Keka or similar. Choose `zipcrypto` only for recipients who can't install anything, and only for
+data that can bear the risk.
+
+*Why:* ZipCrypto can be cracked in minutes with known-plaintext attacks; AES-256 can't.
 
 ## Schedules
 
