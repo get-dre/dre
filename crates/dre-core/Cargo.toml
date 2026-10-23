@@ -18,6 +18,9 @@ thiserror.workspace = true
 serde-saphyr.workspace = true
 schemars.workspace = true
 regex.workspace = true
+# `zip:` on destination entries: deflate, AES-256 and ZipCrypto. MIT; its AES dependencies are
+# MIT/Apache-2.0.
+zip = { version = "9", default-features = false, features = ["deflate", "aes-crypto"] }
 walkdir.workspace = true
 semver.workspace = true
 minijinja.workspace = true

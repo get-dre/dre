@@ -160,7 +160,7 @@ const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
     "file_name",
 ];
 /// The keys of a destination entry core reads; every other key is the plugin's.
-pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst"];
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst", "zip"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "name",
     "format",
@@ -602,6 +602,9 @@ pub struct Destination {
     /// `rate:` (and `burst:`): core paces deliveries to this destination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate: Option<crate::rate::Rate>,
+    /// `zip:`: deliver one zip of the output's (and attached outputs') files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip: Option<crate::zip_pack::ZipSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -3976,12 +3979,33 @@ impl Loader {
             };
             self.check_output_templates(o, &outputs, &octx, file, queries);
             self.check_password_columns(o, &octx, file, queries);
+            for d in o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.is_some() && o.is_message())
+            {
+                self.diags.error(
+                    Code::InvalidDestinationOption,
+                    at.clone(),
+                    None,
+                    format!(
+                        "{octx}: destination `{}`: a message can't be zipped; zip the files on a file output's entry, and attach that output's files to the message instead",
+                        d.profile
+                    ),
+                );
+            }
             for d in o.destinations.iter().filter(|d| !d.attach.is_empty()) {
                 for a in &d.attach {
                     let problem = match outputs.iter().find(|x| x.name.as_deref() == Some(a.as_str())) {
-                        _ if !o.is_message() => Some("`attach` only applies to a message output".to_string()),
+                        _ if !o.is_message() && d.zip.is_none() => Some(
+                            "`attach` only applies to a message output, or to an entry with `zip:` (a pack)"
+                                .to_string(),
+                        ),
                         None => Some(format!("no output of this report is named `{a}`")),
                         Some(x) if std::ptr::eq(x, o) => Some(format!("`{a}` is this output itself")),
+                        Some(x) if x.is_message() && d.zip.is_some() => Some(format!(
+                            "`{a}` is a message, which can't go in a zip; attach file outputs"
+                        )),
                         Some(x) if x.is_message() => Some(format!(
                             "`{a}` is a message; attach file outputs (its `.md` is linked with `outputs.{a}.location`)"
                         )),
@@ -4045,7 +4069,7 @@ impl Loader {
             passwords.push(("`password`", pw));
         }
         for d in &o.destinations {
-            if let Some(pw) = d.options.get("zip").and_then(|z| z.get("password")).and_then(Json::as_str) {
+            if let Some(pw) = d.zip.as_ref().and_then(|z| z.password.as_deref()) {
                 passwords.push(("`zip.password`", pw));
             }
         }
@@ -4685,6 +4709,101 @@ impl Loader {
                 format!("{ctx}: destination `{p}`: `burst` must be a whole number of 1 or more"),
             ),
         }
+        let zip = match d.zip {
+            None | Some(Loose::Ok(de::OneOf::A(false))) => None,
+            Some(Loose::Ok(de::OneOf::A(true))) => Some(crate::zip_pack::ZipSpec {
+                password: None,
+                encryption: Default::default(),
+            }),
+            Some(Loose::Ok(de::OneOf::B(z))) => {
+                for k in &z.unknown.0 {
+                    self.diags.error(
+                        Code::UnknownKey,
+                        file.clone(),
+                        Some(k.line),
+                        format!("{ctx}: destination `{p}`: unknown key `{}` in `zip`; expected `password`, `encryption`", k.name),
+                    );
+                }
+                let password = match z.password {
+                    None => None,
+                    Some(Loose::Ok(s)) if s.is_empty() => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.password` is empty; an empty password would leave the zip unencrypted: set one, or use `zip: true`"),
+                        );
+                        None
+                    }
+                    Some(Loose::Ok(s)) => Some(s),
+                    Some(Loose::Bad(_)) => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.password` must be a string"),
+                        );
+                        None
+                    }
+                };
+                let encryption = match z.encryption {
+                    None => Default::default(),
+                    Some(Loose::Ok(e)) => e,
+                    Some(Loose::Bad(_)) => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!(
+                                "{ctx}: destination `{p}`: `zip.encryption` must be one of {}",
+                                crate::zip_pack::Encryption::NAMES.join(", ")
+                            ),
+                        );
+                        Default::default()
+                    }
+                };
+                if encryption == crate::zip_pack::Encryption::Zipcrypto {
+                    self.diags.warning(
+                        Code::InvalidField,
+                        file.clone(),
+                        None,
+                        format!("{ctx}: destination `{p}`: `encryption: zipcrypto` is weak (it can be cracked); use it only for recipients who can't open AES-256 zips (Windows Explorer, macOS Archive Utility)"),
+                    );
+                    if password.is_none() {
+                        self.diags.warning(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.encryption` has no effect without a `password`"),
+                        );
+                    }
+                }
+                Some(crate::zip_pack::ZipSpec { password, encryption })
+            }
+            Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    None,
+                    format!(
+                        "{ctx}: destination `{p}`: `zip` must be true, false or `{{password, encryption}}`"
+                    ),
+                );
+                None
+            }
+        };
+        if zip.is_some()
+            && let Some(path) = &path
+            && !crate::preflight::is_templated(path.rsplit(['/', '\\']).next().unwrap_or(path))
+            && let Err(e) = crate::zip_pack::zip_name(Some(path), "")
+        {
+            self.diags.error(
+                Code::InvalidField,
+                file.clone(),
+                None,
+                format!("{ctx}: destination `{p}`: {e}"),
+            );
+        }
         Some(Destination {
             profile: p,
             path,
@@ -4692,6 +4811,7 @@ impl Loader {
             attach,
             hold,
             rate,
+            zip,
         })
     }
 

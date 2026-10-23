@@ -347,7 +347,14 @@ fn secret_columns_are_masked_everywhere_dre_reports_but_not_in_what_it_delivers(
     secret(&p);
     let run = p.dre(
         "run",
-        &["statements", "-v", "--row-concurrency", "1", "--output-json", "saved"],
+        &[
+            "statements",
+            "-v",
+            "--row-concurrency",
+            "1",
+            "--output-json",
+            "saved",
+        ],
     );
     run.ok();
     let mut seen = format!("{}{}", run.stdout, run.stderr);
@@ -366,14 +373,24 @@ fn secret_columns_are_masked_everywhere_dre_reports_but_not_in_what_it_delivers(
         assert!(!seen.contains(pw), "`{pw}` leaked:\n{seen}");
     }
     // Masked, while the row values that aren't secret show (mask_row_values: false).
-    assert!(seen.contains("*****") && seen.contains("ann.lee@example.com"), "{seen}");
+    assert!(
+        seen.contains("*****") && seen.contains("ann.lee@example.com"),
+        "{seen}"
+    );
     let saved = p.read("saved/statements/default/members.json");
     assert!(saved.contains("*****") && saved.contains("Ann Lee"), "{saved}");
     // The delivered messages and their options have the real password; the PDFs are encrypted.
     let d = deliveries(&rec);
     assert_eq!(d.len(), 2);
-    assert!(d.iter().any(|x| x["message"]["text"] == "Your password is Ann-pw-7731."), "{d:?}");
-    assert!(d.iter().any(|x| x["options"]["subject"] == "pw Bob-pw-2290"), "{d:?}");
+    assert!(
+        d.iter()
+            .any(|x| x["message"]["text"] == "Your password is Ann-pw-7731."),
+        "{d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x["options"]["subject"] == "pw Bob-pw-2290"),
+        "{d:?}"
+    );
     let pdf = std::fs::read(p.path("target/run/statements/default/statement/101.pdf")).unwrap();
     assert!(String::from_utf8_lossy(&pdf).contains("/Encrypt"));
 }
@@ -387,7 +404,10 @@ fn validate_warns_when_a_password_column_isnt_secret() {
         .ok()
         .says("`password` reads `each.email`, which isn't in `secret_columns` of query `members`");
     let (p, _) = project(
-        &report.replace("queries: [members, holdings]\noutput", "queries: [{query: members, secret_columns: [email]}, holdings]\noutput"),
+        &report.replace(
+            "queries: [members, holdings]\noutput",
+            "queries: [{query: members, secret_columns: [email]}, holdings]\noutput",
+        ),
         &[],
     );
     let v = p.dre("validate", &[]);

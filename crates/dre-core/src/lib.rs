@@ -50,6 +50,7 @@ pub mod template_file;
 pub mod values;
 pub mod variables;
 pub mod yaml;
+pub mod zip_pack;
 
 pub use diag::{Diagnostic, Diagnostics, Severity};
 

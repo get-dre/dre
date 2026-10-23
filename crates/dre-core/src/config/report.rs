@@ -301,10 +301,40 @@ pub struct Destination {
     /// With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).
     #[schemars(range(min = 1))]
     pub burst: Option<Loose<u64>>,
+    /// Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`.
+    #[serde(default)]
+    #[schemars(schema_with = "zip_schema")]
+    pub zip: Option<Loose<OneOf<bool, ZipConfig>>>,
     /// The destination plugin's options.
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub options: Map<serde_json::Value>,
+}
+
+/// `zip:` with settings.
+#[derive(Deserialize)]
+pub struct ZipConfig {
+    pub password: Option<Loose<String>>,
+    pub encryption: Option<Loose<crate::zip_pack::Encryption>>,
+    #[serde(rename = "$unknown", default)]
+    pub unknown: UnknownKeys,
+}
+
+fn zip_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "oneOf": [
+            {"type": "boolean", "description": "`true`: zip the files, with no password."},
+            {
+                "type": "object",
+                "description": "Zip the files with a password.",
+                "properties": {
+                    "password": {"type": "string", "description": "The zip's password. Jinja: `env_var()`, `var()`, `each.*`. An empty password is an error."},
+                    "encryption": {"enum": ["aes256", "zipcrypto"], "description": "`aes256` (default): strong; opens in 7-Zip, WinRAR, Keka. `zipcrypto`: weak, but opens in Windows Explorer and macOS Archive Utility."}
+                },
+                "additionalProperties": false
+            }
+        ]
+    })
 }
 
 /// One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.

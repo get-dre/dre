@@ -1076,6 +1076,8 @@ struct BindingRun<'a> {
     retry: Option<per_row::Retry>,
     /// Deliveries held for `dre release` (`hold: true`, `--hold`).
     held: Vec<crate::release::HeldEntry>,
+    /// The zips built for `zip:` entries, by their files, name and password.
+    zips: std::collections::HashMap<String, PathBuf>,
 }
 
 /// One output's progress through the run.
@@ -1143,6 +1145,10 @@ struct RenderedDest {
     hold: bool,
     /// `rate:` (or `--rate`), recorded with a held delivery.
     rate: Option<crate::rate::Rate>,
+    /// `zip:`, its password rendered.
+    zip: Option<crate::zip_pack::ZipSpec>,
+    /// The zip built for this entry, delivered instead of the output's files.
+    zip_file: Option<PathBuf>,
 }
 
 /// Why a Binding (or one of its steps) failed.
@@ -1243,6 +1249,7 @@ impl<'a> BindingRun<'a> {
             protected_snapshot: None,
             retry: None,
             held: Vec::new(),
+            zips: Default::default(),
         }
     }
 
@@ -2498,6 +2505,8 @@ impl<'a> BindingRun<'a> {
                     attach: Vec::new(),
                     hold: d.hold,
                     rate: self.opts.rate.or(d.rate),
+                    zip: None,
+                    zip_file: None,
                 });
                 continue;
             }
@@ -2517,6 +2526,20 @@ impl<'a> BindingRun<'a> {
                         .map_err(|e| format!("destination `{profile}` option `{k}`: {e}"))?;
                     options.insert(k.clone(), v);
                 }
+                let zip = match &d.zip {
+                    Some(z) => Some(crate::zip_pack::ZipSpec {
+                        password: match &z.password {
+                            Some(pw) => Some(
+                                renderer
+                                    .render(&self.report.file, pw)
+                                    .map_err(|e| format!("destination `{profile}` `zip.password`: {e}"))?,
+                            ),
+                            None => None,
+                        },
+                        encryption: z.encryption,
+                    }),
+                    None => None,
+                };
                 Ok::<_, Fail>(RenderedDest {
                     profile: profile.clone(),
                     path,
@@ -2524,6 +2547,8 @@ impl<'a> BindingRun<'a> {
                     attach: d.attach.clone(),
                     hold: d.hold,
                     rate: self.opts.rate.or(d.rate),
+                    zip,
+                    zip_file: None,
                 })
             })();
             renderer.set_destination(None);
@@ -2658,9 +2683,11 @@ impl<'a> BindingRun<'a> {
             None => extension(&o.format),
         };
         let stem = o.name.clone().unwrap_or_else(|| self.report.name.clone());
+        // A zipping entry's path names the zip, not the files in it.
         let from_remote = self.outs[oi]
             .dests
             .iter()
+            .filter(|d| d.zip.is_none())
             .find_map(|d| d.path.as_deref())
             .and_then(|r| r.rsplit(['/', '\\']).next())
             .filter(|s| !s.is_empty())
@@ -2886,7 +2913,16 @@ impl<'a> BindingRun<'a> {
         if self.outs[oi].files.is_empty() {
             return Ok(());
         }
-        let dests = std::mem::take(&mut self.outs[oi].dests);
+        let mut dests = std::mem::take(&mut self.outs[oi].dests);
+        for d in dests.iter_mut().filter(|d| d.zip.is_some()) {
+            match self.build_zip(oi, d) {
+                Ok(z) => d.zip_file = Some(z),
+                Err(e) => {
+                    self.outs[oi].dests = dests;
+                    return Err(e);
+                }
+            }
+        }
         let mut failures = Vec::new();
         let mut nowhere = Vec::new();
         for d in &dests {
@@ -2958,11 +2994,69 @@ impl<'a> BindingRun<'a> {
         }
     }
 
+    /// Build (or reuse) the zip for output `oi`'s entry `d`: its files and every attached
+    /// output's, in `<run>/zips/`. Entries with the same files, name and password share one.
+    fn build_zip(&mut self, oi: usize, d: &RenderedDest) -> Result<PathBuf, Fail> {
+        let z = d.zip.as_ref().expect("a zipping entry");
+        let label = self.b.outputs[oi].label(oi);
+        let output = self.b.outputs[oi]
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("output{}", oi + 1));
+        let name = crate::zip_pack::zip_name(d.path.as_deref(), &output).map_err(|e| {
+            Fail::new(
+                Code::DeliveryFailed,
+                format!("{label}: destination `{}`: {e}", d.profile),
+            )
+        })?;
+        let mut files: Vec<PathBuf> = self.outs[oi].files.iter().map(|(f, _)| f.clone()).collect();
+        for a in &d.attach {
+            if let Some(j) = self
+                .b
+                .outputs
+                .iter()
+                .position(|o| o.name.as_deref() == Some(a.as_str()))
+            {
+                files.extend(self.outs[j].files.iter().map(|(f, _)| f.clone()));
+            }
+        }
+        let key = json!([name, files, z.password, z.encryption]).to_string();
+        if let Some(p) = self.zips.get(&key) {
+            return Ok(p.clone());
+        }
+        let to = self
+            .run_dir
+            .join("zips")
+            .join(self.zips.len().to_string())
+            .join(&name);
+        let t = Instant::now();
+        crate::zip_pack::build(&to, &files, z.password.as_deref(), z.encryption).map_err(|e| {
+            Fail::new(
+                Code::DeliveryFailed,
+                format!("{label}: destination `{}`: {e}", d.profile),
+            )
+        })?;
+        self.ui.step(
+            Level::Info,
+            "Zipped",
+            &format!(
+                "{} file(s) into {}",
+                files.len(),
+                rel(&self.project.root, &to).display()
+            ),
+            Some(t.elapsed()),
+        );
+        self.zips.insert(key, to.clone());
+        Ok(to)
+    }
+
     /// Record a held delivery of output `oi` to `d`, for `dre release`.
     fn hold(&mut self, oi: usize, d: &RenderedDest) {
+        let zipped = d.zip_file.is_some();
         let attach: Vec<crate::release::HeldFile> = d
             .attach
             .iter()
+            .filter(|_| !zipped)
             .filter_map(|name| {
                 self.b
                     .outputs
@@ -2993,14 +3087,16 @@ impl<'a> BindingRun<'a> {
             attach,
             rate: d.rate,
             message: self.outs[oi].message.clone(),
-            files: self.outs[oi]
-                .files
-                .iter()
-                .map(|(f, _)| crate::release::HeldFile {
-                    path: f.clone(),
-                    sha256: crate::release::sha256_file(f).unwrap_or_default(),
-                })
-                .collect(),
+            files: match &d.zip_file {
+                Some(z) => vec![z.clone()],
+                None => self.outs[oi].files.iter().map(|(f, _)| f.clone()).collect(),
+            }
+            .into_iter()
+            .map(|f| crate::release::HeldFile {
+                sha256: crate::release::sha256_file(&f).unwrap_or_default(),
+                path: f,
+            })
+            .collect(),
         });
         self.ui.step(
             Level::Info,
@@ -3040,7 +3136,12 @@ impl<'a> BindingRun<'a> {
         };
         let kind = out.kind.clone();
         let connection = render_connection(out)?;
-        let files = &self.outs[oi].files;
+        let zipped: Vec<(PathBuf, Option<String>)> = d.zip_file.iter().map(|z| (z.clone(), None)).collect();
+        let files = if d.zip_file.is_some() {
+            &zipped
+        } else {
+            &self.outs[oi].files
+        };
         let targets: Vec<DeliveryFile> = files
             .iter()
             .map(|(f, _)| {
@@ -3120,7 +3221,9 @@ impl<'a> BindingRun<'a> {
                 })?;
                 let loc = delivered.path;
                 self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-                self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
+                if d.zip_file.is_none() {
+                    self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
+                }
                 locations.push(loc);
             }
             return Ok(Some(locations.join(", ")));

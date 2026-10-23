@@ -1666,6 +1666,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant_time_eq"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2209,6 +2218,7 @@ dependencies = [
  "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -2296,6 +2306,7 @@ dependencies = [
  "ureq",
  "walkdir",
  "windows-sys 0.61.2",
+ "zip 9.0.3",
 ]
 
 [[package]]
@@ -8837,12 +8848,19 @@ version = "9.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971"
 dependencies = [
+ "aes",
+ "constant_time_eq",
  "crc32fast",
  "flate2",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
  "indexmap",
  "memchr",
  "nix",
+ "pbkdf2 0.13.0",
+ "sha1 0.11.0",
  "typed-path",
+ "zeroize",
  "zopfli",
 ]
 

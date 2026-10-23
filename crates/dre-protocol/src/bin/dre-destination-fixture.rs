@@ -88,7 +88,9 @@ fn record(d: &Delivery, message: Option<&Message>) -> Result<Vec<String>> {
     let mut files = Vec::new();
     let mut names = Vec::new();
     for f in &d.files {
-        let content = std::fs::read_to_string(&f.local)
+        // Binary files (a zip) are recorded lossily: the test reads them from `local`.
+        let content = std::fs::read(&f.local)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
             .map_err(|e| format!("can't read {}: {e}", f.local.display()))?;
         names.push(f.remote.clone().unwrap_or_else(|| {
             f.local

@@ -45,6 +45,10 @@ pub(crate) struct RowDest {
     pub attach: Vec<PathBuf>,
     /// An attached per-row output's row failed or was skipped: the message is skipped.
     pub attach_missing: bool,
+    /// `zip:`, its password rendered with `each`.
+    pub zip: Option<crate::zip_pack::ZipSpec>,
+    /// Where the row's zip for this entry is built; delivered instead of the row's files.
+    pub zip_file: Option<PathBuf>,
 }
 
 /// A run folder's saved query results, for `--retry-failed`.
@@ -555,18 +559,24 @@ impl BindingRun<'_> {
                         profile: d.profile.clone(),
                         path: d.path.clone(),
                         options: d.options.clone(),
-                        attach: d.attach.iter().map(|f| crate::release::held_file(f)).collect(),
+                        attach: match &d.zip_file {
+                            Some(_) => Vec::new(),
+                            None => d.attach.iter().map(|f| crate::release::held_file(f)).collect(),
+                        },
                         rate: d.rate,
                         message: job.message.clone(),
-                        files: job
-                            .files
-                            .iter()
-                            .zip(&r.files)
-                            .map(|((f, _), rf)| crate::release::HeldFile {
-                                path: f.clone(),
-                                sha256: rf.sha256.clone(),
-                            })
-                            .collect(),
+                        files: match &d.zip_file {
+                            Some(z) => vec![crate::release::held_file(z)],
+                            None => job
+                                .files
+                                .iter()
+                                .zip(&r.files)
+                                .map(|((f, _), rf)| crate::release::HeldFile {
+                                    path: f.clone(),
+                                    sha256: rf.sha256.clone(),
+                                })
+                                .collect(),
+                        },
                     });
                 }
             }
@@ -1018,8 +1028,18 @@ impl BindingRun<'_> {
         }
         let ctx = minijinja::Value::from(ctx_map);
         if !o.is_message() && o.options.values().any(has_template) {
-            let rendered = render_json_with(&renderer, &self.report.file, &Json::Object(o.options.clone()), &ctx)
-                .map_err(|e| Fail::new(Code::RenderFailed, format!("format option: {}", mask.apply(&e.message))))?;
+            let rendered = render_json_with(
+                &renderer,
+                &self.report.file,
+                &Json::Object(o.options.clone()),
+                &ctx,
+            )
+            .map_err(|e| {
+                Fail::new(
+                    Code::RenderFailed,
+                    format!("format option: {}", mask.apply(&e.message)),
+                )
+            })?;
             if let Json::Object(m) = rendered {
                 job.options = Some(m);
             }
@@ -1064,6 +1084,47 @@ impl BindingRun<'_> {
                         }
                     }
                 }
+                let zip = match &d.zip {
+                    Some(z) => Some(crate::zip_pack::ZipSpec {
+                        password: match &z.password {
+                            Some(pw) => Some(
+                                renderer
+                                    .render_with(&self.report.file, pw, ctx.clone(), false)
+                                    .map_err(|e| format!("`zip.password`: {}", mask.apply(&e.message)))?,
+                            ),
+                            None => None,
+                        },
+                        encryption: z.encryption,
+                    }),
+                    None => None,
+                };
+                let zip_file = match &zip {
+                    Some(_) => {
+                        let stem = job
+                            .files
+                            .first()
+                            .and_then(|(f, _)| f.file_stem())
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| key.clone());
+                        let name = crate::zip_pack::zip_name(
+                            path.as_deref()
+                                .or(options.get("attachment_name").and_then(Json::as_str)),
+                            &stem,
+                        )
+                        .map_err(|e| format!("destination `{profile}`: {e}"))?;
+                        // Entries zipping the same files the same way share one zip.
+                        let shared = job.dests.iter().find(|x| {
+                            x.zip == zip
+                                && x.attach == attach
+                                && x.zip_file.as_ref().is_some_and(|f| f.ends_with(&name))
+                        });
+                        Some(match shared.and_then(|x| x.zip_file.clone()) {
+                            Some(f) => f,
+                            None => folder.join("zips").join(format!("{}-{idx}", stem)).join(&name),
+                        })
+                    }
+                    None => None,
+                };
                 Ok(RowDest {
                     idx,
                     profile: profile.clone(),
@@ -1073,6 +1134,8 @@ impl BindingRun<'_> {
                     rate: self.opts.rate.or(d.rate),
                     attach,
                     attach_missing,
+                    zip,
+                    zip_file,
                 })
             })();
             renderer.set_destination(None);
@@ -1243,6 +1306,17 @@ fn run_job(
             Vec::new(),
         ));
     }
+    if job.phase != Phase::Deliver
+        && let Err(e) = make_zips(job)
+    {
+        return Some(row_failed(
+            job,
+            &Code::DeliveryFailed.to_string(),
+            job.mask.apply(&e),
+            Vec::new(),
+            Vec::new(),
+        ));
+    }
     let files: Vec<RowFile> = job
         .files
         .iter()
@@ -1299,7 +1373,10 @@ fn run_job(
         {
             return None;
         }
-        let local: Vec<PathBuf> = job.files.iter().map(|(f, _)| f.clone()).collect();
+        let local: Vec<PathBuf> = match &d.zip_file {
+            Some(z) => vec![z.clone()],
+            None => job.files.iter().map(|(f, _)| f.clone()).collect(),
+        };
         let r = deliver_row(
             shared.project,
             &shared.log,
@@ -1407,6 +1484,25 @@ fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<PluginProcess>
                 job.mask.apply(&w)
             ));
         }
+    }
+    Ok(())
+}
+
+/// Build the row's zips: its files and the entry's attached files, once per zip.
+fn make_zips(job: &Job) -> Result<(), String> {
+    let mut built: Vec<&PathBuf> = Vec::new();
+    for d in &job.dests {
+        let (Some(z), Some(to)) = (&d.zip, &d.zip_file) else {
+            continue;
+        };
+        if built.contains(&to) {
+            continue;
+        }
+        let mut files: Vec<PathBuf> = job.files.iter().map(|(f, _)| f.clone()).collect();
+        files.extend(d.attach.iter().cloned());
+        crate::zip_pack::build(to, &files, z.password.as_deref(), z.encryption)
+            .map_err(|e| format!("destination `{}`: {e}", d.profile))?;
+        built.push(to);
     }
     Ok(())
 }
