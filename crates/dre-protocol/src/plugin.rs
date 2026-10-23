@@ -505,6 +505,11 @@ pub trait Format {
     ) -> (Vec<String>, Vec<String>) {
         (Vec::new(), Vec::new())
     }
+    /// A hint added to the "unknown option" error for `key`, for an option this format doesn't
+    /// take but a sibling format does (`password` on `html`).
+    fn unknown_option_hint(&self, _key: &str) -> Option<String> {
+        None
+    }
     /// Write every result set to `req.path` (and siblings, if the format needs several files);
     /// return the files written.
     fn write(&mut self, req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>>;
@@ -661,7 +666,19 @@ impl Handler<'_> {
     /// Every problem with a config block: the declared checks, then the plugin's own once the
     /// declared ones pass.
     fn check(&self, name: &str, o: &Map<String, Value>) -> Vec<String> {
-        let errs = options::check(self.kind(), name, &self.option_fields(), o);
+        let mut errs = options::check(self.kind(), name, &self.option_fields(), o);
+        if let Handler::Format(f) = self {
+            for e in &mut errs {
+                let hint = o
+                    .keys()
+                    .find(|k| e.starts_with(&format!("unknown option `{k}`")))
+                    .and_then(|k| f.unknown_option_hint(k));
+                if let Some(h) = hint {
+                    e.push_str("; ");
+                    e.push_str(&h);
+                }
+            }
+        }
         if !errs.is_empty() {
             return errs;
         }

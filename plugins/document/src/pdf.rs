@@ -107,6 +107,46 @@ pub fn render_pdf(
     }
 }
 
+/// Encrypt a PDF with an open (user) `password`: AES-256 (PDF 2.0, revision 6), every
+/// permission granted, and a random owner password nobody keeps, so the encryption can't be
+/// lifted with a blank owner password.
+pub fn encrypt(pdf: &[u8], password: &str) -> Result<Vec<u8>, String> {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
+    use lopdf::{Document, EncryptionState, EncryptionVersion, Permissions};
+
+    if password.is_empty() {
+        return Err("`password` is empty; an empty password would leave the PDF unencrypted".into());
+    }
+    let mut key = [0u8; 32];
+    let mut owner = [0u8; 32];
+    getrandom::fill(&mut key).map_err(|e| format!("no random numbers for the PDF key: {e}"))?;
+    getrandom::fill(&mut owner).map_err(|e| format!("no random numbers for the PDF key: {e}"))?;
+    let owner: String = owner.iter().map(|b| format!("{b:02x}")).collect();
+    let mut doc = Document::load_mem(pdf).map_err(|e| format!("can't read the PDF to encrypt it: {e}"))?;
+    let filter: Arc<dyn CryptFilter> = Arc::new(Aes256CryptFilter);
+    let state = EncryptionState::try_from(EncryptionVersion::V5 {
+        encrypt_metadata: true,
+        crypt_filters: BTreeMap::from([(b"StdCF".to_vec(), filter)]),
+        file_encryption_key: &key,
+        stream_filter: b"StdCF".to_vec(),
+        string_filter: b"StdCF".to_vec(),
+        owner_password: &owner,
+        user_password: password,
+        permissions: Permissions::all(),
+    })
+    // Never the password itself in the message: it may be a member's secret.
+    .map_err(|e| format!("the password can't be used to encrypt the PDF: {e}"))?;
+    doc.encrypt(&state)
+        .map_err(|e| format!("can't encrypt the PDF: {e}"))?;
+    let mut out = Vec::with_capacity(pdf.len() + 1024);
+    doc.save_to(&mut out)
+        .map_err(|e| format!("can't write the encrypted PDF: {e}"))?;
+    Ok(out)
+}
+
 /// CSS-style margins: one to four lengths (`20mm`, `15mm 20mm`), in mm, cm, in, pt or px.
 pub fn parse_margins(s: &str) -> Result<Margin, String> {
     let pts: Vec<f32> = s

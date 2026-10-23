@@ -481,3 +481,87 @@ fn image_files_appear_in_the_pdf() {
     );
     assert!(svg_file, "an SVG file");
 }
+
+#[test]
+fn a_pdf_password_encrypts_with_aes_256_and_a_random_owner_password() {
+    let dir = project();
+    let t = dir.path().join("reports/statements/statement.html");
+    let (plain, _) = write("pdf", dir.path(), Some(t.clone()), json!({}), 3).unwrap();
+    let (a, _) = write(
+        "pdf",
+        dir.path(),
+        Some(t.clone()),
+        json!({"password": "s3cret-Ü"}),
+        3,
+    )
+    .unwrap();
+    assert!(!lopdf::Document::load_mem(&plain).unwrap().is_encrypted());
+    let doc = lopdf::Document::load_mem(&a).unwrap();
+    assert!(doc.is_encrypted());
+    // AES-256: the standard handler's version 5, revision 6.
+    let enc = doc.get_encrypted().unwrap();
+    assert_eq!(enc.get(b"V").unwrap().as_i64().unwrap(), 5);
+    assert_eq!(enc.get(b"R").unwrap().as_i64().unwrap(), 6);
+    // Opens with the password, not without or with a wrong one, nor with a blank owner password.
+    assert!(doc.authenticate_password("s3cret-Ü").is_ok());
+    assert!(doc.authenticate_password("").is_err());
+    assert!(doc.authenticate_password("s3cret").is_err());
+    assert!(doc.authenticate_owner_password("").is_err());
+    let opened =
+        lopdf::Document::load_mem_with_options(&a, lopdf::LoadOptions::with_password("s3cret-Ü")).unwrap();
+    let pages = opened.get_pages().len();
+    assert!(pages > 0 && pages == lopdf::Document::load_mem(&plain).unwrap().get_pages().len());
+    // The password never appears in the file; each run draws a new owner password and key.
+    assert!(!String::from_utf8_lossy(&a).contains("s3cret"));
+    let (b, _) = write("pdf", dir.path(), Some(t), json!({"password": "s3cret-Ü"}), 3).unwrap();
+    let o = |pdf: &[u8]| {
+        let d = lopdf::Document::load_mem(pdf).unwrap();
+        d.get_encrypted()
+            .unwrap()
+            .get(b"O")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_vec()
+    };
+    assert_ne!(o(&a), o(&b));
+}
+
+#[test]
+fn an_empty_or_unrendered_password_fails_and_html_takes_none() {
+    let dir = project();
+    let t = dir.path().join("reports/statements/statement.html");
+    let e = write("pdf", dir.path(), Some(t.clone()), json!({"password": ""}), 3).unwrap_err();
+    assert!(e.contains("`password` is empty"), "{e}");
+    let e = write(
+        "pdf",
+        dir.path(),
+        Some(t.clone()),
+        json!({"password": "{{ each.pw }}"}),
+        3,
+    )
+    .unwrap_err();
+    assert!(e.contains("DRE 0.7.0"), "{e}");
+    let e = write("html", dir.path(), Some(t), json!({"password": "x"}), 3).unwrap_err();
+    assert!(
+        e.contains("unknown option `password`") && e.contains("zip: {password"),
+        "{e}"
+    );
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p =
+        PluginProcess::start_for(bin(), Some(&PluginId::new(Kind::Format, "pdf")), log, None).unwrap();
+    let Value::Object(o) = json!({"password": ""}) else {
+        panic!()
+    };
+    let (errors, _) = p.validate_with(o, None).unwrap();
+    assert!(
+        errors.iter().any(|e| e.contains("`password` is empty")),
+        "{errors:?}"
+    );
+    let Value::Object(o) = json!({"password": "{{ each.pw }}"}) else {
+        panic!()
+    };
+    let (errors, _) = p.validate_with(o, None).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let _ = p.close();
+}

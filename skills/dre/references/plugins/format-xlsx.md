@@ -282,7 +282,7 @@ format_options:
 | `fixed_width` | `columns` (see [Fixed-width columns](../docs/plugin-fixed_width.md#columns)), `header`, `line_ending`, `encoding`, `line_breaks` |
 | `parquet` | none; Arrow types are preserved |
 | `xlsx` | `header`, `max_rows_per_sheet`, `autofit` (see [Column widths](../docs/plugin-xlsx.md#column-widths)), `style` (see [Styles](../docs/plugin-xlsx.md#styles)), `columns`, `date_format`, `datetime_format`, `time_format` (see [xlsx column formats](../docs/plugin-xlsx.md#column-formats)), `totals_label` (see [xlsx formulas and totals rows](../docs/plugin-xlsx.md#formulas-and-totals-rows)); per query `anchor`/`header`/`autofit`/`style`/`columns`; `template` |
-| `html`, `pdf` | `max_rows`; html `embed_assets`; pdf `page_size`, `orientation`, `margins`, `author`, `subject`; `template` (see [PDF and HTML documents](../docs/plugin-document.md)) |
+| `html`, `pdf` | `max_rows`; html `embed_assets`; pdf `page_size`, `orientation`, `margins`, `author`, `subject`, `password`; `template` (see [PDF and HTML documents](../docs/plugin-document.md)) |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](../docs/plugins.md#the-message-format)) |
 
 Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or

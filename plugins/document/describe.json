@@ -79,6 +79,12 @@
         "type": "string",
         "description": "the PDF's subject metadata",
         "required": false
+      },
+      {
+        "name": "password",
+        "type": "string",
+        "description": "an open password: the PDF is encrypted with AES-256 and opens only with it; Jinja like `{{ each.pdf_password }}`",
+        "required": false
       }
     ]
   }
