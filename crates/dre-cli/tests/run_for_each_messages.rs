@@ -329,3 +329,88 @@ fn a_tampered_attachment_is_refused_at_release() {
     assert_eq!(d.len(), 1);
     assert_eq!(d[0]["options"]["to"], "bob.ray@example.com");
 }
+
+#[test]
+fn secret_columns_are_masked_everywhere_dre_reports_but_not_in_what_it_delivers() {
+    let secret = |p: &TestProject| {
+        p.duckdb(
+            "data.duckdb",
+            "create or replace table members as select * from (values (101, 'Ann Lee', 'ann.lee@example.com', 'Ann-pw-7731'), (102, 'Bob Ray', 'bob.ray@example.com', 'Bob-pw-2290')) t(member_id, name, email, pdf_password);",
+        );
+    };
+    let report = "queries:\n  - {query: members, secret_columns: [pdf_password]}\n  - holdings\n\
+        output:\n\
+        \x20 - name: statement\n    format: pdf\n    queries: [members, holdings]\n    for_each: {query: members, key: member_id, mask_row_values: false}\n    password: \"{{ each.pdf_password }}\"\n\
+        \x20 - name: password_mail\n    format: message\n    for_each: {query: members, key: member_id, mask_row_values: false}\n    title: \"Password for {{ each.name }}\"\n    text: \"Your password is {{ each.pdf_password }}.\"\n\
+        \x20   destination: {profile: mail, to: \"{{ each.email }}\", subject: \"pw {{ each.pdf_password }}\"}\n";
+    let (p, rec) = project(report, &[]);
+    secret(&p);
+    let run = p.dre(
+        "run",
+        &[
+            "statements",
+            "-v",
+            "--row-concurrency",
+            "1",
+            "--output-json",
+            "saved",
+        ],
+    );
+    run.ok();
+    let mut seen = format!("{}{}", run.stdout, run.stderr);
+    for dir in ["target/run/statements/default", "saved", "logs"] {
+        for f in walkdir(&p.path(dir)) {
+            let name = f.file_name().unwrap().to_string_lossy().to_string();
+            if [".json", ".jsonl", ".log"].iter().any(|x| name.ends_with(x)) {
+                seen.push_str(&std::fs::read_to_string(&f).unwrap());
+            }
+        }
+    }
+    let preview = p.dre("run", &["statements", "--preview", "2"]);
+    seen.push_str(&preview.stdout);
+    seen.push_str(&preview.stderr);
+    for pw in ["Ann-pw-7731", "Bob-pw-2290"] {
+        assert!(!seen.contains(pw), "`{pw}` leaked:\n{seen}");
+    }
+    // Masked, while the row values that aren't secret show (mask_row_values: false).
+    assert!(
+        seen.contains("*****") && seen.contains("ann.lee@example.com"),
+        "{seen}"
+    );
+    let saved = p.read("saved/statements/default/members.json");
+    assert!(saved.contains("*****") && saved.contains("Ann Lee"), "{saved}");
+    // The delivered messages and their options have the real password; the PDFs are encrypted.
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 2);
+    assert!(
+        d.iter()
+            .any(|x| x["message"]["text"] == "Your password is Ann-pw-7731."),
+        "{d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x["options"]["subject"] == "pw Bob-pw-2290"),
+        "{d:?}"
+    );
+    let pdf = std::fs::read(p.path("target/run/statements/default/statement/101.pdf")).unwrap();
+    assert!(String::from_utf8_lossy(&pdf).contains("/Encrypt"));
+}
+
+#[test]
+fn validate_warns_when_a_password_column_isnt_secret() {
+    let report = "queries: [members, holdings]\noutput:\n\
+        \x20 - name: statement\n    format: pdf\n    queries: [members, holdings]\n    for_each: {query: members, key: member_id}\n    password: \"{{ each.email }}\"\n";
+    let (p, _) = project(report, &[]);
+    p.dre("validate", &[])
+        .ok()
+        .says("`password` reads `each.email`, which isn't in `secret_columns` of query `members`");
+    let (p, _) = project(
+        &report.replace(
+            "queries: [members, holdings]\noutput",
+            "queries: [{query: members, secret_columns: [email]}, holdings]\noutput",
+        ),
+        &[],
+    );
+    let v = p.dre("validate", &[]);
+    v.ok();
+    assert!(!v.stdout.contains("secret_columns"), "{}", v.stdout);
+}

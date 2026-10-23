@@ -14,7 +14,10 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
-         "slack-headline", "sftp-delivery")
+         "slack-headline", "sftp-delivery", "password-statements")
+# Examples that need a newer DRE than the released one the examples workflow installs: skipped
+# there (the CI job against this build runs them all).
+NEEDS = {"password-statements": (0, 7)}
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True
 
@@ -98,6 +101,7 @@ def check(dre, plugins):
         "SFTP_HOST": "sftp.example.invalid", "SFTP_USERNAME": "client_a",
         "DRE_SECRET_SFTP_PASSWORD": "not-a-real-password",
         "SFTP_HOST_KEY_FINGERPRINT": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "PACK_PASSWORD": "example-pack-password",
     })
     with tempfile.TemporaryDirectory(prefix="dre-examples-") as scratch:
         scratch = Path(scratch)
@@ -112,8 +116,13 @@ def check(dre, plugins):
                 raise AssertionError(" ".join(command) + "\n" + result.stdout + result.stderr)
             return result.stdout + result.stderr
 
+        version = subprocess.run([dre, "--version"], capture_output=True, text=True).stdout
+        have = tuple(int(x) for x in version.split()[-1].split("-")[0].split(".")[:2])
         projects = {}
         for name in NAMES:
+            if have < NEEDS.get(name, (0, 0)):
+                print(f"{name}: skipped, it needs DRE {'.'.join(map(str, NEEDS[name]))} (this is {have})")
+                continue
             project = scratch / name
             shutil.copytree(ROOT / "examples" / name, project,
                             ignore=shutil.ignore_patterns("target", "out", "dre_deps",
@@ -164,6 +173,22 @@ def check(dre, plugins):
         skipped = current(projects["slack-headline"], "headline")
         assert skipped["output_results"][0]["status"] == "skipped"
         assert skipped["outputs"] == []
+        statements = projects.get("password-statements")
+        if statements:
+            for member in ("1001", "1002"):
+                pdf = (statements / "out" / "statements" / (member + ".pdf")).read_bytes()
+                assert pdf.startswith(b"%PDF-") and b"/Encrypt" in pdf, "statement not encrypted"
+            keys = next((statements / "out" / "keys").glob("password-list-*.csv"))
+            assert keys.read_text(encoding="utf-8") == (
+                "member_id,pdf_password\n1001,09031984-1001\n1002,23111979-1002\n")
+            with ZipFile(next(statements.glob("out/pack-*.zip"))) as pack:
+                assert sorted(pack.namelist()) == ["fees.csv", "pack.csv"]
+                assert all(i.flag_bits & 1 for i in pack.infolist()), "pack not encrypted"
+            reported = "".join(p.read_text(encoding="utf-8", errors="replace")
+                               for d in ("target", "logs") for p in (statements / d).rglob("*")
+                               if p.is_file() and p.suffix in (".json", ".jsonl", ".log"))
+            assert "09031984" not in reported and "example-pack-password" not in reported, \
+                "a password leaked into DRE's records"
         sftp_record = latest(records(projects["sftp-delivery"]))
         output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
         assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-dre-schema-version": "0.6",
+  "x-dre-schema-version": "0.7",
   "title": "DRE report",
   "type": "object",
   "description": "A report: SQL queries plus an output, in a YAML file under `reports/`.",
@@ -245,6 +245,13 @@
           "description": "When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.",
           "$ref": "#/$defs/OnEmpty"
         },
+        "secret_columns": {
+          "type": "array",
+          "description": "Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.",
+          "items": {
+            "type": "string"
+          }
+        },
         "autofit": {
           "type": "boolean",
           "description": "Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on."
@@ -479,6 +486,33 @@
           "type": "integer",
           "description": "With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).",
           "minimum": 1
+        },
+        "zip": {
+          "description": "Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`.",
+          "oneOf": [
+            {
+              "type": "boolean",
+              "description": "`true`: zip the files, with no password."
+            },
+            {
+              "type": "object",
+              "description": "Zip the files with a password.",
+              "properties": {
+                "password": {
+                  "type": "string",
+                  "description": "The zip's password. Jinja: `env_var()`, `var()`, `each.*`. An empty password is an error."
+                },
+                "encryption": {
+                  "enum": [
+                    "aes256",
+                    "zipcrypto"
+                  ],
+                  "description": "`aes256` (default): strong; opens in 7-Zip, WinRAR, Keka. `zipcrypto`: weak, but opens in Windows Explorer and macOS Archive Utility."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -690,6 +724,13 @@
                       "fail"
                     ],
                     "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."
+                  },
+                  "secret_columns": {
+                    "type": "array",
+                    "description": "Columns whose values are masked in DRE's logs, results and previews, added to the query's own.",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [

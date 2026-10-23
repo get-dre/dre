@@ -13,6 +13,7 @@ the first time.
 | [Regional reports](regional-reports/) | The same report with two Sets and separate scheduled files |
 | [Slack headline](slack-headline/) | A result-driven message and a `when:` threshold |
 | [SFTP delivery](sftp-delivery/) | Environment variables, host-key pinning and atomic delivery |
+| [Password statements](password-statements/) | Per-member password PDFs, a password list, an AES-256 zip pack and `secret_columns` |
 
 The Slack and SFTP examples have `dev: {deliver: false}`. A default run formats real output
 locally and cannot contact the destination. Production settings require your environment

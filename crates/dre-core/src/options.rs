@@ -142,7 +142,8 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 routes.entry(kind.to_string()).or_default().push(Route {
                     at: at(Some(profile)),
                     format: message_of[i].format.clone(),
-                    attach: !d.attach.is_empty(),
+                    // A zipping entry packs its attachments into the zip: any destination takes it.
+                    attach: !d.attach.is_empty() && d.zip.is_none(),
                 });
             }
         }

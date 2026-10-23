@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Statement for member {{ each.member_id }}</title>
+  <style>
+    body { font-family: sans-serif; font-size: 11pt; }
+    h1 { color: #1f7a4d; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #ccc; padding: 4px; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Your statement, {{ each.first_name }}</h1>
+  <p>Member {{ each.member_id }}, as at {{ run.date | date('d mmmm yyyy') }}.</p>
+  {{ table(results.holdings) }}
+</body>
+</html>

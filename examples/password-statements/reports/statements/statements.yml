@@ -1,0 +1,34 @@
+queries:
+  - {query: members, secret_columns: [pdf_password]}
+  - holdings
+  - {query: password_list, secret_columns: [pdf_password]}
+  - fund_totals
+
+output:
+  # One password-protected PDF per member (AES-256). The password comes from the driver row.
+  - name: statement
+    format: pdf
+    template: {file: statement.html}
+    queries: [members, holdings]
+    for_each: {query: members, key: member_id}
+    password: "{{ each.pdf_password }}"
+    destination: {profile: local, path: "out/statements/{{ each.member_id }}.pdf"}
+
+  # The file -> password list, for the client's own secure store (here a separate folder).
+  - name: password_list
+    format: csv
+    queries: [password_list]
+    destination: {profile: local, path: "out/keys/password-list-{{ run.date.yyyymmdd }}.csv"}
+
+  # A client pack: two csvs in one AES-256 zip. The password comes from the environment.
+  - name: fees
+    format: csv
+    queries: [fund_totals]
+  - name: pack
+    format: csv
+    queries: [holdings]
+    destination:
+      profile: local
+      path: "out/pack-{{ run.date.yyyymmdd }}.zip"
+      attach: [fees]
+      zip: {password: "{{ env_var('PACK_PASSWORD') }}"}

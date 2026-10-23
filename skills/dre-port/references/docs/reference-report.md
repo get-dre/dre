@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.6/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.7/report.schema.json
 ```
 
 For copyable examples and common errors, see [Build and run reports](building-reports.md). The [glossary](glossary.md) defines DRE's terms.
@@ -55,6 +55,7 @@ A query with settings, instead of just its name.
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
 | `on_empty` | string |  | When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty. |
+| `secret_columns` | list of string |  | Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages. |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
 | `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
 
@@ -128,7 +129,17 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 | `hold` | boolean |  | Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination. |
 | `rate` | string |  | At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it. |
 | `burst` | integer |  | With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced). |
+| `zip` | boolean or map (see below) |  | Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
+
+## `output[].destination[].zip`
+
+Zip the files with a password.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `password` | string |  | The zip's password. Jinja: `env_var()`, `var()`, `each.*`. An empty password is an error. |
+| `encryption` | `aes256` or `zipcrypto` |  | `aes256` (default): strong; opens in 7-Zip, WinRAR, Keka. `zipcrypto`: weak, but opens in Windows Explorer and macOS Archive Utility. |
 
 ## `output[].template`
 
@@ -195,6 +206,7 @@ A query with settings.
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
+| `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `var_schema.<name>`

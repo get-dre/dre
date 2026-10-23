@@ -40,6 +40,7 @@ pub mod runs;
 pub mod saved;
 pub mod schedule;
 mod schema;
+pub mod secret_columns;
 pub mod secrets;
 pub mod selector;
 pub mod settings;
@@ -49,6 +50,7 @@ pub mod template_file;
 pub mod values;
 pub mod variables;
 pub mod yaml;
+pub mod zip_pack;
 
 pub use diag::{Diagnostic, Diagnostics, Severity};
 

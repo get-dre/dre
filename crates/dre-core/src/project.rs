@@ -136,7 +136,17 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
-    "query", "profile", "tab", "tab_name", "anchor", "header", "columns", "autofit", "style", "on_empty",
+    "query",
+    "profile",
+    "tab",
+    "tab_name",
+    "anchor",
+    "header",
+    "columns",
+    "autofit",
+    "style",
+    "on_empty",
+    "secret_columns",
 ];
 /// The shared output keys that don't belong to one format: they survive a layer changing `format`.
 const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
@@ -150,7 +160,7 @@ const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
     "file_name",
 ];
 /// The keys of a destination entry core reads; every other key is the plugin's.
-pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst"];
+pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst", "zip"];
 pub const OUTPUT_SHARED_KEYS: &[&str] = &[
     "name",
     "format",
@@ -382,6 +392,9 @@ pub struct QueryEntry {
     /// `on_empty:`: what to do when this query returns no rows; `None`: the output decides.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_empty: Option<crate::no_data::OnEmpty>,
+    /// `secret_columns:`: columns whose values are masked wherever DRE reports.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub secret_columns: Vec<String>,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -589,6 +602,9 @@ pub struct Destination {
     /// `rate:` (and `burst:`): core paces deliveries to this destination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate: Option<crate::rate::Rate>,
+    /// `zip:`: deliver one zip of the output's (and attached outputs') files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip: Option<crate::zip_pack::ZipSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -3039,6 +3055,7 @@ impl Loader {
             autofit: None,
             style: None,
             on_empty: None,
+            secret_columns: Vec::new(),
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -3132,6 +3149,16 @@ impl Loader {
                         "report `{report}`: `on_empty` of `{name}` must be one of {}",
                         crate::no_data::OnEmpty::NAMES.join(", ")
                     ),
+                ),
+            }
+            match &m.secret_columns {
+                None => {}
+                Some(Loose::Ok(v)) => e.secret_columns = v.clone(),
+                Some(Loose::Bad(_)) => self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    line,
+                    format!("report `{report}`: `secret_columns` of `{name}` must be a list of column names"),
                 ),
             }
             if let Some(a) = &m.autofit {
@@ -3699,6 +3726,22 @@ impl Loader {
                                                     ),
                                                 ),
                                             }
+                                            match &e.secret_columns {
+                                                None => {}
+                                                Some(Loose::Ok(v)) => {
+                                                    for c in v {
+                                                        if !q.secret_columns.contains(c) {
+                                                            q.secret_columns.push(c.clone());
+                                                        }
+                                                    }
+                                                }
+                                                Some(Loose::Bad(_)) => self.diags.error(
+                                                    Code::InvalidField,
+                                                    file.clone(),
+                                                    line,
+                                                    format!("{ctx}: `secret_columns` of `{qn}` must be a list of column names"),
+                                                ),
+                                            }
                                         }
                                         sub.push(q);
                                     }
@@ -3928,6 +3971,7 @@ impl Loader {
                 );
             }
         }
+        self.check_password_lists(&outputs, ctx, file, queries);
         for (i, o) in outputs.iter().enumerate() {
             let octx = if several {
                 format!("{ctx}, {}", o.label(i))
@@ -3935,12 +3979,34 @@ impl Loader {
                 ctx.to_string()
             };
             self.check_output_templates(o, &outputs, &octx, file, queries);
+            self.check_password_columns(o, &octx, file, queries);
+            for d in o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.is_some() && o.is_message())
+            {
+                self.diags.error(
+                    Code::InvalidDestinationOption,
+                    at.clone(),
+                    None,
+                    format!(
+                        "{octx}: destination `{}`: a message can't be zipped; zip the files on a file output's entry, and attach that output's files to the message instead",
+                        d.profile
+                    ),
+                );
+            }
             for d in o.destinations.iter().filter(|d| !d.attach.is_empty()) {
                 for a in &d.attach {
                     let problem = match outputs.iter().find(|x| x.name.as_deref() == Some(a.as_str())) {
-                        _ if !o.is_message() => Some("`attach` only applies to a message output".to_string()),
+                        _ if !o.is_message() && d.zip.is_none() => Some(
+                            "`attach` only applies to a message output, or to an entry with `zip:` (a pack)"
+                                .to_string(),
+                        ),
                         None => Some(format!("no output of this report is named `{a}`")),
                         Some(x) if std::ptr::eq(x, o) => Some(format!("`{a}` is this output itself")),
+                        Some(x) if x.is_message() && d.zip.is_some() => Some(format!(
+                            "`{a}` is a message, which can't go in a zip; attach file outputs"
+                        )),
                         Some(x) if x.is_message() => Some(format!(
                             "`{a}` is a message; attach file outputs (its `.md` is linked with `outputs.{a}.location`)"
                         )),
@@ -3988,6 +4054,100 @@ impl Loader {
     /// A message output's options, and the templates of any output (`text`, `file`, `title`,
     /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
     /// another output. Only attribute access is checked; dynamic access isn't seen.
+    /// Warn when a file output holding a `secret_columns` column (a file → password list) goes
+    /// to a destination profile that also receives the password-protected files it unlocks.
+    fn check_password_lists(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        let protected = |o: &Output| o.options.get("password").is_some();
+        let mut locked: Vec<&str> = Vec::new();
+        for o in outputs {
+            for d in &o.destinations {
+                if d.zip.as_ref().is_some_and(|z| z.password.is_some()) {
+                    locked.push(&d.profile);
+                }
+            }
+            let carries_protected = protected(o)
+                || (o.is_message()
+                    && o.destinations.iter().any(|d| {
+                        d.attach.iter().any(|a| {
+                            outputs
+                                .iter()
+                                .any(|x| x.name.as_deref() == Some(a.as_str()) && protected(x))
+                        })
+                    }));
+            if carries_protected {
+                locked.extend(o.destinations.iter().map(|d| d.profile.as_str()));
+            }
+        }
+        for o in outputs.iter().filter(|o| !o.is_message() && !protected(o)) {
+            let secret = queries
+                .iter()
+                .filter(|q| !q.secret_columns.is_empty() && o.feeds(&q.query))
+                .map(|q| q.query.as_str())
+                .collect::<Vec<_>>();
+            if secret.is_empty() {
+                continue;
+            }
+            for d in o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.as_ref().is_none_or(|z| z.password.is_none()))
+            {
+                // `local` keeps files on this machine: nothing travels together.
+                if d.profile != crate::profiles::LOCAL_TYPE && locked.contains(&d.profile.as_str()) {
+                    self.diags.warning(
+                        Code::InvalidOutputOption,
+                        Some(file.to_path_buf()),
+                        None,
+                        format!(
+                            "{ctx}: output `{}` holds secret columns of `{}` and goes to destination `{}`, which also receives the password-protected files: send the password list somewhere else",
+                            o.name.as_deref().unwrap_or(&o.format),
+                            secret.join("`, `"),
+                            d.profile
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Warn when a password (`password:`, `zip: {password}`) reads `each.<column>` of a column
+    /// the driver query doesn't mark in `secret_columns`: it would show in logs and results.
+    fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        static EACH: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").unwrap());
+        let Some(fe) = &o.for_each else { return };
+        let secret: Vec<&String> = queries
+            .iter()
+            .filter(|q| q.query == fe.query)
+            .flat_map(|q| &q.secret_columns)
+            .collect();
+        let mut passwords: Vec<(&str, &str)> = Vec::new();
+        if let Some(pw) = o.options.get("password").and_then(Json::as_str) {
+            passwords.push(("`password`", pw));
+        }
+        for d in &o.destinations {
+            if let Some(pw) = d.zip.as_ref().and_then(|z| z.password.as_deref()) {
+                passwords.push(("`zip.password`", pw));
+            }
+        }
+        for (what, pw) in passwords {
+            for c in EACH.captures_iter(pw) {
+                let col = &c[1];
+                if !secret.iter().any(|s| s.as_str() == col) {
+                    self.diags.warning(
+                        Code::InvalidOutputOption,
+                        Some(file.to_path_buf()),
+                        None,
+                        format!(
+                            "{ctx}: {what} reads `each.{col}`, which isn't in `secret_columns` of query `{}`: its values would show in logs and results; add `secret_columns: [{col}]` to the query entry",
+                            fe.query
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     fn check_output_templates(
         &mut self,
         o: &Output,
@@ -4606,6 +4766,101 @@ impl Loader {
                 format!("{ctx}: destination `{p}`: `burst` must be a whole number of 1 or more"),
             ),
         }
+        let zip = match d.zip {
+            None | Some(Loose::Ok(de::OneOf::A(false))) => None,
+            Some(Loose::Ok(de::OneOf::A(true))) => Some(crate::zip_pack::ZipSpec {
+                password: None,
+                encryption: Default::default(),
+            }),
+            Some(Loose::Ok(de::OneOf::B(z))) => {
+                for k in &z.unknown.0 {
+                    self.diags.error(
+                        Code::UnknownKey,
+                        file.clone(),
+                        Some(k.line),
+                        format!("{ctx}: destination `{p}`: unknown key `{}` in `zip`; expected `password`, `encryption`", k.name),
+                    );
+                }
+                let password = match z.password {
+                    None => None,
+                    Some(Loose::Ok(s)) if s.is_empty() => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.password` is empty; an empty password would leave the zip unencrypted: set one, or use `zip: true`"),
+                        );
+                        None
+                    }
+                    Some(Loose::Ok(s)) => Some(s),
+                    Some(Loose::Bad(_)) => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.password` must be a string"),
+                        );
+                        None
+                    }
+                };
+                let encryption = match z.encryption {
+                    None => Default::default(),
+                    Some(Loose::Ok(e)) => e,
+                    Some(Loose::Bad(_)) => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!(
+                                "{ctx}: destination `{p}`: `zip.encryption` must be one of {}",
+                                crate::zip_pack::Encryption::NAMES.join(", ")
+                            ),
+                        );
+                        Default::default()
+                    }
+                };
+                if encryption == crate::zip_pack::Encryption::Zipcrypto {
+                    self.diags.warning(
+                        Code::InvalidField,
+                        file.clone(),
+                        None,
+                        format!("{ctx}: destination `{p}`: `encryption: zipcrypto` is weak (it can be cracked); use it only for recipients who can't open AES-256 zips (Windows Explorer, macOS Archive Utility)"),
+                    );
+                    if password.is_none() {
+                        self.diags.warning(
+                            Code::InvalidField,
+                            file.clone(),
+                            None,
+                            format!("{ctx}: destination `{p}`: `zip.encryption` has no effect without a `password`"),
+                        );
+                    }
+                }
+                Some(crate::zip_pack::ZipSpec { password, encryption })
+            }
+            Some(Loose::Bad(_)) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    None,
+                    format!(
+                        "{ctx}: destination `{p}`: `zip` must be true, false or `{{password, encryption}}`"
+                    ),
+                );
+                None
+            }
+        };
+        if zip.is_some()
+            && let Some(path) = &path
+            && !crate::preflight::is_templated(path.rsplit(['/', '\\']).next().unwrap_or(path))
+            && let Err(e) = crate::zip_pack::zip_name(Some(path), "")
+        {
+            self.diags.error(
+                Code::InvalidField,
+                file.clone(),
+                None,
+                format!("{ctx}: destination `{p}`: {e}"),
+            );
+        }
         Some(Destination {
             profile: p,
             path,
@@ -4613,6 +4868,7 @@ impl Loader {
             attach,
             hold,
             rate,
+            zip,
         })
     }
 
@@ -4810,6 +5066,7 @@ impl Loader {
             autofit: None,
             style: None,
             on_empty: None,
+            secret_columns: Vec::new(),
         };
         let base = BindingBase {
             profile: profile.clone(),

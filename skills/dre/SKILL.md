@@ -3,8 +3,8 @@ name: dre
 description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port (moving reports from SSRS, Crystal or SQL scripts), dre-explain (what DRE or a report's YAML does), dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.0.0"
-  dre: ">=0.6.0, <0.7.0"
+  version: "4.1.0"
+  dre: ">=0.6.0, <0.8.0"
 ---
 
 # DRE guide

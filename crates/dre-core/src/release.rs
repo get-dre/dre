@@ -266,6 +266,9 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             rate: None,
             attach: e.attach.iter().map(|f| f.path.clone()).collect(),
             attach_missing: false,
+            // A held zip is already one of the entry's files: sent as it is.
+            zip: None,
+            zip_file: None,
         };
         // Paced per destination profile, at the recorded rate or `--rate`.
         if let Some(rate) = opts.rate.or(e.rate)

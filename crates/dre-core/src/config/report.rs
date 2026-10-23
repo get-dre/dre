@@ -92,6 +92,8 @@ pub struct QueryEntry {
     pub columns: Option<serde_json::Value>,
     /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
+    /// Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.
+    pub secret_columns: Option<Loose<Vec<String>>>,
     /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
     pub autofit: Option<Loose<bool>>,
     /// How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page.
@@ -194,6 +196,7 @@ pub struct SetQuery {
     pub tab: Option<Loose<bool>>,
     pub tab_name: Option<Loose<String>>,
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
+    pub secret_columns: Option<Loose<Vec<String>>>,
 }
 
 fn any_map(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -225,7 +228,8 @@ fn set_queries(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
                         "query": {"type": "string", "description": "The query's name."},
                         "tab": {"type": "boolean", "description": "Whether the query makes a tab."},
                         "tab_name": {"type": "string", "description": "The tab name."},
-                        "on_empty": {"enum": ["continue", "skip", "fail"], "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."}
+                        "on_empty": {"enum": ["continue", "skip", "fail"], "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."},
+                        "secret_columns": {"type": "array", "items": {"type": "string"}, "description": "Columns whose values are masked in DRE's logs, results and previews, added to the query's own."}
                     },
                     "required": ["query"],
                     "additionalProperties": true
@@ -297,10 +301,40 @@ pub struct Destination {
     /// With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).
     #[schemars(range(min = 1))]
     pub burst: Option<Loose<u64>>,
+    /// Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`.
+    #[serde(default)]
+    #[schemars(schema_with = "zip_schema")]
+    pub zip: Option<Loose<OneOf<bool, ZipConfig>>>,
     /// The destination plugin's options.
     #[serde(rename = "$unknown", default)]
     #[schemars(skip)]
     pub options: Map<serde_json::Value>,
+}
+
+/// `zip:` with settings.
+#[derive(Deserialize)]
+pub struct ZipConfig {
+    pub password: Option<Loose<String>>,
+    pub encryption: Option<Loose<crate::zip_pack::Encryption>>,
+    #[serde(rename = "$unknown", default)]
+    pub unknown: UnknownKeys,
+}
+
+fn zip_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "oneOf": [
+            {"type": "boolean", "description": "`true`: zip the files, with no password."},
+            {
+                "type": "object",
+                "description": "Zip the files with a password.",
+                "properties": {
+                    "password": {"type": "string", "description": "The zip's password. Jinja: `env_var()`, `var()`, `each.*`. An empty password is an error."},
+                    "encryption": {"enum": ["aes256", "zipcrypto"], "description": "`aes256` (default): strong; opens in 7-Zip, WinRAR, Keka. `zipcrypto`: weak, but opens in Windows Explorer and macOS Archive Utility."}
+                },
+                "additionalProperties": false
+            }
+        ]
+    })
 }
 
 /// One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.

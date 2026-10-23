@@ -2,7 +2,7 @@
 title: "New in 0.6"
 description: "PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.6
@@ -81,4 +81,4 @@ optional `burst:`; `--rate` overrides it for one command. When a service says to
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.5](new-in-0.5.md)
+**Previous:** [New in 0.7](new-in-0.7.md) · **Next:** [New in 0.5](new-in-0.5.md)
