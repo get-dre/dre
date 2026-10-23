@@ -3,8 +3,8 @@ name: dre-report
 description: Create or change a DRE report, guided - the SQL and report YAML, tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet, PDF and HTML documents from a template), one copy per member or client (for_each), what happens with no data (on_empty), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat) with rates, retries and held deliveries, headline messages, and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, variable, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.0.0"
-  dre: ">=0.6.0, <0.7.0"
+  version: "4.1.0"
+  dre: ">=0.6.0, <0.8.0"
 ---
 
 # Write or change a DRE report
@@ -345,6 +345,9 @@ output:
   and addresses, `on_row_error`, and a `{deliver: false}` dev entry before any test (RUN-8).
 - **No data** (`topics/no-data.md`): `on_empty` on the output or a query; `count(*)` is never
   empty, so use `when:` on a count.
+- **Passwords and zip packs** (`topics/secure-delivery.md`): `password:` on a pdf, `zip:` on a
+  destination entry, `secret_columns:` on every query a password reads (RUN-11), and the
+  password by another route (RUN-10).
 
 ### Step 7: validate
 
@@ -368,6 +371,8 @@ Read it first. Change only what was asked; keep the rest byte for byte. Common c
   YAML, and `format: pdf` (or a second output, to keep the xlsx); `topics/documents.md`.
 - **One per client or member:** `for_each` on the output, with a driver query and a key;
   `topics/per-row.md`.
+- **Password-protect it, or zip a pack:** `password:` on a pdf, or `zip:` on the destination
+  entry with `attach:`; `topics/secure-delivery.md`.
 - **Add a headline message:** turn `output:` into a list, name the existing output (its file is
   then `<name>.<ext>`; keep the report's name as `name:` if file names matter), add a headline
   query and a `message` output (step 6b).
