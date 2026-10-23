@@ -40,6 +40,7 @@ pub mod runs;
 pub mod saved;
 pub mod schedule;
 mod schema;
+pub mod secret_columns;
 pub mod secrets;
 pub mod selector;
 pub mod settings;

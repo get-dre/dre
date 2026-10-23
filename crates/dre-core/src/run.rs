@@ -1670,6 +1670,13 @@ impl<'a> BindingRun<'a> {
         pool.close_all();
 
         self.name_result_sets()?;
+        // A password option (`password:`, `zip: {password}`) read through `env_var()` is a secret.
+        for o in &self.b.outputs {
+            crate::secrets::register_secret_fields(&o.options, &[]);
+            for d in &o.destinations {
+                crate::secrets::register_secret_fields(&d.options, &[]);
+            }
+        }
         if let Some(dir) = &self.opts.output_json {
             let dir = self
                 .project
@@ -1684,15 +1691,20 @@ impl<'a> BindingRun<'a> {
                 results: Vec::new(),
             };
             for result in &self.produced {
-                crate::rows::write_spool(
-                    &result.spool,
-                    &dir.join(format!("{}.json", result.name)),
-                    result.rows,
-                )
-                .map_err(|e| e.to_string())?;
+                // Secret columns are saved masked: dre-mcp and people read these files.
+                let secret = self.secret_columns(&result.query);
+                let masked = result.spool.with_extension("masked.arrow");
+                let spool = if secret.is_empty() {
+                    &result.spool
+                } else {
+                    crate::secret_columns::masked_copy(&result.spool, &masked, &secret)?;
+                    &masked
+                };
+                crate::rows::write_spool(spool, &dir.join(format!("{}.json", result.name)), result.rows)
+                    .map_err(|e| e.to_string())?;
                 // The exact Arrow stream too, for `--from-results`.
                 let file = format!("{}.arrows", result.name);
-                crate::saved::spool_to_stream(&result.spool, &dir.join(&file))?;
+                crate::saved::spool_to_stream(spool, &dir.join(&file))?;
                 index.results.push(crate::saved::SavedResult {
                     query: result.query.clone(),
                     name: result.name.clone(),
@@ -2228,6 +2240,16 @@ impl<'a> BindingRun<'a> {
         Ok(())
     }
 
+    /// The `secret_columns` of `query` in this Binding.
+    fn secret_columns(&self, query: &str) -> Vec<String> {
+        self.b
+            .queries
+            .iter()
+            .filter(|q| q.query == query)
+            .flat_map(|q| q.secret_columns.iter().cloned())
+            .collect()
+    }
+
     /// Run statement `i`, spooling its result if it makes a tab.
     fn execute_statement(
         &mut self,
@@ -2308,6 +2330,7 @@ impl<'a> BindingRun<'a> {
                     .map_err(|e| e.to_string())?,
             };
             w.finish().map_err(|e| e.to_string())?;
+            crate::secret_columns::register(&spool_path, &self.secret_columns(&st.query))?;
             self.produced.push(Produced {
                 query: st.query.clone(),
                 connection: st.connection.clone(),
@@ -2406,6 +2429,7 @@ impl<'a> BindingRun<'a> {
             let r = index.find(&q.query).expect("checked above");
             let spool = self.run_dir.join(".spool").join(format!("{i}.arrow"));
             let (schema, rows) = crate::saved::stream_to_spool(&dir.join(&r.file), &spool)?;
+            crate::secret_columns::register(&spool, &self.secret_columns(&q.query))?;
             self.produced.push(Produced {
                 query: q.query.clone(),
                 connection: r.connection.clone(),
@@ -2706,6 +2730,24 @@ impl<'a> BindingRun<'a> {
             Some(t) => Some(self.template_payload(t)?),
             None => None,
         };
+        // Format options may hold Jinja (a pdf `password:`): rendered once for the output.
+        let options = if out.options.values().any(per_row::has_template) {
+            let renderer = self.renderer(None)?;
+            let mut m = JsonMap::new();
+            for (k, v) in &out.options {
+                let v = if per_row::has_template(v) {
+                    render_json(&renderer, &self.report.file, v).map_err(|e| {
+                        Fail::new(Code::RenderFailed, format!("{} option `{k}`: {e}", out.label(oi)))
+                    })?
+                } else {
+                    v.clone()
+                };
+                m.insert(k.clone(), v);
+            }
+            m
+        } else {
+            out.options.clone()
+        };
         for (name, idxs) in groups {
             let t = Instant::now();
             let path = self.run_dir.join(&name);
@@ -2728,7 +2770,7 @@ impl<'a> BindingRun<'a> {
             p.write_begin(
                 &path.to_string_lossy(),
                 &out.format,
-                out.options.clone(),
+                options.clone(),
                 metas,
                 template.clone(),
             )

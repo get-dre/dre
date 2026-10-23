@@ -136,7 +136,17 @@ pub const SET_ENTRY_KEYS: &[&str] = &[
     "locale",
 ];
 pub const QUERY_ENTRY_KEYS: &[&str] = &[
-    "query", "profile", "tab", "tab_name", "anchor", "header", "columns", "autofit", "style", "on_empty",
+    "query",
+    "profile",
+    "tab",
+    "tab_name",
+    "anchor",
+    "header",
+    "columns",
+    "autofit",
+    "style",
+    "on_empty",
+    "secret_columns",
 ];
 /// The shared output keys that don't belong to one format: they survive a layer changing `format`.
 const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
@@ -382,6 +392,9 @@ pub struct QueryEntry {
     /// `on_empty:`: what to do when this query returns no rows; `None`: the output decides.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_empty: Option<crate::no_data::OnEmpty>,
+    /// `secret_columns:`: columns whose values are masked wherever DRE reports.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub secret_columns: Vec<String>,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -3039,6 +3052,7 @@ impl Loader {
             autofit: None,
             style: None,
             on_empty: None,
+            secret_columns: Vec::new(),
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -3132,6 +3146,16 @@ impl Loader {
                         "report `{report}`: `on_empty` of `{name}` must be one of {}",
                         crate::no_data::OnEmpty::NAMES.join(", ")
                     ),
+                ),
+            }
+            match &m.secret_columns {
+                None => {}
+                Some(Loose::Ok(v)) => e.secret_columns = v.clone(),
+                Some(Loose::Bad(_)) => self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    line,
+                    format!("report `{report}`: `secret_columns` of `{name}` must be a list of column names"),
                 ),
             }
             if let Some(a) = &m.autofit {
@@ -3697,6 +3721,22 @@ impl Loader {
                                                         "{ctx}: `on_empty` of `{qn}` must be one of {}",
                                                         crate::no_data::OnEmpty::NAMES.join(", ")
                                                     ),
+                                                ),
+                                            }
+                                            match &e.secret_columns {
+                                                None => {}
+                                                Some(Loose::Ok(v)) => {
+                                                    for c in v {
+                                                        if !q.secret_columns.contains(c) {
+                                                            q.secret_columns.push(c.clone());
+                                                        }
+                                                    }
+                                                }
+                                                Some(Loose::Bad(_)) => self.diags.error(
+                                                    Code::InvalidField,
+                                                    file.clone(),
+                                                    line,
+                                                    format!("{ctx}: `secret_columns` of `{qn}` must be a list of column names"),
                                                 ),
                                             }
                                         }
@@ -4810,6 +4850,7 @@ impl Loader {
             autofit: None,
             style: None,
             on_empty: None,
+            secret_columns: Vec::new(),
         };
         let base = BindingBase {
             profile: profile.clone(),

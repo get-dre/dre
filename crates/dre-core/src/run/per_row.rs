@@ -74,6 +74,8 @@ struct Job {
     files: Vec<(PathBuf, Vec<usize>)>,
     /// A document's template context, with `each`.
     template: Option<Json>,
+    /// The format options rendered with `each`, when any holds Jinja (a pdf `password:`).
+    options: Option<JsonMap<String, Json>>,
     /// A message's title and text.
     message: Option<(String, String)>,
     dests: Vec<RowDest>,
@@ -904,6 +906,7 @@ impl BindingRun<'_> {
             mask: mask.clone(),
             files: Vec::new(),
             template: None,
+            options: None,
             message: None,
             dests: Vec::new(),
             pre: None,
@@ -1014,6 +1017,13 @@ impl BindingRun<'_> {
             job.files = vec![(folder.join(format!("{stem}.md")), Vec::new())];
         }
         let ctx = minijinja::Value::from(ctx_map);
+        if !o.is_message() && o.options.values().any(has_template) {
+            let rendered = render_json_with(&renderer, &self.report.file, &Json::Object(o.options.clone()), &ctx)
+                .map_err(|e| Fail::new(Code::RenderFailed, format!("format option: {}", mask.apply(&e.message))))?;
+            if let Json::Object(m) = rendered {
+                job.options = Some(m);
+            }
+        }
         let connections = self.pool.as_ref().expect("pool").connections.clone();
         for (idx, d) in o.destinations.iter().enumerate() {
             let profile = renderer
@@ -1095,6 +1105,16 @@ fn each_of(pop: &Population, i: usize, cal: Calendar) -> (JsonMap<String, Json>,
         .collect();
     let value: BTreeMap<String, minijinja::Value> = names.into_iter().zip(typed).collect();
     (json, minijinja::Value::from(value))
+}
+
+/// Whether a JSON value holds Jinja at any depth.
+pub(crate) fn has_template(v: &Json) -> bool {
+    match v {
+        Json::String(s) => crate::preflight::is_templated(s),
+        Json::Array(a) => a.iter().any(has_template),
+        Json::Object(o) => o.values().any(has_template),
+        _ => false,
+    }
 }
 
 fn render_json_with(
@@ -1368,7 +1388,7 @@ fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<PluginProcess>
         p.write_begin(
             &path.to_string_lossy(),
             &shared.format,
-            shared.options.clone(),
+            job.options.clone().unwrap_or_else(|| shared.options.clone()),
             metas,
             job.template.clone(),
         )

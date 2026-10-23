@@ -67,7 +67,7 @@ impl Secrets {
 
 fn sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut v: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
-    v.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    v.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
     v.dedup();
     v
 }
@@ -129,10 +129,12 @@ fn collect_strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
 }
 
 fn register(names: impl Iterator<Item = String>) {
-    let values: Vec<String> = names
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .collect();
+    register_values(names.into_iter().filter_map(|name| std::env::var(name).ok()));
+}
+
+/// Mask these values from now on: a query's `secret_columns`.
+pub fn register_values(values: impl IntoIterator<Item = String>) {
+    let values: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
     if values.is_empty() {
         return;
     }
