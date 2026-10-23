@@ -9,8 +9,9 @@
 //! control characters, so masking the finished text would miss a secret that contains them. Use
 //! [`to_json_pretty`] / [`to_json_line`] for every JSON surface, never `mask` on JSON text.
 //!
-//! Values shorter than 4 characters aren't masked: replacing every `a` or `12` in a log would
-//! make it unreadable, and a value that short isn't a secret anyway.
+//! Every value is masked, however short. One shorter than 4 characters is masked where it stands
+//! alone (not inside a longer word or number), so a PIN of `12` masks `PIN 12` but leaves `2012`
+//! readable.
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +26,35 @@ const MIN_LEN: usize = 4;
 static ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn eligible(value: &str) -> bool {
-    value.chars().count() >= MIN_LEN
+    !value.is_empty()
+}
+
+/// Short values mask only where they stand alone.
+fn short(value: &str) -> bool {
+    value.chars().count() < MIN_LEN
+}
+
+/// `s` with each standalone `x` (not touching a letter or digit) replaced by the mask.
+fn replace_standalone(s: &str, x: &str) -> String {
+    let word = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    let mut before: Option<char> = None;
+    while let Some(i) = rest.find(x) {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let prev = head.chars().next_back().or(before);
+        let next = tail[x.len()..].chars().next();
+        if word(prev) || word(next) {
+            out.push_str(x);
+        } else {
+            out.push_str(MASK);
+        }
+        before = x.chars().next_back();
+        rest = &tail[x.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Secret values, longest first so a secret containing another is masked whole. Starts with
@@ -157,7 +186,14 @@ fn mask_with<'a>(s: &'a str, secrets: &[String]) -> Cow<'a, str> {
     }
     let mut out = s.to_string();
     for x in secrets {
-        out = out.replace(x.as_str(), MASK);
+        out = if short(x) {
+            replace_standalone(&out, x)
+        } else {
+            out.replace(x.as_str(), MASK)
+        };
+    }
+    if out == s {
+        return Cow::Borrowed(s);
     }
     Cow::Owned(out)
 }
@@ -190,7 +226,7 @@ pub(crate) fn mask_message_title(s: &str) -> Cow<'_, str> {
 
 /// Whether masking is enabled and `s` contains a complete registered secret.
 pub fn contains_secret(s: &str) -> bool {
-    ENABLED.load(Ordering::Relaxed) && secrets().plain.iter().any(|secret| s.contains(secret.as_str()))
+    ENABLED.load(Ordering::Relaxed) && matches!(mask_with(s, &secrets().plain), Cow::Owned(_))
 }
 
 fn mask_source_error_with<'a>(error: &'a str, sensitive: bool, secrets: &[String]) -> Cow<'a, str> {
@@ -390,8 +426,15 @@ mod tests {
     }
 
     #[test]
-    fn minimum_length_counts_unicode_characters() {
-        assert!(!eligible("ééé"));
-        assert!(eligible("éééé"));
+    fn short_values_mask_where_they_stand_alone() {
+        assert!(short("ééé") && !short("éééé") && !eligible(""));
+        let secrets = sorted(["12".to_string(), "Ab9".to_string(), "s3cret".to_string()]);
+        assert_eq!(
+            mask_with("PIN 12, code Ab9; year 2012, x12y, Ab99, s3cretly", &secrets),
+            "PIN *****, code *****; year 2012, x12y, Ab99, *****ly"
+        );
+        assert_eq!(mask_with("12", &secrets), "*****");
+        assert_eq!(mask_with("12 12", &secrets), "***** *****");
+        assert!(matches!(mask_with("2012", &secrets), Cow::Borrowed(_)));
     }
 }

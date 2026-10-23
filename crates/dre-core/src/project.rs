@@ -3972,6 +3972,7 @@ impl Loader {
             }
         }
         self.check_password_lists(&outputs, ctx, file, queries);
+        self.check_zip_names(&outputs, ctx, file, queries);
         for (i, o) in outputs.iter().enumerate() {
             let octx = if several {
                 format!("{ctx}, {}", o.label(i))
@@ -4054,6 +4055,95 @@ impl Loader {
     /// A message output's options, and the templates of any output (`text`, `file`, `title`,
     /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
     /// another output. Only attribute access is checked; dynamic access isn't seen.
+    /// A zipping entry's zip is flat: two of its files with one name are an error. The names
+    /// are known here for outputs that aren't per row (theirs render per row).
+    fn check_zip_names(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        let report = file
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let files_of = |o: &Output| -> Option<Vec<String>> {
+            if o.for_each.is_some() || o.is_message() {
+                return None;
+            }
+            let ext = o.extension.clone().unwrap_or_else(|| {
+                match o.format.as_str() {
+                    "delimited" | "fixed_width" => "txt",
+                    f => f,
+                }
+                .to_string()
+            });
+            let literal = o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.is_none())
+                .find_map(|d| d.path.as_deref())
+                .and_then(|p| p.rsplit(['/', '\\']).next())
+                .filter(|n| !n.is_empty());
+            let base = match literal {
+                Some(n) if crate::preflight::is_templated(n) => return None,
+                Some(n) => n.to_string(),
+                None => {
+                    let stem = o.name.clone().unwrap_or_else(|| report.clone());
+                    if ext.is_empty() {
+                        stem
+                    } else {
+                        format!("{stem}.{ext}")
+                    }
+                }
+            };
+            let single_table = matches!(o.format.as_str(), "csv" | "delimited" | "fixed_width" | "parquet");
+            let tabs: Vec<String> = queries
+                .iter()
+                .filter(|q| q.tab && o.feeds(&q.query))
+                .map(|q| q.tab_name.clone().unwrap_or_else(|| q.query.clone()))
+                .collect();
+            if !single_table || o.template.is_some() || tabs.len() <= 1 {
+                return Some(vec![base]);
+            }
+            let (stem, ext) = match base.rfind('.') {
+                Some(i) if i > 0 => (&base[..i], &base[i..]),
+                _ => (base.as_str(), ""),
+            };
+            Some(tabs.iter().map(|t| format!("{stem}_{t}{ext}")).collect())
+        };
+        for (i, o) in outputs.iter().enumerate() {
+            for d in o.destinations.iter().filter(|d| d.zip.is_some()) {
+                let Some(mut names) = files_of(o) else { continue };
+                let mut known = true;
+                for a in &d.attach {
+                    match outputs
+                        .iter()
+                        .find(|x| x.name.as_deref() == Some(a.as_str()))
+                        .and_then(files_of)
+                    {
+                        Some(n) => names.extend(n),
+                        None => known = false,
+                    }
+                }
+                if !known {
+                    continue;
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                for n in &names {
+                    if !seen.insert(n.as_str()) {
+                        self.diags.error(
+                            Code::InvalidDestinationOption,
+                            Some(file.to_path_buf()),
+                            None,
+                            format!(
+                                "{ctx}, {}: destination `{}`: two files named `{n}` would go into the zip (it's flat, and nothing is renamed); give the outputs different `name:`s",
+                                o.label(i),
+                                d.profile
+                            ),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     /// Warn when a file output holding a `secret_columns` column (a file → password list) goes
     /// to a destination profile that also receives the password-protected files it unlocks.
     fn check_password_lists(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
@@ -4115,12 +4205,27 @@ impl Loader {
     fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {
         static EACH: std::sync::LazyLock<regex::Regex> =
             std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").unwrap());
-        let Some(fe) = &o.for_each else { return };
-        let secret: Vec<&String> = queries
-            .iter()
-            .filter(|q| q.query == fe.query)
-            .flat_map(|q| &q.secret_columns)
-            .collect();
+        // `results.<query>` and the column after it: `.first.col`, `.last.col`, `.value`, `.col`.
+        static RESULTS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"\bresults\.([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:first|last|rows\[\d+\]))?(?:\.([A-Za-z_][A-Za-z0-9_]*))?").unwrap()
+        });
+        static VAR: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(r"\bvar\s*\(").unwrap());
+        let secret_of = |q: &str| -> Vec<&String> {
+            queries
+                .iter()
+                .filter(|e| e.query == q)
+                .flat_map(|e| &e.secret_columns)
+                .collect()
+        };
+        let warn = |s: &mut Self, msg: String| {
+            s.diags.warning(
+                Code::InvalidOutputOption,
+                Some(file.to_path_buf()),
+                None,
+                format!("{ctx}: {msg}"),
+            )
+        };
         let mut passwords: Vec<(&str, &str)> = Vec::new();
         if let Some(pw) = o.options.get("password").and_then(Json::as_str) {
             passwords.push(("`password`", pw));
@@ -4131,18 +4236,93 @@ impl Loader {
             }
         }
         for (what, pw) in passwords {
-            for c in EACH.captures_iter(pw) {
-                let col = &c[1];
-                if !secret.iter().any(|s| s.as_str() == col) {
-                    self.diags.warning(
-                        Code::InvalidOutputOption,
-                        Some(file.to_path_buf()),
-                        None,
+            if pw.is_empty() {
+                continue;
+            }
+            if !crate::preflight::is_templated(pw) {
+                warn(
+                    self,
+                    format!(
+                        "{what} is written in the YAML, where anyone who reads the project sees it; read it with `env_var()`, or from a query column in `secret_columns`"
+                    ),
+                );
+                continue;
+            }
+            if VAR.is_match(pw) {
+                warn(
+                    self,
+                    format!(
+                        "{what} reads `var()`: vars show in the run's log and results; read it with `env_var()`, or from a query column in `secret_columns`"
+                    ),
+                );
+            }
+            if let Some(fe) = &o.for_each {
+                let secret = secret_of(&fe.query);
+                for c in EACH.captures_iter(pw) {
+                    let col = &c[1];
+                    if !secret.iter().any(|s| s.as_str() == col) {
+                        warn(
+                            self,
+                            format!(
+                                "{what} reads `each.{col}`, which isn't in `secret_columns` of query `{}`: its values would show in logs and results; add `secret_columns: [{col}]` to the query entry",
+                                fe.query
+                            ),
+                        );
+                    }
+                }
+            }
+            for c in RESULTS.captures_iter(pw) {
+                let q = &c[1];
+                let secret = secret_of(q);
+                let col = c
+                    .get(2)
+                    .map(|m| m.as_str())
+                    .filter(|c| !matches!(*c, "value" | "row_count"));
+                let covered = match col {
+                    Some(col) => secret.iter().any(|s| s.as_str() == col),
+                    None => !secret.is_empty(),
+                };
+                if !covered {
+                    let which = col.map_or_else(|| "its password column".to_string(), |c| format!("`{c}`"));
+                    warn(
+                        self,
                         format!(
-                            "{ctx}: {what} reads `each.{col}`, which isn't in `secret_columns` of query `{}`: its values would show in logs and results; add `secret_columns: [{col}]` to the query entry",
-                            fe.query
+                            "{what} reads `results.{q}`, but {which} isn't in `secret_columns` of query `{q}`: its values would show in logs and results; list it in the query entry's `secret_columns`"
                         ),
                     );
+                }
+            }
+        }
+        // A password-like driver column a message or path prints, not marked secret.
+        if let Some(fe) = &o.for_each {
+            let secret = secret_of(&fe.query);
+            let mut texts: Vec<&str> = ["text", "title"]
+                .iter()
+                .filter_map(|k| o.options.get(*k).and_then(Json::as_str))
+                .collect();
+            texts.extend(o.destinations.iter().filter_map(|d| d.path.as_deref()));
+            let mut seen = Vec::new();
+            for t in texts {
+                for c in EACH.captures_iter(t) {
+                    let col = c[1].to_string();
+                    let lower = col.to_ascii_lowercase();
+                    let looks_secret = ["password", "passwd", "pwd", "passcode", "pin", "secret"]
+                        .iter()
+                        .any(|w| {
+                            lower == *w
+                                || lower.starts_with(&format!("{w}_"))
+                                || lower.ends_with(&format!("_{w}"))
+                        });
+                    if looks_secret && !secret.iter().any(|s| **s == col) && !seen.contains(&col) {
+                        warn(
+                            self,
+                            format!(
+                                "`each.{col}` looks like a password but isn't in `secret_columns` of query `{}`: its values would show in logs and results; add `secret_columns: [{col}]` to the query entry",
+                                fe.query
+                            ),
+                        );
+                        seen.push(col);
+                    }
                 }
             }
         }
