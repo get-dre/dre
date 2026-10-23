@@ -377,3 +377,20 @@ fn secret_columns_are_masked_everywhere_dre_reports_but_not_in_what_it_delivers(
     let pdf = std::fs::read(p.path("target/run/statements/default/statement/101.pdf")).unwrap();
     assert!(String::from_utf8_lossy(&pdf).contains("/Encrypt"));
 }
+
+#[test]
+fn validate_warns_when_a_password_column_isnt_secret() {
+    let report = "queries: [members, holdings]\noutput:\n\
+        \x20 - name: statement\n    format: pdf\n    queries: [members, holdings]\n    for_each: {query: members, key: member_id}\n    password: \"{{ each.email }}\"\n";
+    let (p, _) = project(report, &[]);
+    p.dre("validate", &[])
+        .ok()
+        .says("`password` reads `each.email`, which isn't in `secret_columns` of query `members`");
+    let (p, _) = project(
+        &report.replace("queries: [members, holdings]\noutput", "queries: [{query: members, secret_columns: [email]}, holdings]\noutput"),
+        &[],
+    );
+    let v = p.dre("validate", &[]);
+    v.ok();
+    assert!(!v.stdout.contains("secret_columns"), "{}", v.stdout);
+}

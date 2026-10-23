@@ -3975,6 +3975,7 @@ impl Loader {
                 ctx.to_string()
             };
             self.check_output_templates(o, &outputs, &octx, file, queries);
+            self.check_password_columns(o, &octx, file, queries);
             for d in o.destinations.iter().filter(|d| !d.attach.is_empty()) {
                 for a in &d.attach {
                     let problem = match outputs.iter().find(|x| x.name.as_deref() == Some(a.as_str())) {
@@ -4028,6 +4029,44 @@ impl Loader {
     /// A message output's options, and the templates of any output (`text`, `file`, `title`,
     /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
     /// another output. Only attribute access is checked; dynamic access isn't seen.
+    /// Warn when a password (`password:`, `zip: {password}`) reads `each.<column>` of a column
+    /// the driver query doesn't mark in `secret_columns`: it would show in logs and results.
+    fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        static EACH: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").unwrap());
+        let Some(fe) = &o.for_each else { return };
+        let secret: Vec<&String> = queries
+            .iter()
+            .filter(|q| q.query == fe.query)
+            .flat_map(|q| &q.secret_columns)
+            .collect();
+        let mut passwords: Vec<(&str, &str)> = Vec::new();
+        if let Some(pw) = o.options.get("password").and_then(Json::as_str) {
+            passwords.push(("`password`", pw));
+        }
+        for d in &o.destinations {
+            if let Some(pw) = d.options.get("zip").and_then(|z| z.get("password")).and_then(Json::as_str) {
+                passwords.push(("`zip.password`", pw));
+            }
+        }
+        for (what, pw) in passwords {
+            for c in EACH.captures_iter(pw) {
+                let col = &c[1];
+                if !secret.iter().any(|s| s.as_str() == col) {
+                    self.diags.warning(
+                        Code::InvalidOutputOption,
+                        Some(file.to_path_buf()),
+                        None,
+                        format!(
+                            "{ctx}: {what} reads `each.{col}`, which isn't in `secret_columns` of query `{}`: its values would show in logs and results; add `secret_columns: [{col}]` to the query entry",
+                            fe.query
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     fn check_output_templates(
         &mut self,
         o: &Output,
