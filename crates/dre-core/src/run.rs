@@ -3003,7 +3003,11 @@ impl<'a> BindingRun<'a> {
             .name
             .clone()
             .unwrap_or_else(|| format!("output{}", oi + 1));
-        let name = crate::zip_pack::zip_name(d.path.as_deref(), &output).map_err(|e| {
+        let named = d
+            .path
+            .as_deref()
+            .or(d.options.get("attachment_name").and_then(Json::as_str));
+        let name = crate::zip_pack::zip_name(named, &output).map_err(|e| {
             Fail::new(
                 Code::DeliveryFailed,
                 format!("{label}: destination `{}`: {e}", d.profile),

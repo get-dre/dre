@@ -33,7 +33,7 @@ queries:
 output:
   - name: statement
     format: pdf
-    template: statement.html
+    template: {file: statement.html}
     for_each: {query: members, key: member_id}
     password: "{{ each.pdf_password }}"
   - name: statement_mail

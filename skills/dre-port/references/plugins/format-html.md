@@ -233,7 +233,7 @@ be lifted with a blank owner password. *New in `document` 1.1.0.*
 output:
   - name: statement
     format: pdf
-    template: statement.html
+    template: {file: statement.html}
     for_each: {query: members, key: member_id}
     password: "{{ each.pdf_password }}"        # or "{{ env_var('STATEMENT_PW') }}"
 ```

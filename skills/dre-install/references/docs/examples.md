@@ -1,6 +1,6 @@
 ---
 title: "Tested examples"
-description: "Complete, copyable projects with checked output: Excel, bank files, Sets, Slack and SFTP."
+description: "Complete, copyable projects with checked output: Excel, bank files, Sets, Slack, SFTP and password-protected statements."
 section: build-reports
 position: 10
 ---
@@ -19,6 +19,7 @@ no database account. Start with [Your first report in 10 minutes](first-report.m
 | Regional reports | One workbook per Set, with named schedules | [Regional project](https://github.com/get-dre/dre/blob/master/examples/regional-reports/README.md) |
 | Slack headline | Message controlled by a result threshold | [Slack project](https://github.com/get-dre/dre/blob/master/examples/slack-headline/README.md) |
 | SFTP delivery | CSV and an environment-based remote profile | [SFTP project](https://github.com/get-dre/dre/blob/master/examples/sftp-delivery/README.md) |
+| Password statements | Password PDFs per member, a password list and an AES-256 zip pack | [Password project](https://github.com/get-dre/dre/blob/master/examples/password-statements/README.md) |
 
 [Install DRE](install.md), copy the chosen project directory and run `dre validate` from it.
 Each README gives the run commands and expected values. Dependencies install on demand.
@@ -26,7 +27,7 @@ Each README gives the run commands and expected values. Dependencies install on 
 Slack and SFTP default to `dev: {deliver: false}`: outputs stay local. To use a real destination,
 set your own environment variables, inspect the local output and explicitly select `--target prod`.
 
-CI validates all six projects, runs their local paths and checks saved output. It also exercises
+CI validates all seven projects, runs their local paths and checks saved output. It also exercises
 every tutorial stage on Linux, macOS and Windows. Production remote profiles are checked with
 inert environment values; CI never delivers to Slack or SFTP.
 
