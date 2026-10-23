@@ -1682,6 +1682,9 @@ impl<'a> BindingRun<'a> {
             crate::secrets::register_secret_fields(&o.options, &[]);
             for d in &o.destinations {
                 crate::secrets::register_secret_fields(&d.options, &[]);
+                if let Some(pw) = d.zip.as_ref().and_then(|z| z.password.as_ref()) {
+                    crate::secrets::register_secret_field(&Json::String(pw.clone()));
+                }
             }
         }
         if let Some(dir) = &self.opts.output_json {
@@ -1723,6 +1726,7 @@ impl<'a> BindingRun<'a> {
                     .ok()
                     .map(|h| h.trim().to_string()),
                     file,
+                    masked_columns: secret,
                 });
             }
             crate::saved::write_index(&dir, &index).map_err(|e| e.to_string())?;
@@ -2337,7 +2341,14 @@ impl<'a> BindingRun<'a> {
                     .map_err(|e| e.to_string())?,
             };
             w.finish().map_err(|e| e.to_string())?;
-            crate::secret_columns::register(&spool_path, &self.secret_columns(&st.query))?;
+            let secret = self.secret_columns(&st.query);
+            for c in secret.iter().filter(|c| schema.field_with_name(c).is_err()) {
+                self.ui.warn(&format!(
+                    "  `{}` has no column `{c}`, which its `secret_columns` names: nothing of it is masked; check the spelling",
+                    st.query
+                ));
+            }
+            crate::secret_columns::register(&spool_path, &secret)?;
             self.produced.push(Produced {
                 query: st.query.clone(),
                 connection: st.connection.clone(),
@@ -2419,6 +2430,15 @@ impl<'a> BindingRun<'a> {
                         .ok()
                         .map(|h| h.trim().to_string())
                 });
+            if let Some(r) = index.find(&q.query)
+                && !r.masked_columns.is_empty()
+            {
+                self.ui.warn(&format!(
+                    "  `{}`'s saved results have its `secret_columns` ({}) as `*****`: what they feed (a password, a message) renders as `*****`, so don't deliver this replay",
+                    q.query,
+                    r.masked_columns.join(", ")
+                ));
+            }
             match (rendered, saved) {
                 (Ok(Some(now)), Some(then)) if now != then => self.ui.warn(&format!(
                     "  `{}`'s SQL changed since its results were saved; re-run with `--output-json` to refresh them",

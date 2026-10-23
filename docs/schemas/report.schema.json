@@ -247,7 +247,7 @@
         },
         "secret_columns": {
           "type": "array",
-          "description": "Columns whose values are secrets (a PDF or zip password): masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.",
+          "description": "Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.",
           "items": {
             "type": "string"
           }

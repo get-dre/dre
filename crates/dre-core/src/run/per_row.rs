@@ -844,6 +844,8 @@ impl BindingRun<'_> {
                     .ok()
                     .map(|h| h.trim().to_string()),
                 file,
+                // The run folder keeps the real values: a retry delivers what they feed.
+                masked_columns: Vec::new(),
             });
         }
         crate::saved::write_index(&dir, &index).map_err(|e| e.to_string())?;

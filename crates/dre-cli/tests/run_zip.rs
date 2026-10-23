@@ -246,4 +246,13 @@ fn zip_mistakes_are_validate_errors_or_run_errors() {
         .failed()
         .says("both write detail_summary.csv");
     assert!(!p.path("out/p.zip").exists());
+    // A password list sent where the protected pack goes: warned.
+    let list = format!(
+        "{PACK}    destination: {{profile: mail, to: a@example.com, zip: {{password: Pw-12345678}}}}\n  - name: keys\n    format: csv\n    queries: [members]\n    destination: {{profile: mail, to: b@example.com}}\n"
+    )
+    .replace("queries: [summary, fees, members]", "queries: [summary, fees, {query: members, secret_columns: [zip_password]}]");
+    let (p, _) = project(&list);
+    p.dre("validate", &[])
+        .ok()
+        .says("output `keys` holds secret columns of `members` and goes to destination `mail`");
 }

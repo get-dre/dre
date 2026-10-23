@@ -3971,6 +3971,7 @@ impl Loader {
                 );
             }
         }
+        self.check_password_lists(&outputs, ctx, file, queries);
         for (i, o) in outputs.iter().enumerate() {
             let octx = if several {
                 format!("{ctx}, {}", o.label(i))
@@ -4053,6 +4054,62 @@ impl Loader {
     /// A message output's options, and the templates of any output (`text`, `file`, `title`,
     /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
     /// another output. Only attribute access is checked; dynamic access isn't seen.
+    /// Warn when a file output holding a `secret_columns` column (a file → password list) goes
+    /// to a destination profile that also receives the password-protected files it unlocks.
+    fn check_password_lists(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        let protected = |o: &Output| o.options.get("password").is_some();
+        let mut locked: Vec<&str> = Vec::new();
+        for o in outputs {
+            for d in &o.destinations {
+                if d.zip.as_ref().is_some_and(|z| z.password.is_some()) {
+                    locked.push(&d.profile);
+                }
+            }
+            let carries_protected = protected(o)
+                || (o.is_message()
+                    && o.destinations.iter().any(|d| {
+                        d.attach.iter().any(|a| {
+                            outputs
+                                .iter()
+                                .any(|x| x.name.as_deref() == Some(a.as_str()) && protected(x))
+                        })
+                    }));
+            if carries_protected {
+                locked.extend(o.destinations.iter().map(|d| d.profile.as_str()));
+            }
+        }
+        for o in outputs.iter().filter(|o| !o.is_message() && !protected(o)) {
+            let secret = queries
+                .iter()
+                .filter(|q| !q.secret_columns.is_empty() && o.feeds(&q.query))
+                .map(|q| q.query.as_str())
+                .collect::<Vec<_>>();
+            if secret.is_empty() {
+                continue;
+            }
+            for d in o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.as_ref().is_none_or(|z| z.password.is_none()))
+            {
+                // `local` keeps files on this machine: nothing travels together.
+                if d.profile != crate::profiles::LOCAL_TYPE && locked.contains(&d.profile.as_str()) {
+                    self.diags.warning(
+                        Code::InvalidOutputOption,
+                        Some(file.to_path_buf()),
+                        None,
+                        format!(
+                            "{ctx}: output `{}` holds secret columns of `{}` and goes to destination `{}`, which also receives the password-protected files: send the password list somewhere else",
+                            o.name.as_deref().unwrap_or(&o.format),
+                            secret.join("`, `"),
+                            d.profile
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     /// Warn when a password (`password:`, `zip: {password}`) reads `each.<column>` of a column
     /// the driver query doesn't mark in `secret_columns`: it would show in logs and results.
     fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {

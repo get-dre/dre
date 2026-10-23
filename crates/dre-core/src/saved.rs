@@ -39,6 +39,9 @@ pub struct SavedResult {
     pub sql_sha256: Option<String>,
     /// The Arrow IPC stream, relative to the index.
     pub file: String,
+    /// `secret_columns` saved as `*****`: a replay can't rebuild what they fed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masked_columns: Vec<String>,
 }
 
 impl Index {

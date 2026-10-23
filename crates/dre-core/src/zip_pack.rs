@@ -34,7 +34,7 @@ pub struct ZipSpec {
 }
 
 /// The zip's file name: the last part of the destination's `path`, else `<output>.zip`.
-/// `None` when the path ends in another extension.
+/// An error when the path ends in another extension.
 pub fn zip_name(path: Option<&str>, output: &str) -> Result<String, String> {
     let name = match path {
         Some(p) => p.rsplit(['/', '\\']).next().unwrap_or(p).to_string(),

@@ -92,7 +92,7 @@ pub struct QueryEntry {
     pub columns: Option<serde_json::Value>,
     /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
-    /// Columns whose values are secrets (a PDF or zip password): masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.
+    /// Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.
     pub secret_columns: Option<Loose<Vec<String>>>,
     /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
     pub autofit: Option<Loose<bool>>,

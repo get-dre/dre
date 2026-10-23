@@ -55,7 +55,7 @@ A query with settings, instead of just its name.
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
 | `on_empty` | string |  | When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty. |
-| `secret_columns` | list of string |  | Columns whose values are secrets (a PDF or zip password): masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages. |
+| `secret_columns` | list of string |  | Columns whose values are secrets (a PDF or zip password): values of 4 or more characters are masked as `*****` in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages. |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
 | `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
 
