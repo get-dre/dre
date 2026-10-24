@@ -137,6 +137,12 @@ jobs:
         ports: ["1025:1025", "8025:8025"]
     env:
       RUN_TESTS: ${{ github.event_name != 'push' }}
+      # sccache caches each compiled unit, Rust and the C/C++ inside crates (DuckDB, aws-lc), in
+      # GitHub's cache, keyed by its inputs. It still hits when Cargo.lock changes and the
+      # whole-target cache below misses (a cold build: 10 minutes; with sccache: 3). cc-rs uses
+      # RUSTC_WRAPPER for C/C++ when it's sccache.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
       DRE_TEST_POSTGRES: localhost:5432
       DRE_TEST_S3_ENDPOINT: http://localhost:9090
       DRE_TEST_AZURITE_ENDPOINT: http://localhost:10000
@@ -235,6 +241,9 @@ jobs:
           echo "DRE_TEST_GO_PLUGINS=$dir" >> "$GITHUB_ENV"
       # The runner's rustup, not a third-party action: the newest stable Rust.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
