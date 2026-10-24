@@ -6,10 +6,10 @@
 //! `progress` messages (protocol 1) go to the same sink.
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -33,6 +33,118 @@ pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 /// A log sink that prefixes each plugin line with the plugin's file name, on core's stderr.
 pub fn stderr_log() -> LogSink {
     Arc::new(|plugin, line| eprintln!("[{plugin}] {line}"))
+}
+
+/// Waits for a plugin's stderr to be logged. Lines reach the [`LogSink`] from a background thread,
+/// so a line the plugin wrote before answering a request can be logged after core has the answer.
+/// A host that logs a request's lines differently (hiding them while the request carries a secret)
+/// syncs before it changes how it logs.
+#[derive(Clone)]
+pub struct StderrSync {
+    progress: Arc<StderrProgress>,
+    pipe: RawPipe,
+}
+
+impl StderrSync {
+    /// Wait up to `timeout` until every complete line the plugin has written to stderr so far has
+    /// been logged. False when the plugin kept writing (or the pipe can't be inspected) until then.
+    pub fn wait(&self, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let p = &self.progress;
+            if p.done.load(Ordering::SeqCst) {
+                return true;
+            }
+            // Blocked on an empty pipe, and still blocked in the same read after looking: every
+            // line read before that read has been logged, and nothing more is waiting.
+            let reads = p.reads.load(Ordering::SeqCst);
+            if p.reading.load(Ordering::SeqCst)
+                && pending(self.pipe) == Some(0)
+                && p.reading.load(Ordering::SeqCst)
+                && p.reads.load(Ordering::SeqCst) == reads
+            {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+/// What the stderr forwarder is doing, for [`StderrSync`].
+#[derive(Default)]
+struct StderrProgress {
+    /// In a read of the pipe: every complete line read before it has been logged.
+    reading: AtomicBool,
+    /// Reads that returned.
+    reads: AtomicU64,
+    /// At end of stream: everything has been logged.
+    done: AtomicBool,
+}
+
+/// The pipe, read through [`StderrProgress`] so [`StderrSync`] knows where the forwarder is.
+struct TrackedPipe<R> {
+    pipe: R,
+    progress: Arc<StderrProgress>,
+}
+
+impl<R: Read> Read for TrackedPipe<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.progress.reading.store(true, Ordering::SeqCst);
+        let n = self.pipe.read(buf);
+        self.progress.reading.store(false, Ordering::SeqCst);
+        self.progress.reads.fetch_add(1, Ordering::SeqCst);
+        n
+    }
+}
+
+#[cfg(unix)]
+type RawPipe = std::os::fd::RawFd;
+#[cfg(windows)]
+type RawPipe = usize;
+#[cfg(not(any(unix, windows)))]
+type RawPipe = ();
+
+#[cfg(unix)]
+fn raw_pipe(pipe: &std::process::ChildStderr) -> RawPipe {
+    std::os::fd::AsRawFd::as_raw_fd(pipe)
+}
+#[cfg(windows)]
+fn raw_pipe(pipe: &std::process::ChildStderr) -> RawPipe {
+    std::os::windows::io::AsRawHandle::as_raw_handle(pipe) as usize
+}
+#[cfg(not(any(unix, windows)))]
+fn raw_pipe(_: &std::process::ChildStderr) -> RawPipe {}
+
+/// Bytes waiting in the pipe, unread.
+#[cfg(unix)]
+fn pending(fd: RawPipe) -> Option<usize> {
+    let mut n: libc::c_int = 0;
+    // SAFETY: FIONREAD writes one c_int; the forwarder keeps the descriptor open until it is done.
+    let r = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut n) };
+    (r == 0).then_some(n.max(0) as usize)
+}
+#[cfg(windows)]
+fn pending(handle: RawPipe) -> Option<usize> {
+    let mut n: u32 = 0;
+    // SAFETY: peeks without reading; the forwarder keeps the handle open until it is done.
+    let ok = unsafe {
+        windows_sys::Win32::System::Pipes::PeekNamedPipe(
+            handle as windows_sys::Win32::Foundation::HANDLE,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut n,
+            std::ptr::null_mut(),
+        )
+    };
+    (ok != 0).then_some(n as usize)
+}
+#[cfg(not(any(unix, windows)))]
+fn pending(_: RawPipe) -> Option<usize> {
+    None
 }
 
 pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -276,6 +388,7 @@ pub struct PluginProcess {
     /// The request running now (0: none).
     current: Arc<AtomicU64>,
     stderr: Arc<Mutex<VecDeque<String>>>,
+    stderr_sync: StderrSync,
     /// Forwards stderr; joined on close/drop so no log line is lost when the plugin exits.
     stderr_thread: Option<std::thread::JoinHandle<()>>,
     info: Option<PluginInfo>,
@@ -405,8 +518,17 @@ impl PluginProcess {
         let tail = stderr.clone();
         let who = label.clone();
         let sink = log.clone();
+        let stderr_sync = StderrSync {
+            progress: Arc::default(),
+            pipe: raw_pipe(&stderr_pipe),
+        };
+        let progress = stderr_sync.progress.clone();
         let stderr_thread = std::thread::spawn(move || {
-            for line in BufReader::new(stderr_pipe).lines() {
+            let mut reader = BufReader::new(TrackedPipe {
+                pipe: stderr_pipe,
+                progress: progress.clone(),
+            });
+            for line in reader.by_ref().lines() {
                 let Ok(line) = line else { break };
                 sink(&who, &line);
                 let mut t = tail.lock().unwrap();
@@ -415,6 +537,9 @@ impl PluginProcess {
                 }
                 t.push_back(line);
             }
+            // Before the pipe closes, so a sync never inspects a closed descriptor.
+            progress.done.store(true, Ordering::SeqCst);
+            drop(reader);
         });
         let serve = parse_executable_name(&label).map(|(k, n)| PluginId::new(k, n));
         let child = Arc::new(Mutex::new(child));
@@ -439,6 +564,7 @@ impl PluginProcess {
             last_id: 0,
             current,
             stderr,
+            stderr_sync,
             stderr_thread: Some(stderr_thread),
             info: None,
             early: None,
@@ -543,6 +669,11 @@ impl PluginProcess {
             current: self.current.clone(),
             child: self.child.clone(),
         }
+    }
+
+    /// A handle that waits for the plugin's stderr to be logged; see [`StderrSync`].
+    pub fn stderr_sync(&self) -> StderrSync {
+        self.stderr_sync.clone()
     }
 
     /// The protocol version settled on in the handshake (0 before it).

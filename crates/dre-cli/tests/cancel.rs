@@ -229,7 +229,8 @@ fn a_run_past_its_timeout_is_stopped_and_exits_124() {
     let p = project("sleep 60");
     let pid_file = p.dir.path().join("plugin.pid");
     let mut c = Command::new(env!("CARGO_BIN_EXE_dre"));
-    c.args(["run", "--timeout", "2s", "--project-dir"])
+    // Long enough that a slow start (Windows CI) can't use it up before the plugin runs.
+    c.args(["run", "--timeout", "10s", "--project-dir"])
         .arg(p.root())
         .arg("--profiles-dir")
         .arg(p.dir.path().join("profiles"))
@@ -241,10 +242,10 @@ fn a_run_past_its_timeout_is_stopped_and_exits_124() {
         .stderr(Stdio::piped());
     let mut child = c.spawn().unwrap();
     let plugin = plugin_pid(&mut child, &pid_file);
-    let (code, out) = wait(child, Duration::from_secs(8));
+    let (code, out) = wait(child, Duration::from_secs(20));
     assert_eq!(code, 124, "{out}");
     assert!(
-        out.contains("the run timed out after 2s while running a_slow; 1 Binding didn't run"),
+        out.contains("the run timed out after 10s while running a_slow; 1 Binding didn't run"),
         "{out}"
     );
     let results = p.json("target/run/a_slow/default/run_results.json");

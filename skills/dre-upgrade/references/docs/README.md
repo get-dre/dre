@@ -99,6 +99,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): dre system update, and how each install method updates.
+- [New in 0.8](new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.
 - [New in 0.6](new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
 - [New in 0.5](new-in-0.5.md): Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone.

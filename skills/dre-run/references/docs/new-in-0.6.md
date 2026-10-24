@@ -2,7 +2,7 @@
 title: "New in 0.6"
 description: "PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits."
 section: upgrading
-position: 3
+position: 4
 ---
 
 # New in 0.6
