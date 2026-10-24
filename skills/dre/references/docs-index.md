@@ -144,6 +144,7 @@ Search this index for the question's terms, then open the linked page. These loc
 
 - [Updating DRE](docs/updating.md): dre system update, and how each install method updates.
   Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `dre`, `dre-cli`.
+- [New in 0.8](docs/new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](docs/new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.
   Terms/options: `--output-json`, `attach:`, `document`, `dre.log`, `password:`, `pdf`, `rows.jsonl`, `run_results.json`, `secret_columns`, `secret_columns:`, `zip:`.
 - [New in 0.6](docs/new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
