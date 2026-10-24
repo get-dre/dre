@@ -1,6 +1,6 @@
 ---
 title: "Parquet"
-description: "The parquet format."
+description: "Write Parquet files with the parquet format: how query column types map to Parquet types, and keeping types intact in an export for an analytics platform."
 section: plugins
 position: 12
 ---

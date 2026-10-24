@@ -1,6 +1,6 @@
 ---
 title: "Google Cloud Storage"
-description: "The gcs destination: credentials and paths."
+description: "Deliver reports to Google Cloud Storage with the gcs destination: credentials, bucket paths, notes, and archiving a workbook with application credentials."
 section: plugins
 position: 16
 ---

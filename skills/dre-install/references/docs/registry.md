@@ -1,6 +1,6 @@
 ---
 title: "Plugin packages, the registry and `dre.lock`"
-description: "Plugin packages, the registry index, dre.lock and macro packages."
+description: "Plugin packages, the registry index and dre.lock: how DRE finds, installs and pins plugins, extensions and macro packages, and how to publish a release."
 section: plugins
 position: 2
 ---

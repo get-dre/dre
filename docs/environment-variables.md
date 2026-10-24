@@ -1,6 +1,6 @@
 ---
 title: "Environment variables"
-description: "Every DRE_* variable and what it does."
+description: "Every DRE_* environment variable and what it does, including DRE_RUN_AT to give a scheduled run or a late rerun a fixed, reproducible reporting period."
 section: reference
 position: 14
 ---

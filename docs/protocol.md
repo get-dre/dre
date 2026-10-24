@@ -1,6 +1,6 @@
 ---
 title: "DRE plugin protocol, version 1"
-description: "How a plugin talks to DRE, for writing a plugin in any language."
+description: "The DRE plugin protocol, version 1: how a plugin talks to DRE over streams and frames, the handshake, errors and versioning, to write one in any language."
 section: extend
 position: 1
 ---

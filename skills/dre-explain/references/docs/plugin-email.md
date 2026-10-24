@@ -1,6 +1,6 @@
 ---
 title: "Email"
-description: "The email destination: SMTP settings and options."
+description: "Send reports by email with the email destination: SMTP settings, recipients, attachments and options, and configuring the sender before adding recipients."
 section: plugins
 position: 20
 ---

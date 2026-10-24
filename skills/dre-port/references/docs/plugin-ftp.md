@@ -1,6 +1,6 @@
 ---
 title: "FTP and FTPS"
-description: "The ftp destination: FTP and explicit FTPS."
+description: "Deliver report files over FTP or explicit FTPS with the ftp destination: connection settings, notes, and sending an export over FTPS."
 section: plugins
 position: 19
 ---

@@ -1,6 +1,6 @@
 ---
 title: "sets.yml reference"
-description: "Every key of a Sets file."
+description: "Every key of a Sets file, which runs one report once per client, region or store with its own variables, file names and recipients."
 section: reference
 position: 5
 ---

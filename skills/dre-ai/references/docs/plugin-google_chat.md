@@ -1,6 +1,6 @@
 ---
 title: "Google Chat"
-description: "The google_chat destination: space webhooks."
+description: "Post report headline messages to Google Chat spaces with the google_chat destination: space webhooks, notes, and adapting a headline to Google Chat."
 section: plugins
 position: 23
 ---

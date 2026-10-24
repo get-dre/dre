@@ -1,6 +1,6 @@
 ---
 title: "Microsoft Teams"
-description: "The teams destination: Workflows webhooks."
+description: "Post report headline messages to Microsoft Teams with the teams destination: Workflows webhooks, notes, and adapting a headline to Teams."
 section: plugins
 position: 22
 ---

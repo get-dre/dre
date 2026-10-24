@@ -1,6 +1,6 @@
 ---
 title: "Snowflake"
-description: "The snowflake source: sign-in methods and connection settings."
+description: "Run report SQL on Snowflake with the snowflake source: sign-in methods, role, warehouse and connection settings, and testing the chosen role and warehouse."
 section: plugins
 position: 8
 ---

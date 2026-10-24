@@ -1,6 +1,6 @@
 ---
 title: "SFTP"
-description: "The sftp destination: host keys, keys and the RSA advisory."
+description: "Deliver report files over SFTP with the sftp destination: host keys, key and password sign-in, the RSA advisory, and uploads that never land half-written."
 section: plugins
 position: 18
 ---

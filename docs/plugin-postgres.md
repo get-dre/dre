@@ -1,6 +1,6 @@
 ---
 title: "PostgreSQL"
-description: "The postgres source: profile fields, TLS and SSH bastions."
+description: "Run report SQL on PostgreSQL with the postgres source: profile fields, TLS, SSH bastions, and checking the connection before porting a report."
 section: plugins
 position: 5
 ---
