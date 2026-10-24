@@ -3769,7 +3769,8 @@ impl Session {
     fn statement(&mut self, sensitive: bool) -> Result<(&mut PluginProcess, OpaqueLogScope), String> {
         let opaque_log = Arc::clone(&self.opaque_log);
         let process = self.get()?;
-        let scope = OpaqueLogScope::new(opaque_log, sensitive);
+        let stderr = sensitive.then(|| process.stderr_sync());
+        let scope = OpaqueLogScope::new(opaque_log, sensitive, stderr);
         Ok((process, scope))
     }
 
@@ -3780,17 +3781,25 @@ impl Session {
     }
 }
 
-struct OpaqueLogScope(Arc<AtomicBool>);
+/// Hides a sensitive statement's plugin diagnostics while it runs. The plugin's stderr is logged
+/// from another thread, so the scope waits for the lines the plugin wrote before showing
+/// diagnostics again; if the plugin keeps writing, they stay hidden until the next statement.
+struct OpaqueLogScope(Arc<AtomicBool>, Option<dre_protocol::host::StderrSync>);
 
 impl OpaqueLogScope {
-    fn new(active: Arc<AtomicBool>, sensitive: bool) -> Self {
+    fn new(active: Arc<AtomicBool>, sensitive: bool, stderr: Option<dre_protocol::host::StderrSync>) -> Self {
         active.store(sensitive, Ordering::SeqCst);
-        Self(active)
+        Self(active, stderr)
     }
 }
 
 impl Drop for OpaqueLogScope {
     fn drop(&mut self) {
+        if let Some(stderr) = &self.1
+            && !stderr.wait(Duration::from_secs(1))
+        {
+            return;
+        }
         self.0.store(false, Ordering::SeqCst);
     }
 }

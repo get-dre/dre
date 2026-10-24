@@ -177,6 +177,24 @@ fn log_and_progress_messages_reach_the_log_sink() {
 }
 
 #[test]
+fn stderr_sync_waits_for_lines_written_before_the_reply() {
+    // A slow sink keeps the stderr forwarder behind the replies.
+    let lines = Arc::new(Mutex::new(Vec::new()));
+    let l = lines.clone();
+    let sink: LogSink = Arc::new(move |_, line| {
+        std::thread::sleep(Duration::from_millis(200));
+        l.lock().unwrap().push(line.to_string());
+    });
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    for text in ["first", "second"] {
+        p.execute(&format!("log {text}"), None, |_, _| Ok(())).unwrap();
+        assert!(p.stderr_sync().wait(Duration::from_secs(5)));
+        assert_eq!(lines.lock().unwrap().last().map(String::as_str), Some(text));
+    }
+}
+
+#[test]
 fn an_error_carries_its_kind_and_namespaced_code() {
     let mut p = opened();
     match p.execute("coded", None, |_, _| Ok(())).unwrap_err() {
