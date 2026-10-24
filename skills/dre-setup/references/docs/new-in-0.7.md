@@ -2,7 +2,7 @@
 title: "New in 0.7"
 description: "Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.7
@@ -49,4 +49,4 @@ See [Password-protect PDFs and zip report packs](password-protected-outputs.md).
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.6](new-in-0.6.md)
+**Previous:** [New in 0.8](new-in-0.8.md) · **Next:** [New in 0.6](new-in-0.6.md)

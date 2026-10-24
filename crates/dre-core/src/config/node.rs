@@ -117,8 +117,9 @@ pub fn parse(text: &str) -> Result<Node, SyntaxError> {
     options.strict_booleans = true;
     options.duplicate_keys = serde_saphyr::options::DuplicateKeyPolicy::Error;
     options.with_snippet = false;
-    // `.inf` and `.nan` are values like any other; a plugin decides what they mean.
-    options.reject_non_finite_typeless_float = false;
+    // `.inf`, `.nan` and out-of-range floats like `1e999` reach DRE as the strings they are; a
+    // plugin decides what they mean.
+    options.non_finite_float_policy = serde_saphyr::options::NonFiniteFloatPolicy::AsString;
     if text.trim().is_empty() {
         return Ok(Node::null());
     }
@@ -144,11 +145,16 @@ fn syntax_error(e: &serde_saphyr::Error) -> SyntaxError {
     let line = e.location().map(|l| l.line() as usize).filter(|l| *l > 0);
     let text = e.to_string();
     let first = text.lines().next().unwrap_or_default();
-    // DRE prints the line itself, and serde-saphyr's hint names its own options.
+    // DRE prints the line itself, and serde-saphyr's hints name its own options and functions.
     let message = LOCATION
         .captures(first)
         .map_or(first, |c| c.get(1).map_or(first, |m| m.as_str()));
     let message = message.replace(", set DuplicateKeyPolicy in Options if acceptable", "");
+    let message = message
+        .split("; use from_")
+        .next()
+        .unwrap_or_default()
+        .to_string();
     let message = if message.contains("merge value must be") {
         "invalid YAML merge key (`<<`): `<<` must be a map or a list of maps".to_string()
     } else {
@@ -354,6 +360,40 @@ mod tests {
             Some("x")
         );
         assert_eq!(parse("\n# nothing\n").unwrap().kind, Kind::Null);
+    }
+
+    #[test]
+    fn merged_keys_report_the_merge_line() {
+        let n = parse("base: &b\n  x: 1\ndev:\n  <<: *b\n  z: 3\n").unwrap();
+        let dev = n.get("dev").unwrap();
+        assert_eq!(dev.entry("x").unwrap().0.line, 4);
+        assert_eq!(dev.entry("z").unwrap().0.line, 5);
+    }
+
+    #[test]
+    fn multiple_documents_name_no_library_functions() {
+        let e = parse("a: 1\n---\nb: 2\n").unwrap_err();
+        assert_eq!(e.line, Some(3));
+        assert_eq!(e.message, "multiple YAML documents detected");
+    }
+
+    #[test]
+    fn non_finite_floats_are_strings() {
+        let j = parse("a: .inf\nb: -.inf\nc: .nan\nd: 1e999\n").unwrap().to_json();
+        assert_eq!(
+            j,
+            serde_json::json!({"a": ".inf", "b": "-.inf", "c": ".nan", "d": ".inf"})
+        );
+    }
+
+    #[test]
+    fn relaxed_yaml_forms_parse() {
+        let quoted = parse("a: \"one\n two\"\n").unwrap();
+        assert_eq!(quoted.get("a").unwrap().as_str(), Some("one two"));
+        assert_eq!(parse("?\tk\n").unwrap().to_json(), serde_json::json!({"k": null}));
+        assert!(parse("?").is_ok());
+        let block = parse("s: |\n  a\n  ").unwrap();
+        assert_eq!(block.get("s").unwrap().as_str(), Some("a\n"));
     }
 
     #[test]

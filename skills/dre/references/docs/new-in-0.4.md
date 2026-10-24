@@ -2,7 +2,7 @@
 title: "New in 0.4"
 description: "Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles."
 section: upgrading
-position: 5
+position: 6
 ---
 
 # New in 0.4
