@@ -24,6 +24,14 @@ on:
       - "skills/**"
       - ".claude-plugin/**"
       - ".github/workflows/skills*.yml"
+  # By hand, e.g. to run macOS and Windows on a branch: `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
+
+# A new push to a pull request cancels its older run. Runs on master all finish: they save the
+# build caches every other run restores.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -92,10 +100,13 @@ jobs:
       - run: test -z "$(gofmt -l go)" || { gofmt -l go; exit 1; }
       - run: for m in go/*/; do (cd "$m" && go vet ./...) || exit 1; done
 
-  integration:
-    # Plugin integration tests against local emulators (Linux only). Each test skips itself when
-    # its service's env var is unset. Docker Hub images come through Google's mirror of it
-    # (mirror.gcr.io): the same digests, without Docker Hub's pull limit for shared runners.
+  test-linux:
+    # Every test on Linux, the plugin integration tests among them, against local emulators (each
+    # skips itself when its service's env var is unset). Pull requests run only this job's tests:
+    # macOS and Windows run on master (the `test` job). On master it only builds, to save the
+    # cache: the pull request already ran these tests on the same code. Docker Hub images come
+    # through Google's mirror of it (mirror.gcr.io): the same digests, without Docker Hub's pull
+    # limit for shared runners.
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -125,6 +136,7 @@ jobs:
           MP_SMTP_AUTH_ALLOW_INSECURE: "1"
         ports: ["1025:1025", "8025:8025"]
     env:
+      RUN_TESTS: ${{ github.event_name != 'push' }}
       DRE_TEST_POSTGRES: localhost:5432
       DRE_TEST_S3_ENDPOINT: http://localhost:9090
       DRE_TEST_AZURITE_ENDPOINT: http://localhost:10000
@@ -142,6 +154,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Start emulators that need arguments
+        if: env.RUN_TESTS == 'true'
         run: |
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/id_test"
           echo "DRE_TEST_SFTP_KEY=$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
@@ -198,20 +211,28 @@ jobs:
               sleep 1
             done
           done
-      # The bigquery plugin against the BigQuery emulator.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go/bigquery/go.mod
+          go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
-      - run: go test ./...
-        working-directory: go/bigquery
       # Postgres and ClickHouse with TLS behind an SSH bastion, for the postgres and clickhouse
       # plugins' tunnel tests.
       - name: Start the SSH bastion
+        if: env.RUN_TESTS == 'true'
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
-      # The clickhouse plugin against the ClickHouse service, and with TLS through the bastion.
-      - run: go test ./...
-        working-directory: go/clickhouse
+      # Every Go module; bigquery and clickhouse against their emulators (and through the bastion).
+      - name: Go tests
+        if: env.RUN_TESTS == 'true'
+        run: for m in go/*/; do (cd "$m" && go test ./...) || exit 1; done
+      # The Go packages; the Rust tests check them through the same host code core uses.
+      - name: Build the Go packages
+        run: |
+          dir="$RUNNER_TEMP/go-plugins"
+          mkdir -p "$dir"
+          for p in databricks bigquery snowflake clickhouse; do
+            (cd "go/$p" && go build -o "$dir/dre-plugin-$p" .) || exit 1
+          done
+          echo "DRE_TEST_GO_PLUGINS=$dir" >> "$GITHUB_ENV"
       # The runner's rustup, not a third-party action: the newest stable Rust.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -221,22 +242,34 @@ jobs:
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: nextest
-      - run: >
-          cargo nextest run --no-fail-fast -p dre-plugin-postgres -p dre-plugin-object_store
-          -p dre-plugin-sftp -p dre-plugin-ftp -p dre-plugin-email
-      # A report whose tabs come from DuckDB and Postgres on separate sessions. Build the plugins
-      # first, as the test job does: otherwise each test process builds them (DuckDB from C++
+      # Build the plugins first: otherwise each test process builds them (DuckDB from C++
       # source) into an uncached directory, and the tests sit at SLOW for many minutes.
       - run: cargo build --workspace --bins
-      - run: cargo nextest run --no-fail-fast -p dre-cli --test run_connections
+      # On master: build the tests for the cache, run none.
+      - if: env.RUN_TESTS != 'true'
+        run: cargo nextest run --workspace --no-run
+      # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
+      # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
+      # test even after a failure, so one failure can't hide others.
+      - if: env.RUN_TESTS == 'true'
+        run: cargo nextest run --workspace --no-fail-fast
         env:
           DRE_TEST_PREBUILT_BINS: "1"
+      - name: Validate and run public examples against this build
+        if: env.RUN_TESTS == 'true'
+        run: python .github/scripts/check_examples.py --dre target/debug/dre --plugins-dir target/debug
+      # nextest doesn't run doctests.
+      - if: env.RUN_TESTS == 'true'
+        run: cargo test --workspace --doc
 
   test:
+    # macOS and Windows: on master (after the pull request's Linux run) and by hand, not on pull
+    # requests. Releases are tagged on master, so a tagged commit has passed them.
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
