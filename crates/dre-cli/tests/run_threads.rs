@@ -47,21 +47,31 @@ fn project(threads: u32, secs: u32, paths: [&str; 3]) -> TestProject {
 
 #[test]
 fn bindings_on_a_target_with_threads_run_at_once() {
-    let p = project(3, 2, ["out/a.csv", "out/b.csv", "out/c.csv"]);
-    let t = Instant::now();
-    p.dre("run", &["--threads", "1"]).ok();
-    let one = t.elapsed().as_secs_f64();
-    let t = Instant::now();
+    let p = project(3, 3, ["out/a.csv", "out/b.csv", "out/c.csv"]);
     p.dre("run", &[]).ok();
-    let at_once = t.elapsed().as_secs_f64();
-    // The first Binding signs in alone, then the other two run together: one 2s wait saved.
-    assert!(at_once < one - 1.5, "one at a time {one}s, at once {at_once}s");
     for f in ["out/a.csv", "out/b.csv", "out/c.csv"] {
         assert!(p.path(f).is_file(), "{f}");
     }
-    // run_results keep declaration order.
-    let r = p.json("target/run/a/default/run_results.json");
-    assert_eq!(r["status"], "success");
+    // The first Binding signs in alone, then the other two run together. Compare the Bindings'
+    // own start times and durations, not the run's wall time, which a loaded runner stretches.
+    // `started_at` has whole seconds: a 1s margin keeps one-after-the-other from looking like
+    // overlap, and the 3s waits leave 2s for real overlap to show.
+    let spans: Vec<(i64, i64)> = ["a", "b", "c"]
+        .iter()
+        .map(|r| {
+            let j = p.json(&format!("target/run/{r}/default/run_results.json"));
+            assert_eq!(j["status"], "success", "{r}");
+            let start = chrono::DateTime::parse_from_rfc3339(j["started_at"].as_str().unwrap())
+                .unwrap()
+                .timestamp_millis();
+            (start, start + j["duration_ms"].as_i64().unwrap())
+        })
+        .collect();
+    let overlap = |(s1, e1): (i64, i64), (s2, e2): (i64, i64)| s1 + 1000 < e2 && s2 + 1000 < e1;
+    assert!(
+        overlap(spans[0], spans[1]) || overlap(spans[0], spans[2]) || overlap(spans[1], spans[2]),
+        "no two Bindings ran at once: {spans:?}"
+    );
 }
 
 #[test]

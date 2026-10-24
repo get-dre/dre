@@ -141,9 +141,13 @@ jobs:
 
       # Rust binaries carry the exact list of crates linked into them (`cargo auditable`), so the
       # SBOM reflects what's in the binary. Go binaries carry it already.
+      # A prebuilt binary, checked against the action's pinned checksum, rather than a minute or two
+      # of `cargo install` on every runner.
       - name: Install cargo-auditable
         if: needs.plan.outputs.go == ''
-        run: cargo install cargo-auditable --locked --version 0.7.6
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-auditable@0.7.6
 
       - name: Build
         shell: bash

@@ -62,9 +62,17 @@ for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
 ```
 
 The plugin integration tests (Postgres, object store, SFTP, FTP, email) run against local
-emulators, and each one skips itself when its service isn't configured. See the `integration`
+emulators, and each one skips itself when its service isn't configured. See the `test-linux`
 job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the services and environment
 variables they use.
+
+A pull request runs the tests on Linux only. macOS and Windows run after the merge, on master, so a
+release is never tagged on a commit that hasn't passed them. To run them on a branch before you
+merge (a change to paths, processes or anything else that differs by platform):
+
+```sh
+gh workflow run ci.yml --ref <branch>
+```
 
 ## Security scans
 
