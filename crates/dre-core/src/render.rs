@@ -856,11 +856,13 @@ fn package_template(name: &str) -> String {
 
 /// Concatenate macro files `(path to read, path to report)` into one template source, with
 /// every macro name defined and where each file starts.
+static MACRO_NAME: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").unwrap());
+
 #[allow(clippy::type_complexity)]
 fn combine(
     files: &[(PathBuf, PathBuf)],
 ) -> Result<(String, Vec<String>, Vec<(usize, PathBuf, usize)>), RenderError> {
-    let re = regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").unwrap();
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();
@@ -871,7 +873,7 @@ fn combine(
             message: format!("can't read macro file: {e}"),
         })?;
         let start = combined.matches('\n').count() + 1;
-        names.extend(re.captures_iter(&src).map(|c| c[1].to_string()));
+        names.extend(MACRO_NAME.captures_iter(&src).map(|c| c[1].to_string()));
         combined.push_str(&src);
         if !combined.ends_with('\n') {
             combined.push('\n');

@@ -465,9 +465,11 @@ impl Binding {
 }
 
 /// Whether a template reads `each.*`.
+static MENTIONS_EACH: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\s*(\.|\[)").unwrap());
+
 pub fn mentions_each(src: &str) -> bool {
-    let re = regex::Regex::new(r"\beach\s*(\.|\[)").expect("valid");
-    re.is_match(src)
+    MENTIONS_EACH.is_match(src)
 }
 
 /// Whether an output's `queries:` (as written) includes `query`; no list: every query.
