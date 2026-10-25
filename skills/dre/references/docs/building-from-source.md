@@ -1,6 +1,6 @@
 ---
 title: "Building from source"
-description: "Build dre and the first-party plugins with cargo and Go."
+description: "Build dre and the first-party plugins from source: the Rust workspace with cargo and the Go Databricks plugin, for development or an unsupported platform."
 section: extend
 position: 2
 ---

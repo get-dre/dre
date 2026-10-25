@@ -1,6 +1,6 @@
 ---
 title: "DuckDB"
-description: "The duckdb source: profile fields and notes."
+description: "Run report SQL on DuckDB with the duckdb source: profile fields, notes, and running reports on local files without any database server."
 section: plugins
 position: 4
 ---

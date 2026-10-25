@@ -1,6 +1,6 @@
 ---
 title: "Slack"
-description: "The slack destination: tokens, channels and DMs."
+description: "Post report files and headline messages to Slack with the slack destination: bot tokens, channels and direct messages, and the headline example project."
 section: plugins
 position: 21
 ---

@@ -1,6 +1,6 @@
 ---
 title: "Error codes reference"
-description: "Every code DRE reports, what it means and how to fix it."
+description: "Every error code DRE reports, grouped by usage, config, plugins, connections, queries and delivery, with what each one means and how to fix it."
 section: reference
 position: 12
 ---

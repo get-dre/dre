@@ -1,6 +1,6 @@
 ---
 title: "The target path"
-description: "Where DRE writes compiled SQL, outputs, snapshots and the manifest."
+description: "The target path: where DRE writes compiled SQL, outputs, snapshots and the manifest for each run, how overlapping runs are kept apart, and how to clean it."
 section: schedule-and-run
 position: 4
 ---

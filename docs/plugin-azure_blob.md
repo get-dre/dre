@@ -1,6 +1,6 @@
 ---
 title: "Azure Blob Storage"
-description: "The azure_blob destination: credentials and paths."
+description: "Deliver reports to Azure Blob Storage with the azure_blob destination: credentials, container paths, notes, and archiving a workbook with an Azure identity."
 section: plugins
 position: 17
 ---

@@ -1,6 +1,6 @@
 ---
 title: "Amazon S3"
-description: "The s3 destination: credentials and paths."
+description: "Deliver reports to Amazon S3 or S3-compatible storage with the s3 destination: credentials, paths, notes, and delivering a dated finance export."
 section: plugins
 position: 15
 ---

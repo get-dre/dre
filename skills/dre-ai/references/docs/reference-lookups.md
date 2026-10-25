@@ -1,6 +1,6 @@
 ---
 title: "Lookup config reference"
-description: "Every key of a lookup's config file."
+description: "Every key of a lookup's config file: the columns, types and loading options of a mapping table kept as a file in your DRE project."
 section: reference
 position: 11
 ---

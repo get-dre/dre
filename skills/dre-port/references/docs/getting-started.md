@@ -1,6 +1,6 @@
 ---
 title: "Getting started"
-description: "Start with a coding agent or from the command line."
+description: "Build your first DRE report: let a coding agent with DRE's skills set it up for you, or write the SQL and YAML yourself and run it from the command line."
 section: get-started
 position: 1
 ---

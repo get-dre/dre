@@ -1,6 +1,6 @@
 ---
 title: "dre_project.yml reference"
-description: "Every key of dre_project.yml, the project file."
+description: "Every key of dre_project.yml, the DRE project file: default profile and output, reports, flags, dispatch and plugins, with their types."
 section: reference
 position: 3
 ---

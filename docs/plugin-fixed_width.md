@@ -1,6 +1,6 @@
 ---
 title: "Fixed-width text"
-description: "The fixed_width format: column layout and options."
+description: "Write fixed-width text files, such as payment files for a bank, with the fixed_width format: column layout, value padding, and checking the receiver's layout."
 section: plugins
 position: 11
 ---

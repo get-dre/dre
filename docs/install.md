@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Install DRE with the install script, Homebrew, Scoop, pip or cargo."
+description: "Install DRE on macOS, Linux or Windows with the install script, Homebrew, Scoop, pip or cargo, verify the download, and check the installed command."
 section: get-started
 position: 2
 ---

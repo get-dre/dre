@@ -1,6 +1,6 @@
 ---
 title: "schedules.yml reference"
-description: "Every key of the schedules file."
+description: "Every key of schedules.yml, where named schedules say which report runs when and with which variables, including the every key for recurring timings."
 section: reference
 position: 6
 ---

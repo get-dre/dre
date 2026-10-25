@@ -1,6 +1,6 @@
 ---
 title: "Updating DRE"
-description: "dre system update, and how each install method updates."
+description: "Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first."
 section: upgrading
 position: 1
 ---

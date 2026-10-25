@@ -21,23 +21,23 @@ URL = "https://getdre.com/schemas"
 # (docs/sections.json)
 PAGES = [
     ("project", "reference-project", "dre_project.yml", "dre_project.yml", 3,
-     "Every key of dre_project.yml, the project file."),
+     "Every key of dre_project.yml, the DRE project file: default profile and output, reports, flags, dispatch and plugins, with their types."),
     ("report", "reference-report", "Report YAML", "a `.yml` file under `reports/`", 4,
      "Every key of a report YAML file: queries, output, destinations, Sets and templates."),
     ("sets", "reference-sets", "sets.yml", "`sets.yml`, or any YAML file of Sets", 5,
-     "Every key of a Sets file."),
+     "Every key of a Sets file, which runs one report once per client, region or store with its own variables, file names and recipients."),
     ("schedules", "reference-schedules", "schedules.yml", "`schedules.yml`", 6,
-     "Every key of the schedules file."),
+     "Every key of schedules.yml, where named schedules say which report runs when and with which variables, including the every key for recurring timings."),
     ("timings", "reference-timings", "timings.yml", "`timings.yml`", 7,
-     "Every key of the timings file: named timings schedules share."),
+     "Every key of timings.yml: named timings that several schedules share, including the every key, so one change moves every schedule that uses it."),
     ("profiles", "reference-profiles", "profiles.yml", "`profiles.yml`", 8,
      "Every key of profiles.yml: connections, destinations and their targets."),
     ("sources", "reference-sources", "Sources", "any project YAML file with a top-level `sources:` key, e.g. `sources/<name>.yml`", 9,
      "Every key of a sources declaration: sources, tables and columns, as in dbt."),
     ("dependencies", "reference-dependencies", "dependencies.yml", "`dependencies.yml` or `packages.yml`", 10,
-     "Every key of dependencies.yml: plugin packages and macro packages."),
+     "Every key of dependencies.yml: the plugin packages, companion extensions and macro packages a DRE project installs, and how dre.lock pins them."),
     ("lookup", "reference-lookups", "Lookup config", "`lookups/<name>.yml`, next to the lookup's data file", 11,
-     "Every key of a lookup's config file."),
+     "Every key of a lookup's config file: the columns, types and loading options of a mapping table kept as a file in your DRE project."),
 ]
 
 

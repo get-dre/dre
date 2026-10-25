@@ -1,6 +1,6 @@
 ---
 title: "Excel (xlsx)"
-description: "The xlsx format: column formats, formulas, totals rows and templates."
+description: "Write Excel workbooks with the xlsx format: multi-sheet tabs, column widths, styles, number formats, formulas, totals rows and branded templates."
 section: plugins
 position: 13
 ---

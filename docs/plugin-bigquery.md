@@ -1,6 +1,6 @@
 ---
 title: "BigQuery"
-description: "The bigquery source: sign-in methods and job settings."
+description: "Run report SQL on Google BigQuery with the bigquery source: sign-in methods, job settings, notes, and testing the billing and data projects separately."
 section: plugins
 position: 7
 ---

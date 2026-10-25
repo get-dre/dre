@@ -5,8 +5,10 @@
 as `.sql` and YAML files in git; DRE runs the SQL against your databases (each tab of a workbook can
 come from a different one, and tables can be declared as dbt-style sources), writes the result as
 csv, delimited, fixed-width, parquet or xlsx (including multi-sheet workbooks, number formats,
-formulas and totals rows, and branded Excel templates), and delivers the file wherever it needs
-to go: email, SFTP/FTP, S3, GCS, Azure Blob, Databricks Volumes or Slack. A report can also send a
+formulas and totals rows, and branded Excel templates), or as html or pdf documents from an HTML
+template (one per row if needed, such as a statement for every member, optionally
+password-protected), and delivers the file wherever it needs to go, zipped if you like: email,
+SFTP/FTP, S3, GCS, Azure Blob, Databricks Volumes or Slack. A report can also send a
 headline [message](https://getdre.com/docs/messages/) built from its results, to Slack or email (Microsoft Teams and
 Google Chat are in preview). It runs on whatever scheduler you already have: cron, Airflow, Dagster, Databricks Jobs.
 

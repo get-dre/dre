@@ -1,6 +1,6 @@
 ---
 title: "csv and delimited"
-description: "The csv and delimited formats: options and quoting."
+description: "Write CSV and other delimited text files with the csv and delimited formats: options, quoting and encoding, and exporting a file for a downstream importer."
 section: plugins
 position: 10
 ---

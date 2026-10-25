@@ -1,6 +1,6 @@
 ---
 title: "timings.yml reference"
-description: "Every key of the timings file: named timings schedules share."
+description: "Every key of timings.yml: named timings that several schedules share, including the every key, so one change moves every schedule that uses it."
 section: reference
 position: 7
 ---
