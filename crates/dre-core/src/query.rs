@@ -112,9 +112,97 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
         crate::run::find_plugin(project, PluginKind::Source, &target.kind).map_err(|e| e.to_string())?;
     let log: LogSink =
         Arc::new(|name, message| eprintln!("{name}: {}", crate::secrets::mask_source_error(message, false)));
-    let mut process = plugin
+    let process = plugin
         .start(log, Some(&project.root))
         .map_err(|e| e.to_string())?;
+    // The session and its result live inside one inner call: the single `close()` afterwards runs
+    // on every exit path after `start()`, including a panic unwinding through it.
+    run_session(process, target, sql, max_rows, profile, &project.target_name)
+}
+
+/// A plugin source running as a child process: what [`run_session`] needs of it, so a test can
+/// inject a fake and observe that the process is always closed.
+trait SourceProcess {
+    fn has(&self, capability: &str) -> bool;
+    fn open(
+        &mut self,
+        connection: serde_json::Map<String, Value>,
+        read_only: bool,
+    ) -> dre_protocol::host::Result<()>;
+    fn open_sandboxed(
+        &mut self,
+        connection: serde_json::Map<String, Value>,
+    ) -> dre_protocol::host::Result<()>;
+    fn execute(
+        &mut self,
+        sql: &str,
+        row_limit: Option<u64>,
+        on_batch: &mut dyn FnMut(
+            &arrow::datatypes::SchemaRef,
+            arrow::array::RecordBatch,
+        ) -> std::result::Result<(), String>,
+    ) -> dre_protocol::host::Result<Execution>;
+    fn close(self) -> dre_protocol::host::Result<()>;
+}
+
+impl SourceProcess for dre_protocol::host::PluginProcess {
+    fn has(&self, capability: &str) -> bool {
+        dre_protocol::host::PluginProcess::has(self, capability)
+    }
+    fn open(
+        &mut self,
+        connection: serde_json::Map<String, Value>,
+        read_only: bool,
+    ) -> dre_protocol::host::Result<()> {
+        dre_protocol::host::PluginProcess::open(self, connection, read_only)
+    }
+    fn open_sandboxed(
+        &mut self,
+        connection: serde_json::Map<String, Value>,
+    ) -> dre_protocol::host::Result<()> {
+        dre_protocol::host::PluginProcess::open_sandboxed(self, connection)
+    }
+    fn execute(
+        &mut self,
+        sql: &str,
+        row_limit: Option<u64>,
+        on_batch: &mut dyn FnMut(
+            &arrow::datatypes::SchemaRef,
+            arrow::array::RecordBatch,
+        ) -> std::result::Result<(), String>,
+    ) -> dre_protocol::host::Result<Execution> {
+        dre_protocol::host::PluginProcess::execute(self, sql, row_limit, on_batch)
+    }
+    fn close(self) -> dre_protocol::host::Result<()> {
+        dre_protocol::host::PluginProcess::close(self)
+    }
+}
+
+/// The steps after the plugin process has started: open a session, stream the query, build the
+/// result. The process is closed once this returns, whichever result it produces or how.
+fn run_session<P: SourceProcess>(
+    mut process: P,
+    target: &crate::profiles::ProfileTarget,
+    sql: &str,
+    max_rows: u64,
+    profile: &str,
+    target_name: &str,
+) -> Result<Value, String> {
+    let outcome = session_result(&mut process, target, sql, max_rows, profile, target_name);
+    let _ = process.close();
+    outcome
+}
+
+/// Every step between the running process and the result: the session steps of `run_session`,
+/// without the close.
+fn session_result<P: SourceProcess>(
+    process: &mut P,
+    target: &crate::profiles::ProfileTarget,
+    sql: &str,
+    max_rows: u64,
+    profile: &str,
+    target_name: &str,
+) -> Result<Value, String> {
     let session_read_only = process.has(dre_protocol::CAP_READ_ONLY);
     // Databricks has no read-only session capability. Its single-SELECT guard is
     // enforced here; database permissions remain the user's enforcement boundary.
@@ -133,20 +221,21 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
     let mut rows = Vec::new();
     let mut columns = Vec::new();
+    let mut collect = |schema: &arrow::datatypes::SchemaRef, batch: arrow::array::RecordBatch| {
+        if columns.is_empty() {
+            columns = crate::rows::column_types(schema);
+        }
+        let left = (max_rows + 1).saturating_sub(rows.len() as u64) as usize;
+        let batch = batch.slice(0, left.min(batch.num_rows()));
+        rows.extend(
+            crate::values::batch_rows(&batch)
+                .into_iter()
+                .map(|row| serde_json::to_value(row).unwrap()),
+        );
+        Ok(())
+    };
     let result = process
-        .execute(sql, Some(max_rows + 1), |schema, batch| {
-            if columns.is_empty() {
-                columns = crate::rows::column_types(schema);
-            }
-            let left = (max_rows + 1).saturating_sub(rows.len() as u64) as usize;
-            let batch = batch.slice(0, left.min(batch.num_rows()));
-            rows.extend(
-                crate::values::batch_rows(&batch)
-                    .into_iter()
-                    .map(|row| serde_json::to_value(row).unwrap()),
-            );
-            Ok(())
-        })
+        .execute(sql, Some(max_rows + 1), &mut collect)
         .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
     if let Execution::Result { schema, .. } = result {
         if columns.is_empty() {
@@ -157,9 +246,178 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     }
     let truncated = rows.len() as u64 > max_rows;
     rows.truncate(max_rows as usize);
-    let _ = process.close();
     Ok(
         json!({"schema_version": "dre/rows/v1", "columns": columns, "row_count": rows.len(), "rows": rows,
-        "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {"SQL validation; use a read-only Databricks database role"}, "connection": profile, "target": project.target_name}),
+        "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {"SQL validation; use a read-only Databricks database role"}, "connection": profile, "target": target_name}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// Behaviour a fake source process can be told to show: a read-only session (else the
+    /// capability guard rejects it), a failing `open`, a failing `execute`, or no result set.
+    #[derive(Default)]
+    struct Fake {
+        read_only: bool,
+        fail_open: bool,
+        fail_execute: bool,
+        no_result: bool,
+        /// Set when `close()` runs, so a test can prove the process was closed.
+        closed: Option<Rc<Cell<bool>>>,
+    }
+
+    impl SourceProcess for Fake {
+        fn has(&self, _: &str) -> bool {
+            self.read_only
+        }
+        fn open(
+            &mut self,
+            _connection: serde_json::Map<String, Value>,
+            _read_only: bool,
+        ) -> dre_protocol::host::Result<()> {
+            if self.fail_open {
+                return Err(dre_protocol::host::HostError::Unexpected {
+                    plugin: "fake".into(),
+                    expected: "an open reply",
+                    got: "an error".into(),
+                });
+            }
+            Ok(())
+        }
+        fn open_sandboxed(
+            &mut self,
+            connection: serde_json::Map<String, Value>,
+        ) -> dre_protocol::host::Result<()> {
+            self.open(connection, true)
+        }
+        fn execute(
+            &mut self,
+            _sql: &str,
+            _row_limit: Option<u64>,
+            _on_batch: &mut dyn FnMut(
+                &arrow::datatypes::SchemaRef,
+                arrow::array::RecordBatch,
+            ) -> std::result::Result<(), String>,
+        ) -> dre_protocol::host::Result<Execution> {
+            if self.fail_execute {
+                return Err(dre_protocol::host::HostError::Unexpected {
+                    plugin: "fake".into(),
+                    expected: "an execute reply",
+                    got: "an error".into(),
+                });
+            }
+            if self.no_result {
+                return Ok(Execution::NoResult { rows_affected: None });
+            }
+            let schema =
+                std::sync::Arc::new(arrow::datatypes::Schema::new(vec![arrow::datatypes::Field::new(
+                    "n",
+                    arrow::datatypes::DataType::Int64,
+                    false,
+                )]));
+            Ok(Execution::Result { schema, rows: 0 })
+        }
+        fn close(self) -> dre_protocol::host::Result<()> {
+            if let Some(c) = self.closed {
+                c.set(true);
+            }
+            Ok(())
+        }
+    }
+
+    /// The target a fake session runs against: a plugin type, no connection fields.
+    fn target(kind: &str) -> crate::profiles::ProfileTarget {
+        crate::profiles::ProfileTarget {
+            kind: kind.into(),
+            fields: serde_json::Map::new(),
+        }
+    }
+
+    #[test]
+    fn a_failing_execute_closes_the_process_and_keeps_the_error() {
+        let closed = Rc::new(Cell::new(false));
+        let fake = Fake {
+            read_only: true,
+            fail_execute: true,
+            closed: Some(closed.clone()),
+            ..Fake::default()
+        };
+        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        let err = out.expect_err("the failing execute must surface as an error");
+        assert!(err.contains("an execute reply"), "unexpected error: {err}");
+        assert!(closed.get(), "the process was not closed after a failing execute");
+    }
+
+    #[test]
+    fn a_query_with_no_result_set_closes_the_process() {
+        let closed = Rc::new(Cell::new(false));
+        let fake = Fake {
+            read_only: true,
+            no_result: true,
+            closed: Some(closed.clone()),
+            ..Fake::default()
+        };
+        let out = run_session(fake, &target("fixture"), "none", 10, "fx", "dev");
+        assert_eq!(out.unwrap_err(), "the query returned no result set");
+        assert!(
+            closed.get(),
+            "the process was not closed after the no-result-set path"
+        );
+    }
+
+    #[test]
+    fn a_plugin_without_read_only_is_rejected_and_still_closed() {
+        let closed = Rc::new(Cell::new(false));
+        let fake = Fake {
+            read_only: false,
+            closed: Some(closed.clone()),
+            ..Fake::default()
+        };
+        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        assert_eq!(
+            out.unwrap_err(),
+            "the fixture plugin cannot guarantee a read-only connection"
+        );
+        assert!(
+            closed.get(),
+            "the process was not closed after the read-only rejection"
+        );
+    }
+
+    #[test]
+    fn a_failed_open_is_reported_and_the_process_is_still_closed() {
+        let closed = Rc::new(Cell::new(false));
+        let fake = Fake {
+            read_only: true,
+            fail_open: true,
+            closed: Some(closed.clone()),
+            ..Fake::default()
+        };
+        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        let err = out.expect_err("a failed open must surface as an error");
+        assert!(err.contains("an open reply"), "unexpected error: {err}");
+        assert!(closed.get(), "the process was not closed after a failed open");
+    }
+
+    #[test]
+    fn a_succeeding_session_builds_the_result_and_closes_the_process() {
+        let closed = Rc::new(Cell::new(false));
+        let fake = Fake {
+            read_only: true,
+            closed: Some(closed.clone()),
+            ..Fake::default()
+        };
+        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev")
+            .expect("a read-only session must succeed");
+        assert_eq!(out["schema_version"], "dre/rows/v1");
+        assert_eq!(out["row_count"], 0);
+        assert_eq!(out["connection"], "fx");
+        assert_eq!(out["target"], "dev");
+        assert_eq!(out["read_only_enforcement"], "session");
+        assert!(closed.get(), "the process was not closed on the success path");
+    }
 }
