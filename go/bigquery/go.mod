@@ -4,11 +4,11 @@ go 1.27
 
 require (
 	cloud.google.com/go v0.123.0
-	cloud.google.com/go/bigquery v1.85.0
+	cloud.google.com/go/bigquery v1.86.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/get-dre/dre/go/plugin v0.0.0
 	golang.org/x/oauth2 v0.37.0
-	google.golang.org/api v0.306.0
+	google.golang.org/api v0.308.0
 )
 
 require (
