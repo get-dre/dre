@@ -1,6 +1,6 @@
 ---
 name: allenhori-review
-description: Review a DRE pull request the way the maintainer (allenhori) does, or check your own branch against those standards before you ask for review. Ranks findings as must fix, tidy-up or optional; gives each one a file and line, a concrete failure case and a fix; checks that a test fails without the fix; and explains red CI with evidence. Use when asked to review a PR or diff in this repository, to prepare a PR for review, to write a PR description, or to explain a CI failure on a PR.
+description: Review a DRE pull request the way the maintainer (allenhori) does, or check your own branch against those standards before you ask for review. Ranks findings as must fix, tidy-up or optional; gives each one a file and line, a concrete failure case and a fix; checks that a test fails without the fix; applies the Google Rust style guide with DRE's overrides; and explains red CI with evidence. Use when asked to review a PR or diff in this repository, to prepare a PR for review, to write a PR description, or to explain a CI failure on a PR.
 license: GPL-3.0-only
 metadata:
   source: "Review comments by allenhori on get-dre/dre pull requests #1-#254"
@@ -153,6 +153,56 @@ When the review has only one blocking item, write **One change needed:** in fron
   `python3 .github/scripts/skills.py sync`, `generate` and `check`.
 - One change per PR. Bundling a closely related fix (a yanked-crate lockfile update) is fine
   when the PR says so.
+
+### Rust style: Google's Rust style guide
+
+Rust code follows the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html),
+with the DRE rules below. Where they differ, the DRE rule wins.
+
+**DRE rules over the guide:**
+
+- `rustfmt.toml` and CI decide formatting: stable `cargo fmt` with `max_width = 110`, not the
+  guide's 100. Do not ask for nightly-only rustfmt options such as `imports_granularity`.
+- Apply the API rules by crate. `dre-protocol` and `dre-core` are libraries that plugins and
+  other projects use, so the API rules bind. `dre-cli` and the plugins are applications, so the
+  API rules are a strong recommendation, and simple, direct code wins over reuse.
+- The rules apply to new and changed code. Do not ask a PR to restyle code it does not touch.
+  A style sweep is its own PR.
+- Not adopted: the rules marked `[chrome]` or `[Fuchsia]` (small crates, flat file layout, no
+  `async`, no threads), and `#[non_exhaustive]` on public enums and structs.
+
+**Must fix before approval:**
+
+- `unsafe` without a `// SAFETY:` comment that says why the code is correct and why safe code
+  does not work.
+- A panic (`unwrap()`, `expect()`, indexing, `panic!`) on input from a user, a project file, a
+  plugin or the network. Return a `Result` with context. A panic is only for a bug or a broken
+  invariant. Tests may panic.
+- Code that reaches into a poisoned mutex.
+- An unstable (nightly-only) feature.
+
+**Tidy-ups:**
+
+- `expect("<why this cannot fail>")` instead of `unwrap()` in non-test code.
+- `if let Some(x) = opt` instead of `opt.is_some()` and then `opt.unwrap()`.
+- Parameters take `&str`, `&[T]`, `&T` and `Option<&T>`, not `&String`, `&Vec<T>`, `&Box<T>` or
+  `&Option<T>`.
+- `.clone()` only for a real copy, not to avoid a borrow problem that a small change solves.
+- No glob imports, except `use super::*` in a test module.
+- An `assert!` gives context: the value that failed, or why the condition must hold.
+- `#[derive(...)]` instead of a manual impl that a derive can express.
+- Named fields instead of a tuple or a tuple struct with more than one field.
+- A type annotation on `.parse()`, `.into()` and long iterator chains when the type is not clear.
+
+**Optional:**
+
+- An enum instead of a `bool` parameter whose meaning is not clear at the call site.
+- A borrow or unique ownership instead of `Rc` or `Arc`, when the result stays simple.
+- A standard trait (`FromStr`, `From`, `Default`, `Display`) instead of a custom method with the
+  same job.
+- `Default` on a struct that is a bag of options.
+- A doc comment that says when a public function panics.
+- `macro_rules!` before a proc macro, and code before either.
 
 ## Red CI: explain it with evidence
 

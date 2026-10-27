@@ -14,6 +14,10 @@ Every pull request is reviewed to the maintainer's standard. That standard is wr
 - **Reviewers:** use the skill's *reviewer mode*. Rank findings as **Must fix before
   approval**, **Tidy-ups** and **Optional**. Give each one a `file:line`, a concrete failure
   case and a fix. Do not approve a bug fix whose test passes without the fix.
+- **Rust style:** Rust code follows the
+  [Google Rust style guide](https://google.github.io/styleguide/rustguide.html), with the DRE
+  rules in the skill's "Rust style" section. `rustfmt.toml` and CI's clippy still decide
+  formatting and lints.
 - **Red CI:** explain each failure with evidence (the test, the error, the same failure on
   `master`) before you call it unrelated.
 
