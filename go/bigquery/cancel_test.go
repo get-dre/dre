@@ -221,3 +221,33 @@ func TestRetryRunsANewJobOnceTheFirstEnded(t *testing.T) {
 		t.Fatalf("ran jobs %q, cancelled %q; want two jobs, the second cancelled", inserted, cancelled)
 	}
 }
+
+// When the retries give up while the job still runs, Run cancels the job instead of leaving it
+// to run and bill with nobody reading it.
+func TestGivingUpCancelsTheRunningJob(t *testing.T) {
+	f := &fakeJobs{}
+	f.readErrs.Store(100)
+	f.inserted, f.reads, f.cancelled = make(chan string, 10), make(chan struct{}, 100), make(chan string, 10)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	life, end := context.WithCancel(context.Background())
+	defer end()
+	client, err := bigquery.NewClient(life, "p", option.WithEndpoint(srv.URL), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	s := &session{client: client, project: "p", retries: 1, life: life, end: end}
+	if err := s.Run("select 1", func(plugin.Result) error { return nil }); err == nil {
+		t.Fatal("Run succeeded though every wait failed")
+	}
+	inserted := <-f.inserted
+	select {
+	case cancelled := <-f.cancelled:
+		if cancelled != inserted {
+			t.Fatalf("cancelled job %q, ran %q", cancelled, inserted)
+		}
+	default:
+		t.Fatal("Run gave up without cancelling the running job")
+	}
+}

@@ -233,7 +233,9 @@ func (s *session) Run(sql string, fn func(plugin.Result) error) error {
 		return err
 	})
 	if err != nil {
-		if ctx.Err() != nil {
+		// A cancelled request stops its job; so does one that gave up while its job still runs
+		// (job is nil once BigQuery says it ended).
+		if ctx.Err() != nil || job != nil {
 			s.cancelJob(job, id)
 		}
 		return cleanErr(err)
