@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -210,18 +212,22 @@ func (s *session) Run(sql string, fn func(plugin.Result) error) error {
 	ctx, cancel := s.context()
 	defer cancel()
 	var job *bigquery.Job
+	var id string // the job's id, known before BigQuery replies to its creation
 	var it *bigquery.RowIterator
 	err := s.retry(ctx, func() error {
+		q := s.query(sql)
+		q.JobID = newJobID()
+		id, job = q.JobID, nil
 		var err error
-		if job, err = s.query(sql).Run(ctx); err != nil {
+		if job, err = q.Run(ctx); err != nil {
 			return err
 		}
 		it, err = job.Read(ctx)
 		return err
 	})
 	if err != nil {
-		if job != nil && ctx.Err() != nil {
-			s.cancelJob(job)
+		if ctx.Err() != nil {
+			s.cancelJob(job, id)
 		}
 		return cleanErr(err)
 	}
@@ -270,14 +276,31 @@ func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (
 }
 
 // cancelJob asks BigQuery to stop a job whose request ended. It doesn't wait for the job to stop.
-func (s *session) cancelJob(job *bigquery.Job) {
+// job is nil when the request ended before BigQuery replied to the job's creation: the job may
+// exist all the same, so it is looked up by id.
+func (s *session) cancelJob(job *bigquery.Job, id string) {
 	ctx, cancel := context.WithTimeout(s.life, 15*time.Second)
 	defer cancel()
-	if err := job.Cancel(ctx); err != nil {
-		debugf("can't cancel BigQuery job %s: %v", job.ID(), err)
+	var err error
+	if job == nil {
+		job, err = s.client.JobFromIDLocation(ctx, id, s.client.Location)
+	}
+	if err == nil {
+		err = job.Cancel(ctx)
+	}
+	if err != nil {
+		debugf("can't cancel BigQuery job %s: %v", id, err)
 		return
 	}
-	slog.Info("asked BigQuery to cancel job " + job.ID())
+	slog.Info("asked BigQuery to cancel job " + id)
+}
+
+// newJobID is a job id chosen here, not by BigQuery, so a job can be cancelled before BigQuery
+// replies to its creation.
+func newJobID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return "dre_" + hex.EncodeToString(b)
 }
 
 func (s *session) Close() {
