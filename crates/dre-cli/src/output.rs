@@ -156,43 +156,23 @@ impl Printer {
         self.with(|i| i.run_logs = true);
     }
 
-    /// Colour a diagnostic's `error[...]`/`warning[...]` prefix.
-    pub fn diagnostic(&self, d: &dre_core::Diagnostic) -> String {
-        self.with(|i| {
-            let text = dre_core::secrets::mask(&d.to_string()).into_owned();
-            let (tone, prefix) = match d.severity {
-                dre_core::Severity::Error => (Tone::Bad, "error"),
-                dre_core::Severity::Warning => (Tone::Warn, "warning"),
-            };
-            match text.find("]: ") {
-                Some(end) if i.color => {
-                    format!("{}{}", i.paint(style(tone), &text[..end + 1]), &text[end + 1..])
-                }
-                _ => {
-                    let _ = prefix;
-                    text
-                }
-            }
-        })
-    }
-
     /// Print a diagnostic: a line of text, or with `--log-format json` a `diagnostic` event, so
     /// warnings never break the JSON stream.
     pub fn diag(&self, d: &dre_core::Diagnostic) {
-        // Text goes through `diagnostic`, which locks too, so it's printed outside `with`.
-        let printed = self.with(|i| {
+        // Text is printed after the lock is released, as before.
+        let text = self.with(|i| {
             if i.format != LogFormat::Json {
-                return false;
+                return Some(i.diagnostic(d));
             }
             let message = dre_core::secrets::mask(&d.message).into_owned();
             i.json(
                 json!({"event": "diagnostic", "severity": d.severity, "code": d.code,
                 "file": d.file, "line": d.line, "message": message}),
             );
-            true
+            None
         });
-        if !printed {
-            println!("{}", self.diagnostic(d));
+        if let Some(text) = text {
+            println!("{text}");
         }
     }
 
@@ -299,28 +279,47 @@ impl Printer {
     /// Final line of a run.
     pub fn finish(&self, what: &str) {
         self.with(|i| {
-        if let Some(b) = i.bar.take() {
-            b.finish_and_clear();
-        }
-        for (_, r) in i.rows.drain() {
-            if let Some(b) = r.bar {
+            if let Some(b) = i.bar.take() {
                 b.finish_and_clear();
             }
-        }
-        let (ok, failed) = (i.succeeded, i.failed);
-        let secs = i.started.elapsed().as_secs_f64();
-        let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
-        i.file_log("INFO", &format!("Finished {text}"));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "finished", "command": what, "succeeded": ok, "failed": failed, "elapsed_ms": (secs * 1000.0) as u64}));
-        } else {
-            i.print(if failed > 0 { Tone::Bad } else { Tone::Good }, "Finished", &text);
-        }
+            for (_, r) in i.rows.drain() {
+                if let Some(b) = r.bar {
+                    b.finish_and_clear();
+                }
+            }
+            let (ok, failed) = (i.succeeded, i.failed);
+            let secs = i.started.elapsed().as_secs_f64();
+            let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
+            i.file_log("INFO", &format!("Finished {text}"));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "finished", "command": what, "succeeded": ok, "failed": failed, "elapsed_ms": (secs * 1000.0) as u64}));
+            } else {
+                i.print(if failed > 0 { Tone::Bad } else { Tone::Good }, "Finished", &text);
+            }
         })
     }
 }
 
 impl Inner {
+    /// A diagnostic's text, its `error[...]`/`warning[...]` prefix coloured.
+    fn diagnostic(&self, d: &dre_core::Diagnostic) -> String {
+        let text = dre_core::secrets::mask(&d.to_string()).into_owned();
+        let tone = match d.severity {
+            dre_core::Severity::Error => Tone::Bad,
+            dre_core::Severity::Warning => Tone::Warn,
+        };
+        match text.find("]: ") {
+            Some(end) if self.color => {
+                format!(
+                    "{}{}",
+                    self.paint(style(tone), &text[..end + 1]),
+                    &text[end + 1..]
+                )
+            }
+            _ => text,
+        }
+    }
+
     fn paint(&self, s: Style, text: &str) -> String {
         if self.color {
             format!("{s}{text}{s:#}")
@@ -610,25 +609,25 @@ impl Ui for Printer {
 
     fn step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
         self.with(|i| {
-        // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
-        if level == Level::Info
-            && let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty())
-        {
-            b.set_message(one_line(&format!("{} · {verb} {detail}", i.current), 60));
-        }
-        let text = match elapsed {
-            Some(d) => format!("{} {detail}", i.paint(DIM, &timing(d))),
-            None => detail.to_string(),
-        };
-        if i.format == LogFormat::Json {
-            i.file_log("DEBUG", &format!("{verb} {detail}"));
-            if i.shows(level) {
-                let ms = elapsed.map(|d| d.as_millis() as u64);
-                i.json(json!({"event": "step", "binding": i.current, "verb": verb, "message": detail, "elapsed_ms": ms}));
+            // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
+            if level == Level::Info
+                && let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty())
+            {
+                b.set_message(one_line(&format!("{} · {verb} {detail}", i.current), 60));
             }
-            return;
-        }
-        i.line(Tone::Step, verb, &text, level);
+            let text = match elapsed {
+                Some(d) => format!("{} {detail}", i.paint(DIM, &timing(d))),
+                None => detail.to_string(),
+            };
+            if i.format == LogFormat::Json {
+                i.file_log("DEBUG", &format!("{verb} {detail}"));
+                if i.shows(level) {
+                    let ms = elapsed.map(|d| d.as_millis() as u64);
+                    i.json(json!({"event": "step", "binding": i.current, "verb": verb, "message": detail, "elapsed_ms": ms}));
+                }
+                return;
+            }
+            i.line(Tone::Step, verb, &text, level);
         })
     }
 
@@ -665,21 +664,21 @@ impl Ui for Printer {
         vars: &serde_json::Map<String, serde_json::Value>,
     ) {
         self.with(|i| {
-        if let Some(name) = schedule {
-            let schedule_values = schedule_vars.cloned().unwrap_or_default();
-            i.file_log(
-                "INFO",
-                &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
-            );
-        }
-        let variables = protected_json(vars);
-        i.file_log("INFO", &format!("Vars {variables}"));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
-        } else if i.shows(Level::Debug) {
-            let text = i.paint(DIM, &variables);
-            i.print(Tone::Note, "Vars", &text);
-        }
+            if let Some(name) = schedule {
+                let schedule_values = schedule_vars.cloned().unwrap_or_default();
+                i.file_log(
+                    "INFO",
+                    &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
+                );
+            }
+            let variables = protected_json(vars);
+            i.file_log("INFO", &format!("Vars {variables}"));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
+            } else if i.shows(Level::Debug) {
+                let text = i.paint(DIM, &variables);
+                i.print(Tone::Note, "Vars", &text);
+            }
         })
     }
 
@@ -720,52 +719,52 @@ impl Ui for Printer {
 
     fn binding_end(&mut self, o: &BindingOutcome) {
         self.with(|i| {
-        let name = label(&o.report, o.set.as_deref());
-        let (tone, verb) = match o.status {
-            Status::Error => (Tone::Bad, "Failed"),
-            Status::Success => (Tone::Good, "Succeeded"),
-            Status::DryRun => (Tone::Good, "Compiled"),
-            Status::Checked => (Tone::Good, "Checked"),
-            Status::Cancelled => (Tone::Bad, "Cancelled"),
-            Status::TimedOut => (Tone::Bad, "Timed out"),
-        };
-        if matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut) {
-            i.failed += 1;
-        } else {
-            i.succeeded += 1;
-        }
-        if let Some(b) = &i.bar {
-            b.inc(1);
-        }
-        let detail = match &o.error {
-            Some(e) => e.clone(),
-            None => o.summary.clone(),
-        };
-        i.file_log(
-            if o.error.is_some() { "ERROR" } else { "INFO" },
-            &format!("{verb} in {} {detail}", fmt_secs(o.elapsed.as_secs_f64())),
-        );
-        i.current.clear();
-        i.log = None;
-        i.in_binding = false;
-        if i.format == LogFormat::Json {
-            i.json(json!({
-                "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
-                "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
-                "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
-                "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
-                "timezone": o.timezone,
-            }));
-            return;
-        }
-        if i.verbosity == Verbosity::Quiet
-            && !matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut)
-        {
-            return;
-        }
-        let name = i.paint(Style::new().effects(Effects::BOLD), &name);
-        let text = format!("{} {name}  {detail}", i.paint(DIM, &timing(o.elapsed)));
-        i.print(tone, verb, text.trim_end());
+            let name = label(&o.report, o.set.as_deref());
+            let (tone, verb) = match o.status {
+                Status::Error => (Tone::Bad, "Failed"),
+                Status::Success => (Tone::Good, "Succeeded"),
+                Status::DryRun => (Tone::Good, "Compiled"),
+                Status::Checked => (Tone::Good, "Checked"),
+                Status::Cancelled => (Tone::Bad, "Cancelled"),
+                Status::TimedOut => (Tone::Bad, "Timed out"),
+            };
+            if matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut) {
+                i.failed += 1;
+            } else {
+                i.succeeded += 1;
+            }
+            if let Some(b) = &i.bar {
+                b.inc(1);
+            }
+            let detail = match &o.error {
+                Some(e) => e.clone(),
+                None => o.summary.clone(),
+            };
+            i.file_log(
+                if o.error.is_some() { "ERROR" } else { "INFO" },
+                &format!("{verb} in {} {detail}", fmt_secs(o.elapsed.as_secs_f64())),
+            );
+            i.current.clear();
+            i.log = None;
+            i.in_binding = false;
+            if i.format == LogFormat::Json {
+                i.json(json!({
+                    "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
+                    "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
+                    "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
+                    "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
+                    "timezone": o.timezone,
+                }));
+                return;
+            }
+            if i.verbosity == Verbosity::Quiet
+                && !matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut)
+            {
+                return;
+            }
+            let name = i.paint(Style::new().effects(Effects::BOLD), &name);
+            let text = format!("{} {name}  {detail}", i.paint(DIM, &timing(o.elapsed)));
+            i.print(tone, verb, text.trim_end());
         })
     }
 

@@ -156,7 +156,7 @@ impl Dialect {
     /// `value` as a SQL string literal.
     pub fn literal(&self, value: &str) -> String {
         match self.literal_style {
-            LiteralStyle::Hex(template) => template.replace("{hex}", &crate::manifest::hex(value.as_bytes())),
+            LiteralStyle::Hex(template) => template.replace("{hex}", &crate::checksum::hex(value.as_bytes())),
             LiteralStyle::Doubling => format!("'{}'", value.replace('\'', "''")),
         }
     }

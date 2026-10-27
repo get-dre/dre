@@ -13,7 +13,6 @@ use dre_protocol::{
 };
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::lock::{Checksums, Lock, Locked};
 use crate::plugins::{Manifest, version_dir};
@@ -679,7 +678,7 @@ pub fn install(
         }
     }
     let bytes = fetch(&art.url)?;
-    let got = crate::manifest::hex(&Sha256::digest(&bytes));
+    let got = crate::checksum::sha256_hex(&bytes);
     // Nothing published: the lock's pin, if any, is what the download must match.
     let expected = published.as_deref().or(want);
     if let Some(want) = expected
@@ -976,8 +975,8 @@ fn install_one(
         && let Some(art) = v.artifacts.get(&platform())
         && !(art.url.ends_with(".tar.gz") || art.url.ends_with(".tgz"))
         && let Some(m) = crate::plugins::read_manifest(&vdir)
-        && std::fs::read(vdir.join(&m.executable))
-            .is_ok_and(|b| crate::manifest::hex(&Sha256::digest(&b)).eq_ignore_ascii_case(&art.sha256))
+        && crate::checksum::sha256_file(&vdir.join(&m.executable))
+            .is_ok_and(|h| h.eq_ignore_ascii_case(&art.sha256))
     {
         let locked = Locked {
             version: v.version.clone(),

@@ -28,7 +28,6 @@ chrono-tz.workspace = true
 indicatif = "0.18"
 anstyle = "1"
 serde.workspace = true
-sha2 = "0.11"
 flate2 = "1"
 tar = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate"] }
@@ -51,7 +50,6 @@ umya-spreadsheet = "3"
 minisign = "0.10"
 arrow.workspace = true
 parquet.workspace = true
-sha2 = "0.11"
 flate2 = "1"
 tar = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate"] }

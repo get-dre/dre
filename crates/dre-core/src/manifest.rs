@@ -695,11 +695,7 @@ fn checksum(root: &Path, files: &BTreeSet<String>) -> String {
             Err(_) => h.update([0u8]),
         }
     }
-    hex(&h.finalize())
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    crate::checksum::hex(&h.finalize())
 }
 
 /// A report's own files: its defining file, every query file of any Binding, and templates.
@@ -822,24 +818,10 @@ pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String>
     let dst = dir.join(FILE);
     crate::fs::write_atomic(&dst, text.as_bytes())
         .map_err(|e| format!("can't write {}: {e}", dst.display()))?;
-    Ok(hex(&Sha256::digest(text.as_bytes())))
+    Ok(crate::checksum::sha256_hex(text.as_bytes()))
 }
 
 /// Remove a stale manifest from `target_dir` (the project didn't load).
 pub fn remove(target_dir: &Path) {
     let _ = std::fs::remove_file(target_dir.join(FILE));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hex_is_lowercase_and_zero_padded() {
-        assert_eq!(hex(&[0x00, 0x0a, 0xff]), "000aff");
-        assert_eq!(
-            hex(&Sha256::digest(b"")),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
 }

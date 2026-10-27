@@ -9,29 +9,32 @@ use arrow::ipc::reader::FileReader;
 use serde_json::json;
 
 pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> Result<(), String> {
-    let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
-        .map_err(|e| e.to_string())?;
+    write_rows(spool, output, row_count).map_err(|e| e.to_string())
+}
+
+fn write_rows(spool: &Path, output: &Path, row_count: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let reader = FileReader::try_new(File::open(spool)?, None)?;
     let columns = column_types(&reader.schema());
-    let mut out = BufWriter::new(File::create(output).map_err(|e| e.to_string())?);
+    let mut out = BufWriter::new(File::create(output)?);
     write!(
         out,
         "{{\"schema_version\":\"dre/rows/v1\",\"columns\":{},\"row_count\":{},\"rows\":[",
-        serde_json::to_string(&columns).map_err(|e| e.to_string())?,
+        serde_json::to_string(&columns)?,
         row_count
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     let mut first = true;
     for batch in reader {
-        for row in crate::values::batch_rows(&batch.map_err(|e| e.to_string())?) {
+        for row in crate::values::batch_rows(&batch?) {
             if !first {
-                out.write_all(b",").map_err(|e| e.to_string())?;
+                out.write_all(b",")?;
             }
             first = false;
-            serde_json::to_writer(&mut out, &row).map_err(|e| e.to_string())?;
+            serde_json::to_writer(&mut out, &row)?;
         }
     }
-    out.write_all(b"]}\n").map_err(|e| e.to_string())?;
-    out.flush().map_err(|e| e.to_string())
+    out.write_all(b"]}\n")?;
+    out.flush()?;
+    Ok(())
 }
 
 /// Each column's name and Arrow type, as `dre/rows/v1` lists them.

@@ -6,14 +6,10 @@ mod common;
 use std::path::PathBuf;
 
 use common::{Run, test_plugins};
-use sha2::{Digest, Sha256};
+use dre_core::checksum::sha256_hex as sha;
 
 struct Env {
     dir: tempfile::TempDir,
-}
-
-fn sha(bytes: &[u8]) -> String {
-    dre_core::manifest::hex(&Sha256::digest(bytes))
 }
 
 fn platform() -> String {

@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 
 use crate::Diagnostics;
 use crate::codes::Code;
-use crate::profiles::{LOCAL_TYPE, Role};
+use crate::profiles::{LOCAL_TYPE, ProfileTarget, Role};
 use crate::project::{PluginKind, Project};
 use crate::run::find_plugin;
 
@@ -327,9 +327,8 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
     let log: LogSink = Arc::new(|_, _| {});
     let file = project.profiles.file.clone();
     let mut unset_reported = std::collections::BTreeSet::new();
-    // Plugin -> the entries it checks (with their already-looked-up target), so each plugin
-    // starts once.
-    let mut by_plugin: BTreeMap<(PluginKind, String), Vec<(&EntryRef, _)>> = BTreeMap::new();
+    // Plugin -> the entries it checks, so each plugin starts once.
+    let mut by_plugin: BTreeMap<(PluginKind, String), Vec<(&EntryRef, &ProfileTarget)>> = BTreeMap::new();
     for e in entries {
         let (role, profile, target) = e;
         let Some(t) = project

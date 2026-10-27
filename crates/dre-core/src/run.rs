@@ -2195,12 +2195,9 @@ impl<'a> BindingRun<'a> {
         .map_err(|e| e.to_string())?;
         // Hash the exact rendered SQL before masking display artifacts. Integrations can
         // identify executed SQL without receiving any secret embedded in it.
-        {
-            use sha2::Digest;
-            let hash = crate::manifest::hex(&sha2::Sha256::digest(sql.as_bytes()));
-            std::fs::write(self.compiled_dir.join(format!("{}.sha256", q.query)), hash)
-                .map_err(|e| e.to_string())?;
-        }
+        let hash = crate::checksum::sha256_hex(sql.as_bytes());
+        std::fs::write(self.compiled_dir.join(format!("{}.sha256", q.query)), hash)
+            .map_err(|e| e.to_string())?;
         self.ui
             .step(Level::Debug, "Rendered", &q.path.display().to_string(), None);
         // 2. Split. One file makes at most one tab, from its last statement, so any earlier
@@ -3123,7 +3120,7 @@ impl<'a> BindingRun<'a> {
             }
             .into_iter()
             .map(|f| crate::release::HeldFile {
-                sha256: crate::release::sha256_file(&f).unwrap_or_default(),
+                sha256: crate::checksum::sha256_file(&f).unwrap_or_default(),
                 path: f,
             })
             .collect(),

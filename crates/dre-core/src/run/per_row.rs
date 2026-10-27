@@ -1322,7 +1322,7 @@ fn run_job(
         .iter()
         .map(|(f, _)| RowFile {
             path: record_path_in(shared.project, f),
-            sha256: crate::release::sha256_file(f).unwrap_or_default(),
+            sha256: crate::checksum::sha256_file(f).unwrap_or_default(),
         })
         .collect();
     if job.phase == Phase::Render {

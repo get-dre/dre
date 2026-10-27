@@ -791,7 +791,7 @@ fn json_command(
     printer: &output::Printer,
     build: impl FnOnce(&dre_core::project::Project) -> Result<serde_json::Value, String>,
 ) -> ExitCode {
-    let Some((project, _)) = start_project(args, printer, NeedPlugins::No, |_| true) else {
+    let Some((project, _)) = load_project(args, printer) else {
         return exit::not_started();
     };
     let file = output.output_file;
@@ -814,12 +814,12 @@ fn json_command(
 
 /// `dre compile`: render the selection into target/compiled/ and list the files.
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
-    let Some((project, manifest_checksum)) =
-        start_project(&a.project, &printer, NeedPlugins::IfInstalling, |_| true)
-    else {
+    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
-    if !check_project(&project, &a.project, &printer, false) {
+    if !ready_plugins(&project, &a.project, NeedPlugins::IfInstalling, &printer)
+        || !check_project(&project, &a.project, &printer, false)
+    {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
@@ -951,13 +951,9 @@ fn target_line(p: &dre_core::project::Project) -> String {
     format!("{} ({})", p.target_name, p.target_from)
 }
 
-/// Load the project for `compile` and `run`, writing its manifest; `None` (after printing
-/// why) when it can't run. Also returns the SHA-256 of the manifest written.
 /// What a project command needs of the project's plugins before it starts.
 #[derive(Clone, Copy)]
 enum NeedPlugins {
-    /// None (`dre query`, `dre catalog`).
-    No,
     /// All of them: installed, or with installing off, already there (`dre run`, `dre release`).
     All,
     /// Installed unless installing is off; then a missing one is reported by the Binding that
@@ -965,29 +961,30 @@ enum NeedPlugins {
     IfInstalling,
 }
 
-/// The start of every project command: install macro packages, load the project and write its
-/// manifest, run `loaded` (false stops the command), then see to its plugins. `None` after
-/// printing why.
-fn start_project(
+/// The start of every project command: install macro packages (unless installing is off), then
+/// [`load_for_run`].
+fn load_project(
     args: &ProjectArgs,
     printer: &output::Printer,
-    need: NeedPlugins,
-    loaded: impl FnOnce(&dre_core::project::Project) -> bool,
 ) -> Option<(dre_core::project::Project, Option<String>)> {
+    if !args.no_auto_install && !plugins::sync_packages(&args.project_dir, printer) {
+        return None;
+    }
+    load_for_run(args, printer)
+}
+
+/// Install or check the project's plugins, as `need` says. False after printing why.
+fn ready_plugins(
+    project: &dre_core::project::Project,
+    args: &ProjectArgs,
+    need: NeedPlugins,
+    printer: &output::Printer,
+) -> bool {
     let install = !args.no_auto_install;
-    if install && !plugins::sync_packages(&args.project_dir, printer) {
-        return None;
+    match need {
+        NeedPlugins::All => plugins::ensure(project, install, false, printer),
+        NeedPlugins::IfInstalling => !install || plugins::ensure(project, true, false, printer),
     }
-    let (project, checksum) = load_for_run(args, printer)?;
-    if !loaded(&project) {
-        return None;
-    }
-    let ready = match need {
-        NeedPlugins::No => true,
-        NeedPlugins::All => plugins::ensure(&project, install, false, printer),
-        NeedPlugins::IfInstalling => !install || plugins::ensure(&project, true, false, printer),
-    };
-    ready.then_some((project, checksum))
 }
 
 /// Check that the project's plugins are declared and, with `options`, every connection's
@@ -1006,6 +1003,8 @@ fn check_project(
     report_diags(&diags, printer)
 }
 
+/// Load the project for `compile` and `run`, writing its manifest; `None` (after printing
+/// why) when it can't run. Also returns the SHA-256 of the manifest written.
 fn load_for_run(
     args: &ProjectArgs,
     printer: &output::Printer,
@@ -1119,9 +1118,12 @@ fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
 
 /// `dre release`: deliver a run's held deliveries.
 fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
-    let Some((project, _)) = start_project(&a.project, &printer, NeedPlugins::All, |_| true) else {
+    let Some((project, _)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
+    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
+        return exit::not_started();
+    }
     let by =
         a.by.or_else(|| std::env::var("USER").ok())
             .or_else(|| std::env::var("USERNAME").ok())
@@ -1200,25 +1202,24 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone());
-    // Run logs start before the plugins are installed, so the log files record installing them.
-    let loaded = |project: &dre_core::project::Project| {
-        if let Some(path) = &a.output_json {
-            let value = path.to_string_lossy();
-            if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
-                printer.error(&format!("--output-json: {error}"));
-                return false;
-            }
-        }
-        printer.log_runs();
-        for s in project.settings.lines() {
-            printer.detail(output::Tone::Note, "Setting", &s);
-        }
-        true
-    };
-    let Some((project, manifest_checksum)) = start_project(&a.project, &printer, NeedPlugins::All, loaded)
-    else {
+    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
+    if let Some(path) = &a.output_json {
+        let value = path.to_string_lossy();
+        if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
+            printer.error(&format!("--output-json: {error}"));
+            return exit::not_started();
+        }
+    }
+    // Run logs start before the plugins are installed, so the log files record installing them.
+    printer.log_runs();
+    for s in project.settings.lines() {
+        printer.detail(output::Tone::Note, "Setting", &s);
+    }
+    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
+        return exit::not_started();
+    }
     // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
     let run_timeout = match dre_core::settings::flag_or_env(
         a.timeout.as_deref(),
@@ -1237,27 +1238,23 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         None => project.run_timeout,
     };
     // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
-    let counts = (|| {
-        Ok::<_, String>((
-            count_setting(
-                a.keep_runs.as_deref(),
-                "--keep-runs",
-                dre_core::settings::KEEP_RUNS,
-            )?,
-            count_setting(
-                a.row_concurrency.as_deref(),
-                "--row-concurrency",
-                dre_core::settings::ROW_CONCURRENCY,
-            )?,
-            count_setting(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)?,
-        ))
-    })();
-    let (keep_runs, row_concurrency, threads) = match counts {
-        Ok(c) => c,
-        Err(e) => {
-            printer.error(&e);
-            return exit::not_started();
-        }
+    let count = |flag: &Option<String>, name, var| {
+        count_setting(flag.as_deref(), name, var)
+            .map_err(|e| printer.error(&e))
+            .ok()
+    };
+    let Some(keep_runs) = count(&a.keep_runs, "--keep-runs", dre_core::settings::KEEP_RUNS) else {
+        return exit::not_started();
+    };
+    let Some(row_concurrency) = count(
+        &a.row_concurrency,
+        "--row-concurrency",
+        dre_core::settings::ROW_CONCURRENCY,
+    ) else {
+        return exit::not_started();
+    };
+    let Some(threads) = count(&a.threads, "--threads", dre_core::settings::THREADS) else {
+        return exit::not_started();
     };
     if !check_project(&project, &a.project, &printer, true) {
         return exit::not_started();

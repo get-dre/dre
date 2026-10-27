@@ -1,6 +1,7 @@
 //! DRE core: turns a project directory into a resolved, validated project, and runs it.
 
 pub mod catalog;
+pub mod checksum;
 pub mod codes;
 pub mod coltypes;
 pub mod config;

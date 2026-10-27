@@ -368,8 +368,7 @@ impl Signer {
 
 /// A one-extension registry in `p` serving `companion` (already written) as `dre-mcp`.
 fn companion_registry(p: &TestProject, version: &str, minisig: Option<String>, url: Option<&str>) {
-    use sha2::{Digest, Sha256};
-    let digest = dre_core::manifest::hex(&Sha256::digest(p.read("companion").as_bytes()));
+    let digest = dre_core::checksum::sha256_hex(p.read("companion").as_bytes());
     let url = url.map_or_else(|| p.path("companion").display().to_string(), str::to_owned);
     let artifact = match minisig {
         Some(sig) => json!({"url": url, "sha256": digest, "minisig": sig}),

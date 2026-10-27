@@ -33,24 +33,13 @@ case "$(uname -m)" in
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
 
-# `api` keeps an error response's body (no -f): GitHub's API says what went wrong there.
+# curl's `api` keeps an error response's body (no -f): GitHub's API says what went wrong there.
+# wget drops it, so its failure gets the general message.
 if command -v curl >/dev/null 2>&1; then
-  api() {
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-      curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
-    else
-      curl -sSL "$1"
-    fi
-  }
+  api() { curl -sSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
   get_to() { curl -fsSL -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
-  api() {
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-      wget -qO- --header="Authorization: Bearer $GITHUB_TOKEN" "$1"
-    else
-      wget -qO- "$1"
-    fi
-  }
+  api() { wget -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
   get_to() { wget -qO "$2" "$1"; }
 else
   fail "needs curl or wget"
@@ -63,7 +52,7 @@ if [ -z "$tag" ]; then
   page=1
   while [ -z "$tag" ] && [ "$page" -le 10 ]; do
     list="$(api "https://api.github.com/repos/$repo/releases?per_page=100&page=$page")" ||
-      fail "can't list the releases of $repo; set DRE_VERSION (e.g. DRE_VERSION=v0.8.0) to skip the lookup"
+      fail "can't list the releases of $repo from GitHub's API. A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
     tag="$(printf '%s\n' "$list" | sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' | head -n 1)"
     if ! printf '%s\n' "$list" | grep -q '"tag_name"'; then
       # No releases on this page: past the last one, or an error such as the rate limit.

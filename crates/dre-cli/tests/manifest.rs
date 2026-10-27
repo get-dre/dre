@@ -291,23 +291,18 @@ fn validate_and_run_write_it_too_whatever_is_selected() {
     assert_eq!(p.read("target/manifest.json"), bytes);
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    use sha2::Digest;
-    dre_core::manifest::hex(&sha2::Sha256::digest(bytes))
-}
-
 #[test]
 fn run_results_record_the_manifest_checksum_even_when_a_query_fails() {
     let p = project();
     p.duckdb("dev.duckdb", "select 1;");
     p.dre("run", &["-s", "daily"]).ok();
-    let want = sha256(&std::fs::read(p.path("target/manifest.json")).unwrap());
+    let want = dre_core::checksum::sha256_hex(&std::fs::read(p.path("target/manifest.json")).unwrap());
     let results = p.json("target/run/daily/default/run_results.json");
     assert_eq!(results["manifest_checksum"], want);
 
     p.write("reports/ops/daily/summary.sql", "select * from no_such_table\n");
     p.dre("run", &["-s", "daily"]).failed();
-    let want = sha256(&std::fs::read(p.path("target/manifest.json")).unwrap());
+    let want = dre_core::checksum::sha256_hex(&std::fs::read(p.path("target/manifest.json")).unwrap());
     let results = p.json("target/run/daily/default/run_results.json");
     assert_eq!(results["status"], "error");
     assert_eq!(results["manifest_checksum"], want);
