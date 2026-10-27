@@ -236,7 +236,7 @@ fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    dre_core::manifest::hex(&Sha256::digest(bytes))
 }
 
 /// Check `bytes` against a minisign signature from the trusted key, whose signed (trusted)

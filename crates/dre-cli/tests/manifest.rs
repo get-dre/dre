@@ -293,10 +293,7 @@ fn validate_and_run_write_it_too_whatever_is_selected() {
 
 fn sha256(bytes: &[u8]) -> String {
     use sha2::Digest;
-    sha2::Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    dre_core::manifest::hex(&sha2::Sha256::digest(bytes))
 }
 
 #[test]

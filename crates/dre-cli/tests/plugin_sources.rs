@@ -13,7 +13,7 @@ use common::{Run, test_plugins};
 use sha2::{Digest, Sha256};
 
 fn sha(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    dre_core::manifest::hex(&Sha256::digest(bytes))
 }
 
 fn platform() -> String {

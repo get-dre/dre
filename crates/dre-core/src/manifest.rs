@@ -829,3 +829,17 @@ pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String>
 pub fn remove(target_dir: &Path) {
     let _ = std::fs::remove_file(target_dir.join(FILE));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_is_lowercase_and_zero_padded() {
+        assert_eq!(hex(&[0x00, 0x0a, 0xff]), "000aff");
+        assert_eq!(
+            hex(&Sha256::digest(b"")),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+}

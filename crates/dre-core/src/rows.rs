@@ -9,7 +9,8 @@ use arrow::ipc::reader::FileReader;
 use serde_json::json;
 
 pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> Result<(), String> {
-    let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None).map_err(|e| e.to_string())?;
+    let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
+        .map_err(|e| e.to_string())?;
     let columns = column_types(&reader.schema());
     let mut out = BufWriter::new(File::create(output).map_err(|e| e.to_string())?);
     write!(

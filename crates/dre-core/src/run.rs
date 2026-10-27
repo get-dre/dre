@@ -2197,11 +2197,7 @@ impl<'a> BindingRun<'a> {
         // identify executed SQL without receiving any secret embedded in it.
         {
             use sha2::Digest;
-            let digest = sha2::Sha256::digest(sql.as_bytes());
-            let hash = digest
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
+            let hash = crate::manifest::hex(&sha2::Sha256::digest(sql.as_bytes()));
             std::fs::write(self.compiled_dir.join(format!("{}.sha256", q.query)), hash)
                 .map_err(|e| e.to_string())?;
         }

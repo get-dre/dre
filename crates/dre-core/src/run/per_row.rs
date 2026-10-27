@@ -9,8 +9,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::sync::mpsc;
 
-use sha2::Digest;
-
 use super::*;
 use crate::for_each::{Population, RowMask, Table as RowTable, collision, safe_name};
 use crate::project::{OrphanRows, RowErrors};
@@ -1324,7 +1322,7 @@ fn run_job(
         .iter()
         .map(|(f, _)| RowFile {
             path: record_path_in(shared.project, f),
-            sha256: sha256_file(f).unwrap_or_default(),
+            sha256: crate::release::sha256_file(f).unwrap_or_default(),
         })
         .collect();
     if job.phase == Phase::Render {
@@ -1427,14 +1425,6 @@ fn address(options: &JsonMap<String, Json>) -> Option<String> {
             Json::String(s) => s.clone(),
             other => other.to_string(),
         })
-}
-
-fn sha256_file(p: &Path) -> std::io::Result<String> {
-    let bytes = std::fs::read(p)?;
-    Ok(sha2::Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
 }
 
 fn record_path_in(project: &Project, p: &Path) -> PathBuf {
