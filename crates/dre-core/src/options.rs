@@ -327,8 +327,9 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
     let log: LogSink = Arc::new(|_, _| {});
     let file = project.profiles.file.clone();
     let mut unset_reported = std::collections::BTreeSet::new();
-    // Plugin -> the entries it checks, so each plugin starts once.
-    let mut by_plugin: BTreeMap<(PluginKind, String), Vec<&EntryRef>> = BTreeMap::new();
+    // Plugin -> the entries it checks (with their already-looked-up target), so each plugin
+    // starts once.
+    let mut by_plugin: BTreeMap<(PluginKind, String), Vec<(&EntryRef, _)>> = BTreeMap::new();
     for e in entries {
         let (role, profile, target) = e;
         let Some(t) = project
@@ -345,7 +346,7 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
             Role::Connection => PluginKind::Source,
             Role::Destination => PluginKind::Destination,
         };
-        by_plugin.entry((kind, t.kind.clone())).or_default().push(e);
+        by_plugin.entry((kind, t.kind.clone())).or_default().push((e, t));
     }
     for ((kind, name), entries) in by_plugin {
         // A missing plugin is reported by the plugin checks.
@@ -364,8 +365,7 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
                 continue;
             }
         };
-        for (role, profile, target) in entries {
-            let t = &project.profiles.get(*role, profile).unwrap().targets[target];
+        for ((role, profile, target), t) in entries {
             let line = project.profiles.line_of(*role, profile);
             let at = format!("{} `{profile}` (entry `{target}`)", role.as_str());
             // Values with an unset `env_var()` go unresolved; the rest are rendered as for a run.
