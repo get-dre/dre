@@ -206,23 +206,30 @@ func (s *session) retry(ctx context.Context, f func() error) error {
 	}
 }
 
-// Run executes one statement, retried after a transient error (see retry). A cancelled
-// statement's job is cancelled in BigQuery too: ending the context only stops the wait for it.
+// Run executes one statement, retried after a transient error (see retry). A retry reads the
+// same job again while it runs, and submits a new job only once that one has ended: two jobs
+// would both run and bill. A cancelled statement's job is cancelled in BigQuery too: ending the
+// context only stops the wait for it.
 func (s *session) Run(sql string, fn func(plugin.Result) error) error {
 	ctx, cancel := s.context()
 	defer cancel()
-	var job *bigquery.Job
-	var id string // the job's id, known before BigQuery replies to its creation
+	var job *bigquery.Job // nil until submitted, and again once it has ended
+	var id string         // the job's id, known before BigQuery replies to its creation
 	var it *bigquery.RowIterator
 	err := s.retry(ctx, func() error {
-		q := s.query(sql)
-		q.JobID = newJobID()
-		id, job = q.JobID, nil
 		var err error
-		if job, err = q.Run(ctx); err != nil {
-			return err
+		if job == nil {
+			q := s.query(sql)
+			q.JobID = newJobID()
+			id = q.JobID
+			if job, err = q.Run(ctx); err != nil {
+				job = nil
+				return err
+			}
 		}
-		it, err = job.Read(ctx)
+		if it, err = job.Read(ctx); err != nil && ended(ctx, job) {
+			job = nil
+		}
 		return err
 	})
 	if err != nil {
@@ -273,6 +280,13 @@ func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (
 		Relation: table, Rows: rows,
 		Warning: fmt.Sprintf("BigQuery has no bulk load into a session's temp table, so %d rows were sent as one SQL statement. Data this size probably belongs in a table in BigQuery", rows),
 	}, nil
+}
+
+// ended reports whether BigQuery says job has finished, failed or not. Unknown counts as still
+// running, so the job is read again rather than run twice.
+func ended(ctx context.Context, job *bigquery.Job) bool {
+	st, err := job.Status(ctx)
+	return err == nil && st.Done()
 }
 
 // cancelJob asks BigQuery to stop a job whose request ended. It doesn't wait for the job to stop.

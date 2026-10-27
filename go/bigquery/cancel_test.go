@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,19 +78,24 @@ func TestRequestAfterCancelIsNotCancelled(t *testing.T) {
 	}
 }
 
-// fakeJobs is a BigQuery endpoint whose jobs never finish. It reports each job id it creates
-// and each it is asked to cancel. With slowInsert, jobs.insert only answers when its caller
-// gives up, as when Cancel comes while BigQuery is still creating the job.
+// fakeJobs is a BigQuery endpoint whose jobs never finish. It reports each job id it creates,
+// each wait for a job, and each job it is asked to cancel. With slowInsert, jobs.insert only
+// answers when its caller gives up, as when Cancel comes while BigQuery is still creating the
+// job. The first readErrs waits fail with a 501, a transient error the client library doesn't
+// retry by itself. With ended, BigQuery says every job has ended.
 type fakeJobs struct {
 	slowInsert bool
+	readErrs   atomic.Int32
+	ended      bool
 	inserted   chan string
+	reads      chan struct{}
 	cancelled  chan string
 }
 
 func (f *fakeJobs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	running := func(id string) {
-		fmt.Fprintf(w, `{"jobReference":{"projectId":"p","jobId":%q},"status":{"state":"RUNNING"},`+
-			`"configuration":{"query":{"query":"select 1"}}}`, id)
+	job := func(id, state string) {
+		fmt.Fprintf(w, `{"jobReference":{"projectId":"p","jobId":%q},"status":{"state":%q},`+
+			`"configuration":{"query":{"query":"select 1"}}}`, id, state)
 	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
@@ -103,25 +109,36 @@ func (f *fakeJobs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done()
 			return
 		}
-		running(body.JobReference.JobID)
+		job(body.JobReference.JobID, "RUNNING")
 	case strings.HasSuffix(path, "/cancel"):
 		id := path[strings.LastIndex(path, "/jobs/")+len("/jobs/") : len(path)-len("/cancel")]
 		f.cancelled <- id
 		fmt.Fprintf(w, `{"job":{"jobReference":{"projectId":"p","jobId":%q},"status":{"state":"DONE"}}}`, id)
 	case strings.Contains(path, "/queries/"):
+		f.reads <- struct{}{}
+		if f.readErrs.Add(-1) >= 0 {
+			w.WriteHeader(http.StatusNotImplemented)
+			fmt.Fprint(w, `{"error":{"code":501,"message":"not implemented"}}`)
+			return
+		}
 		fmt.Fprint(w, `{"jobComplete":false}`)
 	case strings.Contains(path, "/jobs/"):
-		running(path[strings.LastIndex(path, "/")+1:])
+		state := "RUNNING"
+		if f.ended {
+			state = "DONE"
+		}
+		job(path[strings.LastIndex(path, "/")+1:], state)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-// runAndCancel runs a statement against f, calls Cancel when f sees the job created, and
-// returns the job id f was asked to cancel.
-func runAndCancel(t *testing.T, f *fakeJobs) (inserted, cancelled string) {
+// runAndCancel runs a statement against f with the given job_retries, and calls Cancel once f
+// has seen reads waits for a job (with reads 0: once f sees the job created). It returns the
+// ids of the jobs f created, and of the job f was asked to cancel.
+func runAndCancel(t *testing.T, f *fakeJobs, retries, reads int) (inserted []string, cancelled string) {
 	t.Helper()
-	f.inserted, f.cancelled = make(chan string, 10), make(chan string, 10)
+	f.inserted, f.reads, f.cancelled = make(chan string, 10), make(chan struct{}, 100), make(chan string, 10)
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	life, end := context.WithCancel(context.Background())
@@ -131,13 +148,21 @@ func runAndCancel(t *testing.T, f *fakeJobs) (inserted, cancelled string) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	s := &session{client: client, project: "p", life: life, end: end}
+	s := &session{client: client, project: "p", retries: retries, life: life, end: end}
 	errc := make(chan error, 1)
 	go func() { errc <- s.Run("select 1", func(plugin.Result) error { return nil }) }()
 	select {
-	case inserted = <-f.inserted:
+	case id := <-f.inserted:
+		inserted = append(inserted, id)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run didn't create a job")
+	}
+	for range reads {
+		select {
+		case <-f.reads:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run didn't wait for the job")
+		}
 	}
 	time.Sleep(50 * time.Millisecond) // waiting for the job, or for BigQuery to create it
 	s.Cancel()
@@ -154,21 +179,45 @@ func runAndCancel(t *testing.T, f *fakeJobs) (inserted, cancelled string) {
 	case <-time.After(time.Second):
 		t.Fatal("Run didn't ask BigQuery to cancel the job")
 	}
+	for len(f.inserted) > 0 {
+		inserted = append(inserted, <-f.inserted)
+	}
 	return inserted, cancelled
 }
 
 // A cancelled Run asks BigQuery to cancel its job, not only to stop waiting for it.
 func TestCancelCancelsTheRunningJob(t *testing.T) {
-	inserted, cancelled := runAndCancel(t, &fakeJobs{})
-	if cancelled != inserted {
+	inserted, cancelled := runAndCancel(t, &fakeJobs{}, 0, 0)
+	if len(inserted) != 1 || cancelled != inserted[0] {
 		t.Fatalf("cancelled job %q, ran %q", cancelled, inserted)
 	}
 }
 
 // A Cancel that comes while BigQuery is still creating the job cancels that job too.
 func TestCancelDuringJobCreationCancelsTheJob(t *testing.T) {
-	inserted, cancelled := runAndCancel(t, &fakeJobs{slowInsert: true})
-	if inserted == "" || cancelled != inserted {
+	inserted, cancelled := runAndCancel(t, &fakeJobs{slowInsert: true}, 0, 0)
+	if len(inserted) != 1 || inserted[0] == "" || cancelled != inserted[0] {
 		t.Fatalf("cancelled job %q, ran %q", cancelled, inserted)
+	}
+}
+
+// A transient error while waiting for a running job retries the wait, not the statement: a
+// second job would run and bill too, and Cancel would stop only the second.
+func TestRetryWaitsForTheSameJob(t *testing.T) {
+	f := &fakeJobs{}
+	f.readErrs.Store(1)
+	inserted, cancelled := runAndCancel(t, f, 3, 2)
+	if len(inserted) != 1 || cancelled != inserted[0] {
+		t.Fatalf("ran jobs %q, cancelled %q; want one job, cancelled", inserted, cancelled)
+	}
+}
+
+// Once BigQuery says the failed job has ended, the retry runs the statement as a new job.
+func TestRetryRunsANewJobOnceTheFirstEnded(t *testing.T) {
+	f := &fakeJobs{ended: true}
+	f.readErrs.Store(1)
+	inserted, cancelled := runAndCancel(t, f, 3, 2)
+	if len(inserted) != 2 || cancelled != inserted[1] {
+		t.Fatalf("ran jobs %q, cancelled %q; want two jobs, the second cancelled", inserted, cancelled)
 	}
 }
