@@ -230,11 +230,8 @@ fn close_probe() -> ! {
             // End of input (or a broken pipe): the host went away without a `close`.
             Err(_) => std::process::exit(0),
         };
+        // A frame that isn't a request has no id to answer with, so it gets no reply.
         let Ok(Envelope { id, body }) = serde_json::from_value::<Envelope<Request>>(v) else {
-            let _ = dre_protocol::frame::write_json(
-                &mut out,
-                &Response::error("close_probe: unsupported request"),
-            );
             continue;
         };
         let reply = match body {
