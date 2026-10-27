@@ -156,10 +156,7 @@ impl Dialect {
     /// `value` as a SQL string literal.
     pub fn literal(&self, value: &str) -> String {
         match self.literal_style {
-            LiteralStyle::Hex(template) => {
-                let hex: String = value.bytes().map(|b| format!("{b:02x}")).collect();
-                template.replace("{hex}", &hex)
-            }
+            LiteralStyle::Hex(template) => template.replace("{hex}", &crate::manifest::hex(value.as_bytes())),
             LiteralStyle::Doubling => format!("'{}'", value.replace('\'', "''")),
         }
     }

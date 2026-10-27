@@ -300,7 +300,14 @@ func takeAttempts() int {
 // info level, naming what; a step that needed several tries is reported to core. Return a
 // plain error for a failure trying again won't fix, or that might repeat something already done.
 func Retry[T any](retries int, what string, f func() (T, error)) (T, error) {
-	return retryWith(retries, what, time.Sleep, f)
+	return retryWith(retries, what, sleepUnlessCancelled, f)
+}
+
+// sleepUnlessCancelled waits d, returning early when core cancels the running request.
+func sleepUnlessCancelled(d time.Duration) {
+	for end := time.Now().Add(d); !Cancelled() && time.Now().Before(end); {
+		time.Sleep(min(100*time.Millisecond, time.Until(end)))
+	}
 }
 
 func retryWith[T any](retries int, what string, sleep func(time.Duration), f func() (T, error)) (T, error) {
@@ -308,7 +315,8 @@ func retryWith[T any](retries int, what string, sleep func(time.Duration), f fun
 		v, err := f()
 		noteAttempts(attempt)
 		var temp *TemporaryError
-		if err == nil || !errors.As(err, &temp) || attempt > retries {
+		// A cancelled request isn't tried again.
+		if err == nil || !errors.As(err, &temp) || attempt > retries || Cancelled() {
 			if temp != nil {
 				err = temp.Err
 			}
@@ -320,6 +328,9 @@ func retryWith[T any](retries int, what string, sleep func(time.Duration), f fun
 		}
 		slog.Info(fmt.Sprintf("%s: %v; trying again in %ds (attempt %d of %d)", what, temp.Err, int(wait.Seconds()), attempt+1, retries+1))
 		sleep(wait)
+		if Cancelled() {
+			return v, temp.Err
+		}
 	}
 }
 

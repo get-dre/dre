@@ -679,7 +679,7 @@ pub fn install(
         }
     }
     let bytes = fetch(&art.url)?;
-    let got = hex(&Sha256::digest(&bytes));
+    let got = crate::manifest::hex(&Sha256::digest(&bytes));
     // Nothing published: the lock's pin, if any, is what the download must match.
     let expected = published.as_deref().or(want);
     if let Some(want) = expected
@@ -766,10 +766,6 @@ fn extract_tar_gz(bytes: &[u8], package: &str) -> Result<(String, Vec<u8>), Stri
         "the archive doesn't contain `{}`",
         package_executable_name(package)
     ))
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// What `sync` did for one package.
@@ -981,7 +977,7 @@ fn install_one(
         && !(art.url.ends_with(".tar.gz") || art.url.ends_with(".tgz"))
         && let Some(m) = crate::plugins::read_manifest(&vdir)
         && std::fs::read(vdir.join(&m.executable))
-            .is_ok_and(|b| hex(&Sha256::digest(&b)).eq_ignore_ascii_case(&art.sha256))
+            .is_ok_and(|b| crate::manifest::hex(&Sha256::digest(&b)).eq_ignore_ascii_case(&art.sha256))
     {
         let locked = Locked {
             version: v.version.clone(),

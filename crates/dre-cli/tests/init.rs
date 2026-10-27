@@ -13,7 +13,7 @@ fn registry(dir: &Path) {
     let reg = dir.join("registry");
     std::fs::create_dir_all(&reg).unwrap();
     std::fs::write(reg.join("fixture"), &bin).unwrap();
-    let sha: String = Sha256::digest(&bin).iter().map(|b| format!("{b:02x}")).collect();
+    let sha = dre_core::manifest::hex(&Sha256::digest(&bin));
     let plat = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
     let art = serde_json::json!({ plat: {"url": reg.join("fixture").to_string_lossy(), "sha256": sha} });
     // One package, `fixture`, with a source and a destination (`inbox`).

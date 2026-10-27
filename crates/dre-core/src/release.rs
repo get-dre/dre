@@ -70,10 +70,7 @@ pub struct HeldFile {
 
 pub fn sha256_file(p: &Path) -> std::io::Result<String> {
     let bytes = std::fs::read(p)?;
-    Ok(sha2::Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
+    Ok(crate::manifest::hex(&sha2::Sha256::digest(&bytes)))
 }
 
 /// A file and its SHA-256 now, for a held delivery.
