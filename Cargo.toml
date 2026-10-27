@@ -36,9 +36,7 @@ assert_cmd = "2"
 # batches between that and this one through the Arrow C data interface (plugins/duckdb/src/bridge.rs).
 # Once duckdb moves to arrow 59, drop the bridge and use one version.
 arrow = "59"
-# Only Snappy: the parquet plugin writes Snappy and nothing reads other codecs. The default
-# codecs pulled in zstd 0.13, which has advisories fixed only in zstd 0.14 (parquet 60).
-parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
+parquet = "59"
 duckdb = { version = "1.10505", features = ["bundled"] }
 
 # Native DuckDB debug symbols dominate development/test disk usage. Omit debug
