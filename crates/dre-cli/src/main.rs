@@ -545,10 +545,9 @@ fn explain(code: &str) -> ExitCode {
 }
 
 fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
-    // With auto-install off, a missing package is reported by the load.
-    if !a.project.no_auto_install {
-        plugins::sync_packages(&a.project.project_dir, printer);
-    }
+    // A failed or skipped install isn't fatal here: the load reports a missing package with
+    // the rest.
+    install_packages(&a.project, printer);
     let selector = selection(&a.select, &a.selector);
     let (project, mut diags) = project::load(&a.project.project_dir, &a.project.load_options());
     // validate checks every report, so templates that don't render are its errors too.
@@ -961,13 +960,18 @@ enum NeedPlugins {
     IfInstalling,
 }
 
-/// The start of every project command: install macro packages (unless installing is off), then
+/// Install the project's macro packages, unless installing is off. False after printing why.
+fn install_packages(args: &ProjectArgs, printer: &output::Printer) -> bool {
+    args.no_auto_install || plugins::sync_packages(&args.project_dir, printer)
+}
+
+/// The start of every project command but `validate` and `deps`: [`install_packages`], then
 /// [`load_for_run`].
 fn load_project(
     args: &ProjectArgs,
     printer: &output::Printer,
 ) -> Option<(dre_core::project::Project, Option<String>)> {
-    if !args.no_auto_install && !plugins::sync_packages(&args.project_dir, printer) {
+    if !install_packages(args, printer) {
         return None;
     }
     load_for_run(args, printer)
@@ -1425,6 +1429,8 @@ fn count_setting(
     }
 }
 
+/// `dre deps` has no `--no-auto-install`, and it doesn't use [`load_project`]: it writes no
+/// manifest, and it syncs a project that has other errors, since it only needs what's declared.
 fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
     if !plugins::sync_packages(&a.project_dir, printer) {
         return exit::failed();
