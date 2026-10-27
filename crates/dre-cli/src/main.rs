@@ -791,10 +791,7 @@ fn json_command(
     printer: &output::Printer,
     build: impl FnOnce(&dre_core::project::Project) -> Result<serde_json::Value, String>,
 ) -> ExitCode {
-    if !args.no_auto_install && !plugins::sync_packages(&args.project_dir, printer) {
-        return exit::not_started();
-    }
-    let Some((project, _)) = load_for_run(args, printer) else {
+    let Some((project, _)) = start_project(args, printer, NeedPlugins::No, |_| true) else {
         return exit::not_started();
     };
     let file = output.output_file;
@@ -817,20 +814,12 @@ fn json_command(
 
 /// `dre compile`: render the selection into target/compiled/ and list the files.
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
+    let Some((project, manifest_checksum)) =
+        start_project(&a.project, &printer, NeedPlugins::IfInstalling, |_| true)
+    else {
         return exit::not_started();
     };
-    // Compiling only needs the source plugin for templates that query; with installing off, a
-    // missing plugin is reported by the Binding that needs it.
-    if !a.project.no_auto_install && !plugins::ensure(&project, true, false, &printer) {
-        return exit::not_started();
-    }
-    let mut diags = dre_core::Diagnostics::default();
-    check_plugin_uses(&project, &a.project, &mut diags);
-    if !report_diags(&diags, &printer) {
+    if !check_project(&project, &a.project, &printer, false) {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
@@ -964,6 +953,59 @@ fn target_line(p: &dre_core::project::Project) -> String {
 
 /// Load the project for `compile` and `run`, writing its manifest; `None` (after printing
 /// why) when it can't run. Also returns the SHA-256 of the manifest written.
+/// What a project command needs of the project's plugins before it starts.
+#[derive(Clone, Copy)]
+enum NeedPlugins {
+    /// None (`dre query`, `dre catalog`).
+    No,
+    /// All of them: installed, or with installing off, already there (`dre run`, `dre release`).
+    All,
+    /// Installed unless installing is off; then a missing one is reported by the Binding that
+    /// needs it (`dre compile`, whose templates may not query).
+    IfInstalling,
+}
+
+/// The start of every project command: install macro packages, load the project and write its
+/// manifest, run `loaded` (false stops the command), then see to its plugins. `None` after
+/// printing why.
+fn start_project(
+    args: &ProjectArgs,
+    printer: &output::Printer,
+    need: NeedPlugins,
+    loaded: impl FnOnce(&dre_core::project::Project) -> bool,
+) -> Option<(dre_core::project::Project, Option<String>)> {
+    let install = !args.no_auto_install;
+    if install && !plugins::sync_packages(&args.project_dir, printer) {
+        return None;
+    }
+    let (project, checksum) = load_for_run(args, printer)?;
+    if !loaded(&project) {
+        return None;
+    }
+    let ready = match need {
+        NeedPlugins::No => true,
+        NeedPlugins::All => plugins::ensure(&project, install, false, printer),
+        NeedPlugins::IfInstalling => !install || plugins::ensure(&project, true, false, printer),
+    };
+    ready.then_some((project, checksum))
+}
+
+/// Check that the project's plugins are declared and, with `options`, every connection's
+/// settings. False after printing the diagnostics, when there are errors.
+fn check_project(
+    project: &dre_core::project::Project,
+    args: &ProjectArgs,
+    printer: &output::Printer,
+    options: bool,
+) -> bool {
+    let mut diags = dre_core::Diagnostics::default();
+    check_plugin_uses(project, args, &mut diags);
+    if options && !diags.has_errors() {
+        dre_core::options::check(project, false, &mut diags);
+    }
+    report_diags(&diags, printer)
+}
+
 fn load_for_run(
     args: &ProjectArgs,
     printer: &output::Printer,
@@ -1077,15 +1119,9 @@ fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
 
 /// `dre release`: deliver a run's held deliveries.
 fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+    let Some((project, _)) = start_project(&a.project, &printer, NeedPlugins::All, |_| true) else {
         return exit::not_started();
     };
-    if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
-        return exit::not_started();
-    }
     let by =
         a.by.or_else(|| std::env::var("USER").ok())
             .or_else(|| std::env::var("USERNAME").ok())
@@ -1164,26 +1200,25 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone());
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
+    // Run logs start before the plugins are installed, so the log files record installing them.
+    let loaded = |project: &dre_core::project::Project| {
+        if let Some(path) = &a.output_json {
+            let value = path.to_string_lossy();
+            if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
+                printer.error(&format!("--output-json: {error}"));
+                return false;
+            }
+        }
+        printer.log_runs();
+        for s in project.settings.lines() {
+            printer.detail(output::Tone::Note, "Setting", &s);
+        }
+        true
+    };
+    let Some((project, manifest_checksum)) = start_project(&a.project, &printer, NeedPlugins::All, loaded)
+    else {
         return exit::not_started();
     };
-    if let Some(path) = &a.output_json {
-        let value = path.to_string_lossy();
-        if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
-            printer.error(&format!("--output-json: {error}"));
-            return exit::not_started();
-        }
-    }
-    printer.log_runs();
-    for s in project.settings.lines() {
-        printer.detail(output::Tone::Note, "Setting", &s);
-    }
-    if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
-        return exit::not_started();
-    }
     // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
     let run_timeout = match dre_core::settings::flag_or_env(
         a.timeout.as_deref(),
@@ -1224,12 +1259,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
             return exit::not_started();
         }
     };
-    let mut diags = dre_core::Diagnostics::default();
-    check_plugin_uses(&project, &a.project, &mut diags);
-    if !diags.has_errors() {
-        dre_core::options::check(&project, false, &mut diags);
-    }
-    if !report_diags(&diags, &printer) {
+    if !check_project(&project, &a.project, &printer, true) {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
