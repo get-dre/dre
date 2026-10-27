@@ -46,7 +46,7 @@ assert_cmd.workspace = true
 jsonschema = { version = "0.60", default-features = false }
 tempfile.workspace = true
 serde_json.workspace = true
-calamine = "0.36"
+calamine = "0.37"
 umya-spreadsheet = "3"
 minisign = "0.10"
 arrow.workspace = true
