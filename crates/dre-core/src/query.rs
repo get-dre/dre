@@ -115,8 +115,9 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     let process = plugin
         .start(log, Some(&project.root))
         .map_err(|e| e.to_string())?;
-    // The session and its result live inside one inner call: the single `close()` afterwards runs
-    // on every exit path after `start()`, including a panic unwinding through it.
+    // The session and its result live inside one inner call, so the single `close()` afterwards
+    // runs on every error and return path after `start()`. A panic skips it: dropping the process
+    // then kills it without a protocol `close`.
     run_session(process, target, sql, max_rows, profile, &project.target_name)
 }
 
@@ -179,7 +180,7 @@ impl SourceProcess for dre_protocol::host::PluginProcess {
 }
 
 /// The steps after the plugin process has started: open a session, stream the query, build the
-/// result. The process is closed once this returns, whichever result it produces or how.
+/// result. The process is closed once they return, with a result or an error.
 fn run_session<P: SourceProcess>(
     mut process: P,
     target: &crate::profiles::ProfileTarget,
@@ -258,28 +259,34 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    /// Behaviour a fake source process can be told to show: a read-only session (else the
-    /// capability guard rejects it), a failing `open`, a failing `execute`, or no result set.
-    #[derive(Default)]
-    struct Fake {
-        read_only: bool,
-        fail_open: bool,
-        fail_execute: bool,
-        no_result: bool,
-        /// Set when `close()` runs, so a test can prove the process was closed.
-        closed: Option<Rc<Cell<bool>>>,
+    /// What a fake source process does in a session.
+    #[derive(Clone, Copy)]
+    enum Scenario {
+        /// Doesn't advertise a read-only session, so the capability guard rejects it.
+        NotReadOnly,
+        FailOpen,
+        FailExecute,
+        /// `execute` returns no result set.
+        NoResult,
+        Ok,
     }
 
-    impl SourceProcess for Fake {
+    struct FakeSource {
+        scenario: Scenario,
+        /// Set when `close()` runs, so a test can prove the process was closed.
+        closed: Rc<Cell<bool>>,
+    }
+
+    impl SourceProcess for FakeSource {
         fn has(&self, _: &str) -> bool {
-            self.read_only
+            !matches!(self.scenario, Scenario::NotReadOnly)
         }
         fn open(
             &mut self,
             _connection: serde_json::Map<String, Value>,
             _read_only: bool,
         ) -> dre_protocol::host::Result<()> {
-            if self.fail_open {
+            if let Scenario::FailOpen = self.scenario {
                 return Err(dre_protocol::host::HostError::Unexpected {
                     plugin: "fake".into(),
                     expected: "an open reply",
@@ -303,121 +310,85 @@ mod tests {
                 arrow::array::RecordBatch,
             ) -> std::result::Result<(), String>,
         ) -> dre_protocol::host::Result<Execution> {
-            if self.fail_execute {
-                return Err(dre_protocol::host::HostError::Unexpected {
+            match self.scenario {
+                Scenario::FailExecute => Err(dre_protocol::host::HostError::Unexpected {
                     plugin: "fake".into(),
                     expected: "an execute reply",
                     got: "an error".into(),
-                });
+                }),
+                Scenario::NoResult => Ok(Execution::NoResult { rows_affected: None }),
+                _ => {
+                    let schema = std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
+                        arrow::datatypes::Field::new("n", arrow::datatypes::DataType::Int64, false),
+                    ]));
+                    Ok(Execution::Result { schema, rows: 0 })
+                }
             }
-            if self.no_result {
-                return Ok(Execution::NoResult { rows_affected: None });
-            }
-            let schema =
-                std::sync::Arc::new(arrow::datatypes::Schema::new(vec![arrow::datatypes::Field::new(
-                    "n",
-                    arrow::datatypes::DataType::Int64,
-                    false,
-                )]));
-            Ok(Execution::Result { schema, rows: 0 })
         }
         fn close(self) -> dre_protocol::host::Result<()> {
-            if let Some(c) = self.closed {
-                c.set(true);
-            }
+            self.closed.set(true);
             Ok(())
         }
     }
 
-    /// The target a fake session runs against: a plugin type, no connection fields.
-    fn target(kind: &str) -> crate::profiles::ProfileTarget {
-        crate::profiles::ProfileTarget {
-            kind: kind.into(),
+    /// `run_session` on a fake source in `scenario`, against a `fixture` target with no
+    /// connection fields: its result, and whether the process was closed.
+    fn run(scenario: Scenario) -> (Result<Value, String>, bool) {
+        let closed = Rc::new(Cell::new(false));
+        let fake = FakeSource {
+            scenario,
+            closed: closed.clone(),
+        };
+        let target = crate::profiles::ProfileTarget {
+            kind: "fixture".into(),
             fields: serde_json::Map::new(),
-        }
+        };
+        let out = run_session(fake, &target, "select 1", 10, "fx", "dev");
+        (out, closed.get())
     }
 
     #[test]
     fn a_failing_execute_closes_the_process_and_keeps_the_error() {
-        let closed = Rc::new(Cell::new(false));
-        let fake = Fake {
-            read_only: true,
-            fail_execute: true,
-            closed: Some(closed.clone()),
-            ..Fake::default()
-        };
-        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        let (out, closed) = run(Scenario::FailExecute);
         let err = out.expect_err("the failing execute must surface as an error");
         assert!(err.contains("an execute reply"), "unexpected error: {err}");
-        assert!(closed.get(), "the process was not closed after a failing execute");
+        assert!(closed, "the process was not closed after a failing execute");
     }
 
     #[test]
     fn a_query_with_no_result_set_closes_the_process() {
-        let closed = Rc::new(Cell::new(false));
-        let fake = Fake {
-            read_only: true,
-            no_result: true,
-            closed: Some(closed.clone()),
-            ..Fake::default()
-        };
-        let out = run_session(fake, &target("fixture"), "none", 10, "fx", "dev");
+        let (out, closed) = run(Scenario::NoResult);
         assert_eq!(out.unwrap_err(), "the query returned no result set");
-        assert!(
-            closed.get(),
-            "the process was not closed after the no-result-set path"
-        );
+        assert!(closed, "the process was not closed after the no-result-set path");
     }
 
     #[test]
     fn a_plugin_without_read_only_is_rejected_and_still_closed() {
-        let closed = Rc::new(Cell::new(false));
-        let fake = Fake {
-            read_only: false,
-            closed: Some(closed.clone()),
-            ..Fake::default()
-        };
-        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        let (out, closed) = run(Scenario::NotReadOnly);
         assert_eq!(
             out.unwrap_err(),
             "the fixture plugin cannot guarantee a read-only connection"
         );
-        assert!(
-            closed.get(),
-            "the process was not closed after the read-only rejection"
-        );
+        assert!(closed, "the process was not closed after the read-only rejection");
     }
 
     #[test]
     fn a_failed_open_is_reported_and_the_process_is_still_closed() {
-        let closed = Rc::new(Cell::new(false));
-        let fake = Fake {
-            read_only: true,
-            fail_open: true,
-            closed: Some(closed.clone()),
-            ..Fake::default()
-        };
-        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev");
+        let (out, closed) = run(Scenario::FailOpen);
         let err = out.expect_err("a failed open must surface as an error");
         assert!(err.contains("an open reply"), "unexpected error: {err}");
-        assert!(closed.get(), "the process was not closed after a failed open");
+        assert!(closed, "the process was not closed after a failed open");
     }
 
     #[test]
     fn a_succeeding_session_builds_the_result_and_closes_the_process() {
-        let closed = Rc::new(Cell::new(false));
-        let fake = Fake {
-            read_only: true,
-            closed: Some(closed.clone()),
-            ..Fake::default()
-        };
-        let out = run_session(fake, &target("fixture"), "select 1", 10, "fx", "dev")
-            .expect("a read-only session must succeed");
+        let (out, closed) = run(Scenario::Ok);
+        let out = out.expect("a read-only session must succeed");
         assert_eq!(out["schema_version"], "dre/rows/v1");
         assert_eq!(out["row_count"], 0);
         assert_eq!(out["connection"], "fx");
         assert_eq!(out["target"], "dev");
         assert_eq!(out["read_only_enforcement"], "session");
-        assert!(closed.get(), "the process was not closed on the success path");
+        assert!(closed, "the process was not closed on the success path");
     }
 }
