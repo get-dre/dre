@@ -20,7 +20,6 @@ path = "src/main.rs"
 serde-saphyr.workspace = true
 dre-core.workspace = true
 dre-protocol.workspace = true
-anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 semver.workspace = true
@@ -42,6 +41,7 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [dev-dependencies]
+anyhow.workspace = true
 assert_cmd.workspace = true
 jsonschema = { version = "0.59", default-features = false }
 tempfile.workspace = true
