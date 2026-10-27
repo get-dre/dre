@@ -1201,42 +1201,29 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         },
         None => project.run_timeout,
     };
-    // `--keep-runs`, else `DRE_KEEP_RUNS`, else `flags: keep_runs`.
-    let keep_runs = match keep_runs_setting(a.keep_runs.as_deref()) {
-        Ok(k) => k,
+    // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
+    let counts = (|| {
+        Ok::<_, String>((
+            count_setting(
+                a.keep_runs.as_deref(),
+                "--keep-runs",
+                dre_core::settings::KEEP_RUNS,
+            )?,
+            count_setting(
+                a.row_concurrency.as_deref(),
+                "--row-concurrency",
+                dre_core::settings::ROW_CONCURRENCY,
+            )?,
+            count_setting(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)?,
+        ))
+    })();
+    let (keep_runs, row_concurrency, threads) = match counts {
+        Ok(c) => c,
         Err(e) => {
             printer.error(&e);
             return exit::not_started();
         }
     };
-    // `--row-concurrency`, else `DRE_ROW_CONCURRENCY`.
-    let row_concurrency = match dre_core::settings::flag_or_env(
-        a.row_concurrency.as_deref(),
-        "--row-concurrency",
-        dre_core::settings::ROW_CONCURRENCY,
-    ) {
-        None => None,
-        Some((v, from)) => match v.trim().parse::<usize>() {
-            Ok(n) if n > 0 => Some(n),
-            _ => {
-                printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
-                return exit::not_started();
-            }
-        },
-    };
-    // `--threads`, else `DRE_THREADS`.
-    let threads =
-        match dre_core::settings::flag_or_env(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)
-        {
-            None => None,
-            Some((v, from)) => match v.trim().parse::<usize>() {
-                Ok(n) if n > 0 => Some(n),
-                _ => {
-                    printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
-                    return exit::not_started();
-                }
-            },
-        };
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(&project, &a.project, &mut diags);
     if !diags.has_errors() {
@@ -1347,7 +1334,11 @@ fn clean(a: CleanArgs) -> ExitCode {
         }
     };
     if a.prune {
-        let keep = match keep_runs_setting(a.keep_runs.as_deref()) {
+        let keep = match count_setting(
+            a.keep_runs.as_deref(),
+            "--keep-runs",
+            dre_core::settings::KEEP_RUNS,
+        ) {
             Ok(Some(k)) => k,
             Ok(None) => {
                 dre_core::target::project_flag_u64(root, "keep_runs").map_or(1, |k| k.max(1) as usize)
@@ -1391,10 +1382,14 @@ fn clean(a: CleanArgs) -> ExitCode {
     }
 }
 
-/// `--keep-runs`, else `DRE_KEEP_RUNS` (the project's `flags: keep_runs` is the caller's
-/// fallback).
-fn keep_runs_setting(flag: Option<&str>) -> Result<Option<usize>, String> {
-    match dre_core::settings::flag_or_env(flag, "--keep-runs", dre_core::settings::KEEP_RUNS) {
+/// A count of 1 or more from `flag_name`, else the environment variable `var`; any fallback
+/// after that is the caller's.
+fn count_setting(
+    flag: Option<&str>,
+    flag_name: &'static str,
+    var: &'static str,
+) -> Result<Option<usize>, String> {
+    match dre_core::settings::flag_or_env(flag, flag_name, var) {
         None => Ok(None),
         Some((v, from)) => match v.trim().parse::<usize>() {
             Ok(n) if n > 0 => Ok(Some(n)),
@@ -1439,6 +1434,28 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         exit::ok()
     } else {
         exit::failed()
+    }
+}
+
+#[cfg(test)]
+mod count_setting_tests {
+    use super::count_setting;
+
+    #[test]
+    fn counts_are_one_or_more() {
+        let max = usize::MAX.to_string();
+        for flag in ["--keep-runs", "--row-concurrency", "--threads"] {
+            let parse = |v: &str| count_setting(Some(v), flag, "DRE_TEST_COUNT_UNSET");
+            assert_eq!(parse("1"), Ok(Some(1)));
+            assert_eq!(parse(&max), Ok(Some(usize::MAX)));
+            assert_eq!(parse(" 4 "), Ok(Some(4)));
+            for bad in ["0", "-1", "abc"] {
+                assert_eq!(
+                    parse(bad),
+                    Err(format!("{flag} must be a whole number of 1 or more, got `{bad}`"))
+                );
+            }
+        }
     }
 }
 
