@@ -42,6 +42,26 @@ func (r *fakeResult) Next() (arrow.Record, error) {
 	return rec, nil
 }
 
+// endlessResult has a batch for as long as it's asked: the first at once, each later one once
+// the request is cancelled (saying on endlessWaiting that it waits). Only stream's check between
+// batches ends it.
+type endlessResult struct{ n int64 }
+
+var endlessWaiting = make(chan struct{}, 1)
+
+func (r *endlessResult) Schema() (*arrow.Schema, error) { return idSchema, nil }
+func (r *endlessResult) HasNext() bool                  { return true }
+func (r *endlessResult) Next() (arrow.Record, error) {
+	if r.n > 0 {
+		endlessWaiting <- struct{}{}
+	}
+	for r.n > 0 && !plugin.Cancelled() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.n++
+	return ids(r.n, 1), nil
+}
+
 type fakeDB struct {
 	ran    []string
 	loaded []string
@@ -96,6 +116,14 @@ func (f *fakeDB) Run(sql string, fn func(plugin.Result) error) error {
 		return fn(nil)
 	case "coded":
 		return &plugin.Error{Kind: "auth", Code: "bad-token", Message: "the token was refused"}
+	case "busy":
+		// Fails with a temporary error every time, so only a cancel ends the retries.
+		_, err := plugin.Retry(100, "running busy", func() (struct{}, error) {
+			return struct{}{}, &plugin.TemporaryError{Err: errors.New("busy")}
+		})
+		return err
+	case "endless":
+		return fn(&endlessResult{})
 	}
 	return errors.New("syntax error")
 }
@@ -393,6 +421,42 @@ func TestProtocolOneIdsLogsErrorsAndCancel(t *testing.T) {
 	c.Send(map[string]any{"type": "describe", "id": 5})
 	if r := c.Reply(); r["type"] != "describe" || r["id"] != 5.0 {
 		t.Fatalf("after cancel: %v", r)
+	}
+}
+
+func TestCancelEndsARetryWaitAndAStream(t *testing.T) {
+	c, _ := start(t)
+	c.Hello()
+	c.Send(map[string]any{"type": "open", "id": 1, "connection": map[string]any{}, "read_only": false})
+	if r := c.Reply(); r["type"] != "ok" {
+		t.Fatalf("open: %v", r)
+	}
+	// Retry logs each wait; the second one lasts at least three seconds.
+	c.Send(map[string]any{"type": "execute", "id": 2, "sql": "busy"})
+	for range 2 {
+		if r := c.Message(); r["type"] != "log" || !strings.Contains(fmt.Sprint(r["message"]), "trying again") {
+			t.Fatalf("retry: %v", r)
+		}
+	}
+	start := time.Now()
+	c.Send(map[string]any{"type": "cancel", "id": 2})
+	if r := c.Reply(); r["type"] != "error" || r["kind"] != "cancelled" || r["id"] != 2.0 {
+		t.Fatalf("cancel during a retry: %v", r)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("the retry kept waiting %v after the cancel", d)
+	}
+
+	c.Send(map[string]any{"type": "execute", "id": 3, "sql": "endless"})
+	if r := c.Reply(); r["type"] != "result" {
+		t.Fatalf("endless: %v", r)
+	}
+	c.Records()
+	<-endlessWaiting
+	c.Send(map[string]any{"type": "cancel", "id": 3})
+	c.Records() // the batch Next was waiting on when the cancel came
+	if r := c.Reply(); r["type"] != "error" || r["kind"] != "cancelled" || r["id"] != 3.0 {
+		t.Fatalf("cancel during a stream: %v", r)
 	}
 }
 
