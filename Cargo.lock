@@ -2328,7 +2328,7 @@ dependencies = [
  "flate2",
  "fulgur",
  "getrandom 0.4.3",
- "lopdf",
+ "lopdf 0.46.0",
  "minijinja 3.0.1",
  "regex",
  "serde_json",
@@ -3036,7 +3036,7 @@ dependencies = [
  "krilla",
  "krilla-svg",
  "log",
- "lopdf",
+ "lopdf 0.45.0",
  "minijinja 2.24.0",
  "parley",
  "serde",
@@ -3059,7 +3059,7 @@ dependencies = [
  "image",
  "krilla",
  "log",
- "lopdf",
+ "lopdf 0.45.0",
  "minijinja 2.24.0",
  "serde",
  "thiserror 2.0.21",
@@ -4402,6 +4402,33 @@ dependencies = [
  "rand 0.10.3",
  "rangemap",
  "rayon",
+ "sha2 0.11.0",
+ "stringprep",
+ "thiserror 2.0.21",
+ "weezl 0.2.1",
+]
+
+[[package]]
+name = "lopdf"
+version = "0.46.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d43f64cb8c0d673ff84245a6de9e0172c0cc05dc5dd9d263660b5b4a02b6c4ae"
+dependencies = [
+ "aes",
+ "bitflags 2.13.2",
+ "brotli-decompressor 5.0.3",
+ "cbc",
+ "ecb",
+ "encoding_rs",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap",
+ "itoa",
+ "log",
+ "md-5",
+ "nom",
+ "rand 0.10.3",
+ "rangemap",
  "sha2 0.11.0",
  "stringprep",
  "thiserror 2.0.21",
