@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Scan the dependencies for known vulnerabilities and licences DRE can't ship.
 
-    security_scan.py rust [--report-dir DIR]   cargo-deny: advisories and licences
-    security_scan.py go [--report-dir DIR]     govulncheck and go-licenses, for every module in go/
+    security_scan.py rust [--advisories fail|warn] [--report-dir DIR]   cargo-deny: advisories and licences
+    security_scan.py go [--advisories fail|warn] [--report-dir DIR]     govulncheck and go-licenses, for every module in go/
+    git diff --name-only BASE HEAD | security_scan.py mode rust|go          fail or warn, for a pull request
 
 Needs Python 3.11 or later, and cargo-deny, govulncheck and go-licenses on the PATH (or in
 $(go env GOPATH)/bin).
@@ -12,11 +13,16 @@ Accepted vulnerabilities are listed once, for both languages, in
 malformed entry fails both commands.
 
 - Rust: the Rust entries become cargo-deny's advisory ignore list, in a config generated from
-  deny.toml (which never lists them). Vulnerabilities, unsound code and yanked crates fail;
-  unmaintained crates only warn.
+  deny.toml (which never lists them). Vulnerabilities and unsound code fail; unmaintained and
+  yanked crates only warn.
 - Go: govulncheck has no ignore list, so its findings are filtered here. A vulnerability the code
   calls fails unless it's listed; one in a module or package the code doesn't call is printed but
   passes, as govulncheck itself does.
+
+With --advisories warn, a vulnerability is printed as a warning and doesn't fail the scan. CI uses
+it on a pull request that doesn't change that language's dependencies (see `mode`): an advisory
+published against unchanged lockfiles isn't that pull request's doing. Pushes to master, the
+weekly run and releases always use fail. Licences and the exceptions file always fail.
 
 Licences: deny.toml's `licenses.allow` (compatible with GPL-3.0-only) applies to the Rust crates
 and, through go-licenses, to the Go modules; the Go exceptions are in
@@ -50,6 +56,13 @@ YANKED_PATTERN = r"[A-Za-z0-9_-]+@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?"
 def key(e):
     """What an entry accepts: its advisory id, or the yanked crate@version."""
     return e.get("id") or e.get("yanked") or "an entry without an id"
+# The files whose change makes a pull request's advisory findings its own: the dependencies, and
+# the scan itself.
+SCAN_FILES = r"\.github/(vulnerability-exceptions\.toml|scripts/security_scan\.py|workflows/security\.yml)"
+DEPENDENCY_FILES = {
+    "rust": rf"(.*/)?Cargo\.(toml|lock)|deny\.toml|{SCAN_FILES}",
+    "go": rf"go/[^/]+/go\.(mod|sum)|{SCAN_FILES}",
+}
 # An exception this close to its expiry is pointed out, so it's renewed or fixed in time.
 WARN_DAYS = 14
 
@@ -116,6 +129,22 @@ def load_exceptions():
     for w in expiring_soon(entries, today):
         print(f"::warning file={EXCEPTIONS_FILE.relative_to(ROOT)}::{w}")
     return entries
+
+
+def mode(ecosystem, changed):
+    """`fail` when a pull request changing the files in `changed` owns its advisory findings for
+    `ecosystem`, `warn` when they come from elsewhere (a new advisory against unchanged lockfiles)."""
+    owned = any(re.fullmatch(DEPENDENCY_FILES[ecosystem], f) for f in changed)
+    return "fail" if owned else "warn"
+
+
+def warned(name, code):
+    """`code` of an advisory check, with `--advisories warn`: 0 after saying why it would fail."""
+    if code:
+        print(f"::warning title={name}::known vulnerabilities, not failing this run: this pull "
+              "request doesn't change the dependencies. Fix them in a pull request of their own "
+              "(CONTRIBUTING.md, \"When the security scan fails\").")
+    return 0
 
 
 def deny_config(deny_toml, entries):
@@ -198,23 +227,26 @@ def tool(name):
     return found
 
 
-def rust(report_dir):
+def rust(report_dir, advisories):
     entries = load_exceptions()
     config = deny_config(DENY_FILE.read_text(), entries)
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "deny.toml"
         path.write_text(config)
-        cmd = [tool("cargo-deny"), "--manifest-path", str(ROOT / "Cargo.toml"), "--config", str(path),
-               "check", "--warn", "unmaintained", "advisories", "licenses"]
-        code = subprocess.run(cmd, check=False).returncode
+        base = [tool("cargo-deny"), "--manifest-path", str(ROOT / "Cargo.toml"), "--config", str(path)]
+        check = ["check", "--warn", "unmaintained"]
+        licences = subprocess.run(base + check + ["licenses"], check=False).returncode
+        found = subprocess.run(base + check + ["advisories"], check=False).returncode
+        if advisories == "warn":
+            found = warned("cargo-deny", found)
         if report_dir:
             with open(report_dir / "cargo-deny.json", "w") as out:
-                subprocess.run(cmd[:5] + ["--format", "json"] + cmd[5:], stdout=out, stderr=out,
-                               check=False)
-    return code
+                subprocess.run(base + ["--format", "json"] + check + ["advisories", "licenses"],
+                               stdout=out, stderr=out, check=False)
+    return 1 if licences or found else 0
 
 
-def go(report_dir):
+def go(report_dir, advisories):
     entries = load_exceptions()
     accepted = {e["id"] for e in entries if e["ecosystem"] == "go" and e.get("id")}
     allowed = allowed_licences(DENY_FILE.read_text())
@@ -233,13 +265,17 @@ def go(report_dir):
         if report_dir:
             (report_dir / f"govulncheck-{name}.json").write_text(result.stdout)
         called, other = go_findings(json_stream(result.stdout), accepted)
+        level = "warning" if advisories == "warn" else "error"
         for osv, summary in called.items():
-            print(f"::error title=go/{name}: {osv}::called by the code: {summary}")
+            print(f"::{level} title=go/{name}: {osv}::called by the code: {summary}")
         for osv, summary in other.items():
             print(f"{osv}: in a dependency, but not called: {summary}")
         if not called:
             print("No vulnerabilities the code calls.")
-        failed |= bool(called)
+        if advisories == "warn":
+            warned(f"go/{name}", bool(called))
+        else:
+            failed |= bool(called)
 
         print(f"== go/{name}: go-licenses", flush=True)
         check = subprocess.run([go_licenses] + licence_args, cwd=module, capture_output=True,
@@ -264,12 +300,20 @@ def parse_licence_exceptions():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("ecosystem", choices=["rust", "go"])
+    parser.add_argument("command", choices=["rust", "go", "mode"])
+    parser.add_argument("ecosystem", nargs="?", choices=["rust", "go"],
+                        help="with mode: the language to decide for")
+    parser.add_argument("--advisories", choices=["fail", "warn"], default="fail")
     parser.add_argument("--report-dir", type=pathlib.Path)
     args = parser.parse_args()
+    if args.command == "mode":
+        if not args.ecosystem:
+            parser.error("mode needs rust or go")
+        print(mode(args.ecosystem, sys.stdin.read().split()))
+        return
     if args.report_dir:
         args.report_dir.mkdir(parents=True, exist_ok=True)
-    sys.exit((rust if args.ecosystem == "rust" else go)(args.report_dir))
+    sys.exit((rust if args.command == "rust" else go)(args.report_dir, args.advisories))
 
 
 if __name__ == "__main__":

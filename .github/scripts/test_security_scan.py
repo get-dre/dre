@@ -163,6 +163,33 @@ class Govulncheck(unittest.TestCase):
         self.assertEqual((list(called), other), (["GO-2026-0002"], {}))
 
 
+class Mode(unittest.TestCase):
+    def test_a_pull_request_without_dependency_changes_warns(self):
+        changed = ["crates/dre-core/src/query.rs", "docs/install.md", "go/bigquery/source.go"]
+        self.assertEqual(ss.mode("rust", changed), "warn")
+        self.assertEqual(ss.mode("go", changed), "warn")
+
+    def test_rust_dependency_changes_fail(self):
+        for f in ["Cargo.lock", "Cargo.toml", "plugins/xlsx/Cargo.toml", "deny.toml"]:
+            self.assertEqual(ss.mode("rust", [f]), "fail", f)
+            self.assertEqual(ss.mode("go", [f]), "warn", f)
+
+    def test_go_dependency_changes_fail(self):
+        for f in ["go/plugin/go.mod", "go/snowflake/go.sum"]:
+            self.assertEqual(ss.mode("go", [f]), "fail", f)
+            self.assertEqual(ss.mode("rust", [f]), "warn", f)
+
+    def test_changing_the_scan_or_its_exceptions_fails_both(self):
+        for f in [".github/vulnerability-exceptions.toml", ".github/scripts/security_scan.py",
+                  ".github/workflows/security.yml"]:
+            self.assertEqual(ss.mode("rust", [f]), "fail", f)
+            self.assertEqual(ss.mode("go", [f]), "fail", f)
+
+    def test_lookalike_names_dont_count(self):
+        self.assertEqual(ss.mode("rust", ["docs/Cargo.lock.md", "MyCargo.toml"]), "warn")
+        self.assertEqual(ss.mode("go", ["go/bigquery/vendor/x/go.mod"]), "warn")
+
+
 class JsonStream(unittest.TestCase):
     def test_reads_concatenated_pretty_printed_objects(self):
         text = '{\n  "config": {}\n}\n{\n  "osv": {"id": "GO-1"}\n}\n'

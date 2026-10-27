@@ -3,7 +3,10 @@ name: Security scan
 # Known vulnerabilities and licences of every dependency, Rust and Go, and the workflows' own
 # security (zizmor: actions pinned by SHA, images by digest, minimal permissions): on every pull request and
 # push to master, before every release (release.yml calls this workflow), and weekly, so a new
-# advisory against unchanged lockfiles shows up as a red run. What to do when it fails:
+# advisory against unchanged lockfiles shows up as a red run. A pull request that doesn't change a
+# language's dependencies only warns about that language's advisories (security_scan.py mode):
+# they aren't its doing, and a red run there would block unrelated work. Licences always fail.
+# What to do when it fails:
 # CONTRIBUTING.md, "When the security scan fails". The script is .github/scripts/security_scan.py;
 # the accepted advisories are in .github/vulnerability-exceptions.toml.
 
@@ -43,11 +46,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: python3 .github/scripts/test_security_scan.py
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny
-      - run: python3 .github/scripts/security_scan.py rust --report-dir security-report
+      - id: mode
+        name: Fail or warn on advisories
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # The checkout is the merge commit, so its first parent is the base branch.
+            echo "advisories=$(git diff --name-only HEAD^1 HEAD | python3 .github/scripts/security_scan.py mode rust)"
+          else
+            echo advisories=fail
+          fi >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+      - run: python3 .github/scripts/security_scan.py rust --advisories "$ADVISORIES" --report-dir security-report
+        env:
+          ADVISORIES: ${{ steps.mode.outputs.advisories }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -62,6 +79,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       # The newest Go patch release: govulncheck reports standard-library advisories for the Go
       # it runs with, and the release builds use the newest patch too.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -72,7 +90,20 @@ jobs:
       - run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           go install github.com/google/go-licenses/v2@v2.0.1
-      - run: python3 .github/scripts/security_scan.py go --report-dir security-report
+      - id: mode
+        name: Fail or warn on advisories
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # The checkout is the merge commit, so its first parent is the base branch.
+            echo "advisories=$(git diff --name-only HEAD^1 HEAD | python3 .github/scripts/security_scan.py mode go)"
+          else
+            echo advisories=fail
+          fi >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+      - run: python3 .github/scripts/security_scan.py go --advisories "$ADVISORIES" --report-dir security-report
+        env:
+          ADVISORIES: ${{ steps.mode.outputs.advisories }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
