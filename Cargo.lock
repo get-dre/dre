@@ -1293,17 +1293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "brotli"
-version = "8.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc91aac060a7a1e25823bdccbfb6af1875b88f17c6daac97894eed8207166b3"
-dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
- "brotli-decompressor 5.0.3",
-]
-
-[[package]]
 name = "brotli-decompressor"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1396,9 +1385,9 @@ dependencies = [
 
 [[package]]
 name = "calamine"
-version = "0.36.1"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fa68281b1a76b54a62156474adb06bb380a67e07dd60656e3217152b42183f3"
+checksum = "c9ca341b94bc4b29e08970b1a03914fad2dfe177e2ecb67fcd6de9046004aafb"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -1407,9 +1396,9 @@ dependencies = [
  "encoding_rs",
  "fast-float2",
  "log",
- "quick-xml",
+ "quick-xml 0.42.0",
  "serde",
- "zip 8.6.0",
+ "zip 9.1.0",
 ]
 
 [[package]]
@@ -1747,9 +1736,9 @@ dependencies = [
 
 [[package]]
 name = "croner"
-version = "4.0.1"
+version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
+checksum = "26d09284075f5c87675790d1ad74212a7863eb8bdf228cdbd364f08a152fc62d"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -1811,9 +1800,9 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.6"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
+checksum = "9c035cb64cba03dad2fb921f3e218785e8cf9a41790da5eb3a1400f62fa2be11"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1901,7 +1890,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1942,9 +1931,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
+checksum = "fe3e9d21d39e6f39ff46e03d5b621424f88ee23d8a1672c6bfc9ccc7f2da4f6a"
 dependencies = [
  "cmov",
  "subtle",
@@ -2268,7 +2257,7 @@ dependencies = [
  "tempfile",
  "umya-spreadsheet",
  "windows-sys 0.61.2",
- "zip 9.0.5",
+ "zip 9.1.0",
 ]
 
 [[package]]
@@ -2286,7 +2275,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "libc",
- "minijinja 3.0.1",
+ "minijinja 3.0.3",
  "minijinja-contrib",
  "regex",
  "rrule",
@@ -2303,7 +2292,7 @@ dependencies = [
  "ureq",
  "walkdir",
  "windows-sys 0.61.2",
- "zip 9.0.5",
+ "zip 9.1.0",
 ]
 
 [[package]]
@@ -2328,8 +2317,8 @@ dependencies = [
  "flate2",
  "fulgur",
  "getrandom 0.4.3",
- "lopdf",
- "minijinja 3.0.1",
+ "lopdf 0.46.0",
+ "minijinja 3.0.3",
  "regex",
  "serde_json",
  "tempfile",
@@ -2415,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-parquet"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
@@ -3036,7 +3025,7 @@ dependencies = [
  "krilla",
  "krilla-svg",
  "log",
- "lopdf",
+ "lopdf 0.45.0",
  "minijinja 2.24.0",
  "parley",
  "serde",
@@ -3059,7 +3048,7 @@ dependencies = [
  "image",
  "krilla",
  "log",
- "lopdf",
+ "lopdf 0.45.0",
  "minijinja 2.24.0",
  "serde",
  "thiserror 2.0.21",
@@ -3608,7 +3597,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4029,9 +4018,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.59.0"
+version = "0.60.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b320ad34c177093d21622edc9215bb608294c2333ff296672c0c8265a5ee60c"
+checksum = "65de752665c4a06528af6759955eecf60ba73ae7442d35349963a09c8031cd71"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4057,23 +4046,24 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.59.0"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1472f7be79026f79e01a9b172263311e829d7c210d57b39cb57037abc0ce0500"
+checksum = "107aeb6ff14b8deb5610096a8ce5c554ec89806b521147eaeb3cae05b07edb7a"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.59.0"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5a7550a7a84787e715ead0b47e01fa8c6bb7c3413630f91a8f2094c06c2078a"
+checksum = "e281d6b177bb4834f2ffd6f92aa0443cffe29c996b251c8d94eb6f456186feba"
 dependencies = [
  "ahash",
  "bytecount",
  "fraction",
  "getrandom 0.3.4",
+ "memchr",
  "num-cmp",
  "num-traits",
  "serde_json",
@@ -4409,19 +4399,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "lopdf"
+version = "0.46.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d43f64cb8c0d673ff84245a6de9e0172c0cc05dc5dd9d263660b5b4a02b6c4ae"
+dependencies = [
+ "aes",
+ "bitflags 2.13.2",
+ "brotli-decompressor 5.0.3",
+ "cbc",
+ "ecb",
+ "encoding_rs",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap",
+ "itoa",
+ "log",
+ "md-5",
+ "nom",
+ "rand 0.10.3",
+ "rangemap",
+ "sha2 0.11.0",
+ "stringprep",
+ "thiserror 2.0.21",
+ "weezl 0.2.1",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
-
-[[package]]
-name = "lz4_flex"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
-dependencies = [
- "twox-hash",
-]
 
 [[package]]
 name = "mac"
@@ -4538,9 +4546,9 @@ dependencies = [
 
 [[package]]
 name = "minijinja"
-version = "3.0.1"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "789a6b737c4a13bec43cd3c1b982aa8a8a192ff4bf444e0fb1fd5a324f064fd1"
+checksum = "90086695417a271bc96e6cb50618555614ca48fa3bb0d9aa96e3468b0f84431e"
 dependencies = [
  "indexmap",
  "serde",
@@ -4548,11 +4556,11 @@ dependencies = [
 
 [[package]]
 name = "minijinja-contrib"
-version = "3.0.1"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e15d0d31fbf10ce99b313a238406d62dd5913d95a9be5fa081f1232e31292fc7"
+checksum = "9c8e63b8c511fbb281cc19a1f731acd0903886ab6fbaf8399240ca68e5626568"
 dependencies = [
- "minijinja 3.0.1",
+ "minijinja 3.0.3",
 ]
 
 [[package]]
@@ -4891,7 +4899,7 @@ dependencies = [
  "nix",
  "parking_lot",
  "percent-encoding",
- "quick-xml",
+ "quick-xml 0.41.0",
  "rand 0.10.3",
  "reqwest",
  "rustls-pki-types",
@@ -5081,13 +5089,10 @@ dependencies = [
  "arrow-schema 59.3.0",
  "arrow-select 59.3.0",
  "base64 0.23.1",
- "brotli 8.0.4",
  "bytes",
  "chrono",
- "flate2",
  "half",
  "hashbrown 0.17.1",
- "lz4_flex",
  "num-bigint 0.5.1",
  "num-integer",
  "num-traits",
@@ -5095,7 +5100,6 @@ dependencies = [
  "simdutf8",
  "snap",
  "twox-hash",
- "zstd",
 ]
 
 [[package]]
@@ -5594,9 +5598,18 @@ version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
- "encoding_rs",
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "encoding_rs",
+ "memchr",
 ]
 
 [[package]]
@@ -5850,9 +5863,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.59.0"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "473f4dcca28ead7ee0f8e5b5d0bbae2549f4fc4c958fb20af328961b6c174be3"
+checksum = "f42818036d3b37cda6bd4c494543158a36e431cb717015ef7c93acc6ba214d3b"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -6170,7 +6183,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49aa1d1558e9465f5053bf9fb5361fe75db827c6a4423d5e5fe72096622f8908"
 dependencies = [
  "tempfile",
- "zip 9.0.5",
+ "zip 9.1.0",
 ]
 
 [[package]]
@@ -6514,7 +6527,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.22.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -7348,7 +7361,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
@@ -7733,6 +7746,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7768,7 +7787,7 @@ dependencies = [
  "md-5",
  "num-traits",
  "phf 0.14.0",
- "quick-xml",
+ "quick-xml 0.41.0",
  "rand 0.10.3",
  "rgb",
  "sha2 0.11.0",
@@ -7875,9 +7894,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "3.4.2"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
+checksum = "cde93ff05758a36a851a398a772b0b79a82fbe3c186a46f2696baaeaf84c966b"
 dependencies = [
  "base64 0.23.1",
  "flate2",
@@ -7892,9 +7911,9 @@ dependencies = [
 
 [[package]]
 name = "ureq-proto"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86fd172ccca569e458f61b6bdd6220965a9ef36e672a6852953b51a0e1583be"
+checksum = "841583fc36089d7d59419568ae157f43a5a03a2e5a81ba87c77d1596ef46e922"
 dependencies = [
  "base64 0.23.1",
  "http",
@@ -8542,7 +8561,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb9e0d17aedee2afac15749407e107edce8485f57b7ad9fb929f0bbdf2c28f24"
 dependencies = [
  "bitvec",
- "brotli 7.0.0",
+ "brotli",
  "bytes",
  "four-cc",
  "safer-bytes",
@@ -8829,15 +8848,15 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
- "typed-path",
+ "typed-path 0.12.3",
  "zopfli",
 ]
 
 [[package]]
 name = "zip"
-version = "9.0.5"
+version = "9.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
+checksum = "2886b00003a72c4ccee3f42cfc34908d33b2508a74d827dc2a4244706475c704"
 dependencies = [
  "aes",
  "constant_time_eq",
@@ -8850,7 +8869,8 @@ dependencies = [
  "nix",
  "pbkdf2 0.13.0",
  "sha1 0.11.0",
- "typed-path",
+ "typed-path 0.13.0",
+ "windows-sys 0.61.2",
  "zeroize",
  "zopfli",
 ]
@@ -8877,34 +8897,6 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
-]
-
-[[package]]
-name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
-dependencies = [
- "zstd-sys",
-]
-
-[[package]]
-name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
-dependencies = [
- "cc",
- "pkg-config",
 ]
 
 [[package]]
