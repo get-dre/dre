@@ -1721,8 +1721,7 @@ impl<'a> BindingRun<'a> {
                     crate::secret_columns::masked_copy(&result.spool, &masked, &secret)?;
                     &masked
                 };
-                crate::rows::write_spool(spool, &dir.join(format!("{}.json", result.name)), result.rows)
-                    .map_err(|e| e.to_string())?;
+                crate::rows::write_spool(spool, &dir.join(format!("{}.json", result.name)), result.rows)?;
                 // The exact Arrow stream too, for `--from-results`.
                 let file = format!("{}.arrows", result.name);
                 crate::saved::spool_to_stream(spool, &dir.join(&file))?;
