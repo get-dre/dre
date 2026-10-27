@@ -9,9 +9,10 @@ all-features = true
 
 [advisories]
 version = 2
-# Vulnerabilities, unsound code and yanked crates fail. Unmaintained crates only warn: the script
-# passes `--warn unmaintained`.
-yanked = "deny"
+# Vulnerabilities and unsound code fail. Unmaintained crates only warn (the script passes
+# `--warn unmaintained`), and so do yanked ones: a yank isn't a vulnerability, and the advisory
+# that caused it, if any, fails on its own. Update a yanked crate with `cargo update -p`.
+yanked = "warn"
 
 [licenses]
 version = 2
