@@ -312,11 +312,12 @@ impl Canceller {
         if id == 0 {
             return false;
         }
-        let mut stdin = self.stdin.lock().unwrap();
-        let Some(w) = stdin.as_mut() else {
-            return false;
-        };
-        frame::write_json(w, &Envelope::new(Some(id), Request::Cancel {})).is_ok()
+        // A poisoned lock means a writer panicked mid-frame: nothing more can be sent.
+        self.stdin.lock().is_ok_and(|mut stdin| {
+            stdin
+                .as_mut()
+                .is_some_and(|w| frame::write_json(w, &Envelope::new(Some(id), Request::Cancel {})).is_ok())
+        })
     }
 
     /// Kill the plugin process.
@@ -333,12 +334,20 @@ static RUNNING: Mutex<Vec<(u64, Canceller)>> = Mutex::new(Vec::new());
 static NEXT_PROCESS: AtomicU64 = AtomicU64::new(1);
 
 /// Send `cancel` to every running plugin's current request (protocol 1). Returns how many had one.
+///
+/// # Panics
+///
+/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
 pub fn cancel_all() -> usize {
     let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
     all.iter().filter(|c| c.cancel()).count()
 }
 
 /// Kill every running plugin process.
+///
+/// # Panics
+///
+/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
 pub fn kill_all() {
     let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
     for c in all {
@@ -347,6 +356,10 @@ pub fn kill_all() {
 }
 
 /// How many plugin processes are running.
+///
+/// # Panics
+///
+/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
 pub fn running() -> usize {
     RUNNING.lock().unwrap().len()
 }
@@ -455,6 +468,10 @@ impl PluginProcess {
     }
 
     /// Spawn with extra environment variables and a working directory, without a handshake.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
     pub fn spawn_in(
         path: &Path,
         log: LogSink,
@@ -499,8 +516,13 @@ impl PluginProcess {
                 plugin: label.clone(),
                 error,
             })?;
-        let stdout = child.stdout.take().expect("stdout is piped");
-        let stderr_pipe = child.stderr.take().expect("stderr is piped");
+        let (Some(stdout), Some(stderr_pipe)) = (child.stdout.take(), child.stderr.take()) else {
+            let _ = child.kill();
+            return Err(HostError::Spawn {
+                plugin: label,
+                error: std::io::Error::other("the plugin's stdout or stderr isn't piped"),
+            });
+        };
         let stdin = Arc::new(Mutex::new(child.stdin.take().map(BufWriter::new)));
 
         let (tx, rx) = channel();
@@ -652,6 +674,12 @@ impl PluginProcess {
         &self.path
     }
 
+    /// What the plugin said in its handshake.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the process was spawned without a handshake ([`Self::spawn_env`],
+    /// [`Self::spawn_in`]).
     pub fn info(&self) -> &PluginInfo {
         self.info.as_ref().expect("handshake completed")
     }
@@ -737,10 +765,12 @@ impl PluginProcess {
                 Some(self.last_id)
             }
         };
-        let ok = match self.stdin.lock().unwrap().as_mut() {
-            Some(w) => frame::write_json(w, &Envelope::new(id, req)).is_ok(),
-            None => false,
-        };
+        // A poisoned lock means a writer panicked mid-frame: report a failed write.
+        let ok = self.stdin.lock().is_ok_and(|mut stdin| {
+            stdin
+                .as_mut()
+                .is_some_and(|w| frame::write_json(w, &Envelope::new(id, req)).is_ok())
+        });
         if ok { Ok(()) } else { Err(self.write_failed()) }
     }
 
@@ -766,10 +796,11 @@ impl PluginProcess {
             plugin: self.label.clone(),
             message: e.to_string(),
         })?;
-        let ok = match self.stdin.lock().unwrap().as_mut() {
-            Some(w) => frame::write_arrow(w, &ipc).is_ok(),
-            None => false,
-        };
+        let ok = self.stdin.lock().is_ok_and(|mut stdin| {
+            stdin
+                .as_mut()
+                .is_some_and(|w| frame::write_arrow(w, &ipc).is_ok())
+        });
         if ok { Ok(()) } else { Err(self.write_failed()) }
     }
 
@@ -1231,29 +1262,36 @@ impl PluginProcess {
     pub fn close(mut self) -> Result<()> {
         let _ = self.send(&Request::Close {});
         let _ = self.recv(Some(Duration::from_secs(5)), "the close reply");
-        self.stdin.lock().unwrap().take();
+        if let Ok(mut stdin) = self.stdin.lock() {
+            stdin.take();
+        }
         for _ in 0..250 {
             if let Ok(Some(_)) = self.try_wait() {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        let _ = self.child.lock().unwrap().kill();
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+        }
         Ok(())
     }
 
     /// Raw access for protocol tests: write arbitrary bytes to the plugin.
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<()> {
-        let ok = match self.stdin.lock().unwrap().as_mut() {
-            Some(w) => w.write_all(bytes).and_then(|_| w.flush()).is_ok(),
-            None => false,
-        };
+        let ok = self.stdin.lock().is_ok_and(|mut stdin| {
+            stdin
+                .as_mut()
+                .is_some_and(|w| w.write_all(bytes).and_then(|_| w.flush()).is_ok())
+        });
         if ok { Ok(()) } else { Err(self.write_failed()) }
     }
 
     /// Wait up to `timeout` for the process to exit.
     pub fn wait_exit(&mut self, timeout: Duration) -> Option<ExitStatus> {
-        self.stdin.lock().unwrap().take();
+        if let Ok(mut stdin) = self.stdin.lock() {
+            stdin.take();
+        }
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {
             if let Ok(Some(s)) = self.try_wait() {

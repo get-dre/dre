@@ -181,8 +181,9 @@ pub fn resolver(project: &Project, limited: Arc<Limited>) -> Option<SourceResolv
     let cache: Arc<Mutex<Resolved>> = Arc::default();
     Some(Arc::new(move |source: &str, table: &str| {
         let key = (source.to_string(), table.to_string());
-        if let Some(r) = cache.lock().unwrap().get(&key) {
-            return r.clone();
+        // A poisoned cache is skipped, not read: resolving again gives the same answer.
+        if let Some(r) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+            return r;
         }
         let r = (|| {
             let Some(s) = sources.get(source) else {
@@ -219,7 +220,9 @@ pub fn resolver(project: &Project, limited: Arc<Limited>) -> Option<SourceResolv
                 quoting: t.quoting.over(&s.quoting),
             })
         })();
-        cache.lock().unwrap().insert(key, r.clone());
+        if let Ok(mut c) = cache.lock() {
+            c.insert(key, r.clone());
+        }
         r
     }))
 }
@@ -382,10 +385,24 @@ pub fn binding(
             explicit.push((format!("query `{}` sets `profile: {p}`", q.query), p.clone()));
         }
         for (s, t) in r.take_sources() {
-            let resolve = sources
-                .as_ref()
-                .expect("source() succeeded, so sources are declared");
-            let rs = resolve(&s, &t).expect("resolved during the render");
+            // The render called `source()`, so it resolved there: the error is only a fallback.
+            let resolved = sources.as_ref().map_or_else(
+                || Err("no sources are declared".to_string()),
+                |resolve| resolve(&s, &t),
+            );
+            let rs = match resolved {
+                Ok(rs) => rs,
+                Err(m) => {
+                    error(
+                        &mut out,
+                        PARSE_FAILED,
+                        q.path.clone(),
+                        None,
+                        format!("{ctx_name}: query `{}`: {m}", q.query),
+                    );
+                    continue;
+                }
+            };
             let key = rs.key();
             if let Some(p) = &rs.profile {
                 explicit.push((format!("source `{key}` is on connection `{p}`"), p.clone()));

@@ -616,7 +616,7 @@ impl Table {
                     ),
                 ),
                 ColType::Date => {
-                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("January 1 is a valid date");
+                    let epoch = chrono::DateTime::UNIX_EPOCH.date_naive();
                     (
                         DataType::Date32,
                         Arc::new(

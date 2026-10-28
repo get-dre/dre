@@ -22,6 +22,7 @@ impl Error {
         }
     }
 
+    #[must_use]
     pub fn with_hint(mut self, hint: impl Into<String>) -> Error {
         self.hint = Some(hint.into());
         self
@@ -33,6 +34,7 @@ impl Error {
 
     /// The step's own code, unless a more specific one is already set (anything but
     /// `run-failed`, what an uncoded message gets).
+    #[must_use]
     pub fn or(mut self, code: Code) -> Error {
         if self.code == Code::RunFailed {
             self.code = code.into();

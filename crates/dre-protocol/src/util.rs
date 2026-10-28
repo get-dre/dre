@@ -66,6 +66,7 @@ pub fn parse_cell(s: &str) -> Option<(u32, u16)> {
 }
 
 /// Percent-encode everything except RFC 3986 unreserved characters and, if `keep_slash`, `/`.
+#[must_use]
 pub fn percent_encode(s: &str, keep_slash: bool) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -79,6 +80,7 @@ pub fn percent_encode(s: &str, keep_slash: bool) -> String {
 }
 
 /// One line, at most `max` characters, for quoting SQL in messages.
+#[must_use]
 pub fn summarize(text: &str, max: usize) -> String {
     let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > max {

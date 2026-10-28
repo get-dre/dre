@@ -1,5 +1,8 @@
 //! DRE core: turns a project directory into a resolved, validated project, and runs it.
 
+// A public function that can panic says when in a `# Panics` section (CI denies warnings).
+#![warn(clippy::missing_panics_doc)]
+
 pub mod catalog;
 pub mod checksum;
 pub mod codes;

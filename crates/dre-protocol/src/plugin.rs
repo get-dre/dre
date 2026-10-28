@@ -91,6 +91,7 @@ impl PluginError {
         }
     }
 
+    #[must_use]
     pub fn code(mut self, code: impl Into<String>) -> PluginError {
         self.code = Some(code.into());
         self
@@ -179,6 +180,10 @@ pub fn cancelled() -> bool {
 /// Run `hook` when core cancels a request, on the stdin reader's thread, while the request is
 /// still running on the main one (e.g. ask the server to cancel the query). Replaces any hook
 /// set before. The request then fails, and the SDK replies with kind `cancelled`.
+///
+/// # Panics
+///
+/// Panics if the hook's lock is poisoned (a hook set or run before panicked).
 pub fn on_cancel(hook: impl Fn() + Send + Sync + 'static) {
     *shared().hook.lock().unwrap() = Some(Arc::new(hook));
 }
@@ -325,6 +330,7 @@ impl About {
         }
     }
 
+    #[must_use]
     pub fn capabilities(mut self, caps: &'static [&'static str]) -> About {
         self.capabilities = caps;
         self
@@ -741,6 +747,10 @@ impl Plugin {
 
 /// Serve every plugin of a package from one executable. Core's `hello` names the plugin it
 /// wants; without one, the first is served.
+///
+/// # Panics
+///
+/// Panics if `plugins` is empty.
 pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     assert!(!plugins.is_empty(), "a package serves at least one plugin");
     // Take stdout for frames before anything else can print to it.

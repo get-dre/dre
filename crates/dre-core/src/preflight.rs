@@ -61,10 +61,7 @@ pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
             if field == "name" {
                 continue;
             }
-            let line = line_at(
-                src,
-                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
-            );
+            let line = line_at(src, seg.start() + c.get_match().start());
             let instead = match field {
                 "type" => "`connection.type` (the query's connection)".to_string(),
                 "profile" => "`connection.name` (the query's connection)".to_string(),
@@ -80,10 +77,7 @@ pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
                 "source_type" => "`connection.type` (the query's connection)",
                 _ => continue,
             };
-            let line = line_at(
-                src,
-                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
-            );
+            let line = line_at(src, seg.start() + c.get_match().start());
             out.push((format!("run.{}", &c[1]), instead.to_string(), line));
         }
         for m in SOURCE_ROLE.find_iter(seg.as_str()) {
@@ -101,14 +95,8 @@ pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
 pub fn refs(src: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
-        for c in REF.captures_iter(seg.as_str()) {
-            out.push((
-                c[1].to_string(),
-                line_at(
-                    src,
-                    seg.start() + c.get(1).expect("the pattern always captures this group").start(),
-                ),
-            ));
+        for m in REF.captures_iter(seg.as_str()).filter_map(|c| c.get(1)) {
+            out.push((m.as_str().to_string(), line_at(src, seg.start() + m.start())));
         }
     }
     out
@@ -128,13 +116,13 @@ pub struct MacroDef {
 pub fn macro_defs(src: &str) -> Vec<MacroDef> {
     MACRO
         .captures_iter(src)
-        .map(|c| {
-            let body = c.get(2).expect("the pattern always captures this group");
-            MacroDef {
-                name: c[1].to_string(),
+        .filter_map(|c| {
+            let (name, body) = (c.get(1)?, c.get(2)?);
+            Some(MacroDef {
+                name: name.as_str().to_string(),
                 body: body.as_str().to_string(),
                 line_offset: line_at(src, body.start()) - 1,
-            }
+            })
         })
         .collect()
 }
@@ -156,10 +144,9 @@ pub fn attributes(src: &str, name: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
         for c in ATTRIBUTE.captures_iter(seg.as_str()).filter(|c| &c[1] == name) {
-            let m = c
-                .get(2)
-                .or_else(|| c.get(3))
-                .expect("the pattern always captures this group");
+            let Some(m) = c.get(2).or_else(|| c.get(3)) else {
+                continue;
+            };
             out.push((m.as_str().to_string(), line_at(src, seg.start() + m.start())));
         }
     }
@@ -199,7 +186,9 @@ pub fn calls(src: &str) -> Vec<Call> {
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
         for c in VAR.captures_iter(seg.as_str()) {
-            let m = c.get(1).expect("the pattern always captures this group");
+            let Some(m) = c.get(1) else {
+                continue;
+            };
             out.push(Call {
                 func: if m.as_str() == "var" { "var" } else { "env_var" },
                 name: c[3].to_string(),
@@ -217,10 +206,7 @@ pub fn unknown_run_refs(src: &str) -> Vec<(String, usize)> {
     for seg in SEGMENT.find_iter(src) {
         for c in RUN.captures_iter(seg.as_str()) {
             let attr = &c[1];
-            let line = line_at(
-                src,
-                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
-            );
+            let line = line_at(src, seg.start() + c.get_match().start());
             if matches!(attr, "profile" | "source_type") {
                 // Reported by `removed_names`, with the replacement.
                 continue;

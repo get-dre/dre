@@ -247,6 +247,7 @@ impl RowMask {
         }
     }
 
+    #[must_use]
     pub fn apply(&self, text: &str) -> String {
         let mut out = text.to_string();
         for (v, m) in self.values.iter() {
@@ -258,6 +259,7 @@ impl RowMask {
     }
 
     /// Mask every string in a JSON value.
+    #[must_use]
     pub fn apply_json(&self, v: &serde_json::Value) -> serde_json::Value {
         match v {
             serde_json::Value::String(s) => serde_json::Value::String(self.apply(s)),

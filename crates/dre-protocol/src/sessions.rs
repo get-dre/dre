@@ -56,6 +56,7 @@ fn read(path: &Path) -> Map<String, Value> {
 
 /// A lock file held while the sessions file is rewritten. A lock older than a few seconds was
 /// left by a process that died, so it's taken over rather than waited on forever.
+#[must_use = "dropping the lock releases it at once"]
 struct Lock(Option<PathBuf>);
 
 impl Lock {

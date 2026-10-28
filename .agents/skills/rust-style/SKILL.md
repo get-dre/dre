@@ -113,9 +113,13 @@ grep ': warning:' clippy-audit.txt | sed 's/.*warning: //' | sort | uniq -c | so
 grep ': warning:' clippy-audit.txt                                                     # each hit
 ```
 
-Use `--workspace` for the whole codebase. Add `-W clippy::missing_panics_doc
--W clippy::must_use_candidate -W clippy::missing_errors_doc` for `dre-protocol` and `dre-core`
-only (library rules). Then grep for what clippy can't see:
+Use `--workspace` for the whole codebase. Add `-W clippy::must_use_candidate
+-W clippy::missing_errors_doc` for `dre-protocol` and `dre-core` only (library rules);
+`must_use_candidate` lists candidates, so add `#[must_use]` only where ignoring the value is a
+bug (builders, `with_*`, pure transforms, guards), never on plain getters.
+`clippy::missing_panics_doc` is already on in CI for those two crates (`#![warn]` in their
+`lib.rs`, denied by `-D warnings`): remove the panic where you can, else write the `# Panics`
+section. Then grep for what clippy can't see:
 
 ```bash
 grep -rnE 'catch_unwind|into_inner\(\)|#!\[feature|rustfmt::skip' --include='*.rs' crates plugins

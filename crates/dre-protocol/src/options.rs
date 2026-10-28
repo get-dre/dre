@@ -64,18 +64,22 @@ impl OptionField {
             max: None,
         }
     }
+    #[must_use]
     pub fn required(mut self) -> Self {
         self.required = true;
         self
     }
+    #[must_use]
     pub fn default(mut self, v: impl Into<Value>) -> Self {
         self.default = Some(v.into());
         self
     }
+    #[must_use]
     pub fn choices(mut self, c: &[&str]) -> Self {
         self.choices = c.iter().map(|s| s.to_string()).collect();
         self
     }
+    #[must_use]
     pub fn range(mut self, min: Option<f64>, max: Option<f64>) -> Self {
         self.min = min;
         self.max = max;
@@ -255,8 +259,9 @@ pub fn check_num_format(code: &str) -> Result<NumFormatClass, String> {
                     && ["h", "m", "s"]
                         .iter()
                         .any(|u| lower.chars().all(|ch| ch.to_string() == *u))
+                    && let Some(e) = elapsed.last_mut()
                 {
-                    *elapsed.last_mut().expect("the list starts with one entry") = true;
+                    *e = true;
                 }
             }
             ']' => return Err("has a `]` without a matching `[`".into()),
@@ -269,10 +274,11 @@ pub fn check_num_format(code: &str) -> Result<NumFormatClass, String> {
                 sections.push(String::new());
                 elapsed.push(false);
             }
-            _ => sections
-                .last_mut()
-                .expect("the list starts with one entry")
-                .push(c),
+            _ => {
+                if let Some(s) = sections.last_mut() {
+                    s.push(c);
+                }
+            }
         }
     }
     if sections.len() > 4 {
@@ -507,15 +513,11 @@ pub fn parse_columns(
                     errs.extend(e.into_iter().map(|e| format!("column `{name}`: `style`: {e}")));
                     col.style = Some(s);
                 }
-                "width" => match val {
-                    Value::String(s) if s == "auto" => {
+                "width" => match (val, val.as_f64().filter(|w| *w > 0.0 && *w <= 255.0)) {
+                    (Value::String(s), _) if s == "auto" => {
                         col.width = Some(crate::msg::ColumnWidth::Auto(crate::msg::AutoWidth::Auto))
                     }
-                    Value::Number(n) if n.as_f64().is_some_and(|w| w > 0.0 && w <= 255.0) => {
-                        col.width = Some(crate::msg::ColumnWidth::Chars(
-                            n.as_f64().expect("checked by the match guard"),
-                        ))
-                    }
+                    (Value::Number(_), Some(w)) => col.width = Some(crate::msg::ColumnWidth::Chars(w)),
                     _ => errs.push(format!(
                         "column `{name}`: `width` must be `auto` or a number of characters from 1 to 255"
                     )),

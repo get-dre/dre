@@ -15,6 +15,9 @@
 //! - [`markdown`]: the portable Markdown subset of messages, and its translations.
 //! - [`delivery`]: the delivery and network rules every file destination shares.
 
+// A public function that can panic says when in a `# Panics` section (CI denies warnings).
+#![warn(clippy::missing_panics_doc)]
+
 /// The `log` crate, re-exported: plugins log with `dre_protocol::log::info!` and friends, which
 /// the SDK sends to core as `log` messages.
 pub use log;

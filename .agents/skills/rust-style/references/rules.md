@@ -103,7 +103,7 @@ lint that finds it, where one exists. "Library" means the rule binds in `dre-pro
 
 | Rule | Tier | Lint | DRE note |
 |---|---|---|---|
-| Document public items (`///`, `//!`), panics and unsafe invariants | optional, library | `missing_panics_doc`, `missing_errors_doc`, `missing_safety_doc` (default) | Don't restate the obvious. |
+| Document public items (`///`, `//!`), panics and unsafe invariants | optional, library | `missing_panics_doc`, `missing_errors_doc`, `missing_safety_doc` (default) | Don't restate the obvious. `missing_panics_doc` is on in CI for `dre-protocol` and `dre-core`. |
 
 ## Other features
 
@@ -118,7 +118,7 @@ lint that finds it, where one exists. "Library" means the rule binds in `dre-pro
 | `const fn` only when it will stay `const` | optional, library | | |
 | Operator overloads only for their maths meaning | tidy-up | | |
 | `#[non_exhaustive]` on public enums and structs | not adopted | | DRE matches exhaustively on purpose. |
-| `#[must_use]` on functions and error types | optional, library | `must_use_candidate`, `return_self_not_must_use` | |
+| `#[must_use]` on functions and error types | optional, library | `must_use_candidate`, `return_self_not_must_use` | Only where ignoring the value is a bug: builders, `with_*`, pure transforms, guards. Not getters. |
 | No code before `main` | must fix | grep `ctor` | |
 
 ## Implementation

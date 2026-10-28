@@ -145,6 +145,7 @@ fn distance(a: &str, b: &str) -> usize {
 
 /// `messages` with every secret field's value replaced by `*****`, so a plugin's rule that
 /// quotes a value can't leak it.
+#[must_use]
 pub fn redact(
     messages: Vec<String>,
     fields: &[ConnectionField],
