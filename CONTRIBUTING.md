@@ -135,8 +135,8 @@ Licences always fail.
 - **Rust style:** follow the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html)
   in new and changed code. `rustfmt.toml` (110 columns) and CI's clippy still decide formatting
   and lints; the API rules bind for `dre-protocol` and `dre-core`. The full list of DRE's
-  overrides is in the "Rust style" section of
-  [`.agents/skills/allenhori-review/SKILL.md`](.agents/skills/allenhori-review/SKILL.md).
+  overrides, and an audit command, is in
+  [`.agents/skills/rust-style/SKILL.md`](.agents/skills/rust-style/SKILL.md).
 - **Docs:** update `README.md` or `docs/` when you change behaviour users can see. Practices
   and opinions go in [`docs/practices.md`](docs/practices.md). A new page names its `section` and
   `position` in its front matter (the sections are in [`docs/sections.json`](docs/sections.json));
