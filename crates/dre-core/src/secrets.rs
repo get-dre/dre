@@ -107,8 +107,9 @@ fn secrets() -> Arc<Secrets> {
 
 /// The environment variables a template reads through `env_var('NAME')` (either quote).
 pub fn env_references(text: &str) -> Vec<String> {
-    static CALL: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r#"env_var\(\s*(?:'([^']+)'|"([^"]+)")"#).unwrap());
+    static CALL: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"env_var\(\s*(?:'([^']+)'|"([^"]+)")"#).expect("the pattern is a valid regex")
+    });
     CALL.captures_iter(text)
         .filter_map(|c| c.get(1).or_else(|| c.get(2)))
         .map(|m| m.as_str().to_owned())
@@ -151,8 +152,16 @@ pub fn register_secret_fields(fields: &serde_json::Map<String, serde_json::Value
 fn collect_strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
     match value {
         serde_json::Value::String(s) => out.push(s),
-        serde_json::Value::Array(a) => a.iter().for_each(|v| collect_strings(v, out)),
-        serde_json::Value::Object(o) => o.values().for_each(|v| collect_strings(v, out)),
+        serde_json::Value::Array(a) => {
+            for v in a {
+                collect_strings(v, out);
+            }
+        }
+        serde_json::Value::Object(o) => {
+            for v in o.values() {
+                collect_strings(v, out);
+            }
+        }
         _ => {}
     }
 }
@@ -293,7 +302,11 @@ fn redact_json_with(v: &mut serde_json::Value, secrets: &[String]) {
                 *s = m;
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(|v| redact_json_with(v, secrets)),
+        Value::Array(a) => {
+            for v in a {
+                redact_json_with(v, secrets);
+            }
+        }
         Value::Object(o) => {
             let entries = std::mem::take(o);
             let keys: Vec<String> = entries.keys().cloned().collect();

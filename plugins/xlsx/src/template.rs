@@ -142,7 +142,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
 
     // 1. Single cells, in template coordinates.
     for b in payload.bindings.iter().filter(|b| b.cell.is_some()) {
-        let cell = b.cell.as_deref().unwrap();
+        let cell = b.cell.as_deref().expect("filtered on cell");
         let ws = sheet(&mut book, &b.sheet)?;
         let (r, c) = parse_cell(cell).ok_or_else(|| format!("invalid cell `{cell}`"))?;
         let coord = (u32::from(c) + 1, r + 1);
@@ -234,7 +234,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
             for (k, row) in (part * max_rows..((part + 1) * max_rows).min(total)).enumerate() {
                 let r = first + k as u32;
                 for c in 0..res.names.len() {
-                    let formula = row_formula(&res.formulas[c], col_of, r - 1)
+                    let formula = row_formula(res.formulas[c].as_deref(), col_of, r - 1)
                         .map_err(|n| format!("sheet `{name}`: column `{n}` isn't on the sheet"))?;
                     write_value(
                         ws,
@@ -349,7 +349,7 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
         for row in 0..n as usize {
             let r = first + row as u32;
             for (k, &ci) in cols.iter().enumerate() {
-                let formula = row_formula(&res.formulas[ci], col_of, r - 1).map_err(|name| {
+                let formula = row_formula(res.formulas[ci].as_deref(), col_of, r - 1).map_err(|name| {
                     format!(
                         "template block on `{}`: column `{}`'s formula refers to `{name}`, which the block doesn't place (it places: {})",
                         b.sheet,
@@ -399,7 +399,7 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
             for row in 0..(n as usize).min(crate::widths::MEASURE_ROWS as usize) {
                 widths.value(
                     k,
-                    &excel_value(a.as_ref(), row, &res.names[ci]),
+                    excel_value(a.as_ref(), row, &res.names[ci]).as_ref(),
                     res.formats[ci].code(),
                 );
             }
@@ -416,7 +416,7 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
 }
 
 static RANGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:(?P<sheet>'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?(?P<c1>\$?[A-Z]{1,3})(?P<a1>\$?)(?P<r1>\d+):(?P<c2>\$?[A-Z]{1,3})(?P<a2>\$?)(?P<r2>\d+)").unwrap()
+    Regex::new(r"(?:(?P<sheet>'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?(?P<c1>\$?[A-Z]{1,3})(?P<a1>\$?)(?P<r1>\d+):(?P<c2>\$?[A-Z]{1,3})(?P<a2>\$?)(?P<r2>\d+)").expect("the pattern is a valid regex")
 });
 
 /// Extend every range ending on the block's reserved row `reserved` (and starting at or above
@@ -465,8 +465,9 @@ fn extend_formulas(book: &mut Spreadsheet, block_sheet: &str, reserved: u32, las
     }
 }
 
-static CELL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$?[A-Z]{1,3}(?P<abs>\$?)(?P<row>\d+)").unwrap());
+static CELL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\$?[A-Z]{1,3}(?P<abs>\$?)(?P<row>\d+)").expect("the pattern is a valid regex")
+});
 
 /// `f` filled down `by` rows, as Excel's fill-down does: every relative row reference moves
 /// (`D5` → `D6`, `SUM(D$5:D5)` → `SUM(D$5:D6)`), absolute rows (`$D$5`, `D$5`) stay. Text in
@@ -503,7 +504,7 @@ fn shift_rows(f: &str, by: u32) -> String {
 fn shift_plain(s: &str, by: u32) -> String {
     let word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$');
     CELL.replace_all(s, |caps: &regex::Captures<'_>| {
-        let m = caps.get(0).unwrap();
+        let m = caps.get(0).expect("group 0 is the whole match");
         let before = s[..m.start()].chars().next_back();
         let after = s[m.end()..].chars().next();
         // Part of a name (`LOG10(`, `Q1_total`, `Sheet1!`), not a cell reference.
@@ -514,7 +515,7 @@ fn shift_plain(s: &str, by: u32) -> String {
             return m.as_str().to_string();
         }
         let row: u32 = caps["row"].parse().unwrap_or(0);
-        let at = caps.name("row").unwrap().start() - m.start();
+        let at = caps.name("row").expect("the pattern always captures row").start() - m.start();
         format!("{}{}", &m.as_str()[..at], row + by)
     })
     .into_owned()
@@ -523,7 +524,7 @@ fn shift_plain(s: &str, by: u32) -> String {
 /// A column's row formula for 0-based sheet row `row`, if it has one; `Err(name)` for a
 /// reference `col_of` can't place.
 fn row_formula(
-    parts: &Option<Vec<FormulaPart>>,
+    parts: Option<&[FormulaPart]>,
     col_of: impl Fn(&str) -> Option<u32>,
     row: u32,
 ) -> std::result::Result<Option<String>, String> {

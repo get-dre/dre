@@ -250,7 +250,7 @@ impl BindingRun<'_> {
         };
         let sidecar = self.run_dir.join(format!("{stem}.rows.jsonl"));
         summary.sidecar = record_path(self.project, &sidecar);
-        self.outs[oi].for_each = Some(summary.clone());
+        self.outs[oi].for_each = Some(summary);
         if rows.is_empty() {
             // An empty driver (`on_empty` has decided already), or nothing left to redo.
             let why = if pop.is_empty() {
@@ -963,7 +963,7 @@ impl BindingRun<'_> {
                 })
                 .collect()
         } else {
-            vec![(path.clone(), kept.clone())]
+            vec![(path, kept.clone())]
         };
         if let Some(Json::Object(base)) = template_base {
             let mut t = base.clone();
@@ -1017,7 +1017,7 @@ impl BindingRun<'_> {
             .map_err(|e| Fail::new(Code::RenderFailed, mask.apply(&e.message)))?;
             let title = match opt("title") {
                 Some(t) => renderer
-                    .render_with(&self.report.file, &t, ctx.clone(), false)
+                    .render_with(&self.report.file, &t, ctx, false)
                     .map_err(|e| Fail::new(Code::RenderFailed, mask.apply(&e.message)))?,
                 None => format!("{}: {}", self.report.name, self.date),
             };
@@ -1225,9 +1225,8 @@ fn worker(
         if shared.cancel.is_cancelled() {
             break;
         }
-        let job = match jobs.lock().unwrap().recv() {
-            Ok(j) => j,
-            Err(_) => break,
+        let Ok(job) = jobs.lock().unwrap().recv() else {
+            break;
         };
         // A row the run stopped part-way isn't recorded: it never finished, so a retry makes it.
         let Some(record) = run_job(shared, &job, &mut format, &mut dests) else {
@@ -1529,7 +1528,11 @@ pub(crate) fn deliver_row(
     let targets: Vec<DeliveryFile> = files
         .iter()
         .map(|f| {
-            let name = f.file_name().unwrap().to_string_lossy().to_string();
+            let name = f
+                .file_name()
+                .expect("the path ends in a file name")
+                .to_string_lossy()
+                .to_string();
             let r = d.path.as_deref().map(|r| {
                 if files.len() == 1 {
                     r.to_string()

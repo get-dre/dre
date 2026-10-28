@@ -292,7 +292,7 @@ impl Profiles {
             (Some(c), Some(s)) => {
                 diags.error(
                     Code::InvalidProfiles,
-                    file.clone(),
+                    file,
                     s.line(),
                     "profiles.yml has both `connections:` and `sources:`; `sources:` is the old name of `connections:`, so move its profiles under `connections:`",
                 );
@@ -302,7 +302,7 @@ impl Profiles {
             (None, Some(s)) => {
                 diags.warning(
                     Code::ProfilesSourcesRenamed,
-                    file.clone(),
+                    file,
                     s.line(),
                     "`sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x",
                 );
@@ -490,7 +490,7 @@ fn parse_profile(
         Some(t) => {
             diags.error(
                 Code::InvalidProfile,
-                file.clone(),
+                file,
                 t.line(),
                 format!("{what}: `target` must be the name of one of its `targets`"),
             );
@@ -573,7 +573,7 @@ fn parse_profile(
         has.sort();
         diags.error(
             Code::InvalidProfile,
-            file.clone(),
+            file,
             target_line,
             format!(
                 "{what}: `target: {t}` isn't one of its targets ({})",

@@ -254,9 +254,11 @@ impl Builders {
                     Col::Timestamp => Box::new(TimestampMicrosecondBuilder::new()),
                     Col::TimestampTz => Box::new(TimestampMicrosecondBuilder::new().with_timezone("UTC")),
                     Col::Bytes => Box::new(BinaryBuilder::new()),
-                    Col::Decimal(p, s) => {
-                        Box::new(Decimal128Builder::new().with_precision_and_scale(p, s).unwrap())
-                    }
+                    Col::Decimal(p, s) => Box::new(
+                        Decimal128Builder::new()
+                            .with_precision_and_scale(p, s)
+                            .expect("precision and scale were checked when the column was read"),
+                    ),
                 }
             })
             .collect();
@@ -273,7 +275,7 @@ impl Builders {
                     .append_option($v)
             };
         }
-        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("January 1 is a valid date");
         for i in 0..self.cols.len() {
             match self.cols[i] {
                 Col::Bool => put!(i, BooleanBuilder, row.try_get::<_, Option<bool>>(i)?),
@@ -461,7 +463,7 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
         host,
         port,
         connect_timeout,
-        rules: rules.clone(),
+        rules,
         tls,
         ssh,
     })
@@ -498,17 +500,14 @@ fn cancel_on_server(
         return;
     };
     rt.block_on(async {
-        let stream = match tokio::time::timeout(
+        let Ok(Ok(stream)) = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::net::TcpStream::connect((host, port)),
         )
         .await
-        {
-            Ok(Ok(s)) => s,
-            _ => {
-                dre_protocol::log::warn!("couldn't reach {host}:{port} to cancel the running query");
-                return;
-            }
+        else {
+            dre_protocol::log::warn!("couldn't reach {host}:{port} to cancel the running query");
+            return;
         };
         let r = match tls {
             Some(t) => {
@@ -721,7 +720,7 @@ impl Source for Postgres {
         // PQcancel does, on a new connection). Not through an SSH tunnel or a Unix socket.
         if s.ssh.is_none() && !s.host.starts_with('/') {
             let token = session.client.cancel_token();
-            let (host, port, tls) = (s.host.clone(), s.port, s.tls.clone());
+            let (host, port, tls) = (s.host.clone(), s.port, s.tls);
             dre_protocol::plugin::on_cancel(move || {
                 let (token, host, tls) = (token.clone(), host.clone(), tls.clone());
                 std::thread::spawn(move || cancel_on_server(&token, &host, port, tls));

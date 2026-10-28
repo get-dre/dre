@@ -132,7 +132,7 @@ pub fn scaffold(dir: &Path, s: &Scaffold) -> Result<Vec<PathBuf>, String> {
     let mut written = Vec::new();
     for (rel, content) in files {
         let p = dir.join(rel);
-        std::fs::create_dir_all(p.parent().unwrap())
+        std::fs::create_dir_all(p.parent().expect("the path has a parent folder"))
             .map_err(|e| format!("can't create {}: {e}", p.display()))?;
         std::fs::write(&p, content).map_err(|e| format!("can't write {}: {e}", p.display()))?;
         written.push(p);
@@ -460,8 +460,7 @@ fn add_profile(
     profile.insert("targets".into(), Value::Object(targets));
     let mut root = Mapping::new();
     root.insert(name.into(), Value::Object(profile));
-    let block: String = dre_core::config::to_yaml(&root)
-        .map_err(|e| e.to_string())?
+    let block: String = dre_core::config::to_yaml(&root)?
         .lines()
         .map(|l| format!("  {l}\n"))
         .collect();

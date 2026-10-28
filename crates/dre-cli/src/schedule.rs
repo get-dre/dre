@@ -60,7 +60,10 @@ enum Output {
 /// A date (00:00 UTC) or an RFC 3339 date-time.
 fn when(flag: &str, v: &str) -> Result<DateTime<Utc>, String> {
     if let Ok(d) = NaiveDate::parse_from_str(v, "%Y-%m-%d") {
-        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc());
+        return Ok(d
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is a valid time")
+            .and_utc());
     }
     DateTime::parse_from_rfc3339(v)
         .map(|t| t.with_timezone(&Utc))

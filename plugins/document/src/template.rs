@@ -729,10 +729,10 @@ pub fn check(c: &Check) -> (Vec<String>, Vec<String>) {
     // Every template reached through literal includes, from the main one.
     let mut todo = vec![file.clone()];
     let mut seen = BTreeSet::new();
-    let include = Regex::new(r#"\{%-?\s*(?:include|extends|import|from)\s+(?:ignore\s+missing\s+)?(?:\[)?\s*("([^"]*)"|'([^']*)'|[^\s%]+)"#).unwrap();
-    let results_ref =
-        Regex::new(r#"results\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([^"']+)["']\s*\])"#).unwrap();
-    let filter_ref = Regex::new(r"\|\s*([A-Za-z_][A-Za-z0-9_]*)").unwrap();
+    let include = Regex::new(r#"\{%-?\s*(?:include|extends|import|from)\s+(?:ignore\s+missing\s+)?(?:\[)?\s*("([^"]*)"|'([^']*)'|[^\s%]+)"#).expect("the pattern is a valid regex");
+    let results_ref = Regex::new(r#"results\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([^"']+)["']\s*\])"#)
+        .expect("the pattern is a valid regex");
+    let filter_ref = Regex::new(r"\|\s*([A-Za-z_][A-Za-z0-9_]*)").expect("the pattern is a valid regex");
     let mut filters = BTreeSet::new();
     while let Some(name) = todo.pop() {
         if !seen.insert(name.clone()) {

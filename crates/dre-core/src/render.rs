@@ -448,7 +448,7 @@ impl Renderer {
         // Per rendered file: a later query may have recreated the relation.
         let columns_cache: Arc<Mutex<ColumnsCache>> = Arc::default();
         let cache = columns_cache.clone();
-        let rels = relations.clone();
+        let rels = relations;
         env.add_function(
             "columns",
             move |rel: String, kwargs: Kwargs| -> Result<Value, Error> {
@@ -860,8 +860,9 @@ fn package_template(name: &str) -> String {
 fn combine(
     files: &[(PathBuf, PathBuf)],
 ) -> Result<(String, Vec<String>, Vec<(usize, PathBuf, usize)>), RenderError> {
-    static MACRO: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").unwrap());
+    static MACRO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").expect("the pattern is a valid regex")
+    });
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();

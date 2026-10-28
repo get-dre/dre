@@ -125,7 +125,9 @@ impl Calendar {
         match self.numbering {
             WeekNumbering::Iso => (d.iso_week().year(), d.iso_week().week()),
             WeekNumbering::Us => {
-                let first = self.week_start_of(NaiveDate::from_ymd_opt(d.year(), 1, 1).unwrap());
+                let first = self.week_start_of(
+                    NaiveDate::from_ymd_opt(d.year(), 1, 1).expect("January 1 is a valid date"),
+                );
                 (d.year(), ((d - first).num_days() / 7) as u32 + 1)
             }
         }
@@ -156,15 +158,16 @@ fn err(msg: impl Into<String>) -> Error {
 }
 
 fn quarter_start(d: NaiveDate) -> NaiveDate {
-    NaiveDate::from_ymd_opt(d.year(), (d.month() - 1) / 3 * 3 + 1, 1).unwrap()
+    NaiveDate::from_ymd_opt(d.year(), (d.month() - 1) / 3 * 3 + 1, 1)
+        .expect("the first day of a quarter is a valid date")
 }
 
 fn month_start(d: NaiveDate) -> NaiveDate {
-    d.with_day(1).unwrap()
+    d.with_day(1).expect("every month has a first day")
 }
 
 fn year_start(d: NaiveDate) -> NaiveDate {
-    NaiveDate::from_ymd_opt(d.year(), 1, 1).unwrap()
+    NaiveDate::from_ymd_opt(d.year(), 1, 1).expect("January 1 is a valid date")
 }
 
 fn add_months(d: NaiveDate, n: i64) -> Option<NaiveDate> {
@@ -289,9 +292,11 @@ impl Object for Date {
             "week_year" => Value::from(cal.week_number(d).0),
             "weekday" => Value::from(d.weekday().number_from_monday()),
             "day_of_year" => Value::from(d.ordinal()),
-            "days_in_month" => {
-                Value::from((add_months(month_start(d), 1).unwrap() - month_start(d)).num_days())
-            }
+            "days_in_month" => Value::from(
+                (add_months(month_start(d), 1).expect("the date is far from the end of the calendar")
+                    - month_start(d))
+                .num_days(),
+            ),
             "prev_day" => self.at(d.pred_opt()?),
             "next_day" => self.at(d.succ_opt()?),
             "week_start" => self.at(cal.week_start_of(d)),
@@ -526,9 +531,15 @@ impl Period {
         let last = match kind {
             Kind::Day => first,
             Kind::Week => first + Days::new(6),
-            Kind::Month => add_months(first, 1).unwrap() - Days::new(1),
-            Kind::Quarter => add_months(first, 3).unwrap() - Days::new(1),
-            Kind::Year => add_months(first, 12).unwrap() - Days::new(1),
+            Kind::Month => {
+                add_months(first, 1).expect("the date is far from the end of the calendar") - Days::new(1)
+            }
+            Kind::Quarter => {
+                add_months(first, 3).expect("the date is far from the end of the calendar") - Days::new(1)
+            }
+            Kind::Year => {
+                add_months(first, 12).expect("the date is far from the end of the calendar") - Days::new(1)
+            }
             Kind::Days(n) => first + Days::new(n - 1),
         };
         Period {

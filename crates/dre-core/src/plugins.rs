@@ -69,7 +69,9 @@ pub fn plugins_dir(project: Option<&Path>) -> PathBuf {
 
 /// Put `src` at `dst` without a second copy on disk where possible.
 pub fn link_or_copy(src: &Path, dst: &Path) -> Result<(), String> {
-    let parent = dst.parent().unwrap();
+    let parent = dst
+        .parent()
+        .ok_or_else(|| format!("{} has no parent folder", dst.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| format!("can't create {}: {e}", parent.display()))?;
     let _ = std::fs::remove_file(dst);
     if std::fs::hard_link(src, dst).is_ok() {
@@ -99,8 +101,13 @@ pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
     let p = version_dir.join(MANIFEST);
-    crate::fs::write_atomic(&p, serde_json::to_string_pretty(m).unwrap().as_bytes())
-        .map_err(|e| format!("can't write {}: {e}", p.display()))
+    crate::fs::write_atomic(
+        &p,
+        serde_json::to_string_pretty(m)
+            .expect("a JSON value serializes")
+            .as_bytes(),
+    )
+    .map_err(|e| format!("can't write {}: {e}", p.display()))
 }
 
 fn is_executable(p: &Path) -> bool {

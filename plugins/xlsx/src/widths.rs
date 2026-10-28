@@ -64,14 +64,14 @@ impl Widths {
     }
 
     /// A data cell, shown with number format `code`; counted for the first `MEASURE_ROWS` rows.
-    pub fn value(&mut self, col: usize, v: &Option<Excel>, code: Option<&str>) {
+    pub fn value(&mut self, col: usize, v: Option<&Excel>, code: Option<&str>) {
         if self.rows < MEASURE_ROWS && self.measure.get(col).copied().unwrap_or(false) {
             self.longest[col] = self.longest[col].max(shown_len(v, code));
         }
     }
 
     /// A totals cell's value, measured whatever the row count.
-    pub fn total(&mut self, col: usize, v: &Option<Excel>, code: Option<&str>) {
+    pub fn total(&mut self, col: usize, v: Option<&Excel>, code: Option<&str>) {
         if self.measure.get(col).copied().unwrap_or(false) {
             self.longest[col] = self.longest[col].max(shown_len(v, code));
         }
@@ -106,7 +106,7 @@ fn is_wide(c: char) -> bool {
 }
 
 /// How many characters Excel shows for `v` under number format `code`.
-pub fn shown_len(v: &Option<Excel>, code: Option<&str>) -> usize {
+pub fn shown_len(v: Option<&Excel>, code: Option<&str>) -> usize {
     match v {
         None => 0,
         Some(Excel::Text(s)) => text_len(s),
@@ -271,32 +271,32 @@ mod tests {
     #[test]
     fn formatted_lengths() {
         assert_eq!(
-            shown_len(&Some(Excel::Number(152630.38)), Some("#,##0.00")),
+            shown_len(Some(&Excel::Number(152630.38)), Some("#,##0.00")),
             "152,630.38".len()
         );
         assert_eq!(
-            shown_len(&Some(Excel::Number(-5.0)), Some("#,##0.00;[Red](#,##0.00)")),
+            shown_len(Some(&Excel::Number(-5.0)), Some("#,##0.00;[Red](#,##0.00)")),
             "(5.00)".len()
         );
         assert_eq!(
-            shown_len(&Some(Excel::Number(0.125)), Some("0.0%")),
+            shown_len(Some(&Excel::Number(0.125)), Some("0.0%")),
             "12.5%".len()
         );
         assert_eq!(
-            shown_len(&Some(Excel::Number(1234.5)), Some("[$€-x-euro2] #,##0.00")),
+            shown_len(Some(&Excel::Number(1234.5)), Some("[$€-x-euro2] #,##0.00")),
             "€ 1,234.50".chars().count()
         );
-        assert_eq!(shown_len(&Some(Excel::Number(1234.5)), None), "1234.5".len());
+        assert_eq!(shown_len(Some(&Excel::Number(1234.5)), None), "1234.5".len());
         assert_eq!(
-            shown_len(&Some(Excel::Date(46047.0)), Some("dd/mm/yyyy")),
+            shown_len(Some(&Excel::Date(46047.0)), Some("dd/mm/yyyy")),
             "25/01/2026".len()
         );
         assert_eq!(
-            shown_len(&Some(Excel::Date(46047.0)), Some("mmmm yyyy")),
+            shown_len(Some(&Excel::Date(46047.0)), Some("mmmm yyyy")),
             "September 2026".len()
         );
         assert_eq!(
-            shown_len(&Some(Excel::Time(0.5)), Some("h:mm AM/PM")),
+            shown_len(Some(&Excel::Time(0.5)), Some("h:mm AM/PM")),
             "12:00 PM".len()
         );
         assert_eq!(text_len("Europe, Middle East & Africa"), 28);
@@ -308,10 +308,10 @@ mod tests {
         use dre_protocol::msg::{AutoWidth, ColumnWidth};
         let mut w = Widths::new(true, &[None, Some(ColumnWidth::Chars(30.0)), None]);
         w.text(0, "n");
-        w.value(2, &Some(Excel::Text("x".repeat(200))), None);
+        w.value(2, Some(&Excel::Text("x".repeat(200))), None);
         assert_eq!(w.widths(), [Some(MIN_WIDTH), Some(30.0), Some(MAX_WIDTH)]);
         let mut w = Widths::new(false, &[None, Some(ColumnWidth::Auto(AutoWidth::Auto))]);
-        w.value(1, &Some(Excel::Text("Europe, Middle East & Africa".into())), None);
+        w.value(1, Some(&Excel::Text("Europe, Middle East & Africa".into())), None);
         assert_eq!(w.widths(), [None, Some(30.0)]);
     }
 }

@@ -256,7 +256,7 @@ pub fn check_num_format(code: &str) -> Result<NumFormatClass, String> {
                         .iter()
                         .any(|u| lower.chars().all(|ch| ch.to_string() == *u))
                 {
-                    *elapsed.last_mut().unwrap() = true;
+                    *elapsed.last_mut().expect("the list starts with one entry") = true;
                 }
             }
             ']' => return Err("has a `]` without a matching `[`".into()),
@@ -269,7 +269,10 @@ pub fn check_num_format(code: &str) -> Result<NumFormatClass, String> {
                 sections.push(String::new());
                 elapsed.push(false);
             }
-            _ => sections.last_mut().unwrap().push(c),
+            _ => sections
+                .last_mut()
+                .expect("the list starts with one entry")
+                .push(c),
         }
     }
     if sections.len() > 4 {
@@ -340,7 +343,10 @@ fn remove_general(s: &str) -> String {
         if lower[i..].starts_with("general") {
             i += "general".len();
         } else {
-            let c = s[i..].chars().next().unwrap();
+            let c = s[i..]
+                .chars()
+                .next()
+                .expect("i is below the length, on a char boundary");
             out.push(c);
             i += c.len_utf8();
         }
@@ -506,7 +512,9 @@ pub fn parse_columns(
                         col.width = Some(crate::msg::ColumnWidth::Auto(crate::msg::AutoWidth::Auto))
                     }
                     Value::Number(n) if n.as_f64().is_some_and(|w| w > 0.0 && w <= 255.0) => {
-                        col.width = Some(crate::msg::ColumnWidth::Chars(n.as_f64().unwrap()))
+                        col.width = Some(crate::msg::ColumnWidth::Chars(
+                            n.as_f64().expect("checked by the match guard"),
+                        ))
                     }
                     _ => errs.push(format!(
                         "column `{name}`: `width` must be `auto` or a number of characters from 1 to 255"

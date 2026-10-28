@@ -296,10 +296,7 @@ mod tests {
         let v = s[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
         assert_eq!(v.iter().map(Option::unwrap).collect::<Vec<_>>(), vec!["x", "z"]);
         assert_eq!(p.slices(2).unwrap()[0].num_rows(), 0);
-        assert_eq!(
-            (p.orphan_rows, p.orphan_samples.clone()),
-            (2, vec!["9".to_string()])
-        );
+        assert_eq!((p.orphan_rows, p.orphan_samples), (2, vec!["9".to_string()]));
     }
 
     #[test]

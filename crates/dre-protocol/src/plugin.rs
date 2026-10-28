@@ -754,9 +754,8 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     }
     let provides: Vec<PluginId> = plugins.iter().map(Plugin::id).collect();
     let chosen = loop {
-        let req = match next_request(&mut input, &mut out) {
-            Some(r) => r,
-            None => continue,
+        let Some(req) = next_request(&mut input, &mut out) else {
+            continue;
         };
         let Request::Hello {
             min_version,
@@ -802,11 +801,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
                 .chain(std::iter::once(&CAP_VALIDATE))
                 .map(|c| c.to_string())
                 .collect(),
-            provides: if provides.len() > 1 {
-                provides.clone()
-            } else {
-                Vec::new()
-            },
+            provides: if provides.len() > 1 { provides } else { Vec::new() },
         });
         shared().version.store(chosen, Ordering::SeqCst);
         break i;
@@ -896,6 +891,8 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
         let result = if cancelled() {
             Ok(Err("cancelled before it started".into()))
         } else {
+            // Defense in depth, not error handling: a panic is a plugin bug, and this only turns it
+            // into an error reply so the host reports it instead of a closed pipe.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 handle(&mut h, name, req, &mut input, &mut out)
             }))
@@ -1082,7 +1079,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 (Ok(()), SinkState::NoResult) => {}
                 (Ok(()), SinkState::Result) => {
                     if !sink.sent_any {
-                        let schema = sink.schema.clone().unwrap();
+                        let schema = sink.schema.clone().expect("a result sets the schema");
                         sink.out.batch(&RecordBatch::new_empty(schema))?;
                     }
                     let rows = sink.rows;

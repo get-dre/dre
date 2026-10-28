@@ -81,7 +81,9 @@ fn in_order(v: &mut serde_json::Value) {
     use serde_json::Value;
     match v {
         Value::Object(m) => {
-            m.values_mut().for_each(in_order);
+            for v in m.values_mut() {
+                in_order(v);
+            }
             // `properties` and `$defs` are names, in the structs' order; the rest are keywords.
             if m.contains_key("$schema")
                 || m.contains_key("type")
@@ -95,7 +97,11 @@ fn in_order(v: &mut serde_json::Value) {
                 m.extend(entries);
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(in_order),
+        Value::Array(a) => {
+            for v in a {
+                in_order(v);
+            }
+        }
         _ => {}
     }
 }
@@ -138,16 +144,22 @@ fn without_null(v: &mut serde_json::Value) {
                     .collect();
                 if rest.len() == 1 && rest.len() < any.len() {
                     m.remove("anyOf");
-                    if let Value::Object(inner) = rest.into_iter().next().unwrap() {
+                    if let Value::Object(inner) = rest.into_iter().next().expect("rest has one entry") {
                         for (k, v) in inner {
                             m.entry(k).or_insert(v);
                         }
                     }
                 }
             }
-            m.values_mut().for_each(without_null);
+            for v in m.values_mut() {
+                without_null(v);
+            }
         }
-        Value::Array(a) => a.iter_mut().for_each(without_null),
+        Value::Array(a) => {
+            for v in a {
+                without_null(v);
+            }
+        }
         _ => {}
     }
 }

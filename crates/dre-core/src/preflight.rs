@@ -20,26 +20,37 @@ pub const RUN_ATTRS: &[&str] = &[
 /// Attributes and methods of `run.date`.
 pub use crate::dates::DATE_ATTRS;
 
-static SEGMENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)\{\{.*?\}\}|\{%.*?%\}").unwrap());
-static VAR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?:^|[^\w.])(env_var|var)\s*\(\s*(['"])([^'"]+)['"]\s*([,)])"#).unwrap());
-static RUN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^\w.])run\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?").unwrap());
+static SEGMENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\{\{.*?\}\}|\{%.*?%\}").expect("the pattern is a valid regex"));
+static VAR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:^|[^\w.])(env_var|var)\s*\(\s*(['"])([^'"]+)['"]\s*([,)])"#)
+        .expect("the pattern is a valid regex")
+});
+static RUN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[^\w.])run\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?").expect("the pattern is a valid regex")
+});
 
 static MACRO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)\{%-?\s*macro\s+([A-Za-z_]\w*)\s*\(.*?%\}(.*?)\{%-?\s*endmacro\s*-?%\}").unwrap()
+    Regex::new(r"(?s)\{%-?\s*macro\s+([A-Za-z_]\w*)\s*\(.*?%\}(.*?)\{%-?\s*endmacro\s*-?%\}")
+        .expect("the pattern is a valid regex")
 });
-static CALL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w.])([A-Za-z_]\w*)\s*\(").unwrap());
+static CALL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[^\w.])([A-Za-z_]\w*)\s*\(").expect("the pattern is a valid regex"));
 
-static REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?:^|[^\w.])ref\s*\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap());
+static REF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:^|[^\w.])ref\s*\(\s*['"]([^'"]+)['"]\s*\)"#).expect("the pattern is a valid regex")
+});
 
 /// `root.attr` or `root['attr']` (`results`, `outputs`).
 static ATTRIBUTE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?:^|[^\w.])([A-Za-z_]\w*)\s*(?:\.\s*([A-Za-z_]\w*)|\[\s*['"]([^'"]+)['"]\s*\])"#).unwrap()
+    Regex::new(r#"(?:^|[^\w.])([A-Za-z_]\w*)\s*(?:\.\s*([A-Za-z_]\w*)|\[\s*['"]([^'"]+)['"]\s*\])"#)
+        .expect("the pattern is a valid regex")
 });
-static TARGET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w.])target\.([A-Za-z_]\w*)").unwrap());
-static SOURCE_ROLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"role\s*=\s*['"]source['"]"#).unwrap());
+static TARGET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[^\w.])target\.([A-Za-z_]\w*)").expect("the pattern is a valid regex")
+});
+static SOURCE_ROLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"role\s*=\s*['"]source['"]"#).expect("the pattern is a valid regex"));
 
 /// Template names DRE 0.2 removed, inside Jinja blocks: `(name, what to write instead, line)`.
 pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
@@ -50,7 +61,10 @@ pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
             if field == "name" {
                 continue;
             }
-            let line = line_at(src, seg.start() + c.get(0).unwrap().start());
+            let line = line_at(
+                src,
+                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
+            );
             let instead = match field {
                 "type" => "`connection.type` (the query's connection)".to_string(),
                 "profile" => "`connection.name` (the query's connection)".to_string(),
@@ -66,7 +80,10 @@ pub fn removed_names(src: &str) -> Vec<(String, String, usize)> {
                 "source_type" => "`connection.type` (the query's connection)",
                 _ => continue,
             };
-            let line = line_at(src, seg.start() + c.get(0).unwrap().start());
+            let line = line_at(
+                src,
+                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
+            );
             out.push((format!("run.{}", &c[1]), instead.to_string(), line));
         }
         for m in SOURCE_ROLE.find_iter(seg.as_str()) {
@@ -87,7 +104,10 @@ pub fn refs(src: &str) -> Vec<(String, usize)> {
         for c in REF.captures_iter(seg.as_str()) {
             out.push((
                 c[1].to_string(),
-                line_at(src, seg.start() + c.get(1).unwrap().start()),
+                line_at(
+                    src,
+                    seg.start() + c.get(1).expect("the pattern always captures this group").start(),
+                ),
             ));
         }
     }
@@ -109,7 +129,7 @@ pub fn macro_defs(src: &str) -> Vec<MacroDef> {
     MACRO
         .captures_iter(src)
         .map(|c| {
-            let body = c.get(2).unwrap();
+            let body = c.get(2).expect("the pattern always captures this group");
             MacroDef {
                 name: c[1].to_string(),
                 body: body.as_str().to_string(),
@@ -136,7 +156,10 @@ pub fn attributes(src: &str, name: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
         for c in ATTRIBUTE.captures_iter(seg.as_str()).filter(|c| &c[1] == name) {
-            let m = c.get(2).or_else(|| c.get(3)).unwrap();
+            let m = c
+                .get(2)
+                .or_else(|| c.get(3))
+                .expect("the pattern always captures this group");
             out.push((m.as_str().to_string(), line_at(src, seg.start() + m.start())));
         }
     }
@@ -176,7 +199,7 @@ pub fn calls(src: &str) -> Vec<Call> {
     let mut out = Vec::new();
     for seg in SEGMENT.find_iter(src) {
         for c in VAR.captures_iter(seg.as_str()) {
-            let m = c.get(1).unwrap();
+            let m = c.get(1).expect("the pattern always captures this group");
             out.push(Call {
                 func: if m.as_str() == "var" { "var" } else { "env_var" },
                 name: c[3].to_string(),
@@ -194,7 +217,10 @@ pub fn unknown_run_refs(src: &str) -> Vec<(String, usize)> {
     for seg in SEGMENT.find_iter(src) {
         for c in RUN.captures_iter(seg.as_str()) {
             let attr = &c[1];
-            let line = line_at(src, seg.start() + c.get(0).unwrap().start());
+            let line = line_at(
+                src,
+                seg.start() + c.get(0).expect("group 0 is the whole match").start(),
+            );
             if matches!(attr, "profile" | "source_type") {
                 // Reported by `removed_names`, with the replacement.
                 continue;

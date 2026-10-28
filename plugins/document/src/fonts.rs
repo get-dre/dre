@@ -39,16 +39,22 @@ const GENERIC: &[&str] = &[
     "unset",
 ];
 
-static STYLE_BLOCK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").unwrap());
-static STYLE_ATTR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)(\bstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).unwrap());
-static FONT_FACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)@font-face\s*\{([^}]*)\}").unwrap());
+static STYLE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").expect("the pattern is a valid regex")
+});
+static STYLE_ATTR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)(\bstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).expect("the pattern is a valid regex")
+});
+static FONT_FACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)@font-face\s*\{([^}]*)\}").expect("the pattern is a valid regex"));
 static FAMILY_DECL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(font-family\s*:\s*)([^;}]+)").unwrap());
-static SRC_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)"#).unwrap());
-static HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<head\b[^>]*>").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)(font-family\s*:\s*)([^;}]+)").expect("the pattern is a valid regex"));
+static SRC_URL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)"#)
+        .expect("the pattern is a valid regex")
+});
+static HEAD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<head\b[^>]*>").expect("the pattern is a valid regex"));
 
 /// One font file to register.
 pub struct Font {

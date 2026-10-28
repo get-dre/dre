@@ -242,7 +242,7 @@ impl CellWriter {
     ) -> Result<()> {
         let fmt = style.map(|s| &s.format);
         if let Some(f) = formula {
-            let formula = rust_xlsxwriter::Formula::new(f).set_result(crate::formulas::cached(&v));
+            let formula = rust_xlsxwriter::Formula::new(f).set_result(crate::formulas::cached(v.as_ref()));
             match fmt {
                 Some(x) => ws.write_formula_with_format(row, col, formula, x)?,
                 None => ws.write_formula(row, col, formula)?,

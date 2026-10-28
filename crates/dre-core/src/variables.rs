@@ -88,7 +88,10 @@ impl Definition {
         if !valid {
             return Err(format!(
                 "variable `{name}` must have type {}",
-                serde_json::to_value(&self.kind).unwrap().as_str().unwrap()
+                serde_json::to_value(&self.kind)
+                    .unwrap()
+                    .as_str()
+                    .expect("a JSON value serializes")
             ));
         }
         if self

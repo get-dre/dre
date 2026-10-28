@@ -82,6 +82,7 @@ impl Pacer {
         // Up to `burst` deliveries may run ahead of the even schedule.
         let slack = gap * (rate.burst.max(1) - 1) as u32;
         let until = {
+            // A poisoned lock is safe to use: each update is one `insert` of a whole slot.
             let mut next = self.next.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
             let tat = next.get(key).copied().unwrap_or(now).max(now);

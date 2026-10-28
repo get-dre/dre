@@ -310,7 +310,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
         .unwrap_or_else(|| serde_json::json!({}));
     let failed = outcome.failed();
     if let Json::Object(m) = &mut record {
-        m.insert("run_id".into(), Json::from(release_id.clone()));
+        m.insert("run_id".into(), Json::from(release_id));
         m.insert(
             "status".into(),
             Json::from(if failed { "error" } else { "success" }),

@@ -140,7 +140,7 @@ pub fn parse(text: &str) -> Result<Node, SyntaxError> {
 fn syntax_error(e: &serde_saphyr::Error) -> SyntaxError {
     static LOCATION: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^(?:error: )?(?:line \d+ column \d+: )?(.*?)(?: at line \d+, column \d+)?$")
-            .unwrap()
+            .expect("the pattern is a valid regex")
     });
     let line = e.location().map(|l| l.line() as usize).filter(|l| *l > 0);
     let text = e.to_string();

@@ -382,7 +382,12 @@ fn document(
 ) -> Json {
     let reports = reports
         .into_iter()
-        .map(|(r, bs)| (r.name.clone(), report(project, r, &bs, errors.get(&r.name))))
+        .map(|(r, bs)| {
+            (
+                r.name.clone(),
+                report(project, r, &bs, errors.get(&r.name).map(Vec::as_slice)),
+            )
+        })
         .collect();
     let plugins = project
         .plugins
@@ -420,12 +425,7 @@ fn document(
     sorted(serde_json::to_value(doc).expect("a manifest serializes"))
 }
 
-fn report(
-    project: &Project,
-    r: &Report,
-    bindings: &[&Binding],
-    errors: Option<&Vec<String>>,
-) -> ManifestReport {
+fn report(project: &Project, r: &Report, bindings: &[&Binding], errors: Option<&[String]>) -> ManifestReport {
     // Every source any Binding reads, as `depends_on` says it in dbt.
     let mut used: Vec<String> = Vec::new();
     for p in r.bindings.iter().filter_map(|b| b.parsed.as_ref()) {
@@ -435,7 +435,7 @@ fn report(
             }
         }
     }
-    let errors = errors.cloned().unwrap_or_default();
+    let errors = errors.map(<[String]>::to_vec).unwrap_or_default();
     ManifestReport {
         name: r.name.clone(),
         description: r.description.clone(),
@@ -661,7 +661,7 @@ fn slash(p: &Path) -> String {
 
 /// `v` as compact JSON with every object's keys sorted: the same bytes for the same value.
 pub fn canonical(v: &Json) -> String {
-    serde_json::to_string(&sorted(v.clone())).unwrap()
+    serde_json::to_string(&sorted(v.clone())).expect("a JSON value serializes")
 }
 
 /// `v` with every object's keys sorted, so the bytes don't depend on insertion order.
@@ -806,7 +806,7 @@ pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
 
 /// The manifest's text: pretty JSON, secrets masked, newline-terminated.
 pub fn render(doc: &Json) -> String {
-    crate::secrets::to_json_pretty(doc).unwrap() + "\n"
+    crate::secrets::to_json_pretty(doc).expect("a JSON value serializes") + "\n"
 }
 
 /// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of

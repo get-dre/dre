@@ -40,7 +40,8 @@ const DATA_EXTS: &[&str] = &["csv", "xlsx", "xls", "json", "jsonl"];
 /// Keys of a lookup config file.
 pub const CONFIG_KEYS: &[&str] = &["columns", "sheet", "load", "rows"];
 
-static IDENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
+static IDENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("the pattern is a valid regex"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColType {
@@ -469,7 +470,7 @@ fn read_objects(items: &[Json]) -> Result<Raw, String> {
     }
     let mut rows = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let obj = item.as_object().unwrap();
+        let obj = item.as_object().expect("every item was checked to be a map");
         let label = format!("entry {}", i + 1);
         let mut cells = Vec::new();
         for c in &columns {
@@ -613,7 +614,7 @@ impl Table {
                     ),
                 ),
                 ColType::Date => {
-                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("January 1 is a valid date");
                     (
                         DataType::Date32,
                         Arc::new(

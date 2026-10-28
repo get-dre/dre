@@ -154,7 +154,10 @@ pub fn history(a: HistoryArgs) -> ExitCode {
             println!("{}", r["path"].as_str().unwrap_or_default());
         }
     } else if a.output == HistoryOutput::Json {
-        println!("{}", dre_core::secrets::to_json_pretty(&rows).unwrap());
+        println!(
+            "{}",
+            dre_core::secrets::to_json_pretty(&rows).expect("a JSON value serializes")
+        );
     } else {
         for r in &rows {
             let mark = if r["current"] == true { "*" } else { " " };

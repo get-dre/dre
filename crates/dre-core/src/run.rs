@@ -2290,7 +2290,11 @@ impl<'a> BindingRun<'a> {
                     let f = File::create(&spool_path).map_err(|e| e.to_string())?;
                     writer = Some(FileWriter::try_new(f, schema).map_err(|e| e.to_string())?);
                 }
-                writer.as_mut().unwrap().write(&batch).map_err(|e| e.to_string())
+                writer
+                    .as_mut()
+                    .expect("the writer was created above")
+                    .write(&batch)
+                    .map_err(|e| e.to_string())
             })
             .map_err(|e| {
                 let message = format!(
@@ -3172,7 +3176,11 @@ impl<'a> BindingRun<'a> {
         let targets: Vec<DeliveryFile> = files
             .iter()
             .map(|(f, _)| {
-                let name = f.file_name().unwrap().to_string_lossy().to_string();
+                let name = f
+                    .file_name()
+                    .expect("the path ends in a file name")
+                    .to_string_lossy()
+                    .to_string();
                 let r = d.path.as_deref().map(|r| {
                     if files.len() == 1 {
                         r.to_string()
@@ -3755,7 +3763,7 @@ impl Session {
             })?;
             self.proc_ = Some(p);
         }
-        Ok(self.proc_.as_mut().unwrap())
+        Ok(self.proc_.as_mut().expect("the process was started above"))
     }
 
     fn statement(&mut self, sensitive: bool) -> Result<(&mut PluginProcess, OpaqueLogScope), String> {

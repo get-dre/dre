@@ -123,10 +123,10 @@ fn write(
     )
     .unwrap();
     let h = headline();
-    p.write_result_set(&h.schema(), vec![h.clone()])
+    p.write_result_set(&h.schema(), vec![h])
         .map_err(|e| e.to_string())?;
     let b = holdings(rows);
-    p.write_result_set(&b.schema(), vec![b.clone()])
+    p.write_result_set(&b.schema(), vec![b])
         .map_err(|e| e.to_string())?;
     let (files, warnings) = p.write_finish_with_warnings().map_err(|e| e.to_string())?;
     let _ = p.close();
