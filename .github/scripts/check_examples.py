@@ -14,10 +14,10 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
-         "slack-headline", "sftp-delivery", "password-statements")
+         "slack-headline", "sftp-delivery", "password-statements", "multilingual")
 # Examples that need a newer DRE than the released one the examples workflow installs: skipped
 # there (the CI job against this build runs them all).
-NEEDS = {"password-statements": (0, 7)}
+NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 8, 1)}
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True
 
@@ -117,10 +117,10 @@ def check(dre, plugins):
             return result.stdout + result.stderr
 
         version = subprocess.run([dre, "--version"], capture_output=True, text=True).stdout
-        have = tuple(int(x) for x in version.split()[-1].split("-")[0].split(".")[:2])
+        have = tuple(int(x) for x in version.split()[-1].split("-")[0].split(".")[:3])
         projects = {}
         for name in NAMES:
-            if have < NEEDS.get(name, (0, 0)):
+            if have < NEEDS.get(name, (0, 0, 0)):
                 print(f"{name}: skipped, it needs DRE {'.'.join(map(str, NEEDS[name]))} (this is {have})")
                 continue
             project = scratch / name
@@ -189,6 +189,18 @@ def check(dre, plugins):
                                if p.is_file() and p.suffix in (".json", ".jsonl", ".log"))
             assert "09031984" not in reported and "example-pack-password" not in reported, \
                 "a password leaked into DRE's records"
+        cities = ("東京", "北京", "서울", "Москва", "القاهرة", "Αθήνα", "मुंबई", "São Paulo", "Zürich")
+        offices = projects["multilingual"] / "out"
+        everyone = workbook(offices / "all-offices.xlsx")["offices"]
+        for row, city in enumerate(cities, start=2):
+            assert_cell(everyone, f"A{row}", city)
+            staff = workbook(offices / "offices" / (city + ".xlsx"))["staff"]
+            assert_cell(staff, "A2", city)
+            assert_cell(staff, "A3", city)
+            assert "A4" not in staff, (city, "another office's staff in the workbook")
+        mumbai = workbook(offices / "offices/मुंबई.xlsx")["staff"]
+        assert_cell(mumbai, "B2", "प्रिया पटेल")
+        assert_cell(mumbai, "C2", "लेखाकार")
         sftp_record = latest(records(projects["sftp-delivery"]))
         output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
         assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"
