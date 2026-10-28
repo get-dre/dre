@@ -234,7 +234,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
             for (k, row) in (part * max_rows..((part + 1) * max_rows).min(total)).enumerate() {
                 let r = first + k as u32;
                 for c in 0..res.names.len() {
-                    let formula = row_formula(res.formulas[c].as_ref(), col_of, r - 1)
+                    let formula = row_formula(res.formulas[c].as_deref(), col_of, r - 1)
                         .map_err(|n| format!("sheet `{name}`: column `{n}` isn't on the sheet"))?;
                     write_value(
                         ws,
@@ -349,7 +349,7 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
         for row in 0..n as usize {
             let r = first + row as u32;
             for (k, &ci) in cols.iter().enumerate() {
-                let formula = row_formula(res.formulas[ci].as_ref(), col_of, r - 1).map_err(|name| {
+                let formula = row_formula(res.formulas[ci].as_deref(), col_of, r - 1).map_err(|name| {
                     format!(
                         "template block on `{}`: column `{}`'s formula refers to `{name}`, which the block doesn't place (it places: {})",
                         b.sheet,
@@ -524,7 +524,7 @@ fn shift_plain(s: &str, by: u32) -> String {
 /// A column's row formula for 0-based sheet row `row`, if it has one; `Err(name)` for a
 /// reference `col_of` can't place.
 fn row_formula(
-    parts: Option<&Vec<FormulaPart>>,
+    parts: Option<&[FormulaPart]>,
     col_of: impl Fn(&str) -> Option<u32>,
     row: u32,
 ) -> std::result::Result<Option<String>, String> {

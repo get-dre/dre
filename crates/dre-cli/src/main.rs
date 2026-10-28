@@ -575,7 +575,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
     // Only a project that checks out gets compiled.
     let (plans, targets) = match &project {
         Some(p) if !diags.has_errors() => {
-            compile_for_validate(p, selector.as_ref(), &a.set, &a.project, &mut diags)
+            compile_for_validate(p, selector.as_deref(), &a.set, &a.project, &mut diags)
         }
         _ => (Vec::new(), None),
     };
@@ -709,13 +709,13 @@ impl dre_core::run::Ui for Collect {
 /// doesn't render is an error.
 fn compile_for_validate(
     project: &dre_core::project::Project,
-    selector: Option<&String>,
+    selector: Option<&str>,
     set: &Option<String>,
     p: &ProjectArgs,
     diags: &mut dre_core::Diagnostics,
 ) -> (Vec<dre_core::run::BindingPlan>, Option<dre_core::run::RunTargets>) {
     let opts = dre_core::run::RunOptions {
-        selector: selector.cloned(),
+        selector: selector.map(str::to_string),
         set: Some(set.clone().unwrap_or_else(|| "all".into())),
         target: p.target.clone(),
         vars: p.vars.iter().cloned().collect(),

@@ -382,7 +382,12 @@ fn document(
 ) -> Json {
     let reports = reports
         .into_iter()
-        .map(|(r, bs)| (r.name.clone(), report(project, r, &bs, errors.get(&r.name))))
+        .map(|(r, bs)| {
+            (
+                r.name.clone(),
+                report(project, r, &bs, errors.get(&r.name).map(Vec::as_slice)),
+            )
+        })
         .collect();
     let plugins = project
         .plugins
@@ -420,12 +425,7 @@ fn document(
     sorted(serde_json::to_value(doc).expect("a manifest serializes"))
 }
 
-fn report(
-    project: &Project,
-    r: &Report,
-    bindings: &[&Binding],
-    errors: Option<&Vec<String>>,
-) -> ManifestReport {
+fn report(project: &Project, r: &Report, bindings: &[&Binding], errors: Option<&[String]>) -> ManifestReport {
     // Every source any Binding reads, as `depends_on` says it in dbt.
     let mut used: Vec<String> = Vec::new();
     for p in r.bindings.iter().filter_map(|b| b.parsed.as_ref()) {
@@ -435,7 +435,7 @@ fn report(
             }
         }
     }
-    let errors = errors.cloned().unwrap_or_default();
+    let errors = errors.map(<[String]>::to_vec).unwrap_or_default();
     ManifestReport {
         name: r.name.clone(),
         description: r.description.clone(),

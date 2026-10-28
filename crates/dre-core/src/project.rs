@@ -1307,7 +1307,7 @@ impl Loader {
                 DEFAULT_RUN_QUERY_MAX_ROWS
             }
         };
-        let (run_timeout, keep_runs) = self.parse_flags(file.as_ref(), pf.flags);
+        let (run_timeout, keep_runs) = self.parse_flags(file.as_deref(), pf.flags);
         let dispatch = self.parse_dispatch(&yf.display, pf.dispatch);
         match pf.format_options {
             None | Some(de::Located { value: Loose::Ok(None), .. }) => {}
@@ -1604,7 +1604,7 @@ impl Loader {
     /// `http_timeout`); returns `run_timeout`.
     fn parse_flags(
         &mut self,
-        file: Option<&PathBuf>,
+        file: Option<&Path>,
         v: Option<de::Located<Loose<config::project::Flags>>>,
     ) -> (Option<std::time::Duration>, usize) {
         let flags = match v {
@@ -1615,7 +1615,7 @@ impl Loader {
             Some(v) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     v.line(),
                     "`flags` must be a map",
                 );
@@ -1625,7 +1625,7 @@ impl Loader {
         for k in &flags.unknown.0 {
             self.diags.error(
                 Code::UnknownKey,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 Some(k.line),
                 format!(
                     "unknown key `flags.{}`; flags are: http_timeout, keep_runs, run_timeout",
@@ -1640,7 +1640,7 @@ impl Loader {
             }) if n > 0 => crate::manager::set_project_http_timeout(n),
             Some(v) => self.diags.error(
                 Code::InvalidField,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 v.line(),
                 "`flags.http_timeout` must be a positive whole number of seconds",
             ),
@@ -1653,7 +1653,7 @@ impl Loader {
             Some(v) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     v.line(),
                     "`flags.keep_runs` must be a whole number of 1 or more",
                 );
@@ -1673,7 +1673,7 @@ impl Loader {
             Ok(_) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     line,
                     "`flags.run_timeout` must be more than zero",
                 );
@@ -1682,7 +1682,7 @@ impl Loader {
             Err(e) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     line,
                     format!("`flags.run_timeout` {e}"),
                 );
@@ -4497,7 +4497,7 @@ impl Loader {
         let destinations = match o.destination {
             None => Vec::new(),
             Some(Loose::Ok(de::OneOf::A(d))) => self
-                .typed_destination(d, ctx, file.as_ref(), used)
+                .typed_destination(d, ctx, file.as_deref(), used)
                 .into_iter()
                 .collect(),
             Some(Loose::Ok(de::OneOf::B(list))) if list.is_empty() => {
@@ -4515,7 +4515,7 @@ impl Loader {
                 let mut out = Vec::new();
                 for (i, d) in list.into_iter().enumerate() {
                     match d {
-                        Loose::Ok(d) => out.extend(self.typed_destination(d, ctx, file.as_ref(), used)),
+                        Loose::Ok(d) => out.extend(self.typed_destination(d, ctx, file.as_deref(), used)),
                         Loose::Bad(_) => self.diags.error(
                             Code::InvalidField,
                             file.clone(),
@@ -4547,7 +4547,7 @@ impl Loader {
                         format!("{ctx}: `output.template` only applies to the xlsx, html and pdf formats"),
                     );
                 }
-                let t = self.typed_template(t, ctx, file.as_ref(), queries);
+                let t = self.typed_template(t, ctx, file.as_deref(), queries);
                 if format != "xlsx" && t.as_ref().is_some_and(|t| !t.bindings.is_empty()) {
                     self.diags.error(
                         Code::InvalidTemplate,
@@ -4673,7 +4673,7 @@ impl Loader {
                 None
             }
             Some(Loose::Ok(de::OneOf::A(f))) => {
-                self.typed_for_each(f, ctx, file.as_ref(), entries, &format, &destinations)
+                self.typed_for_each(f, ctx, file.as_deref(), entries, &format, &destinations)
             }
         };
         let file_name = match o.file_name {
@@ -4719,7 +4719,7 @@ impl Loader {
         &mut self,
         f: config::report::ForEach,
         ctx: &str,
-        file: Option<&PathBuf>,
+        file: Option<&Path>,
         queries: &[QueryEntry],
         format: &str,
         destinations: &[Destination],
@@ -4727,7 +4727,7 @@ impl Loader {
         let err = |s: &mut Self, msg: String| {
             s.diags.error(
                 Code::InvalidOutputOption,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: {msg}"),
             );
@@ -4780,7 +4780,7 @@ impl Loader {
             {
                 self.diags.warning(
                     Code::InvalidOutputOption,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!(
                         "{ctx}: the `for_each` key `{k}` looks like personal data; keys are never masked (they name files and appear in logs), so use an opaque id such as a member number"
@@ -4866,13 +4866,13 @@ impl Loader {
         &mut self,
         d: config::report::Destination,
         ctx: &str,
-        file: Option<&PathBuf>,
+        file: Option<&Path>,
         used: &mut Usage,
     ) -> Option<Destination> {
         let Some(Loose::Ok(p)) = d.profile else {
             self.diags.error(
                 Code::InvalidField,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: `output.destination` needs a `profile:` naming a profiles.yml entry"),
             );
@@ -4884,14 +4884,14 @@ impl Loader {
             Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!("{ctx}: destination `{p}`: `path` must be a string"),
                 );
                 None
             }
         };
-        used.destination(&p, file.cloned(), None);
+        used.destination(&p, file.map(Path::to_path_buf), None);
         let options = d.options.0.into_iter().map(|(k, v)| (k.value, v)).collect();
         let attach = match d.attach {
             None => Vec::new(),
@@ -4900,7 +4900,7 @@ impl Loader {
             Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!("{ctx}: destination `{p}`: `attach` must be an output name or a list of them"),
                 );
@@ -4913,7 +4913,7 @@ impl Loader {
             Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!("{ctx}: destination `{p}`: `hold` must be true or false"),
                 );
@@ -4927,7 +4927,7 @@ impl Loader {
                 Err(e) => {
                     self.diags.error(
                         Code::InvalidField,
-                        file.cloned(),
+                        file.map(Path::to_path_buf),
                         None,
                         format!("{ctx}: destination `{p}`: `rate`: {e}"),
                     );
@@ -4937,7 +4937,7 @@ impl Loader {
             Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!("{ctx}: destination `{p}`: `rate` must be a count and a unit, like `100/minute`"),
                 );
@@ -4949,13 +4949,13 @@ impl Loader {
             (Some(Loose::Ok(n)), Some(r)) if n > 0 => r.burst = n,
             (Some(Loose::Ok(_)), None) => self.diags.error(
                 Code::InvalidField,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: destination `{p}`: `burst` needs a `rate`"),
             ),
             (Some(_), _) => self.diags.error(
                 Code::InvalidField,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: destination `{p}`: `burst` must be a whole number of 1 or more"),
             ),
@@ -4970,7 +4970,7 @@ impl Loader {
                 for k in &z.unknown.0 {
                     self.diags.error(
                         Code::UnknownKey,
-                        file.cloned(),
+                        file.map(Path::to_path_buf),
                         Some(k.line),
                         format!("{ctx}: destination `{p}`: unknown key `{}` in `zip`; expected `password`, `encryption`", k.name),
                     );
@@ -4980,7 +4980,7 @@ impl Loader {
                     Some(Loose::Ok(s)) if s.is_empty() => {
                         self.diags.error(
                             Code::InvalidField,
-                            file.cloned(),
+                            file.map(Path::to_path_buf),
                             None,
                             format!("{ctx}: destination `{p}`: `zip.password` is empty; an empty password would leave the zip unencrypted: set one, or use `zip: true`"),
                         );
@@ -4990,7 +4990,7 @@ impl Loader {
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
                             Code::InvalidField,
-                            file.cloned(),
+                            file.map(Path::to_path_buf),
                             None,
                             format!("{ctx}: destination `{p}`: `zip.password` must be a string"),
                         );
@@ -5003,7 +5003,7 @@ impl Loader {
                     Some(Loose::Bad(_)) => {
                         self.diags.error(
                             Code::InvalidField,
-                            file.cloned(),
+                            file.map(Path::to_path_buf),
                             None,
                             format!(
                                 "{ctx}: destination `{p}`: `zip.encryption` must be one of {}",
@@ -5016,14 +5016,14 @@ impl Loader {
                 if encryption == crate::zip_pack::Encryption::Zipcrypto {
                     self.diags.warning(
                         Code::InvalidField,
-                        file.cloned(),
+                        file.map(Path::to_path_buf),
                         None,
                         format!("{ctx}: destination `{p}`: `encryption: zipcrypto` is weak (it can be cracked); use it only for recipients who can't open AES-256 zips (Windows Explorer, macOS Archive Utility)"),
                     );
                     if password.is_none() {
                         self.diags.warning(
                             Code::InvalidField,
-                            file.cloned(),
+                            file.map(Path::to_path_buf),
                             None,
                             format!("{ctx}: destination `{p}`: `zip.encryption` has no effect without a `password`"),
                         );
@@ -5034,7 +5034,7 @@ impl Loader {
             Some(Loose::Bad(_)) => {
                 self.diags.error(
                     Code::InvalidField,
-                    file.cloned(),
+                    file.map(Path::to_path_buf),
                     None,
                     format!(
                         "{ctx}: destination `{p}`: `zip` must be true, false or `{{password, encryption}}`"
@@ -5050,7 +5050,7 @@ impl Loader {
         {
             self.diags.error(
                 Code::InvalidField,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: destination `{p}`: {e}"),
             );
@@ -5070,13 +5070,13 @@ impl Loader {
         &mut self,
         t: Loose<config::report::Template>,
         ctx: &str,
-        file: Option<&PathBuf>,
+        file: Option<&Path>,
         queries: &[QueryEntry],
     ) -> Option<Template> {
         let err = |s: &mut Self, msg: String| {
             s.diags.error(
                 Code::InvalidTemplate,
-                file.cloned(),
+                file.map(Path::to_path_buf),
                 None,
                 format!("{ctx}: {msg}"),
             )
