@@ -3,7 +3,7 @@ name: dre-report
 description: Create or change a DRE report, guided - the SQL and report YAML, tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet, PDF and HTML documents from a template), one copy per member or client (for_each), what happens with no data (on_empty), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat) with rates, retries and held deliveries, headline messages, and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, variable, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.2.0"
+  version: "4.2.1"
   dre: ">=0.6.0, <0.9.0"
 ---
 

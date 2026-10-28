@@ -3,7 +3,7 @@ name: dre-port
 description: Move reports from another tool to DRE, guided - SSRS and Power BI paginated (.rdl), Crystal Reports (XML or text exports; not binary .rpt), or SQL plus a screenshot or description. Reads the report, asks about the gaps one question at a time, writes the SQL, report YAML, document template, schedules and destinations, validates, then proves the port with a parity check against an export of the old report (row counts, column totals, a keyed cell diff). For a folder of reports, lists them first with an effort score, groups near-duplicates into Sets and suggests an order. Use when the user wants to port, migrate, convert, move or replace SSRS, Crystal, Power BI paginated or other legacy reports, or check that a DRE report matches the old one. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.2.0"
+  version: "4.2.1"
   dre: ">=0.6.0, <0.9.0"
 ---
 
