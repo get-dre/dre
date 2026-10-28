@@ -934,17 +934,7 @@ fn plugin_list() -> ExitCode {
             p.path.display().to_string(),
         ]);
     }
-    let widths: Vec<usize> = (0..5)
-        .map(|i| rows.iter().map(|r| r[i].len()).max().unwrap_or(0))
-        .collect();
-    for r in rows {
-        let line: Vec<String> = r
-            .iter()
-            .enumerate()
-            .map(|(i, c)| format!("{c:<w$}", w = widths[i]))
-            .collect();
-        println!("{}", line.join("  ").trim_end());
-    }
+    print!("{}", ls::columns(rows));
     exit::ok()
 }
 

@@ -191,7 +191,10 @@ fn cron_times(expr: &str, lo: NaiveDateTime, hi: NaiveDateTime) -> Result<Vec<Na
         .unwrap_or(expr)
         .to_ascii_uppercase();
     let fields: Vec<&str> = expr.split_whitespace().collect();
-    let both = fields[2].starts_with('*') || fields[4].starts_with('*');
+    let [_, _, day_of_month, _, day_of_week] = fields.as_slice() else {
+        return Err(format!("invalid cron `{expr}`: expected 5 fields"));
+    };
+    let both = day_of_month.starts_with('*') || day_of_week.starts_with('*');
     let cron = croner::parser::CronParser::builder()
         .seconds(croner::parser::Seconds::Disallowed)
         .year(croner::parser::Year::Disallowed)

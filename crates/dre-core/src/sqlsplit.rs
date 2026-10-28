@@ -17,11 +17,11 @@ pub fn split(sql: &str) -> Vec<Statement> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'\'' | b'"' | b'`' => i = skip_quoted(b, i),
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'\'' | b'"' | b'`' => i = skip_quoted(b, i, c),
             b'-' if b.get(i + 1) == Some(&b'-') => {
-                while i < b.len() && b[i] != b'\n' {
+                while b.get(i).is_some_and(|&c| c != b'\n') {
                     i += 1;
                 }
             }
@@ -39,6 +39,8 @@ pub fn split(sql: &str) -> Vec<Statement> {
     out
 }
 
+// Every byte offset here sits next to an ASCII delimiter (`;`, a quote, a comment marker,
+// `$`) or at the end, so the string slices land on char boundaries.
 fn push_statement(sql: &str, start: usize, end: usize, out: &mut Vec<Statement>) {
     let raw = &sql[start..end];
     let text = raw.trim();
@@ -53,11 +55,11 @@ fn push_statement(sql: &str, start: usize, end: usize, out: &mut Vec<Statement>)
     });
 }
 
-fn skip_quoted(b: &[u8], i: usize) -> usize {
-    let q = b[i];
+/// The end of the `q`-quoted string that opens at `i`.
+fn skip_quoted(b: &[u8], i: usize, q: u8) -> usize {
     let mut j = i + 1;
-    while j < b.len() {
-        if b[j] == q {
+    while let Some(&c) = b.get(j) {
+        if c == q {
             // A doubled quote is an escaped quote.
             if b.get(j + 1) == Some(&q) {
                 j += 2;
@@ -73,11 +75,11 @@ fn skip_quoted(b: &[u8], i: usize) -> usize {
 fn skip_block_comment(b: &[u8], i: usize) -> usize {
     let mut depth = 0;
     let mut j = i;
-    while j < b.len() {
-        if b[j] == b'/' && b.get(j + 1) == Some(&b'*') {
+    while let Some(&c) = b.get(j) {
+        if c == b'/' && b.get(j + 1) == Some(&b'*') {
             depth += 1;
             j += 2;
-        } else if b[j] == b'*' && b.get(j + 1) == Some(&b'/') {
+        } else if c == b'*' && b.get(j + 1) == Some(&b'/') {
             depth -= 1;
             j += 2;
             if depth == 0 {
@@ -94,8 +96,8 @@ fn skip_dollar_quoted(sql: &str, i: usize) -> usize {
     let b = sql.as_bytes();
     // A tag is `$` [A-Za-z_][A-Za-z0-9_]* `$`, or just `$$`. `$1` parameters are not tags.
     let mut j = i + 1;
-    if j < b.len() && (b[j].is_ascii_alphabetic() || b[j] == b'_') {
-        while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+    if b.get(j).is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_') {
+        while b.get(j).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_') {
             j += 1;
         }
     }

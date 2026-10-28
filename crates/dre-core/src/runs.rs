@@ -260,7 +260,7 @@ impl BindingRuns {
         let ids = self.list();
         let cut = ids.len().saturating_sub(keep);
         let mut removed = Vec::new();
-        for id in &ids[..cut] {
+        for id in ids.iter().take(cut) {
             if Some(id) == current.as_ref() {
                 continue;
             }

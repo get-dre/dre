@@ -32,11 +32,10 @@ fn parts(name: &str, dialect: &Dialect) -> Result<Vec<String>, String> {
     let SetExpr::Select(select) = query.body.as_ref() else {
         return Err("expected a relation name".into());
     };
-    if select.from.len() != 1
-        || !select.from[0].joins.is_empty()
-        || select.selection.is_some()
-        || query.limit_clause.is_some()
-    {
+    let [from] = select.from.as_slice() else {
+        return Err(format!("`{name}` must be a relation name, not SQL"));
+    };
+    if !from.joins.is_empty() || select.selection.is_some() || query.limit_clause.is_some() {
         return Err(format!("`{name}` must be a relation name, not SQL"));
     }
     let TableFactor::Table {
@@ -44,13 +43,13 @@ fn parts(name: &str, dialect: &Dialect) -> Result<Vec<String>, String> {
         alias: None,
         args: None,
         ..
-    } = &select.from[0].relation
+    } = &from.relation
     else {
         return Err(format!(
             "`{name}` must be a relation name, not a function or alias"
         ));
     };
-    if query.to_string() != format!("SELECT * FROM {}", select.from[0].relation) {
+    if query.to_string() != format!("SELECT * FROM {}", from.relation) {
         return Err(format!("`{name}` must contain only a relation name"));
     }
     object
@@ -98,12 +97,12 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         _ => return Err(unsupported()),
     };
     let defaults = rows(project, profile, defaults)?;
-    let catalog = defaults
-        .first()
+    let first = defaults.first();
+    let catalog = first
         .and_then(|r| r[0].as_str())
         .ok_or("the connection returned no current catalog")?;
-    let schema = defaults[0][1]
-        .as_str()
+    let schema = first
+        .and_then(|r| r[1].as_str())
         .ok_or("the connection returned no current schema")?;
     let mut wanted = Vec::new();
     for name in &request.tables {

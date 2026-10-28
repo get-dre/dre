@@ -459,10 +459,12 @@ fn setup_warnings(report: &Report, b: &Binding, out: &mut ParsedBinding) {
             .filter(|l| l.tab)
             .filter_map(|l| Some((l.query.clone(), conn(&l.query)?)))
             .collect();
-        if later.is_empty() || later.iter().any(|(_, lc)| *lc == c) {
+        let Some((other, oc)) = later.first() else {
+            continue;
+        };
+        if later.iter().any(|(_, lc)| *lc == c) {
             continue;
         }
-        let (other, oc) = &later[0];
         warnings.push(Problem {
             code: Code::SetupOnOtherConnection,
             file: report.file.clone(),

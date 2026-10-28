@@ -117,6 +117,7 @@ fn force_field(entry: &mut Json, field: &str, marker: &str) {
 
 /// Match public names exactly. If either side has unmatched protected data, protect the remaining
 /// pool and align it by occurrence. This avoids persisting a reversible or guessable identity.
+/// Pairs of indexes into `previous` and `current`; every index is in range of its slice.
 fn align_entries(previous: &mut [Json], current: &mut [Json]) -> Vec<(usize, usize)> {
     let mut current_by_name: BTreeMap<String, VecDeque<usize>> = BTreeMap::new();
     for (index, entry) in current.iter().enumerate() {
@@ -184,6 +185,7 @@ pub(crate) fn align_protection(previous: &mut Json, current: &mut Json) {
     ) else {
         return;
     };
+    // The pairs index the slices they were aligned from.
     let result_set_pairs = align_entries(previous_sets, current_sets);
     for (previous_index, current_index) in result_set_pairs {
         let (Some(previous_columns), Some(current_columns)) = (
@@ -287,20 +289,19 @@ pub(crate) fn drift(previous: &Json, current: &Json) -> Vec<String> {
                 _ => {}
             }
         }
-        for column_identity in new_result
+        for (_, column) in new_result
             .columns
-            .keys()
-            .filter(|identity| !old_result.columns.contains_key(*identity))
+            .iter()
+            .filter(|(identity, _)| !old_result.columns.contains_key(*identity))
         {
-            let column = &new_result.columns[column_identity];
             drift.push(format!("`{}`: column `{}` added", old_result.name, column.name));
         }
     }
-    for identity in current
-        .keys()
-        .filter(|identity| !previous.contains_key(*identity))
+    for (_, result) in current
+        .iter()
+        .filter(|(identity, _)| !previous.contains_key(*identity))
     {
-        drift.push(format!("result set `{}` is new", current[identity].name));
+        drift.push(format!("result set `{}` is new", result.name));
     }
     drift
 }

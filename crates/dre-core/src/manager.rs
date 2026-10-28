@@ -459,6 +459,7 @@ fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
         let mut start = 0;
         let bytes = s.as_bytes();
         for i in 1..=bytes.len() {
+            // A run changes only next to an ASCII digit, so `i` is a char boundary.
             if i == bytes.len() || bytes[i].is_ascii_digit() != bytes[start].is_ascii_digit() {
                 out.push(&s[start..i]);
                 start = i;
@@ -881,19 +882,18 @@ pub fn sync(
             PluginSource::Github(_) => format!("{}#{name}", req.source.lock_key().unwrap_or_default()),
             s => s.lock_key().unwrap_or_default(),
         };
-        if !indexes.contains_key(&ikey) {
-            match Index::for_source(&req.source, name) {
-                Ok(i) => {
-                    indexes.insert(ikey.clone(), i);
-                }
+        let index = match indexes.entry(ikey) {
+            std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::btree_map::Entry::Vacant(e) => match Index::for_source(&req.source, name) {
+                Ok(i) => e.insert(i),
                 Err(e) if req.source.is_default() => return Err(vec![e]),
                 Err(e) => {
                     errors.push(e);
                     continue;
                 }
-            }
-        }
-        match install_one(&dir, &indexes[&ikey], req, pin.as_ref()).map(|(mut l, fresh)| {
+            },
+        };
+        match install_one(&dir, index, req, pin.as_ref()).map(|(mut l, fresh)| {
             l.from = req.source.lock_key();
             (l, fresh)
         }) {

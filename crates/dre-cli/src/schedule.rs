@@ -196,18 +196,7 @@ fn table(doc: &Json) -> String {
             doc["window"]["to"].as_str().unwrap_or("")
         ));
     } else {
-        let widths: Vec<usize> = (0..3)
-            .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0))
-            .collect();
-        for r in rows {
-            let line: Vec<String> = r
-                .iter()
-                .enumerate()
-                .map(|(i, c)| format!("{c:<w$}", w = widths[i]))
-                .collect();
-            out.push_str(line.join("  ").trim_end());
-            out.push('\n');
-        }
+        out.push_str(&crate::ls::columns(rows));
     }
     for (name, s) in doc["schedules"].as_object().into_iter().flatten() {
         if s["enabled"] == false {

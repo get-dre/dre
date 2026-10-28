@@ -117,12 +117,11 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 }
                 add(PluginKind::Format, &o.format, &o.options, template, at(None));
             }
-            let message_of: Vec<&crate::project::Output> = b
+            let with_output = b
                 .outputs
                 .iter()
-                .flat_map(|o| o.destinations.iter().map(move |_| o))
-                .collect();
-            for (i, d) in b.destinations().enumerate() {
+                .flat_map(|o| o.destinations.iter().map(move |d| (o, d)));
+            for (i, (output, d)) in with_output.enumerate() {
                 // The profile as the parse pass rendered it (a Jinja `profile:`).
                 let rendered = b
                     .parsed
@@ -141,7 +140,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 add(PluginKind::Destination, kind, &d.options, None, at(Some(profile)));
                 routes.entry(kind.to_string()).or_default().push(Route {
                     at: at(Some(profile)),
-                    format: message_of[i].format.clone(),
+                    format: output.format.clone(),
                     // A zipping entry packs its attachments into the zip: any destination takes it.
                     attach: !d.attach.is_empty() && d.zip.is_none(),
                 });
