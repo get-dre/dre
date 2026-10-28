@@ -891,6 +891,8 @@ fn serve(name: &str, mut h: Handler<'_>, mut input: Input, mut out: Output) -> !
         let result = if cancelled() {
             Ok(Err("cancelled before it started".into()))
         } else {
+            // Defense in depth, not error handling: a panic is a plugin bug, and this only turns it
+            // into an error reply so the host reports it instead of a closed pipe.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 handle(&mut h, name, req, &mut input, &mut out)
             }))
