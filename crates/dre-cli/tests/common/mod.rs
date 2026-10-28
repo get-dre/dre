@@ -300,3 +300,44 @@ pub fn without_run_id(path: &str) -> String {
         _ => path.to_string(),
     }
 }
+
+/// Whether a process with this pid is running.
+pub fn alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+    #[cfg(windows)]
+    {
+        // A match is a line `<image> <pid> <session> ...`; with no match there's only a message.
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some(pid.to_string().as_str()))
+    }
+}
+
+/// The pid in `pid_file` (the fixture plugin writes it at `open`), once it's there.
+pub fn read_pid(pid_file: &Path) -> Option<u32> {
+    std::fs::read_to_string(pid_file).ok()?.trim().parse().ok()
+}
+
+/// The pid in `pid_file`, waiting up to 30 seconds for it; panics if it never appears.
+pub fn wait_for_pid(pid_file: &Path) -> u32 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        if let Some(pid) = read_pid(pid_file) {
+            return pid;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("the fixture plugin never opened its session")
+}
