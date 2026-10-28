@@ -133,6 +133,9 @@ impl Format for Xlsx {
         let mut cells = CellWriter::new();
         while let Some(mut rs) = sets.next_set()? {
             let normalized = cells::normalize(&arrow::array::RecordBatch::new_empty(rs.schema.clone()))?;
+            // `col_formats`, `styles`, `set`'s vectors, and below `names`, `data_styles` and
+            // `accs` hold one entry per column of the set's schema, so a column index is valid in
+            // each of them.
             let col_formats = fmts.for_set(&rs.meta, &normalized.schema())?;
             let styles = cells.formats(&col_formats);
             let set = SetFormulas::resolve(&rs.meta, fmts.output(), &normalized.schema())?;

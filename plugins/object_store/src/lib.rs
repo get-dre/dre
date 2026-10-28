@@ -653,8 +653,8 @@ fn gcs_upload(
     let mut offset = 0u64;
     loop {
         let mut n = 0;
-        while n < buf.len() {
-            let r = file.read(&mut buf[n..]).map_err(unreadable)?;
+        while let Some(rest @ [_, ..]) = buf.get_mut(n..) {
+            let r = file.read(rest).map_err(unreadable)?;
             if r == 0 {
                 break;
             }
@@ -670,6 +670,7 @@ fn gcs_upload(
         if let Some(a) = &auth {
             put = put.header("Authorization", a);
         }
+        // `n` stops at `buf.len()` (the loop above).
         let mut resp = put.send(&buf[..n]).map_err(unsent)?;
         match resp.status().as_u16() {
             200 | 201 => break,

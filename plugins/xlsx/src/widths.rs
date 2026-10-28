@@ -58,22 +58,25 @@ impl Widths {
 
     /// A header or totals cell's text.
     pub fn text(&mut self, col: usize, s: &str) {
-        if self.measure.get(col).copied().unwrap_or(false) {
-            self.longest[col] = self.longest[col].max(text_len(s));
-        }
+        self.grow(col, || text_len(s));
     }
 
     /// A data cell, shown with number format `code`; counted for the first `MEASURE_ROWS` rows.
     pub fn value(&mut self, col: usize, v: Option<&Excel>, code: Option<&str>) {
-        if self.rows < MEASURE_ROWS && self.measure.get(col).copied().unwrap_or(false) {
-            self.longest[col] = self.longest[col].max(shown_len(v, code));
+        if self.rows < MEASURE_ROWS {
+            self.grow(col, || shown_len(v, code));
         }
     }
 
     /// A totals cell's value, measured whatever the row count.
     pub fn total(&mut self, col: usize, v: Option<&Excel>, code: Option<&str>) {
-        if self.measure.get(col).copied().unwrap_or(false) {
-            self.longest[col] = self.longest[col].max(shown_len(v, code));
+        self.grow(col, || shown_len(v, code));
+    }
+
+    /// Raise a measured column's longest to `len()`; other columns are left alone.
+    fn grow(&mut self, col: usize, len: impl FnOnce() -> usize) {
+        if let (Some(true), Some(longest)) = (self.measure.get(col), self.longest.get_mut(col)) {
+            *longest = (*longest).max(len());
         }
     }
 
@@ -83,10 +86,13 @@ impl Widths {
 
     /// Each column's width, in characters: `None` leaves Excel's (or the template's) own.
     pub fn widths(&self) -> Vec<Option<f64>> {
-        (0..self.measure.len())
-            .map(|c| match (self.fixed[c], self.measure[c]) {
-                (Some(w), _) => Some(w),
-                (None, true) => Some((self.longest[c] as f64 + PADDING).clamp(MIN_WIDTH, MAX_WIDTH)),
+        self.fixed
+            .iter()
+            .zip(&self.measure)
+            .zip(&self.longest)
+            .map(|((fixed, measure), longest)| match (fixed, measure) {
+                (Some(w), _) => Some(*w),
+                (None, true) => Some((*longest as f64 + PADDING).clamp(MIN_WIDTH, MAX_WIDTH)),
                 (None, false) => None,
             })
             .collect()
@@ -148,10 +154,11 @@ fn section(code: &str, n: f64) -> (&str, bool) {
         }
     }
     sections.push(&code[start..]);
-    match (n < 0.0, n == 0.0, sections.len()) {
-        (true, _, l) if l >= 2 => (sections[1], true),
-        (false, true, l) if l >= 3 => (sections[2], false),
-        _ => (sections[0], false),
+    match (n < 0.0, n == 0.0, sections.as_slice()) {
+        (true, _, [_, neg, ..]) => (neg, true),
+        (false, true, [_, _, zero, ..]) => (zero, false),
+        (_, _, [first, ..]) => (first, false),
+        _ => (code, false),
     }
 }
 
@@ -205,10 +212,10 @@ fn number_len(n: f64, code: &str) -> usize {
 fn date_len(code: &str) -> usize {
     let (sec, _) = section(code, 1.0);
     let lower = sec.to_ascii_lowercase();
+    // Walk bytes, not `str` slices: a code like `yyyy年mm月` puts `i` inside a character.
     let b = lower.as_bytes();
     let (mut i, mut len, mut quoted) = (0, 0, false);
-    while i < b.len() {
-        let c = b[i];
+    while let Some(here @ &[c, ..]) = b.get(i..) {
         if c == b'"' {
             quoted = !quoted;
             i += 1;
@@ -221,29 +228,27 @@ fn date_len(code: &str) -> usize {
         }
         if c == b'[' {
             // `[h]`: elapsed hours, shown as digits.
-            let end = lower[i..].find(']').map_or(b.len(), |e| i + e + 1);
-            len += if lower[i..end].starts_with("[h")
-                || lower[i..end].starts_with("[m")
-                || lower[i..end].starts_with("[s")
-            {
+            let end = here.iter().position(|&x| x == b']').map_or(here.len(), |e| e + 1);
+            let token = here.get(..end).unwrap_or(here);
+            len += if token.starts_with(b"[h") || token.starts_with(b"[m") || token.starts_with(b"[s") {
                 3
             } else {
                 0
             };
-            i = end;
+            i += end;
             continue;
         }
-        if lower[i..].starts_with("am/pm") {
+        if here.starts_with(b"am/pm") {
             len += 2;
             i += 5;
             continue;
         }
-        if lower[i..].starts_with("a/p") {
+        if here.starts_with(b"a/p") {
             len += 1;
             i += 3;
             continue;
         }
-        let run = b[i..].iter().take_while(|x| **x == c).count();
+        let run = here.iter().take_while(|x| **x == c).count();
         len += match (c, run) {
             (b'y', r) if r <= 2 => 2,
             (b'y', _) => 4,
@@ -267,6 +272,13 @@ fn date_len(code: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn date_code_with_non_ascii_text() {
+        // Byte offsets used to land inside `年` and panic.
+        assert_eq!(date_len("yyyy年mm月dd日"), 4 + 3 + 2 + 3 + 2 + 3);
+        assert_eq!(date_len("[$-ja-JP]ggge年m月d日"), 3 + 1 + 3 + 2 + 3 + 2 + 3);
+    }
 
     #[test]
     fn formatted_lengths() {

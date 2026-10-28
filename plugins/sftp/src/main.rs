@@ -90,7 +90,8 @@ impl SftpStore<'_> {
     async fn make_parents(&self, path: &str) -> std::result::Result<(), StoreError> {
         let mut dir = String::new();
         let parts: Vec<&str> = path.split('/').collect();
-        for (i, part) in parts[..parts.len().saturating_sub(1)].iter().enumerate() {
+        let dirs = parts.split_last().map_or(&[][..], |(_, dirs)| dirs);
+        for (i, part) in dirs.iter().enumerate() {
             if part.is_empty() {
                 if i == 0 {
                     dir.push('/');

@@ -89,7 +89,7 @@ impl Look {
     /// A data cell's format: its number format `code`, its column's style, the band on
     /// alternate rows.
     pub fn data(&self, col: usize, code: Option<&str>, banded: bool) -> Format {
-        let mut s = self.columns[col].clone();
+        let mut s = self.columns.get(col).cloned().unwrap_or_default();
         if banded && s.fill.is_none() {
             s.fill = self.band;
         }

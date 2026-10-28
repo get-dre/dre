@@ -389,8 +389,8 @@ fn relative(target: &Path, from: &Path) -> String {
     let common = t.iter().zip(&f).take_while(|(a, b)| a == b).count();
     let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), f.len() - common).collect();
     parts.extend(
-        t[common..]
-            .iter()
+        t.iter()
+            .skip(common)
             .map(|c| c.as_os_str().to_string_lossy().into_owned()),
     );
     parts.join("/")
@@ -454,8 +454,9 @@ pub fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [0, 1, 2].map(|i| chunk.get(i).copied().unwrap_or(0));
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        // Each index is masked to 6 bits, so it's always inside `T`.
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
         out.push(if chunk.len() > 1 {

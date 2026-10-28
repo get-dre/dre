@@ -2294,7 +2294,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-csv"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
@@ -2347,7 +2347,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-fixed_width"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2432,7 +2432,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-sftp"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "dre-protocol",
  "dre-ssh",
