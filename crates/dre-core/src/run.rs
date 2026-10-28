@@ -3007,7 +3007,7 @@ impl<'a> BindingRun<'a> {
         }
         let o = &mut self.outs[oi];
         o.dests = dests;
-        if o.files.iter().all(|(_, d)| d.is_none()) && !nowhere.is_empty() {
+        if !o.deliveries.iter().any(|d| d.status == "delivered") && !nowhere.is_empty() {
             o.delivery_note = Some(nowhere.join("; "));
         }
         match failures.len() {
@@ -3321,7 +3321,9 @@ impl<'a> BindingRun<'a> {
                 .map_err(failed)?;
             self.attempts = p.last_attempts();
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-            if let Some((_, at)) = self.outs[oi].files.first_mut() {
+            if d.zip_file.is_none()
+                && let Some((_, at)) = self.outs[oi].files.first_mut()
+            {
                 at.get_or_insert_with(|| loc.clone());
             }
             let _ = p.close();
@@ -3347,11 +3349,13 @@ impl<'a> BindingRun<'a> {
                 .map_err(failed)?;
             self.attempts = self.attempts.max(p.last_attempts());
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-            // Targets and files don't line up with `zip:`: the one target is the zip, and only
-            // the output's first file gets its location.
-            for i in batch {
-                if let Some((_, at)) = self.outs[oi].files.get_mut(i) {
-                    at.get_or_insert_with(|| loc.clone());
+            // With `zip:` the one target is the zip: the files in it keep no location of their
+            // own, as with a local destination, and the entry's delivery records the zip's.
+            if d.zip_file.is_none() {
+                for i in batch {
+                    if let Some((_, at)) = self.outs[oi].files.get_mut(i) {
+                        at.get_or_insert_with(|| loc.clone());
+                    }
                 }
             }
             locations.push(loc);
