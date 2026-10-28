@@ -1,0 +1,16 @@
+queries: [offices, staff]
+
+output:
+  # One workbook per office, named after the city in its own script (out/offices/東京.xlsx),
+  # holding only that office's staff.
+  - name: office
+    format: xlsx
+    queries: [offices, staff]
+    for_each: {query: offices, key: city}
+    destination: {profile: local, path: "out/offices/{{ each.city }}.xlsx"}
+
+  # Every office on one sheet.
+  - name: all_offices
+    format: xlsx
+    queries: [offices]
+    destination: {profile: local, path: "out/all-offices.xlsx"}
