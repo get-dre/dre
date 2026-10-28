@@ -138,7 +138,7 @@ fn without_null(v: &mut serde_json::Value) {
                     .collect();
                 if rest.len() == 1 && rest.len() < any.len() {
                     m.remove("anyOf");
-                    if let Value::Object(inner) = rest.into_iter().next().unwrap() {
+                    if let Value::Object(inner) = rest.into_iter().next().expect("rest has one entry") {
                         for (k, v) in inner {
                             m.entry(k).or_insert(v);
                         }

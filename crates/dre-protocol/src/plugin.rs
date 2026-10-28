@@ -1077,7 +1077,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 (Ok(()), SinkState::NoResult) => {}
                 (Ok(()), SinkState::Result) => {
                     if !sink.sent_any {
-                        let schema = sink.schema.clone().unwrap();
+                        let schema = sink.schema.clone().expect("a result sets the schema");
                         sink.out.batch(&RecordBatch::new_empty(schema))?;
                     }
                     let rows = sink.rows;

@@ -499,8 +499,8 @@ impl PluginProcess {
                 plugin: label.clone(),
                 error,
             })?;
-        let stdout = child.stdout.take().unwrap();
-        let stderr_pipe = child.stderr.take().unwrap();
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let stderr_pipe = child.stderr.take().expect("stderr is piped");
         let stdin = Arc::new(Mutex::new(child.stdin.take().map(BufWriter::new)));
 
         let (tx, rx) = channel();

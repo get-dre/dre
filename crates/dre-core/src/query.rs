@@ -230,7 +230,7 @@ fn session_result<P: SourceProcess>(
         rows.extend(
             crate::values::batch_rows(&batch)
                 .into_iter()
-                .map(|row| serde_json::to_value(row).unwrap()),
+                .map(|row| serde_json::to_value(row).expect("a JSON value serializes")),
         );
         Ok(())
     };

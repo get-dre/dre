@@ -860,8 +860,9 @@ fn package_template(name: &str) -> String {
 fn combine(
     files: &[(PathBuf, PathBuf)],
 ) -> Result<(String, Vec<String>, Vec<(usize, PathBuf, usize)>), RenderError> {
-    static MACRO: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").unwrap());
+    static MACRO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").expect("the pattern is a valid regex")
+    });
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();

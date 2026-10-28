@@ -204,7 +204,9 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
         "platform": platform, "artifact_sha256": digest});
     dre_core::fs::write_atomic(
         &folder.join("extension.json"),
-        serde_json::to_vec(&receipt).unwrap().as_slice(),
+        serde_json::to_vec(&receipt)
+            .expect("a JSON value serializes")
+            .as_slice(),
     )
     .map_err(|e| e.to_string())?;
     dre_core::fs::write_atomic(&root.join("current"), version.version.to_string().as_bytes())

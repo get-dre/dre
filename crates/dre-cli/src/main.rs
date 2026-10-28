@@ -628,7 +628,10 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
             "compiled": plans,
             "project": project.as_ref().map(|p| dre_core::manifest::build(p, &report_errors)),
         });
-        println!("{}", dre_core::secrets::to_json_pretty(&out).unwrap());
+        println!(
+            "{}",
+            dre_core::secrets::to_json_pretty(&out).expect("a JSON value serializes")
+        );
     } else {
         for d in diags.sorted() {
             printer.diag(d);
@@ -801,8 +804,13 @@ fn json_command(
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        dre_core::fs::write_atomic(&path, serde_json::to_vec(&value).unwrap().as_slice())
-            .map_err(|e| e.to_string())
+        dre_core::fs::write_atomic(
+            &path,
+            serde_json::to_vec(&value)
+                .expect("a JSON value serializes")
+                .as_slice(),
+        )
+        .map_err(|e| e.to_string())
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

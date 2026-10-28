@@ -14,30 +14,45 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
 
-static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<link\b[^>]*>").unwrap());
-static ATTR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\b(rel|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap());
-static IMG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)(<img\b[^>]*?\bsrc\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).unwrap());
-static IMG_TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>"#).unwrap());
+static LINK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<link\b[^>]*>").expect("the pattern is a valid regex"));
+static ATTR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)\b(rel|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+        .expect("the pattern is a valid regex")
+});
+static IMG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)(<img\b[^>]*?\bsrc\s*=\s*)(?:"([^"]*)"|'([^']*)')"#)
+        .expect("the pattern is a valid regex")
+});
+static IMG_TAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>"#).expect("the pattern is a valid regex")
+});
 static IMG_ATTR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)\b(src|width|height|style|class|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
-        .unwrap()
+        .expect("the pattern is a valid regex")
 });
 static SVG_PROLOG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?").unwrap()
+    Regex::new(r"(?is)^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?")
+        .expect("the pattern is a valid regex")
 });
-static SVG_ROOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)^<svg\b").unwrap());
-static SVG_SIZE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\s(width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap());
-static STYLE_BLOCK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").unwrap());
-static STYLE_ATTR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)(\bstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).unwrap());
-static URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)"#).unwrap());
-static IMPORT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)@import\b"#).unwrap());
+static SVG_ROOT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)^<svg\b").expect("the pattern is a valid regex"));
+static SVG_SIZE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)\s(width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#)
+        .expect("the pattern is a valid regex")
+});
+static STYLE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").expect("the pattern is a valid regex")
+});
+static STYLE_ATTR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)(\bstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).expect("the pattern is a valid regex")
+});
+static URL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)"#)
+        .expect("the pattern is a valid regex")
+});
+static IMPORT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)@import\b"#).expect("the pattern is a valid regex"));
 
 /// Files by the name they're handed to the PDF engine under, with their bytes.
 pub type Files = Vec<(String, Vec<u8>)>;

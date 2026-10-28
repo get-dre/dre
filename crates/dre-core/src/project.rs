@@ -466,8 +466,9 @@ impl Binding {
 
 /// Whether a template reads `each.*`.
 pub fn mentions_each(src: &str) -> bool {
-    static EACH: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\s*(\.|\[)").unwrap());
+    static EACH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\beach\s*(\.|\[)").expect("the pattern is a valid regex")
+    });
     EACH.is_match(src)
 }
 
@@ -2736,7 +2737,11 @@ impl Loader {
             for (name, line) in preflight::refs(&src) {
                 if index.contains_key(&name) {
                     if is_sql {
-                        let stem = file.file_stem().unwrap().to_string_lossy().to_string();
+                        let stem = file
+                            .file_stem()
+                            .expect("the path ends in a file name")
+                            .to_string_lossy()
+                            .to_string();
                         graph.entry(stem).or_default().push((name.clone(), line));
                     }
                     names.insert(name);
@@ -2767,7 +2772,7 @@ impl Loader {
                     key.sort();
                     if reported.insert(key) {
                         cycle.push(next.clone());
-                        let file = index[path.last().unwrap()][0].clone();
+                        let file = index[path.last().expect("the path holds the current node")][0].clone();
                         self.diags.error(
                             Code::RefCycle,
                             Some(file),
@@ -2789,7 +2794,11 @@ impl Loader {
     fn index_sql(&mut self, sql: &[PathBuf]) -> BTreeMap<String, Vec<PathBuf>> {
         let mut index: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
         for p in sql {
-            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+            let stem = p
+                .file_stem()
+                .expect("the path ends in a file name")
+                .to_string_lossy()
+                .to_string();
             index.entry(stem).or_default().push(p.clone());
         }
         for (name, paths) in &index {
@@ -3241,7 +3250,7 @@ impl Loader {
                 ..
             }) => schema.clone(),
             Some(value) => {
-                let (file, _) = located("var_schema").unwrap();
+                let (file, _) = located("var_schema").expect("the key is present: its value was read");
                 self.diags.error(Code::InvalidField, Some(file), value.line(),
                     "`var_schema` must map variable names to declarations with a supported type, default, allowed values, description, required flag, pattern and max_length");
                 BTreeMap::new()
@@ -3288,7 +3297,7 @@ impl Loader {
             match &t.value {
                 Loose::Ok(l) => tags.extend(l.iter().cloned()),
                 Loose::Bad(_) => {
-                    let (f, l) = located("tags").unwrap();
+                    let (f, l) = located("tags").expect("the key is present: its value was read");
                     self.diags.error(
                         Code::InvalidField,
                         Some(f),
@@ -3301,7 +3310,7 @@ impl Loader {
         dedup(&mut tags);
 
         if key("profile").is_some() && key("sets").is_some() {
-            let (f, l) = located("sets").unwrap();
+            let (f, l) = located("sets").expect("the key is present: its value was read");
             self.diags.error(
                 Code::ProfileAndSets,
                 Some(f),
@@ -3313,12 +3322,12 @@ impl Loader {
         let report_profile = match &typed.profile {
             Some(p) => match &p.value {
                 Loose::Ok(s) => {
-                    let (f, l) = located("profile").unwrap();
+                    let (f, l) = located("profile").expect("the key is present: its value was read");
                     used.connection(s, Some(f), l);
                     Some(s.clone())
                 }
                 Loose::Bad(_) => {
-                    let (f, l) = located("profile").unwrap();
+                    let (f, l) = located("profile").expect("the key is present: its value was read");
                     self.diags.error(
                         Code::InvalidField,
                         Some(f),
@@ -3336,7 +3345,7 @@ impl Loader {
             .find_map(|l| l.profile.as_ref().map(|p| p.0.clone()));
         let report_timezone = match &typed.timezone {
             Some(t) => {
-                let (f, l) = located("timezone").unwrap();
+                let (f, l) = located("timezone").expect("the key is present: its value was read");
                 self.timezone_str(
                     t.value.ok().map(String::as_str),
                     &f,
@@ -3351,7 +3360,7 @@ impl Loader {
             .or_else(|| project.timezone.clone());
         let report_locale = match &typed.locale {
             Some(t) => {
-                let (f, l) = located("locale").unwrap();
+                let (f, l) = located("locale").expect("the key is present: its value was read");
                 self.locale_str(
                     t.value.ok().map(String::as_str),
                     &f,
@@ -3387,7 +3396,7 @@ impl Loader {
             match &v.value {
                 Loose::Ok(m) => vars.extend(m.clone()),
                 Loose::Bad(_) => {
-                    let (f, l) = located("vars").unwrap();
+                    let (f, l) = located("vars").expect("the key is present: its value was read");
                     self.diags.error(
                         Code::InvalidField,
                         Some(f),
@@ -3424,14 +3433,14 @@ impl Loader {
         let mut outputs = vec![output];
         if let Some(o) = key("output") {
             for p in layer_outputs(&mut outputs, &o.value) {
-                let (f, l) = located("output").unwrap();
+                let (f, l) = located("output").expect("the key is present: its value was read");
                 self.diags
                     .error(Code::InvalidField, Some(f), l, format!("report `{name}`: {p}"));
             }
         }
 
         if typed.schedule.is_some() {
-            let (f, l) = located("schedule").unwrap();
+            let (f, l) = located("schedule").expect("the key is present: its value was read");
             self.moved_to_schedules(&f, l, &format!("report `{name}`: `schedule`"));
         }
 
@@ -3453,7 +3462,7 @@ impl Loader {
             if let Some(d) = &default_set
                 && !declared.contains(&d.as_str())
             {
-                let (f, l) = located("default_set").unwrap();
+                let (f, l) = located("default_set").expect("the key is present: its value was read");
                 self.diags.error(
                     Code::UnknownDefaultSet,
                     Some(f),
@@ -3463,7 +3472,7 @@ impl Loader {
             }
         } else {
             if default_set.is_some() {
-                let (f, l) = located("default_set").unwrap();
+                let (f, l) = located("default_set").expect("the key is present: its value was read");
                 self.diags.error(
                     Code::UnknownDefaultSet,
                     Some(f),
@@ -4204,14 +4213,16 @@ impl Loader {
     /// Warn when a password (`password:`, `zip: {password}`) reads `each.<column>` of a column
     /// the driver query doesn't mark in `secret_columns`: it would show in logs and results.
     fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {
-        static EACH: std::sync::LazyLock<regex::Regex> =
-            std::sync::LazyLock::new(|| regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").unwrap());
+        static EACH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").expect("the pattern is a valid regex")
+        });
         // `results.<query>` and the column after it: `.first.col`, `.last.col`, `.value`, `.col`.
         static RESULTS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"\bresults\.([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:first|last|rows\[\d+\]))?(?:\.([A-Za-z_][A-Za-z0-9_]*))?").unwrap()
+            regex::Regex::new(r"\bresults\.([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:first|last|rows\[\d+\]))?(?:\.([A-Za-z_][A-Za-z0-9_]*))?").expect("the pattern is a valid regex")
         });
-        static VAR: std::sync::LazyLock<regex::Regex> =
-            std::sync::LazyLock::new(|| regex::Regex::new(r"\bvar\s*\(").unwrap());
+        static VAR: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"\bvar\s*\(").expect("the pattern is a valid regex")
+        });
         let secret_of = |q: &str| -> Vec<&String> {
             queries
                 .iter()
@@ -5745,7 +5756,7 @@ impl Loader {
     /// paths are rendered with its vars and one fixed date. Paths that can't render offline (a
     /// `run_query()`, a missing `env_var()`) are skipped.
     fn check_schedule_paths(&mut self, project: &Project) {
-        let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("January 1 is a valid date");
         for report in &project.reports {
             for b in report.bindings.iter().filter(|b| b.schedules.len() > 1) {
                 let paths: Vec<&String> = b.destinations().filter_map(|d| d.path.as_ref()).collect();

@@ -105,7 +105,7 @@ fn validate_every(v: &Value) -> Result<(), String> {
     if m.len() != 1 {
         return Err("`every` must have exactly one unit: `days`, `weeks` or `months`".into());
     }
-    let (k, n) = m.iter().next().unwrap();
+    let (k, n) = m.iter().next().expect("the map has one entry");
     let unit = k.as_str();
     if !matches!(unit, "days" | "weeks" | "months") {
         return Err(format!(

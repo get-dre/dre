@@ -245,7 +245,7 @@ impl BindingRuns {
         let to = self.run_dir(&id);
         std::fs::create_dir_all(&to)?;
         for p in old {
-            std::fs::rename(&p, to.join(p.file_name().unwrap()))?;
+            std::fs::rename(&p, to.join(p.file_name().expect("the path ends in a file name")))?;
         }
         if self.current().is_none() {
             self.switch(&id)?;

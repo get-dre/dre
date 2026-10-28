@@ -107,8 +107,9 @@ fn secrets() -> Arc<Secrets> {
 
 /// The environment variables a template reads through `env_var('NAME')` (either quote).
 pub fn env_references(text: &str) -> Vec<String> {
-    static CALL: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r#"env_var\(\s*(?:'([^']+)'|"([^"]+)")"#).unwrap());
+    static CALL: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"env_var\(\s*(?:'([^']+)'|"([^"]+)")"#).expect("the pattern is a valid regex")
+    });
     CALL.captures_iter(text)
         .filter_map(|c| c.get(1).or_else(|| c.get(2)))
         .map(|m| m.as_str().to_owned())

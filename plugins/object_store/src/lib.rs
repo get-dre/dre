@@ -146,7 +146,7 @@ fn build(
             }
             if explicit {
                 b = b
-                    .with_access_key_id(conn_str(c, "access_key_id").unwrap())
+                    .with_access_key_id(conn_str(c, "access_key_id").expect("explicit means the key is set"))
                     .with_secret_access_key(
                         conn_str(c, "secret_access_key")
                             .ok_or("`access_key_id` needs `secret_access_key`")?,

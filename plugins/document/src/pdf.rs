@@ -16,10 +16,13 @@ use crate::{assets, fonts};
 pub const PAGE_SIZES: &[&str] = &["A3", "A4", "A5", "Letter", "Legal"];
 
 /// An `@page` rule's declarations (before any nested margin box).
-static PAGE_RULE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)@page\b[^{]*\{([^{}]*)").unwrap());
-static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<title\b[^>]*>(.*?)</title>").unwrap());
+static PAGE_RULE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)@page\b[^{]*\{([^{}]*)").expect("the pattern is a valid regex"));
+static TITLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<title\b[^>]*>(.*?)</title>").expect("the pattern is a valid regex"));
 static LANG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)<html\b[^>]*?\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap()
+    Regex::new(r#"(?is)<html\b[^>]*?\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+        .expect("the pattern is a valid regex")
 });
 
 /// The page options, used where the template's CSS sets no `@page`.

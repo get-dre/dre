@@ -379,7 +379,7 @@ impl Inner {
             let bar = self.multi().add(ProgressBar::new(p.total));
             bar.set_style(
                 ProgressStyle::with_template("{prefix:>10.cyan.bold} [{bar:28.green/dim}] {wide_msg}")
-                    .unwrap()
+                    .expect("the progress template is valid")
                     .progress_chars("█▉░"),
             );
             bar.set_prefix(short_name(&p.output).to_string());
@@ -566,7 +566,7 @@ impl Ui for Printer {
                     ProgressStyle::with_template(
                         "{spinner:.green} [{bar:28.green/dim}] {pos}/{len} {wide_msg}",
                     )
-                    .unwrap()
+                    .expect("the progress template is valid")
                     .progress_chars("█▉░"),
                 );
                 bar.enable_steady_tick(Duration::from_millis(100));

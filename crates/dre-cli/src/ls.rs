@@ -191,7 +191,10 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
                 return crate::exit::not_started();
             }
             Some(def) if tb.as_ref().is_some_and(|t| def.table(t).is_none()) => {
-                eprintln!("error: source `{s}` has no table `{}`", tb.unwrap());
+                eprintln!(
+                    "error: source `{s}` has no table `{}`",
+                    tb.expect("checked by the match guard")
+                );
                 return crate::exit::not_started();
             }
             _ => wanted.push((s, tb)),

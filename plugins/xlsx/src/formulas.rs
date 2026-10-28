@@ -166,7 +166,7 @@ pub fn col_letters(col: u32) -> String {
         n = (n - 1) / 26;
     }
     out.reverse();
-    String::from_utf8(out).unwrap()
+    String::from_utf8(out).expect("column letters are ASCII")
 }
 
 /// A formula with its references turned into A1 cells: `{name}` on 0-based `row`, `{name:*}`
