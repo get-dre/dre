@@ -1,6 +1,6 @@
 //! `dre deps`, `dre plugin install/update/remove`, and auto-install before run/validate.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::ExitCode;
 
 use dre_core::codes::Code;
@@ -104,15 +104,15 @@ fn package<'a>(index: &'a Index, name: &str) -> Result<&'a IndexPackage, String>
 }
 
 /// `dre plugin install` / `dre plugin update`.
-pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Printer) -> ExitCode {
-    let (name, cli_req) = match parse(&spec) {
+pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) -> ExitCode {
+    let (name, cli_req) = match parse(spec) {
         Ok(x) => x,
         Err(e) => {
             printer.error(&e);
             return crate::exit::failed();
         }
     };
-    let project = project_at(&project_dir);
+    let project = project_at(project_dir);
     // A package the project declares installs from wherever it's declared to come from.
     let declared = project
         .iter()
@@ -218,19 +218,19 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
 }
 
 /// `dre plugin remove`.
-pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode {
+pub fn remove(spec: &str, project_dir: &Path, printer: &Printer) -> ExitCode {
     let (name, version) = match spec.split_once('@') {
         Some((i, v)) => match semver::Version::parse(v) {
-            Ok(v) => (i.to_string(), Some(v)),
+            Ok(v) => (i, Some(v)),
             Err(e) => {
                 printer.error(&format!("`{v}` isn't an exact version: {e}"));
                 return crate::exit::failed();
             }
         },
-        None => (spec.clone(), None),
+        None => (spec, None),
     };
     let in_project = project_dir.join(project::PROJECT_FILE).is_file();
-    let dir = dre_core::plugins::plugins_dir(in_project.then_some(project_dir.as_path()));
+    let dir = dre_core::plugins::plugins_dir(in_project.then_some(project_dir));
     let targets: Vec<_> = dre_core::plugins::discover(&dir)
         .into_iter()
         .filter(|p| p.name == name)
@@ -257,16 +257,16 @@ pub fn remove(spec: String, project_dir: PathBuf, printer: &Printer) -> ExitCode
         printer.line(Tone::Good, "Removed", &format!("plugin package `{}` {v}", t.name));
     }
     // Drop the lock pin if the pinned version is gone.
-    if let Some(p) = project_at(&project_dir)
+    if let Some(p) = project_at(project_dir)
         && let Ok(mut lock) = Lock::load(&p.root)
     {
-        let gone = lock.get(&name).is_some_and(|l| {
+        let gone = lock.get(name).is_some_and(|l| {
             targets
                 .iter()
                 .any(|t| t.version.is_none() || t.version.as_ref() == Some(&l.version))
         });
         if gone {
-            lock.plugins.remove(&name);
+            lock.plugins.remove(name);
             if let Err(e) = lock.save(&p.root) {
                 printer.error(&e);
                 return crate::exit::failed();

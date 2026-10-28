@@ -173,7 +173,7 @@ impl BindingRun<'_> {
             let reader = FileReader::try_new(File::open(&p.spool).map_err(|e| e.to_string())?, None)
                 .map_err(|e| e.to_string())?;
             let batches: Vec<RecordBatch> = reader.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-            RowTable::new(&p.query, p.schema.clone(), &batches)
+            RowTable::new(&p.query, &p.schema, &batches)
         };
         let driver = read(&self.produced[driver_p])?;
         let data: Vec<RowTable> = data_ps

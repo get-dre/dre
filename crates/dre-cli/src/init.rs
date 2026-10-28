@@ -141,10 +141,10 @@ pub fn scaffold(dir: &Path, s: &Scaffold) -> Result<Vec<PathBuf>, String> {
 }
 
 /// `dre new <dir>`.
-pub fn new(dir: PathBuf, profile: String, source: String, printer: &Printer) -> ExitCode {
-    let name = project_name(&dir);
+pub fn new(dir: &Path, profile: String, source: String, printer: &Printer) -> ExitCode {
+    let name = project_name(dir);
     match scaffold(
-        &dir,
+        dir,
         &Scaffold {
             name,
             profile,
@@ -505,7 +505,7 @@ fn add_profile(
 }
 
 /// `dre init`.
-pub fn init(profiles_dir: Option<PathBuf>, printer: &Printer) -> ExitCode {
+pub fn init(profiles_dir: Option<&Path>, printer: &Printer) -> ExitCode {
     match init_inner(profiles_dir, printer, std::io::stdin().lock()) {
         Ok(()) => crate::exit::ok(),
         Err(e) => {
@@ -515,11 +515,11 @@ pub fn init(profiles_dir: Option<PathBuf>, printer: &Printer) -> ExitCode {
     }
 }
 
-fn init_inner(profiles_dir: Option<PathBuf>, printer: &Printer, input: impl BufRead) -> Result<(), String> {
+fn init_inner(profiles_dir: Option<&Path>, printer: &Printer, input: impl BufRead) -> Result<(), String> {
     let mut p = Prompter { input };
     let index = Index::load()?;
     let profiles_path =
-        dre_core::profiles::profiles_dir(profiles_dir.as_deref()).join(dre_core::profiles::PROFILES_FILE);
+        dre_core::profiles::profiles_dir(profiles_dir).join(dre_core::profiles::PROFILES_FILE);
     eprintln!("Welcome to DRE. This sets up a connection, installs its plugin and can start a project.\n");
 
     let sources = choices(&index, PluginKind::Source);
