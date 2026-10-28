@@ -1,8 +1,8 @@
 name: Repository hygiene
 
 # Git must not track build outputs: a file over 1 MiB, a compiled binary, or a stray executable.
-# Every clone and CI checkout pays for them. This runs on every pull request, without a paths
-# filter, because an artifact can arrive in any change, including a docs-only one.
+# A tracked artifact is copied into every clone and CI checkout. This runs on every pull request,
+# without a paths filter, because an artifact can arrive in any change, including a docs-only one.
 
 on:
   pull_request:

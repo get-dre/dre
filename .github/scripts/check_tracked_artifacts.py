@@ -4,7 +4,7 @@ executable that is not a script.
 
     check_tracked_artifacts.py
 
-Build outputs belong in .gitignore. Every clone and CI checkout pays for a tracked binary.
+Build outputs belong in .gitignore. A tracked binary is copied into every clone and CI checkout.
 """
 
 import pathlib
@@ -61,7 +61,7 @@ def problems(root=ROOT):
         size = path.stat().st_size
         if size > MAX_BYTES:
             found.append(f"{name}: {size} bytes, over the 1 MiB limit")
-        if path.suffix in BINARY_SUFFIXES or head(path).startswith(MAGIC):
+        if path.suffix.lower() in BINARY_SUFFIXES or head(path).startswith(MAGIC):
             found.append(f"{name}: looks like a compiled binary")
         elif mode == "100755" and head(path, 2) != b"#!":
             found.append(f"{name}: executable but not a script")

@@ -57,6 +57,12 @@ class TrackedArtifacts(unittest.TestCase):
         [problem] = c.problems(self.root)
         self.assertIn("compiled binary", problem)
 
+    def test_an_uppercase_binary_suffix_fails(self):
+        self.write("module.PYC", b"not really bytecode")
+        self.add()
+        [problem] = c.problems(self.root)
+        self.assertIn("compiled binary", problem)
+
     def test_an_executable_without_a_shebang_fails(self):
         self.write("plugin", b"binary without magic", executable=True)
         self.add()
