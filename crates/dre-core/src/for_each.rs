@@ -168,20 +168,22 @@ fn take(batch: &RecordBatch, rows: &[u32]) -> Result<RecordBatch, String> {
     arrow::compute::take_record_batch(batch, &idx).map_err(|e| e.to_string())
 }
 
-/// A key as a file name: letters, digits, `.`, `-` and `_` kept, anything else `_`; never empty,
-/// `.` or `..`, at most 100 characters.
+/// A key as a file name: letters and digits of any script, `.`, `-` and `_` kept, anything else
+/// `_`; never empty, `.` or `..`, at most 100 bytes (on a character boundary), so the extension
+/// still fits in a file system's 255-byte limit.
 pub fn safe_name(key: &str) -> String {
-    let mut s: String = key
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(100)
-        .collect();
+    let mut s = String::new();
+    for c in key.chars() {
+        let c = if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+            c
+        } else {
+            '_'
+        };
+        if s.len() + c.len_utf8() > 100 {
+            break;
+        }
+        s.push(c);
+    }
     if s.is_empty() || s.chars().all(|c| c == '.') {
         s = format!("_{s}");
     }
@@ -317,6 +319,15 @@ mod tests {
         assert_eq!(safe_name("ab/../c d"), "ab_.._c_d");
         assert_eq!(safe_name(".."), "_..");
         assert_eq!(safe_name(""), "_");
+        // Keys in any script keep their letters, so `東京` and `大阪` get files of their own.
+        assert_eq!(safe_name("東京"), "東京");
+        assert_eq!(safe_name("Zoë/Ødegaard 東京"), "Zoë_Ødegaard_東京");
+        assert_eq!(safe_name("株式会社 ABC"), "株式会社_ABC");
+        assert_eq!(collision([("東京", "東京.csv"), ("大阪", "大阪.csv")]), None);
+        // Cut at 100 bytes, never inside a character: 33 three-byte characters.
+        let long = safe_name(&"東".repeat(50));
+        assert_eq!(long, "東".repeat(33));
+        assert_eq!(safe_name(&"a".repeat(150)).len(), 100);
         assert_eq!(
             collision([("a b", "a_b.csv"), ("a/b", "a_b.csv")]),
             Some(("a_b.csv".into(), "a b".into(), "a/b".into()))
