@@ -1,6 +1,6 @@
 ---
 title: "First-party plugins"
-description: "The first-party plugins, their profile fields and output options."
+description: "The first-party DRE plugins for sources, formats and destinations, with each one's profile fields and output options and a link to its own page."
 section: plugins
 position: 3
 ---

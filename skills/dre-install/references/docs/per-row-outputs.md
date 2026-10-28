@@ -56,7 +56,8 @@ can turn it on, or off with `for_each: false`. Each Set's Binding fans out on it
 
 Each row's file is `<output>/<key>.<ext>` in the run folder (`statement/12345.pdf`; a
 composite key is joined with `_`), or what `file_name:` renders (`"{{ each.member_id }}_q3.pdf"`).
-Key values are made safe for file names. Before anything renders, the run fails when two rows
+Key values are made safe for file names: letters and digits in any script (`東京`, `Zoë`),
+`.`, `-` and `_` stay, anything else becomes `_`, cut at 100 bytes. Before anything renders, the run fails when two rows
 have the same key, or would write the same file name, so rows never overwrite each other. A
 destination with a `path` must use `each.*` in it, or `dre validate` fails; pathless
 destinations (email, Slack) are exempt.

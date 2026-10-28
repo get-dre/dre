@@ -1,6 +1,6 @@
 ---
 title: "dependencies.yml reference"
-description: "Every key of dependencies.yml: plugin packages and macro packages."
+description: "Every key of dependencies.yml: the plugin packages, companion extensions and macro packages a DRE project installs, and how dre.lock pins them."
 section: reference
 position: 10
 ---

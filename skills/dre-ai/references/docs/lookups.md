@@ -1,6 +1,6 @@
 ---
 title: "Lookups"
-description: "Mapping tables kept as files: typed columns, inline or temp table."
+description: "Lookups are mapping tables kept as files in your project, with typed columns, loaded inline or as a temp table, plus quoting, an example and common errors."
 section: build-reports
 position: 3
 ---

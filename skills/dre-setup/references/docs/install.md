@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Install DRE with the install script, Homebrew, Scoop, pip or cargo."
+description: "Install DRE on macOS, Linux or Windows with the install script, Homebrew, Scoop, pip or cargo, verify the download, and check the installed command."
 section: get-started
 position: 2
 ---
@@ -15,11 +15,14 @@ curl -fsSL https://getdre.com/install.sh | sh
 
 This puts `dre` in `~/.local/bin`, after checking the download against the release's
 `SHA256SUMS`. `DRE_INSTALL_DIR` picks another folder and `DRE_VERSION` a release (default: the
-newest, pre-releases included):
+newest, pre-releases included). A folder you don't own, such as `/usr/local/bin`, needs `sudo`:
 
 ```bash
-curl -fsSL https://getdre.com/install.sh | DRE_VERSION=v0.3.2 DRE_INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION=v0.3.2 DRE_INSTALL_DIR=/usr/local/bin sh
 ```
+
+Finding the newest release asks GitHub's API, which allows 60 unauthenticated requests an hour.
+If the installer reports GitHub's rate limit, set `GITHUB_TOKEN` or `DRE_VERSION`.
 
 The same line works in a Databricks job (a cluster init script or a `%sh` cell), a CI runner or a
 container build. On Windows, download `dre-<version>-windows-x86_64.zip` (or `-aarch64.zip`)

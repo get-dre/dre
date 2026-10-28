@@ -3,7 +3,7 @@ name: dre-setup
 description: Set up DRE step by step - pick and install the database plugin (DuckDB, Postgres, Databricks, Snowflake, BigQuery, ClickHouse), write the connection profile in ~/.dre/profiles.yml with a safe sign-in, add destinations, create a starter project with `dre new` and check it with `dre validate`. Use when the user wants to connect dre to a database, add or change a profile, set up dev and prod environments, or start a DRE project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.2.0"
+  version: "4.2.1"
   dre: ">=0.6.0, <0.9.0"
 ---
 

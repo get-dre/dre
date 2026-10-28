@@ -8,8 +8,8 @@ The same pages, in the same order, are on [getdre.com/docs](https://getdre.com/d
 
 Install DRE, learn the ideas, and make a first report.
 
-- [Getting started](getting-started.md): Start with a coding agent or from the command line.
-- [Install](install.md): Install DRE with the install script, Homebrew, Scoop, pip or cargo.
+- [Getting started](getting-started.md): Build your first DRE report: let a coding agent with DRE's skills set it up for you, or write the SQL and YAML yourself and run it from the command line.
+- [Install](install.md): Install DRE on macOS, Linux or Windows with the install script, Homebrew, Scoop, pip or cargo, verify the download, and check the installed command.
 - [Your first report in 10 minutes](first-report.md): Build an Excel report with DuckDB, then add variables, tabs, formats, Sets, a schedule and local delivery.
 - [Concepts](concepts.md): Reports, Sets, Bindings, templates, lookups, plugins, delivery, logs, verification and selecting.
 
@@ -19,7 +19,7 @@ Queries, outputs, templates, lookups and messages.
 
 - [Build and run reports](building-reports.md): Commands, the report YAML, profiles, dependencies and what a run does.
 - [Templates](templates.md): Jinja in SQL, paths and options: connection, destination, source(), profile(), columns(), dates and timezones.
-- [Lookups](lookups.md): Mapping tables kept as files: typed columns, inline or temp table.
+- [Lookups](lookups.md): Lookups are mapping tables kept as files in your project, with typed columns, loaded inline or as a temp table, plus quoting, an example and common errors.
 - [Messages](messages.md): Headline numbers to Slack, Teams, Google Chat and email, built from a report's own queries.
 - [Per-row outputs](per-row-outputs.md): One statement, file or email per member, client or account from one run: for_each, each.*, failures, retries, masking and held deliveries.
 - [Password-protect PDFs and zip report packs](password-protected-outputs.md): Send password-protected PDF statements and AES-256 zip packs: pdf password:, zip: on destinations, secret_columns masking, and the password by another route.
@@ -43,35 +43,35 @@ Schedules, orchestrators and where runs write their files.
 - [Schedules](schedules.md): Name schedules in schedules.yml, share timings, see when they fire, and run them from your orchestrator.
 - [Schedule occurrences: `dre schedule ls`](schedule-ls.md): When a project's schedules fire, as a table or a versioned JSON document with the command for each firing, and its JSON Schema.
 - [Orchestration recipe](orchestration.md): Self-host scheduling: load occurrences into a database after every merge, refresh weekly, and run what's due. With Airflow, Databricks Jobs and cron.
-- [The target path](target-path.md): Where DRE writes compiled SQL, outputs, snapshots and the manifest.
+- [The target path](target-path.md): The target path: where DRE writes compiled SQL, outputs, snapshots and the manifest for each run, how overlapping runs are kept apart, and how to clean it.
 
 ## Plugins
 
 Installing plugins, the registry, and every first-party plugin.
 
 - [Managing plugins](managing-plugins.md): Plugin packages are installed on demand; how to have them in place before the first run.
-- [Plugin packages, the registry and `dre.lock`](registry.md): Plugin packages, the registry index, dre.lock and macro packages.
-- [First-party plugins](plugins.md): The first-party plugins, their profile fields and output options.
-- [DuckDB](plugin-duckdb.md): The duckdb source: profile fields and notes.
-- [PostgreSQL](plugin-postgres.md): The postgres source: profile fields, TLS and SSH bastions.
+- [Plugin packages, the registry and `dre.lock`](registry.md): Plugin packages, the registry index and dre.lock: how DRE finds, installs and pins plugins, extensions and macro packages, and how to publish a release.
+- [First-party plugins](plugins.md): The first-party DRE plugins for sources, formats and destinations, with each one's profile fields and output options and a link to its own page.
+- [DuckDB](plugin-duckdb.md): Run report SQL on DuckDB with the duckdb source: profile fields, notes, and running reports on local files without any database server.
+- [PostgreSQL](plugin-postgres.md): Run report SQL on PostgreSQL with the postgres source: profile fields, TLS, SSH bastions, and checking the connection before porting a report.
 - [Databricks](plugin-databricks.md): The databricks source and destination: SQL warehouses, Volumes and workspace files.
-- [BigQuery](plugin-bigquery.md): The bigquery source: sign-in methods and job settings.
-- [Snowflake](plugin-snowflake.md): The snowflake source: sign-in methods and connection settings.
+- [BigQuery](plugin-bigquery.md): Run report SQL on Google BigQuery with the bigquery source: sign-in methods, job settings, notes, and testing the billing and data projects separately.
+- [Snowflake](plugin-snowflake.md): Run report SQL on Snowflake with the snowflake source: sign-in methods, role, warehouse and connection settings, and testing the chosen role and warehouse.
 - [ClickHouse](plugin-clickhouse.md): The clickhouse source: HTTP or native, TLS, ClickHouse Cloud and SSH bastions.
-- [csv and delimited](plugin-csv.md): The csv and delimited formats: options and quoting.
-- [Fixed-width text](plugin-fixed_width.md): The fixed_width format: column layout and options.
-- [Parquet](plugin-parquet.md): The parquet format.
-- [Excel (xlsx)](plugin-xlsx.md): The xlsx format: column formats, formulas, totals rows and templates.
+- [csv and delimited](plugin-csv.md): Write CSV and other delimited text files with the csv and delimited formats: options, quoting and encoding, and exporting a file for a downstream importer.
+- [Fixed-width text](plugin-fixed_width.md): Write fixed-width text files, such as payment files for a bank, with the fixed_width format: column layout, value padding, and checking the receiver's layout.
+- [Parquet](plugin-parquet.md): Write Parquet files with the parquet format: how query column types map to Parquet types, and keeping types intact in an export for an analytics platform.
+- [Excel (xlsx)](plugin-xlsx.md): Write Excel workbooks with the xlsx format: multi-sheet tabs, column widths, styles, number formats, formulas, totals rows and branded templates.
 - [PDF and HTML documents](plugin-document.md): The html and pdf formats: a branded document from a Jinja HTML + CSS template, with no browser.
-- [Amazon S3](plugin-s3.md): The s3 destination: credentials and paths.
-- [Google Cloud Storage](plugin-gcs.md): The gcs destination: credentials and paths.
-- [Azure Blob Storage](plugin-azure_blob.md): The azure_blob destination: credentials and paths.
-- [SFTP](plugin-sftp.md): The sftp destination: host keys, keys and the RSA advisory.
-- [FTP and FTPS](plugin-ftp.md): The ftp destination: FTP and explicit FTPS.
-- [Email](plugin-email.md): The email destination: SMTP settings and options.
-- [Slack](plugin-slack.md): The slack destination: tokens, channels and DMs.
-- [Microsoft Teams](plugin-teams.md): The teams destination: Workflows webhooks.
-- [Google Chat](plugin-google_chat.md): The google_chat destination: space webhooks.
+- [Amazon S3](plugin-s3.md): Deliver reports to Amazon S3 or S3-compatible storage with the s3 destination: credentials, paths, notes, and delivering a dated finance export.
+- [Google Cloud Storage](plugin-gcs.md): Deliver reports to Google Cloud Storage with the gcs destination: credentials, bucket paths, notes, and archiving a workbook with application credentials.
+- [Azure Blob Storage](plugin-azure_blob.md): Deliver reports to Azure Blob Storage with the azure_blob destination: credentials, container paths, notes, and archiving a workbook with an Azure identity.
+- [SFTP](plugin-sftp.md): Deliver report files over SFTP with the sftp destination: host keys, key and password sign-in, the RSA advisory, and uploads that never land half-written.
+- [FTP and FTPS](plugin-ftp.md): Deliver report files over FTP or explicit FTPS with the ftp destination: connection settings, notes, and sending an export over FTPS.
+- [Email](plugin-email.md): Send reports by email with the email destination: SMTP settings, recipients, attachments and options, and configuring the sender before adding recipients.
+- [Slack](plugin-slack.md): Post report files and headline messages to Slack with the slack destination: bot tokens, channels and direct messages, and the headline example project.
+- [Microsoft Teams](plugin-teams.md): Post report headline messages to Microsoft Teams with the teams destination: Workflows webhooks, notes, and adapting a headline to Teams.
+- [Google Chat](plugin-google_chat.md): Post report headline messages to Google Chat spaces with the google_chat destination: space webhooks, notes, and adapting a headline to Google Chat.
 
 ## Reference
 
@@ -79,18 +79,18 @@ The command line, every YAML file, error codes, environment variables and the ma
 
 - [CLI reference](cli-reference.md): Every dre command, subcommand and flag, with defaults and environment variables.
 - [YAML reference](yaml-reference.md): Every key of every YAML file a DRE project uses, generated from the JSON Schemas.
-- [dre_project.yml reference](reference-project.md): Every key of dre_project.yml, the project file.
+- [dre_project.yml reference](reference-project.md): Every key of dre_project.yml, the DRE project file: default profile and output, reports, flags, dispatch and plugins, with their types.
 - [Report YAML reference](reference-report.md): Every key of a report YAML file: queries, output, destinations, Sets and templates.
-- [sets.yml reference](reference-sets.md): Every key of a Sets file.
-- [schedules.yml reference](reference-schedules.md): Every key of the schedules file.
-- [timings.yml reference](reference-timings.md): Every key of the timings file: named timings schedules share.
+- [sets.yml reference](reference-sets.md): Every key of a Sets file, which runs one report once per client, region or store with its own variables, file names and recipients.
+- [schedules.yml reference](reference-schedules.md): Every key of schedules.yml, where named schedules say which report runs when and with which variables, including the every key for recurring timings.
+- [timings.yml reference](reference-timings.md): Every key of timings.yml: named timings that several schedules share, including the every key, so one change moves every schedule that uses it.
 - [profiles.yml reference](reference-profiles.md): Every key of profiles.yml: connections, destinations and their targets.
 - [Sources reference](reference-sources.md): Every key of a sources declaration: sources, tables and columns, as in dbt.
-- [dependencies.yml reference](reference-dependencies.md): Every key of dependencies.yml: plugin packages and macro packages.
-- [Lookup config reference](reference-lookups.md): Every key of a lookup's config file.
-- [Error codes reference](reference-error-codes.md): Every code DRE reports, what it means and how to fix it.
+- [dependencies.yml reference](reference-dependencies.md): Every key of dependencies.yml: the plugin packages, companion extensions and macro packages a DRE project installs, and how dre.lock pins them.
+- [Lookup config reference](reference-lookups.md): Every key of a lookup's config file: the columns, types and loading options of a mapping table kept as a file in your DRE project.
+- [Error codes reference](reference-error-codes.md): Every error code DRE reports, grouped by usage, config, plugins, connections, queries and delivery, with what each one means and how to fix it.
 - [Exit codes](exit-codes.md): What each dre exit code means, so a scheduler knows whether to retry, alert or stop.
-- [Environment variables](environment-variables.md): Every DRE_* variable and what it does.
+- [Environment variables](environment-variables.md): Every DRE_* environment variable and what it does, including DRE_RUN_AT to give a scheduled run or a late rerun a fixed, reproducible reporting period.
 - [The manifest and `run_results.json`](manifest.md): The project manifest and the per-run results file, with the manifest JSON Schema.
 - [Glossary](glossary.md): DRE terms, from Bindings and Sets to targets, sources and run artifacts.
 
@@ -98,11 +98,11 @@ The command line, every YAML file, error codes, environment variables and the ma
 
 Updating DRE and what changed in each release.
 
-- [Updating DRE](updating.md): dre system update, and how each install method updates.
+- [Updating DRE](updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
 - [New in 0.8](new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.
 - [New in 0.6](new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.
-- [New in 0.5](new-in-0.5.md): Templates follow Jinja2 more closely: Python-style lists and dicts, Jinja2 rounding and division, and the old --output-json name of dre query and dre catalog is gone.
+- [New in 0.5](new-in-0.5.md): New in DRE 0.5: templates follow Jinja2 more closely (Python-style lists and dicts, rounding, division) and an old flag of dre query and dre catalog is gone.
 - [New in 0.4](new-in-0.4.md): Reliable runs and deliveries: exit codes, cancellation and timeouts, run folders, safe uploads, retries, connection checks, Bindings at once, and xlsx styles.
 - [New in 0.3](new-in-0.3.md): Messages, several outputs per report, when:, number filters and locale:, and the teams and google_chat destinations.
 - [Upgrading to 0.2](migrating-to-0.2.md): Every rename and removed name in DRE 0.2 (connections, targets, sources, template names) and what changed in 0.2.1, with what to write instead.
@@ -111,8 +111,8 @@ Updating DRE and what changed in each release.
 
 The plugin protocol, building from source and editor setup.
 
-- [DRE plugin protocol, version 1](protocol.md): How a plugin talks to DRE, for writing a plugin in any language.
-- [Building from source](building-from-source.md): Build dre and the first-party plugins with cargo and Go.
+- [DRE plugin protocol, version 1](protocol.md): The DRE plugin protocol, version 1: how a plugin talks to DRE over streams and frames, the handshake, errors and versioning, to write one in any language.
+- [Building from source](building-from-source.md): Build dre and the first-party plugins from source: the Rust workspace with cargo and the Go Databricks plugin, for development or an unsupported platform.
 - [Editor setup](editor-setup.md): Autocomplete and validation for DRE's YAML files in VS Code and JetBrains, from the JSON Schemas.
 
 ## Adding a page
