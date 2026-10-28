@@ -754,9 +754,8 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     }
     let provides: Vec<PluginId> = plugins.iter().map(Plugin::id).collect();
     let chosen = loop {
-        let req = match next_request(&mut input, &mut out) {
-            Some(r) => r,
-            None => continue,
+        let Some(req) = next_request(&mut input, &mut out) else {
+            continue;
         };
         let Request::Hello {
             min_version,

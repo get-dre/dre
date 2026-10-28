@@ -16,9 +16,8 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
     if max_rows == 0 || max_rows > 100_000 {
         return Err("max_rows must be between 1 and 100000".into());
     }
-    let target = match project.profiles.entry(Role::Connection, profile) {
-        Entry::Use(target) => target,
-        _ => return Err(format!("connection `{profile}` has no entry for this target")),
+    let Entry::Use(target) = project.profiles.entry(Role::Connection, profile) else {
+        return Err(format!("connection `{profile}` has no entry for this target"));
     };
     let dialect: Box<dyn sqlparser::dialect::Dialect> = match target.kind.as_str() {
         "duckdb" => Box::new(DuckDbDialect {}),

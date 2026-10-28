@@ -1225,9 +1225,8 @@ fn worker(
         if shared.cancel.is_cancelled() {
             break;
         }
-        let job = match jobs.lock().unwrap().recv() {
-            Ok(j) => j,
-            Err(_) => break,
+        let Ok(job) = jobs.lock().unwrap().recv() else {
+            break;
         };
         // A row the run stopped part-way isn't recorded: it never finished, so a retry makes it.
         let Some(record) = run_job(shared, &job, &mut format, &mut dests) else {

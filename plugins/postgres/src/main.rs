@@ -498,17 +498,14 @@ fn cancel_on_server(
         return;
     };
     rt.block_on(async {
-        let stream = match tokio::time::timeout(
+        let Ok(Ok(stream)) = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::net::TcpStream::connect((host, port)),
         )
         .await
-        {
-            Ok(Ok(s)) => s,
-            _ => {
-                dre_protocol::log::warn!("couldn't reach {host}:{port} to cancel the running query");
-                return;
-            }
+        else {
+            dre_protocol::log::warn!("couldn't reach {host}:{port} to cancel the running query");
+            return;
         };
         let r = match tls {
             Some(t) => {
