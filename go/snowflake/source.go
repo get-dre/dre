@@ -25,6 +25,11 @@ import (
 type session struct {
 	db   *sql.DB
 	conn *sql.Conn
+	// life is the session's context, ended by Close; every request's context derives from it.
+	life context.Context
+	end  context.CancelFunc
+	// Cancel ends the running request's context; the driver then aborts its query in Snowflake.
+	plugin.Request
 }
 
 func open(conn map[string]any) (*session, error) {
@@ -37,27 +42,31 @@ func open(conn map[string]any) (*session, error) {
 	}
 	db := sql.OpenDB(sf.NewConnector(sf.SnowflakeDriver{}, *cfg))
 	db.SetMaxOpenConns(1)
-	c, err := db.Conn(context.Background())
+	life, end := context.WithCancel(context.Background())
+	c, err := db.Conn(life)
 	if err == nil {
 		// Sign in now, so a bad credential fails `open`, not the first statement.
-		err = c.PingContext(context.Background())
+		err = c.PingContext(life)
 	}
 	if err != nil {
 		db.Close()
+		end()
 		return nil, openErr(err, cfg)
 	}
-	return &session{db: db, conn: c}, nil
+	return &session{db: db, conn: c, life: life, end: end}, nil
 }
 
 // queryContext asks for Arrow batches, NUMBER kept exact, timestamps in microseconds.
-func queryContext() context.Context {
-	ctx := sf.WithHigherPrecision(context.Background())
+func queryContext(ctx context.Context) context.Context {
+	ctx = sf.WithHigherPrecision(ctx)
 	ctx = arrowbatches.WithArrowBatches(ctx)
 	return arrowbatches.WithTimestampOption(ctx, arrowbatches.UseMicrosecondTimestamp)
 }
 
 func (s *session) Run(query string, fn func(plugin.Result) error) error {
-	ctx := queryContext()
+	ctx, cancel := s.Start(s.life)
+	defer cancel()
+	ctx = queryContext(ctx)
 	err := s.conn.Raw(func(dc any) error {
 		q, ok := dc.(driver.QueryerContext)
 		if !ok {
@@ -97,7 +106,9 @@ func (s *session) Run(query string, fn func(plugin.Result) error) error {
 
 // Check runs EXPLAIN, which compiles the statement without running it.
 func (s *session) Check(query string) (string, error) {
-	rows, err := s.conn.QueryContext(context.Background(), "EXPLAIN "+query)
+	ctx, cancel := s.Start(s.life)
+	defer cancel()
+	rows, err := s.conn.QueryContext(ctx, "EXPLAIN "+query)
 	if err != nil {
 		return "", cleanErr(err)
 	}
@@ -114,7 +125,9 @@ func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (
 	if err != nil {
 		return plugin.Loaded{}, err
 	}
-	if _, err := s.conn.ExecContext(context.Background(), sql); err != nil {
+	ctx, cancel := s.Start(s.life)
+	defer cancel()
+	if _, err := s.conn.ExecContext(ctx, sql); err != nil {
 		return plugin.Loaded{}, cleanErr(err)
 	}
 	return plugin.Loaded{
@@ -126,6 +139,7 @@ func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (
 func (s *session) Close() {
 	s.conn.Close()
 	s.db.Close()
+	s.end()
 }
 
 // result is one statement's batches, each normalised against the column metadata.

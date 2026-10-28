@@ -61,6 +61,40 @@ type Canceller interface {
 	Cancel()
 }
 
+// Request gives each request a context that Cancel ends. A Session embeds it to be a Canceller,
+// and passes the context Start returns to its driver calls.
+type Request struct {
+	mu     sync.Mutex
+	cancel context.CancelFunc // the running request's; nil between requests
+}
+
+// Start is the running request's context, derived from parent. Call done when the request ends.
+func (r *Request) Start(parent context.Context) (ctx context.Context, done func()) {
+	ctx, cancel := context.WithCancel(parent)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
+	// A cancel that came before the context existed.
+	if Cancelled() {
+		cancel()
+	}
+	return ctx, func() {
+		r.mu.Lock()
+		r.cancel = nil
+		r.mu.Unlock()
+		cancel()
+	}
+}
+
+// Cancel ends the running request's context, if a request is running.
+func (r *Request) Cancel() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cancel != nil {
+		r.cancel()
+	}
+}
+
 // Field mirrors the protocol's `describe` entry for one profile field.
 type Field struct {
 	Name         string `json:"name"`
@@ -803,6 +837,10 @@ func (s *server) stream(res Result, rowLimit *int64) error {
 	for res.HasNext() {
 		if rowLimit != nil && rows >= *rowLimit {
 			break
+		}
+		// A session without Cancel still stops between batches.
+		if Cancelled() {
+			return errors.New("cancelled")
 		}
 		rec, err := res.Next()
 		if err == io.EOF {
