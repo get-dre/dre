@@ -67,8 +67,7 @@ here.
 - **`#[derive]`** instead of a hand-written impl that a derive produces.
 - **Named fields** instead of a tuple or a tuple struct with more than one field, outside a very
   local scope.
-- **`format!` / `write!`** instead of chains of `+` or `push_str(&format!(..))` with more than two
-  parts.
+- **`format!` / `write!`** instead of a chain of `+` that joins more than two strings.
 - **Types you can read**: annotate `.parse()`, `.into()`, `.collect()` and long iterator chains
   when the type isn't obvious; prefer `let x: T = ...` over a turbofish.
 - **No side effects in iterator chains**: no `for_each`, no long chain in a `for` header; use a
@@ -106,7 +105,7 @@ CLIPPY_CONF_DIR="$conf" cargo clippy -p <crate> --all-targets --message-format=s
   -W clippy::unwrap_used -W clippy::panic -W clippy::undocumented_unsafe_blocks \
   -W clippy::wildcard_imports -W clippy::enum_glob_use -W clippy::redundant_clone \
   -W clippy::implicit_clone -W clippy::ref_option -W clippy::manual_let_else \
-  -W clippy::format_push_string -W clippy::needless_for_each -W clippy::fn_params_excessive_bools \
+  -W clippy::needless_for_each -W clippy::fn_params_excessive_bools \
   2> clippy-audit.txt
 grep ': warning:' clippy-audit.txt | sed 's/.*warning: //' | sort | uniq -c | sort -rn   # hits per kind
 grep ': warning:' clippy-audit.txt                                                     # each hit

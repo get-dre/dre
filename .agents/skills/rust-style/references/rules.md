@@ -132,7 +132,7 @@ lint that finds it, where one exists. "Library" means the rule binds in `dre-pro
 | Context strings in `assert!` | tidy-up | grep | Non-test code. |
 | Short iterator chains, no `for_each`, no chains in `for` headers | tidy-up | `needless_for_each` | |
 | No `catch_unwind` | must fix | grep | Defense in depth at a process boundary only, with a comment. |
-| `format!` / `write!` to join more than two strings | tidy-up | `format_push_string` | |
+| `format!` / `write!` to join more than two strings | tidy-up | | `push_str(&format!(..))` already follows it. |
 
 ## Testing
 
