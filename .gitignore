@@ -9,6 +9,9 @@
 /go/*/dre-*
 /go/*/source-*
 /go/*/*.so
+/go/*/*.dylib
+/go/*/*.dll
+/go/*/*.exe
 
 # Python bytecode from .github/scripts.
 __pycache__/

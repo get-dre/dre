@@ -32,7 +32,7 @@ class TrackedArtifacts(unittest.TestCase):
             os.chmod(path, 0o755)
 
     def add(self):
-        self.git("add", "-A")
+        self.git("add", "-A", "-f")
 
     def test_a_small_text_file_is_fine(self):
         self.write("src/main.rs")
