@@ -1,2 +1,21 @@
 /target/
 .DS_Store
+
+# Go plugin build outputs: `go build` in go/<plugin>/ writes the plugin binary there.
+/go/*/bigquery
+/go/*/clickhouse
+/go/*/databricks
+/go/*/snowflake
+/go/*/dre-*
+/go/*/source-*
+/go/*/*.so
+/go/*/*.dylib
+/go/*/*.dll
+/go/*/*.exe
+
+# Python bytecode from .github/scripts.
+__pycache__/
+*.pyc
+
+# security_scan.py --report-dir output.
+security-report/

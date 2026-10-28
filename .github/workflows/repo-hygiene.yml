@@ -1,0 +1,25 @@
+name: Repository hygiene
+
+# Git must not track build outputs: a file over 1 MiB, a compiled binary, or a stray executable.
+# A tracked artifact is copied into every clone and CI checkout. This runs on every pull request,
+# without a paths filter, because an artifact can arrive in any change, including a docs-only one.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tracked-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/test_check_tracked_artifacts.py
+      - run: python3 .github/scripts/check_tracked_artifacts.py
