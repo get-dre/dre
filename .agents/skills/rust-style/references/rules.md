@@ -1,7 +1,7 @@
 # Every rule in the guide, for DRE
 
 One row per rule of the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html),
-in the guide's order. **Tier**: must fix, tidy-up, optional, or not adopted. **Lint**: the clippy
+in the guide's order. **Tier**: must fix (before approval), tidy-up, optional, or not adopted. **Lint**: the clippy
 lint that finds it, where one exists. "Library" means the rule binds in `dre-protocol` and
 `dre-core` only and is optional elsewhere.
 

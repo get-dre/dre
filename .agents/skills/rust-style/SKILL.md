@@ -34,7 +34,7 @@ here.
 6. **Tests may panic.** `unwrap()`, `expect()`, `panic!` and indexing are fine in `#[cfg(test)]`
    code, `tests/` and test fixtures.
 
-## Must fix
+## Must fix before approval
 
 - **A panic on outside input.** `unwrap()`, `expect()`, indexing, slicing or `panic!` on data
   from a user, a project file, a profile, a plugin or the network. Return a `Result` with
@@ -127,6 +127,8 @@ checked, or on a literal regex, is a tidy-up; `unwrap()` on a parsed project fil
 
 ## Reporting
 
-In a review, give each finding its tier, `file:line`, the input that breaks it (must fix) or the
+The tiers match the review skill's (`.agents/skills/allenhori-review`): in a pull request
+review, this skill supplies the Rust findings and the review skill sets the format. Without it,
+give each finding its tier, `file:line`, the input that breaks it (must fix) or the
 rule it breaks (tidy-up), and the fix. For a whole-codebase audit, report counts per rule and per
 crate first, then the must-fix items one by one.

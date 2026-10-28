@@ -61,11 +61,6 @@ gofmt -l go                              # prints nothing when the Go code is fo
 for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
 ```
 
-Rust code follows the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html)
-with DRE's own rules, for new and changed code. The `rust-style` agent skill in
-[`.agents/skills/rust-style`](.agents/skills/rust-style/SKILL.md) has the rules and an audit
-command; any coding agent can use it, and so can you.
-
 The plugin integration tests (Postgres, object store, SFTP, FTP, email) run against local
 emulators, and each one skips itself when its service isn't configured. See the `test-linux`
 job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the services and environment
@@ -140,8 +135,8 @@ Licences always fail.
 - **Rust style:** follow the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html)
   in new and changed code. `rustfmt.toml` (110 columns) and CI's clippy still decide formatting
   and lints; the API rules bind for `dre-protocol` and `dre-core`. The full list of DRE's
-  overrides is in the "Rust style" section of
-  [`.agents/skills/allenhori-review/SKILL.md`](.agents/skills/allenhori-review/SKILL.md).
+  overrides, and an audit command, is in
+  [`.agents/skills/rust-style/SKILL.md`](.agents/skills/rust-style/SKILL.md).
 - **Docs:** update `README.md` or `docs/` when you change behaviour users can see. Practices
   and opinions go in [`docs/practices.md`](docs/practices.md). A new page names its `section` and
   `position` in its front matter (the sections are in [`docs/sections.json`](docs/sections.json));
