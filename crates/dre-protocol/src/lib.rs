@@ -26,6 +26,8 @@ pub mod conformance;
 pub mod connection;
 pub mod delivery;
 pub mod frame;
+#[cfg(target_os = "linux")]
+mod fuse_fds;
 pub mod host;
 pub mod markdown;
 pub mod msg;

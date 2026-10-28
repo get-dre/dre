@@ -500,6 +500,10 @@ impl PluginProcess {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
+        // Files on a FUSE mount (a Databricks Volume as the target path) close before `execve`,
+        // or the plugin may never start (see `fuse_fds`).
+        #[cfg(target_os = "linux")]
+        crate::fuse_fds::close_in_child(&mut cmd);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
