@@ -8,7 +8,11 @@ use std::path::Path;
 use arrow::ipc::reader::FileReader;
 use serde_json::json;
 
-pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> anyhow::Result<()> {
+pub fn write_spool(spool: &Path, output: &Path, row_count: u64) -> Result<(), String> {
+    write_rows(spool, output, row_count).map_err(|e| e.to_string())
+}
+
+fn write_rows(spool: &Path, output: &Path, row_count: u64) -> Result<(), Box<dyn std::error::Error>> {
     let reader = FileReader::try_new(File::open(spool)?, None)?;
     let columns = column_types(&reader.schema());
     let mut out = BufWriter::new(File::create(output)?);

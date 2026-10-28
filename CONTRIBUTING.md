@@ -103,6 +103,12 @@ artifacts.
 
 ### When the security scan fails
 
+On a pull request that doesn't change a language's dependencies (`Cargo.toml`, `Cargo.lock`,
+`deny.toml`, `go/*/go.mod`, `go/*/go.sum`) or the scan itself, that language's advisories only
+warn: a new advisory against unchanged lockfiles isn't that pull request's doing. They fail on
+master, in the weekly run and before a release, so fix them there, in a pull request of their own.
+Licences always fail.
+
 - **A vulnerability** (RUSTSEC-… or GO-…): update the dependency to a fixed version
   (`cargo update -p <crate>`, or `go get <module>@<version>` and `go mod tidy`), and bump the
   version of every plugin whose dependencies changed. A Go standard-library advisory is fixed by
@@ -113,9 +119,8 @@ artifacts.
   ended). Never exempt a whole crate, module or severity.
 - **An exception expired:** check the advisory again. Remove the entry once a fix is in, or renew
   it with an up-to-date reason and a new date.
-- **A yanked crate:** `cargo update -p <crate>`. When no unyanked version fits yet (a dependency
-  still needs the yanked one), add a `yanked = "<crate>@<version>"` entry to the exceptions file,
-  with the reason, an owner and a short expiry, and remove it once the dependency moves on.
+- **A yanked crate** only warns: a yank isn't a vulnerability, and an advisory behind it fails on
+  its own. Run `cargo update -p <crate>` when a newer version fits.
 - **An unmaintained crate** only warns. Plan to replace it.
 - **A licence that isn't allowed:** use another dependency. If its licence is in fact compatible
   with GPL-3.0-only, add it to `licenses.allow` in `deny.toml` (both languages use that list), or,

@@ -9,6 +9,10 @@
 //! - `die`: logs to stderr and exits 5 at start
 //! - `no_sessions`: a normal source that doesn't advertise `sessions`
 //! - `no_check`: a normal source that doesn't advertise `check`
+//! - `close_probe`: speaks the protocol by hand, outside the SDK: answers `hello`, `open` and
+//!   `describe`, fails every `execute` with `fixture can't run `<sql>``, and on a protocol `close`
+//!   after an `open` writes `close` to `$DRE_FIXTURE_CLOSE_FILE`. End of input writes nothing, so
+//!   a test can tell a `close` request from a closed pipe (the SDK handles both the same way)
 //!
 //! Every `open` logs `fixture: opened read_only=<bool>` to stderr, and writes the process id to
 //! `$DRE_FIXTURE_PID_FILE` when it's set.
@@ -33,7 +37,7 @@ use dre_protocol::msg::LogLevel;
 use dre_protocol::plugin::{
     About, Destination, ErrorKind, Plugin, PluginError, ResultSink, Source, serve_package, serve_source,
 };
-use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS};
+use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
 use serde_json::{Map, Value};
 
 struct Fixture {
@@ -189,6 +193,7 @@ fn main() {
             eprintln!("boom: fixture died on purpose");
             std::process::exit(5);
         }
+        Ok("close_probe") => close_probe(),
         _ => {}
     }
     if std::env::var("DRE_FIXTURE_MODE").as_deref() == Ok("no_check") {
@@ -210,6 +215,59 @@ fn main() {
         Plugin::Source(about, Box::new(Fixture { opened: false })),
         Plugin::Destination(About::new("inbox", env!("CARGO_PKG_VERSION")), Box::new(Inbox)),
     ])
+}
+
+/// The `close_probe` mode: a source served frame by frame, recording a protocol `close`.
+fn close_probe() -> ! {
+    use dre_protocol::msg::{Envelope, Request, Response};
+    let mut stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    let mut opened = false;
+    loop {
+        let v = match dre_protocol::frame::read_frame(&mut stdin) {
+            Ok(dre_protocol::frame::Frame::Json(v)) => v,
+            Ok(dre_protocol::frame::Frame::Arrow(_)) => continue,
+            // End of input (or a broken pipe): the host went away without a `close`.
+            Err(_) => std::process::exit(0),
+        };
+        // A frame that isn't a request has no id to answer with, so it gets no reply.
+        let Ok(Envelope { id, body }) = serde_json::from_value::<Envelope<Request>>(v) else {
+            continue;
+        };
+        let reply = match body {
+            Request::Hello { .. } => Response::Hello {
+                protocol_version: dre_protocol::MAX_VERSION,
+                kind: dre_protocol::Kind::Source,
+                name: "fixture".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                capabilities: [CAP_SESSIONS, CAP_READ_ONLY, CAP_CHECK, CAP_VALIDATE]
+                    .map(String::from)
+                    .to_vec(),
+                provides: Vec::new(),
+            },
+            Request::Describe {} => Response::Describe {
+                connection_fields: Fixture { opened: false }.connection_fields(),
+                option_fields: Vec::new(),
+                identifier_quote: Some("\"".into()),
+                string_literal: None,
+                message_limit: None,
+            },
+            Request::Open { .. } => {
+                opened = true;
+                Response::Ok {}
+            }
+            Request::Execute { sql, .. } => Response::error(format!("fixture can't run `{sql}`")),
+            Request::Close {} => {
+                if opened && let Ok(f) = std::env::var("DRE_FIXTURE_CLOSE_FILE") {
+                    let _ = std::fs::write(f, "close");
+                }
+                let _ = dre_protocol::frame::write_json(&mut out, &Envelope::new(id, Response::Ok {}));
+                std::process::exit(0);
+            }
+            _ => Response::error("close_probe: unsupported request"),
+        };
+        let _ = dre_protocol::frame::write_json(&mut out, &Envelope::new(id, reply));
+    }
 }
 
 /// A destination with the source's connection fields, recording nothing.

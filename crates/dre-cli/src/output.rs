@@ -144,165 +144,182 @@ impl Printer {
         }
     }
 
+    /// Run `f` with the shared state locked. `f` must not call back into the `Printer`: the
+    /// lock isn't reentrant.
+    fn with<R>(&self, f: impl FnOnce(&mut Inner) -> R) -> R {
+        f(&mut self.inner.lock().unwrap())
+    }
+
     /// `dre run`: also write every event, at debug level, to `dre.log` in each Binding's run
     /// folder (see the module docs).
     pub fn log_runs(&self) {
-        self.inner.lock().unwrap().run_logs = true;
-    }
-
-    /// Colour a diagnostic's `error[...]`/`warning[...]` prefix.
-    pub fn diagnostic(&self, d: &dre_core::Diagnostic) -> String {
-        let i = self.inner.lock().unwrap();
-        let text = dre_core::secrets::mask(&d.to_string()).into_owned();
-        let (tone, prefix) = match d.severity {
-            dre_core::Severity::Error => (Tone::Bad, "error"),
-            dre_core::Severity::Warning => (Tone::Warn, "warning"),
-        };
-        match text.find("]: ") {
-            Some(end) if i.color => format!("{}{}", i.paint(style(tone), &text[..end + 1]), &text[end + 1..]),
-            _ => {
-                let _ = prefix;
-                text
-            }
-        }
+        self.with(|i| i.run_logs = true);
     }
 
     /// Print a diagnostic: a line of text, or with `--log-format json` a `diagnostic` event, so
     /// warnings never break the JSON stream.
     pub fn diag(&self, d: &dre_core::Diagnostic) {
-        let i = self.inner.lock().unwrap();
-        if i.format == LogFormat::Json {
+        // Text is printed after the lock is released, as before.
+        let text = self.with(|i| {
+            if i.format != LogFormat::Json {
+                return Some(i.diagnostic(d));
+            }
             let message = dre_core::secrets::mask(&d.message).into_owned();
             i.json(
                 json!({"event": "diagnostic", "severity": d.severity, "code": d.code,
                 "file": d.file, "line": d.line, "message": message}),
             );
-            return;
+            None
+        });
+        if let Some(text) = text {
+            println!("{text}");
         }
-        drop(i);
-        println!("{}", self.diagnostic(d));
     }
 
     /// `     Verb  text`, the verb right-aligned in a 10-column gutter.
     pub fn line(&self, tone: Tone, verb: &str, text: &str) {
-        self.inner.lock().unwrap().line(tone, verb, text, Level::Info);
+        self.with(|i| i.line(tone, verb, text, Level::Info));
     }
 
     /// Like [`Printer::line`], shown only with `-v`, and only as text: JSON events carry the
     /// same facts in their own fields.
     pub fn detail(&self, tone: Tone, verb: &str, text: &str) {
-        let mut i = self.inner.lock().unwrap();
-        if i.format == LogFormat::Json {
-            i.file_log("DEBUG", &format!("{verb} {text}"));
-            return;
-        }
-        i.line(tone, verb, text, Level::Debug);
+        self.with(|i| {
+            if i.format == LogFormat::Json {
+                i.file_log("DEBUG", &format!("{verb} {text}"));
+                return;
+            }
+            i.line(tone, verb, text, Level::Debug);
+        })
     }
 
     pub fn error(&self, msg: &str) {
-        let mut i = self.inner.lock().unwrap();
-        i.file_log("ERROR", msg);
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "error", "message": msg}));
-        } else {
-            i.print(Tone::Bad, "Error", msg);
-        }
+        self.with(|i| {
+            i.file_log("ERROR", msg);
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "error", "message": msg}));
+            } else {
+                i.print(Tone::Bad, "Error", msg);
+            }
+        })
     }
 
     /// Record the run's parameters in the log file (and as a JSON event).
     pub fn log_params(&self, params: &serde_json::Value) {
-        let mut i = self.inner.lock().unwrap();
-        i.file_log("INFO", &format!("Parameters {}", protected_json(params)));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "run_parameters", "parameters": params}));
-        }
+        self.with(|i| {
+            i.file_log("INFO", &format!("Parameters {}", protected_json(params)));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "run_parameters", "parameters": params}));
+            }
+        })
     }
 
     /// Where a compiled Binding's output would go: source, output file, each destination and
     /// its target (non-dev targets stand out), and the schedules that run it.
     pub fn plan(&self, p: &dre_core::run::BindingPlan) {
-        let i = self.inner.lock().unwrap();
-        let non_dev = |t: &str| t != "dev";
-        i.print(Tone::Step, "Binding", &label(&p.report, p.set.as_deref()));
-        for f in &p.compiled {
-            i.print(Tone::Good, "Compiled", &f.display().to_string());
-        }
-        i.print(
-            if non_dev(&p.target) {
-                Tone::Warn
-            } else {
-                Tone::Note
-            },
-            "Target",
-            &p.target,
-        );
-        for q in &p.queries {
-            let sources = if q.sources.is_empty() {
-                String::new()
-            } else {
-                format!(", reads {}", q.sources.join(", "))
-            };
-            let target = if q.target == p.target {
-                String::new()
-            } else {
-                format!(", target {}", q.target)
-            };
+        self.with(|i| {
+            let non_dev = |t: &str| t != "dev";
+            i.print(Tone::Step, "Binding", &label(&p.report, p.set.as_deref()));
+            for f in &p.compiled {
+                i.print(Tone::Good, "Compiled", &f.display().to_string());
+            }
             i.print(
-                Tone::Note,
-                "Query",
-                &format!("{} on {} ({}){target}{sources}", q.query, q.connection, q.kind),
-            );
-        }
-        for o in &p.outputs {
-            let what = match &o.name {
-                Some(n) => format!("{} ({}, output `{n}`)", o.output.display(), o.format),
-                None => format!("{} ({})", o.output.display(), o.format),
-            };
-            i.print(Tone::Note, "Output", &what);
-            for d in &o.destinations {
-                let target = d.target.clone().unwrap_or_default();
-                let what = match (&d.kind, &d.path) {
-                    (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
-                    (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
-                    (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
-                };
-                let tone = if d.delivers && non_dev(&target) {
+                if non_dev(&p.target) {
                     Tone::Warn
                 } else {
                     Tone::Note
+                },
+                "Target",
+                &p.target,
+            );
+            for q in &p.queries {
+                let sources = if q.sources.is_empty() {
+                    String::new()
+                } else {
+                    format!(", reads {}", q.sources.join(", "))
                 };
-                i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+                let target = if q.target == p.target {
+                    String::new()
+                } else {
+                    format!(", target {}", q.target)
+                };
+                i.print(
+                    Tone::Note,
+                    "Query",
+                    &format!("{} on {} ({}){target}{sources}", q.query, q.connection, q.kind),
+                );
             }
-        }
-        if !p.schedules.is_empty() {
-            i.print(Tone::Note, "Schedules", &p.schedules.join(", "));
-        }
+            for o in &p.outputs {
+                let what = match &o.name {
+                    Some(n) => format!("{} ({}, output `{n}`)", o.output.display(), o.format),
+                    None => format!("{} ({})", o.output.display(), o.format),
+                };
+                i.print(Tone::Note, "Output", &what);
+                for d in &o.destinations {
+                    let target = d.target.clone().unwrap_or_default();
+                    let what = match (&d.kind, &d.path) {
+                        (Some(k), Some(path)) => format!("{} ({k}), target {target} → {path}", d.profile),
+                        (Some(k), None) => format!("{} ({k}), target {target}", d.profile),
+                        (None, _) => format!("{}: `{target}` delivers nowhere (`deliver: false`)", d.profile),
+                    };
+                    let tone = if d.delivers && non_dev(&target) {
+                        Tone::Warn
+                    } else {
+                        Tone::Note
+                    };
+                    i.print(tone, if d.delivers { "Delivers" } else { "Keeps" }, &what);
+                }
+            }
+            if !p.schedules.is_empty() {
+                i.print(Tone::Note, "Schedules", &p.schedules.join(", "));
+            }
+        })
     }
 
     /// Final line of a run.
     pub fn finish(&self, what: &str) {
-        let mut i = self.inner.lock().unwrap();
-        if let Some(b) = i.bar.take() {
-            b.finish_and_clear();
-        }
-        for (_, r) in i.rows.drain() {
-            if let Some(b) = r.bar {
+        self.with(|i| {
+            if let Some(b) = i.bar.take() {
                 b.finish_and_clear();
             }
-        }
-        let (ok, failed) = (i.succeeded, i.failed);
-        let secs = i.started.elapsed().as_secs_f64();
-        let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
-        i.file_log("INFO", &format!("Finished {text}"));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "finished", "command": what, "succeeded": ok, "failed": failed, "elapsed_ms": (secs * 1000.0) as u64}));
-        } else {
-            i.print(if failed > 0 { Tone::Bad } else { Tone::Good }, "Finished", &text);
-        }
+            for (_, r) in i.rows.drain() {
+                if let Some(b) = r.bar {
+                    b.finish_and_clear();
+                }
+            }
+            let (ok, failed) = (i.succeeded, i.failed);
+            let secs = i.started.elapsed().as_secs_f64();
+            let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
+            i.file_log("INFO", &format!("Finished {text}"));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "finished", "command": what, "succeeded": ok, "failed": failed, "elapsed_ms": (secs * 1000.0) as u64}));
+            } else {
+                i.print(if failed > 0 { Tone::Bad } else { Tone::Good }, "Finished", &text);
+            }
+        })
     }
 }
 
 impl Inner {
+    /// A diagnostic's text, its `error[...]`/`warning[...]` prefix coloured.
+    fn diagnostic(&self, d: &dre_core::Diagnostic) -> String {
+        let text = dre_core::secrets::mask(&d.to_string()).into_owned();
+        let tone = match d.severity {
+            dre_core::Severity::Error => Tone::Bad,
+            dre_core::Severity::Warning => Tone::Warn,
+        };
+        match text.find("]: ") {
+            Some(end) if self.color => {
+                format!(
+                    "{}{}",
+                    self.paint(style(tone), &text[..end + 1]),
+                    &text[end + 1..]
+                )
+            }
+            _ => text,
+        }
+    }
+
     fn paint(&self, s: Style, text: &str) -> String {
         if self.color {
             format!("{s}{text}{s:#}")
@@ -518,119 +535,126 @@ fn label(report: &str, set: Option<&str>) -> String {
 
 impl Ui for Printer {
     fn targets(&mut self, t: &dre_core::run::RunTargets) {
-        {
-            let mut i = self.inner.lock().unwrap();
+        self.with(|i| {
             if i.format == LogFormat::Json {
                 i.file_log("INFO", &format!("Target {}", t.line()));
                 i.json(json!({"event": "targets", "target": t}));
             } else {
                 i.line(Tone::Note, "Target", &t.line(), Level::Info);
             }
-        }
+        });
         if let Some(w) = t.mismatch() {
             self.warn(&w);
         }
     }
 
     fn plan(&mut self, bindings: usize) {
-        let mut i = self.inner.lock().unwrap();
-        i.started = Instant::now();
-        let text = format!("{bindings} Binding{}", if bindings == 1 { "" } else { "s" });
-        i.file_log("INFO", &format!("Running {text}"));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "plan", "bindings": bindings}));
-            return;
-        }
-        if i.verbosity != Verbosity::Quiet {
-            i.print(Tone::Note, "Running", &text);
-        }
-        if i.verbosity != Verbosity::Quiet && std::io::stderr().is_terminal() && bindings > 0 {
-            let bar = i.multi().add(ProgressBar::new(bindings as u64));
-            bar.set_style(
-                ProgressStyle::with_template("{spinner:.green} [{bar:28.green/dim}] {pos}/{len} {wide_msg}")
+        self.with(|i| {
+            i.started = Instant::now();
+            let text = format!("{bindings} Binding{}", if bindings == 1 { "" } else { "s" });
+            i.file_log("INFO", &format!("Running {text}"));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "plan", "bindings": bindings}));
+                return;
+            }
+            if i.verbosity != Verbosity::Quiet {
+                i.print(Tone::Note, "Running", &text);
+            }
+            if i.verbosity != Verbosity::Quiet && std::io::stderr().is_terminal() && bindings > 0 {
+                let bar = i.multi().add(ProgressBar::new(bindings as u64));
+                bar.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.green} [{bar:28.green/dim}] {pos}/{len} {wide_msg}",
+                    )
                     .unwrap()
                     .progress_chars("█▉░"),
-            );
-            bar.enable_steady_tick(Duration::from_millis(100));
-            i.bar = Some(bar);
-        }
+                );
+                bar.enable_steady_tick(Duration::from_millis(100));
+                i.bar = Some(bar);
+            }
+        })
     }
 
     fn running(&mut self, label: &str, running: bool) {
-        let mut i = self.inner.lock().unwrap();
-        if running {
-            i.running.push(label.to_string());
-        } else {
-            i.running.retain(|l| l != label);
-        }
-        if let Some(b) = &i.bar {
-            b.set_message(format!("running {}", i.running.join(", ")));
-        }
+        self.with(|i| {
+            if running {
+                i.running.push(label.to_string());
+            } else {
+                i.running.retain(|l| l != label);
+            }
+            if let Some(b) = &i.bar {
+                b.set_message(format!("running {}", i.running.join(", ")));
+            }
+        })
     }
 
     fn binding_start(&mut self, report: &str, set: Option<&str>) {
-        let mut i = self.inner.lock().unwrap();
-        i.seen_binding = true;
-        i.in_binding = true;
-        i.pending.clear();
-        i.current = label(report, set);
-        i.file_log("INFO", "Started");
-        if let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty()) {
-            b.set_message(i.current.clone());
-        }
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "binding_start", "report": report, "set": set}));
-        } else if i.verbosity == Verbosity::Debug {
-            let text = i.current.clone();
-            i.print(Tone::Note, "Started", &text);
-        }
+        self.with(|i| {
+            i.seen_binding = true;
+            i.in_binding = true;
+            i.pending.clear();
+            i.current = label(report, set);
+            i.file_log("INFO", "Started");
+            if let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty()) {
+                b.set_message(i.current.clone());
+            }
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "binding_start", "report": report, "set": set}));
+            } else if i.verbosity == Verbosity::Debug {
+                let text = i.current.clone();
+                i.print(Tone::Note, "Started", &text);
+            }
+        })
     }
 
     fn step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
-        let mut i = self.inner.lock().unwrap();
-        // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
-        if level == Level::Info
-            && let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty())
-        {
-            b.set_message(one_line(&format!("{} · {verb} {detail}", i.current), 60));
-        }
-        let text = match elapsed {
-            Some(d) => format!("{} {detail}", i.paint(DIM, &timing(d))),
-            None => detail.to_string(),
-        };
-        if i.format == LogFormat::Json {
-            i.file_log("DEBUG", &format!("{verb} {detail}"));
-            if i.shows(level) {
-                let ms = elapsed.map(|d| d.as_millis() as u64);
-                i.json(json!({"event": "step", "binding": i.current, "verb": verb, "message": detail, "elapsed_ms": ms}));
+        self.with(|i| {
+            // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
+            if level == Level::Info
+                && let Some(b) = i.bar.as_ref().filter(|_| i.running.is_empty())
+            {
+                b.set_message(one_line(&format!("{} · {verb} {detail}", i.current), 60));
             }
-            return;
-        }
-        i.line(Tone::Step, verb, &text, level);
+            let text = match elapsed {
+                Some(d) => format!("{} {detail}", i.paint(DIM, &timing(d))),
+                None => detail.to_string(),
+            };
+            if i.format == LogFormat::Json {
+                i.file_log("DEBUG", &format!("{verb} {detail}"));
+                if i.shows(level) {
+                    let ms = elapsed.map(|d| d.as_millis() as u64);
+                    i.json(json!({"event": "step", "binding": i.current, "verb": verb, "message": detail, "elapsed_ms": ms}));
+                }
+                return;
+            }
+            i.line(Tone::Step, verb, &text, level);
+        })
     }
 
     fn warn(&mut self, msg: &str) {
-        let mut i = self.inner.lock().unwrap();
-        i.file_log("WARN", msg);
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "warning", "binding": i.current, "message": msg}));
-        } else if i.verbosity != Verbosity::Quiet {
-            i.print(Tone::Warn, "Warning", msg);
-        }
+        self.with(|i| {
+            i.file_log("WARN", msg);
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "warning", "binding": i.current, "message": msg}));
+            } else if i.verbosity != Verbosity::Quiet {
+                i.print(Tone::Warn, "Warning", msg);
+            }
+        })
     }
 
     fn binding_log(&mut self, path: &Path) {
-        let mut i = self.inner.lock().unwrap();
-        if !i.run_logs {
-            return;
-        }
-        if let Some(mut f) = LogFile::open(path) {
-            for line in i.header.iter().chain(i.pending.iter()) {
-                f.write(line);
+        self.with(|i| {
+            if !i.run_logs {
+                return;
             }
-            i.pending.clear();
-            i.log = Some(f);
-        }
+            if let Some(mut f) = LogFile::open(path) {
+                for line in i.header.iter().chain(i.pending.iter()) {
+                    f.write(line);
+                }
+                i.pending.clear();
+                i.log = Some(f);
+            }
+        })
     }
 
     fn binding_vars(
@@ -639,112 +663,113 @@ impl Ui for Printer {
         schedule_vars: Option<&serde_json::Map<String, serde_json::Value>>,
         vars: &serde_json::Map<String, serde_json::Value>,
     ) {
-        let mut i = self.inner.lock().unwrap();
-        if let Some(name) = schedule {
-            let schedule_values = schedule_vars.cloned().unwrap_or_default();
-            i.file_log(
-                "INFO",
-                &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
-            );
-        }
-        let variables = protected_json(vars);
-        i.file_log("INFO", &format!("Vars {variables}"));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
-        } else if i.shows(Level::Debug) {
-            let text = i.paint(DIM, &variables);
-            i.print(Tone::Note, "Vars", &text);
-        }
+        self.with(|i| {
+            if let Some(name) = schedule {
+                let schedule_values = schedule_vars.cloned().unwrap_or_default();
+                i.file_log(
+                    "INFO",
+                    &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
+                );
+            }
+            let variables = protected_json(vars);
+            i.file_log("INFO", &format!("Vars {variables}"));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));
+            } else if i.shows(Level::Debug) {
+                let text = i.paint(DIM, &variables);
+                i.print(Tone::Note, "Vars", &text);
+            }
+        })
     }
 
     fn compiled(&mut self, p: &dre_core::run::BindingPlan) {
-        let mut i = self.inner.lock().unwrap();
-        for f in &p.compiled {
-            i.file_log("INFO", &format!("Compiled {}", f.display()));
-        }
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "compiled", "plan": p}));
-        } else {
+        self.with(|i| {
             for f in &p.compiled {
-                i.print(Tone::Good, "Compiled", &f.display().to_string());
+                i.file_log("INFO", &format!("Compiled {}", f.display()));
             }
-        }
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "compiled", "plan": p}));
+            } else {
+                for f in &p.compiled {
+                    i.print(Tone::Good, "Compiled", &f.display().to_string());
+                }
+            }
+        })
     }
 
     fn message(&mut self, m: &dre_core::run::ShownMessage) {
-        let mut i = self.inner.lock().unwrap();
-        i.file_log("INFO", &format!("Message {}\n{}", m.title, m.text));
-        if i.format == LogFormat::Json {
-            i.json(json!({"event": "message", "message": m}));
-            return;
-        }
-        let head = match &m.output {
-            Some(n) => format!("{} (output `{n}`)", m.title),
-            None => m.title.clone(),
-        };
-        i.print(Tone::Good, "Message", &head);
-        let body: String = m.text.lines().map(|l| format!("  {l}\n")).collect();
-        i.print(Tone::Note, "", &format!("\n{}", body.trim_end()));
-        for n in &m.notes {
-            i.print(Tone::Note, "Note", n);
-        }
+        self.with(|i| {
+            i.file_log("INFO", &format!("Message {}\n{}", m.title, m.text));
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "message", "message": m}));
+                return;
+            }
+            let head = match &m.output {
+                Some(n) => format!("{} (output `{n}`)", m.title),
+                None => m.title.clone(),
+            };
+            i.print(Tone::Good, "Message", &head);
+            let body: String = m.text.lines().map(|l| format!("  {l}\n")).collect();
+            i.print(Tone::Note, "", &format!("\n{}", body.trim_end()));
+            for n in &m.notes {
+                i.print(Tone::Note, "Note", n);
+            }
+        })
     }
 
     fn binding_end(&mut self, o: &BindingOutcome) {
-        let mut i = self.inner.lock().unwrap();
-        let name = label(&o.report, o.set.as_deref());
-        let (tone, verb) = match o.status {
-            Status::Error => (Tone::Bad, "Failed"),
-            Status::Success => (Tone::Good, "Succeeded"),
-            Status::DryRun => (Tone::Good, "Compiled"),
-            Status::Checked => (Tone::Good, "Checked"),
-            Status::Cancelled => (Tone::Bad, "Cancelled"),
-            Status::TimedOut => (Tone::Bad, "Timed out"),
-        };
-        if matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut) {
-            i.failed += 1;
-        } else {
-            i.succeeded += 1;
-        }
-        if let Some(b) = &i.bar {
-            b.inc(1);
-        }
-        let detail = match &o.error {
-            Some(e) => e.clone(),
-            None => o.summary.clone(),
-        };
-        i.file_log(
-            if o.error.is_some() { "ERROR" } else { "INFO" },
-            &format!("{verb} in {} {detail}", fmt_secs(o.elapsed.as_secs_f64())),
-        );
-        i.current.clear();
-        i.log = None;
-        i.in_binding = false;
-        if i.format == LogFormat::Json {
-            i.json(json!({
-                "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
-                "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
-                "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
-                "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
-                "timezone": o.timezone,
-            }));
-            return;
-        }
-        if i.verbosity == Verbosity::Quiet
-            && !matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut)
-        {
-            return;
-        }
-        let name = i.paint(Style::new().effects(Effects::BOLD), &name);
-        let text = format!("{} {name}  {detail}", i.paint(DIM, &timing(o.elapsed)));
-        i.print(tone, verb, text.trim_end());
+        self.with(|i| {
+            let name = label(&o.report, o.set.as_deref());
+            let (tone, verb) = match o.status {
+                Status::Error => (Tone::Bad, "Failed"),
+                Status::Success => (Tone::Good, "Succeeded"),
+                Status::DryRun => (Tone::Good, "Compiled"),
+                Status::Checked => (Tone::Good, "Checked"),
+                Status::Cancelled => (Tone::Bad, "Cancelled"),
+                Status::TimedOut => (Tone::Bad, "Timed out"),
+            };
+            if matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut) {
+                i.failed += 1;
+            } else {
+                i.succeeded += 1;
+            }
+            if let Some(b) = &i.bar {
+                b.inc(1);
+            }
+            let detail = match &o.error {
+                Some(e) => e.clone(),
+                None => o.summary.clone(),
+            };
+            i.file_log(
+                if o.error.is_some() { "ERROR" } else { "INFO" },
+                &format!("{verb} in {} {detail}", fmt_secs(o.elapsed.as_secs_f64())),
+            );
+            i.current.clear();
+            i.log = None;
+            i.in_binding = false;
+            if i.format == LogFormat::Json {
+                i.json(json!({
+                    "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
+                    "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
+                    "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
+                    "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
+                    "timezone": o.timezone,
+                }));
+                return;
+            }
+            if i.verbosity == Verbosity::Quiet
+                && !matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut)
+            {
+                return;
+            }
+            let name = i.paint(Style::new().effects(Effects::BOLD), &name);
+            let text = format!("{} {name}  {detail}", i.paint(DIM, &timing(o.elapsed)));
+            i.print(tone, verb, text.trim_end());
+        })
     }
 
     fn choose_set(&mut self, report: &str, sets: &[String]) -> Result<Option<String>, String> {
-        let (multi, bar) = {
-            let i = self.inner.lock().unwrap();
-            (i.multi.clone(), i.bar.clone())
-        };
+        let (multi, bar) = self.with(|i| (i.multi.clone(), i.bar.clone()));
         let ask = || -> Result<Option<String>, String> {
             eprintln!("Report `{report}` has several Sets:");
             for (i, s) in sets.iter().enumerate() {
@@ -783,47 +808,45 @@ impl Ui for Printer {
         let p = self.clone();
         Arc::new(move |label, sql| {
             let body: String = sql.trim_end().lines().map(|l| format!("\n    {l}")).collect();
-            p.inner
-                .lock()
-                .unwrap()
-                .file_log("DEBUG", &format!("SQL {label}:{body}"));
+            p.with(|i| i.file_log("DEBUG", &format!("SQL {label}:{body}")));
         })
     }
 
     fn rows(&mut self, progress: &dre_core::run::RowProgress) {
-        self.inner.lock().unwrap().rows(progress);
+        self.with(|i| i.rows(progress));
     }
 
     fn plugin_log(&self) -> LogSink {
         let p = self.clone();
         Arc::new(move |plugin, line| {
-            let mut i = p.inner.lock().unwrap();
-            // `info: ...` lines are for the person (e.g. waiting for a warehouse to start).
-            if let Some(msg) = line.strip_prefix("info: ") {
-                i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
-                return;
-            }
-            // `warning: ...` lines are too (a message cut short to fit the service).
-            if let Some(msg) = line.strip_prefix("warning: ") {
-                i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
-                return;
-            }
-            // `debug: ...` is a plugin's `log` message at debug; anything else is a raw stderr line
-            // (a panic, a native driver), kept in the log file at WARN.
-            let (level, line) = match line.strip_prefix("debug: ") {
-                Some(rest) => ("DEBUG", rest),
-                None => ("WARN", line),
-            };
-            i.file_log(level, &format!("[{plugin}] {line}"));
-            if !i.shows(Level::Debug) {
-                return;
-            }
-            if i.format == LogFormat::Json {
-                i.json(json!({"event": "plugin_log", "plugin": plugin, "message": line}));
-            } else {
-                let text = i.paint(DIM, &format!("[{plugin}] {line}"));
-                i.print(Tone::Note, "Plugin", &text);
-            }
+            p.with(|i| {
+                // `info: ...` lines are for the person (e.g. waiting for a warehouse to start).
+                if let Some(msg) = line.strip_prefix("info: ") {
+                    i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
+                    return;
+                }
+                // `warning: ...` lines are too (a message cut short to fit the service).
+                if let Some(msg) = line.strip_prefix("warning: ") {
+                    i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
+                    return;
+                }
+                // `debug: ...` is a plugin's `log` message at debug; anything else is a raw stderr line
+                // (a panic, a native driver), kept in the log file at WARN.
+                let (level, line) = match line.strip_prefix("debug: ") {
+                    Some(rest) => ("DEBUG", rest),
+                    None => ("WARN", line),
+                };
+                i.file_log(level, &format!("[{plugin}] {line}"));
+                if !i.shows(Level::Debug) {
+                    return;
+                }
+                if i.format == LogFormat::Json {
+                    i.json(json!({"event": "plugin_log", "plugin": plugin, "message": line}));
+                } else {
+                    let text = i.paint(DIM, &format!("[{plugin}] {line}"));
+                    i.print(Tone::Note, "Plugin", &text);
+                }
+            })
         })
     }
 }

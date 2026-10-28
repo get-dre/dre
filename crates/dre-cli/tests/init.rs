@@ -5,7 +5,6 @@ mod common;
 use std::path::Path;
 
 use common::test_plugins;
-use sha2::{Digest, Sha256};
 
 fn registry(dir: &Path) {
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
@@ -13,7 +12,7 @@ fn registry(dir: &Path) {
     let reg = dir.join("registry");
     std::fs::create_dir_all(&reg).unwrap();
     std::fs::write(reg.join("fixture"), &bin).unwrap();
-    let sha: String = Sha256::digest(&bin).iter().map(|b| format!("{b:02x}")).collect();
+    let sha = dre_core::checksum::sha256_hex(&bin);
     let plat = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
     let art = serde_json::json!({ plat: {"url": reg.join("fixture").to_string_lossy(), "sha256": sha} });
     // One package, `fixture`, with a source and a destination (`inbox`).

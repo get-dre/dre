@@ -7,14 +7,10 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use sha2::{Digest, Sha256};
+use dre_core::checksum::sha256_hex as sha;
 
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 const RECEIPT: &str = "dre-receipt.json";
-
-fn sha(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
-}
 
 fn platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)

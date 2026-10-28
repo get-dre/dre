@@ -84,7 +84,7 @@ jobs:
       # Every Rust cache is saved only from master, so PRs can't evict master's caches or each
       # other's, and every run (PRs included) restores master's. The key follows Cargo.lock, the
       # toolchain and CARGO_* variables, not Cargo.toml's [profile] settings: after changing those,
-      # bump prefix-key here and in skills.yml, or master keeps its stale cache.
+      # bump prefix-key in all three jobs (lint, test-linux, test), or master keeps its stale cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust

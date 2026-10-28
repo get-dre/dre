@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,15 +34,18 @@ type session struct {
 	startTime time.Duration // job_creation_timeout_seconds
 	retries   int
 	retryFor  time.Duration
+	// life is the session's context, ended by Close; every request's context derives from it.
+	life context.Context
+	end  context.CancelFunc
+	plugin.Request
 }
 
-func open(conn map[string]any) (*session, error) {
+func open(conn map[string]any) (_ *session, err error) {
 	project := first(conn, "project", "database")
 	if project == "" {
 		return nil, fmt.Errorf("the profile output needs a `project` field (dbt's `database`)")
 	}
 	s := &session{project: project, dataset: first(conn, "dataset", "schema")}
-	var err error
 	if s.maxBilled, err = plugin.Int(conn, "maximum_bytes_billed", 0); err != nil {
 		return nil, err
 	}
@@ -76,7 +81,13 @@ func open(conn map[string]any) (*session, error) {
 		return nil, fmt.Errorf("`priority` must be interactive or batch, got `%s`", p)
 	}
 
-	ctx := context.Background()
+	s.life, s.end = context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			s.end()
+		}
+	}()
+	ctx := s.life
 	ts, err := tokenSource(ctx, conn)
 	if err != nil {
 		return nil, err
@@ -165,31 +176,68 @@ func (s *session) query(sql string) *bigquery.Query {
 	return q
 }
 
-// context bounds one job: creation plus execution timeouts, when set.
-func (s *session) context() (context.Context, context.CancelFunc) {
-	if s.jobTime > 0 || s.startTime > 0 {
-		return context.WithTimeout(context.Background(), s.jobTime+s.startTime+time.Minute)
+// context is one request's context: ended by Cancel (which stops its retries and its job, see
+// Run), and bounded by the creation plus execution timeouts when set.
+func (s *session) context() (context.Context, func()) {
+	ctx, done := s.Start(s.life)
+	if s.jobTime == 0 && s.startTime == 0 {
+		return ctx, done
 	}
-	return context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(ctx, s.jobTime+s.startTime+time.Minute)
+	return ctx, func() { cancel(); done() }
 }
 
-// Run executes one statement. A statement that fails with a transient error runs again, up to
-// job_retries times within job_retry_deadline_seconds.
+// retry runs f again after a transient error, up to job_retries times within
+// job_retry_deadline_seconds. A cancelled request isn't tried again, and its wait ends at once.
+func (s *session) retry(ctx context.Context, f func() error) error {
+	start := time.Now()
+	for attempt := 0; ; attempt++ {
+		err := f()
+		if err == nil || attempt >= s.retries || !transient(err) || (s.retryFor > 0 && time.Since(start) > s.retryFor) ||
+			ctx.Err() != nil || plugin.Cancelled() {
+			return err
+		}
+		debugf("retrying after a transient error: %v", err)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
+}
+
+// Run executes one statement, retried after a transient error (see retry). A retry reads the
+// same job again while it runs, and submits a new job only once that one has ended: two jobs
+// would both run and bill. A cancelled statement's job is cancelled in BigQuery too: ending the
+// context only stops the wait for it.
 func (s *session) Run(sql string, fn func(plugin.Result) error) error {
 	ctx, cancel := s.context()
 	defer cancel()
-	start := time.Now()
+	var job *bigquery.Job // nil until submitted, and again once it has ended
+	var id string         // the job's id, known before BigQuery replies to its creation
 	var it *bigquery.RowIterator
-	var err error
-	for attempt := 0; ; attempt++ {
-		it, err = s.query(sql).Read(ctx)
-		if err == nil || attempt >= s.retries || !transient(err) || (s.retryFor > 0 && time.Since(start) > s.retryFor) {
-			break
+	err := s.retry(ctx, func() error {
+		var err error
+		if job == nil {
+			q := s.query(sql)
+			q.JobID = newJobID()
+			id = q.JobID
+			if job, err = q.Run(ctx); err != nil {
+				job = nil
+				return err
+			}
 		}
-		debugf("retrying after a transient error: %v", err)
-		time.Sleep(time.Duration(attempt+1) * time.Second)
-	}
+		if it, err = job.Read(ctx); err != nil && ended(ctx, job) {
+			job = nil
+		}
+		return err
+	})
 	if err != nil {
+		// A cancelled request stops its job; so does one that gave up while its job still runs
+		// (job is nil once BigQuery says it ended).
+		if ctx.Err() != nil || job != nil {
+			s.cancelJob(job, id)
+		}
 		return cleanErr(err)
 	}
 	res, err := newResult(it)
@@ -236,15 +284,51 @@ func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (
 	}, nil
 }
 
+// ended reports whether BigQuery says job has finished, failed or not. Unknown counts as still
+// running, so the job is read again rather than run twice.
+func ended(ctx context.Context, job *bigquery.Job) bool {
+	st, err := job.Status(ctx)
+	return err == nil && st.Done()
+}
+
+// cancelJob asks BigQuery to stop a job whose request ended. It doesn't wait for the job to stop.
+// job is nil when the request ended before BigQuery replied to the job's creation: the job may
+// exist all the same, so it is looked up by id.
+func (s *session) cancelJob(job *bigquery.Job, id string) {
+	ctx, cancel := context.WithTimeout(s.life, 15*time.Second)
+	defer cancel()
+	var err error
+	if job == nil {
+		job, err = s.client.JobFromIDLocation(ctx, id, s.client.Location)
+	}
+	if err == nil {
+		err = job.Cancel(ctx)
+	}
+	if err != nil {
+		debugf("can't cancel BigQuery job %s: %v", id, err)
+		return
+	}
+	slog.Info("asked BigQuery to cancel job " + id)
+}
+
+// newJobID is a job id chosen here, not by BigQuery, so a job can be cancelled before BigQuery
+// replies to its creation.
+func newJobID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return "dre_" + hex.EncodeToString(b)
+}
+
 func (s *session) Close() {
 	if s.id != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(s.life, 30*time.Second)
 		if job, err := s.query("CALL BQ.ABORT_SESSION()").Run(ctx); err == nil {
 			_, _ = job.Wait(ctx)
 		}
 		cancel()
 	}
 	s.client.Close()
+	s.end()
 }
 
 // tempTableSQL is a temp table holding recs. Every column is typed in the array's STRUCT, so an

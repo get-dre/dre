@@ -6,8 +6,11 @@
 # DRE_VERSION     the release to install, e.g. v0.0.1-alpha (default: the newest, pre-releases
 #                 included)
 # DRE_INSTALL_DIR where to put dre (default: ~/.local/bin)
+# GITHUB_TOKEN    sent to GitHub's API when finding the newest release, for its higher rate limit
 #
 # Plugins aren't installed here: `dre deps` (or `dre init`) downloads the ones a project needs.
+# No pipefail: `printf | grep -q` would then fail on a large page (grep exits early, printf gets
+# SIGPIPE). The commands whose failure matters run outside pipelines instead.
 set -eu
 
 repo="get-dre/dre"
@@ -29,11 +32,13 @@ case "$(uname -m)" in
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
 
+# curl's `api` keeps an error response's body (no -f): GitHub's API says what went wrong there.
+# wget drops it, so its failure gets the general message.
 if command -v curl >/dev/null 2>&1; then
-  get() { curl -fsSL "$1"; }
+  api() { curl -sSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
   get_to() { curl -fsSL -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
-  get() { wget -qO- "$1"; }
+  api() { wget -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
   get_to() { wget -qO "$2" "$1"; }
 else
   fail "needs curl or wget"
@@ -45,10 +50,20 @@ if [ -z "$tag" ]; then
   # repository also releases its plugins (duckdb-v1.0.0, ...), which can fill whole pages.
   page=1
   while [ -z "$tag" ] && [ "$page" -le 10 ]; do
-    list="$(get "https://api.github.com/repos/$repo/releases?per_page=100&page=$page")" ||
-      fail "can't list the releases of $repo"
+    list="$(api "https://api.github.com/repos/$repo/releases?per_page=100&page=$page")" ||
+      fail "can't list the releases of $repo from GitHub's API. A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
     tag="$(printf '%s\n' "$list" | sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' | head -n 1)"
-    printf '%s\n' "$list" | grep -q '"tag_name"' || break
+    case "$list" in
+      *'"tag_name"'*) ;;
+      *)
+        # No releases on this page: past the last one (`[]`), or an error such as the rate limit.
+        [ "$(printf '%s' "$list" | tr -d ' \n\r\t')" = "[]" ] && break
+        message="$(printf '%s\n' "$list" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
+        hint="A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
+        [ -z "$message" ] || fail "GitHub's API says: ${message%.}. $hint"
+        fail "can't list the releases of $repo: GitHub's API sent something unexpected. $hint"
+        ;;
+    esac
     page=$((page + 1))
   done
   [ -n "$tag" ] || fail "can't find a release of $repo"
@@ -62,26 +77,31 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading dre $tag for $os-$arch"
-get_to "$base/$archive" "$tmp/$archive" || fail "can't download $base/$archive"
+get_to "$base/$archive" "$tmp/$archive" ||
+  fail "can't download $base/$archive; is $tag a release? See https://github.com/$repo/releases"
 get_to "$base/SHA256SUMS" "$tmp/SHA256SUMS" || fail "can't download $base/SHA256SUMS"
 
 want="$(awk -v f="$archive" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUMS")"
+# No pipeline: a failing checksum tool must not look like a mismatch.
 if command -v sha256sum >/dev/null 2>&1; then
-  got="$(sha256sum "$tmp/$archive" | cut -d' ' -f1)"
+  sum="$(sha256sum "$tmp/$archive")" || fail "sha256sum can't read $archive; nothing was installed"
 else
-  got="$(shasum -a 256 "$tmp/$archive" | cut -d' ' -f1)"
+  sum="$(shasum -a 256 "$tmp/$archive")" || fail "shasum can't read $archive; nothing was installed"
 fi
+got="${sum%% *}"
 [ -n "$want" ] && [ "$want" = "$got" ] || fail "checksum mismatch for $archive; nothing was installed"
 
-tar -xzf "$tmp/$archive" -C "$tmp"
-mkdir -p "$dir"
-mv "$tmp/dre" "$dir/dre"
-chmod 755 "$dir/dre"
+tar -xzf "$tmp/$archive" -C "$tmp" || fail "can't unpack $archive; nothing was installed"
+if ! { mkdir -p "$dir" && [ -w "$dir" ]; } 2>/dev/null; then
+  fail "can't write to $dir; set DRE_INSTALL_DIR to a folder you own (default: ~/.local/bin), or run the installer with sudo"
+fi
+mv "$tmp/dre" "$dir/dre" && chmod 755 "$dir/dre" || fail "can't put dre in $dir"
 # The receipt tells `dre system update` this is a direct install it may replace.
 if [ -f "$tmp/dre-receipt.json" ]; then
-  mv "$tmp/dre-receipt.json" "$dir/dre-receipt.json"
+  mv "$tmp/dre-receipt.json" "$dir/dre-receipt.json" || fail "can't put dre-receipt.json in $dir"
 fi
-echo "Installed $("$dir/dre" --version) to $dir/dre"
+installed="$("$dir/dre" --version 2>&1)" || fail "installed $dir/dre, but it doesn't run: $installed"
+echo "Installed $installed to $dir/dre"
 
 case ":$PATH:" in
   *":$dir:"*) ;;

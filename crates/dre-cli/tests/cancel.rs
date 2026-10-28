@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use common::TestProject;
+use common::{TestProject, alive};
 
 const PROFILES: &str = "\
 connections:
@@ -79,9 +79,7 @@ fn plugin_pid(child: &mut Child, pid_file: &Path) -> u32 {
             let _ = child.stderr.take().unwrap().read_to_string(&mut out);
             panic!("dre ended ({status}) before the plugin started:\n{out}");
         }
-        if let Ok(s) = std::fs::read_to_string(pid_file)
-            && let Ok(pid) = s.trim().parse()
-        {
+        if let Some(pid) = common::read_pid(pid_file) {
             // Give it a moment to get into the slow statement.
             std::thread::sleep(Duration::from_millis(500));
             return pid;
@@ -114,26 +112,6 @@ fn terminate(child: &Child) {
     }
     // SAFETY: sends Ctrl-Break to the child's own process group.
     assert_ne!(unsafe { GenerateConsoleCtrlEvent(1, child.id()) }, 0);
-}
-
-fn alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success()
-    }
-    #[cfg(windows)]
-    {
-        let out = Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .unwrap();
-        String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
-    }
 }
 
 fn wait(child: Child, limit: Duration) -> (i32, String) {

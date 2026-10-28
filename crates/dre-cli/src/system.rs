@@ -407,10 +407,7 @@ fn replace(exe: &Path, release: &Release) -> Result<(), String> {
             )
         })?;
     let bytes = manager::fetch(&asset(&archive)?).map_err(|e| format!("the update failed: {e}"))?;
-    let got = {
-        use sha2::Digest;
-        dre_core::manifest::hex(&sha2::Sha256::digest(&bytes))
-    };
+    let got = dre_core::checksum::sha256_hex(&bytes);
     if got != want {
         return Err(format!(
             "the update failed: {archive} doesn't match its SHA256SUMS entry (expected {want}, got {got})"

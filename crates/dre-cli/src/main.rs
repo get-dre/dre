@@ -545,10 +545,9 @@ fn explain(code: &str) -> ExitCode {
 }
 
 fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
-    // With auto-install off, a missing package is reported by the load.
-    if !a.project.no_auto_install {
-        plugins::sync_packages(&a.project.project_dir, printer);
-    }
+    // A failed or skipped install isn't fatal here: the load reports a missing package with
+    // the rest.
+    install_packages(&a.project, printer);
     let selector = selection(&a.select, &a.selector);
     let (project, mut diags) = project::load(&a.project.project_dir, &a.project.load_options());
     // validate checks every report, so templates that don't render are its errors too.
@@ -791,10 +790,7 @@ fn json_command(
     printer: &output::Printer,
     build: impl FnOnce(&dre_core::project::Project) -> Result<serde_json::Value, String>,
 ) -> ExitCode {
-    if !args.no_auto_install && !plugins::sync_packages(&args.project_dir, printer) {
-        return exit::not_started();
-    }
-    let Some((project, _)) = load_for_run(args, printer) else {
+    let Some((project, _)) = load_project(args, printer) else {
         return exit::not_started();
     };
     let file = output.output_file;
@@ -817,20 +813,12 @@ fn json_command(
 
 /// `dre compile`: render the selection into target/compiled/ and list the files.
 fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
+    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
-    // Compiling only needs the source plugin for templates that query; with installing off, a
-    // missing plugin is reported by the Binding that needs it.
-    if !a.project.no_auto_install && !plugins::ensure(&project, true, false, &printer) {
-        return exit::not_started();
-    }
-    let mut diags = dre_core::Diagnostics::default();
-    check_plugin_uses(&project, &a.project, &mut diags);
-    if !report_diags(&diags, &printer) {
+    if !ready_plugins(&project, &a.project, NeedPlugins::IfInstalling, &printer)
+        || !check_project(&project, &a.project, &printer, Checks::PluginUses)
+    {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
@@ -962,6 +950,72 @@ fn target_line(p: &dre_core::project::Project) -> String {
     format!("{} ({})", p.target_name, p.target_from)
 }
 
+/// What a project command needs of the project's plugins before it starts.
+#[derive(Clone, Copy)]
+enum NeedPlugins {
+    /// All of them: installed, or with installing off, already there (`dre run`, `dre release`).
+    All,
+    /// Installed unless installing is off; then a missing one is reported by the Binding that
+    /// needs it (`dre compile`, whose templates may not query).
+    IfInstalling,
+}
+
+/// Install the project's macro packages, unless installing is off. False after printing why.
+fn install_packages(args: &ProjectArgs, printer: &output::Printer) -> bool {
+    args.no_auto_install || plugins::sync_packages(&args.project_dir, printer)
+}
+
+/// The start of every project command but `validate` and `deps`: [`install_packages`], then
+/// [`load_for_run`].
+fn load_project(
+    args: &ProjectArgs,
+    printer: &output::Printer,
+) -> Option<(dre_core::project::Project, Option<String>)> {
+    if !install_packages(args, printer) {
+        return None;
+    }
+    load_for_run(args, printer)
+}
+
+/// Install or check the project's plugins, as `need` says. False after printing why.
+fn ready_plugins(
+    project: &dre_core::project::Project,
+    args: &ProjectArgs,
+    need: NeedPlugins,
+    printer: &output::Printer,
+) -> bool {
+    let install = !args.no_auto_install;
+    match need {
+        NeedPlugins::All => plugins::ensure(project, install, false, printer),
+        NeedPlugins::IfInstalling => !install || plugins::ensure(project, true, false, printer),
+    }
+}
+
+/// What [`check_project`] checks.
+#[derive(Clone, Copy, PartialEq)]
+enum Checks {
+    /// The project's plugins are declared (`dre compile`).
+    PluginUses,
+    /// That, then every connection's settings (`dre run`).
+    PluginUsesAndOptions,
+}
+
+/// Check the project as `checks` says. False after printing the diagnostics, when there are
+/// errors.
+fn check_project(
+    project: &dre_core::project::Project,
+    args: &ProjectArgs,
+    printer: &output::Printer,
+    checks: Checks,
+) -> bool {
+    let mut diags = dre_core::Diagnostics::default();
+    check_plugin_uses(project, args, &mut diags);
+    if checks == Checks::PluginUsesAndOptions && !diags.has_errors() {
+        dre_core::options::check(project, false, &mut diags);
+    }
+    report_diags(&diags, printer)
+}
+
 /// Load the project for `compile` and `run`, writing its manifest; `None` (after printing
 /// why) when it can't run. Also returns the SHA-256 of the manifest written.
 fn load_for_run(
@@ -1077,13 +1131,10 @@ fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
 
 /// `dre release`: deliver a run's held deliveries.
 fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, _)) = load_for_run(&a.project, &printer) else {
+    let Some((project, _)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
-    if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
+    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
         return exit::not_started();
     }
     let by =
@@ -1164,10 +1215,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone());
-    if !a.project.no_auto_install && !plugins::sync_packages(&a.project.project_dir, &printer) {
-        return exit::not_started();
-    }
-    let Some((project, manifest_checksum)) = load_for_run(&a.project, &printer) else {
+    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
         return exit::not_started();
     };
     if let Some(path) = &a.output_json {
@@ -1177,11 +1225,12 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
             return exit::not_started();
         }
     }
+    // Run logs start before the plugins are installed, so the log files record installing them.
     printer.log_runs();
     for s in project.settings.lines() {
         printer.detail(output::Tone::Note, "Setting", &s);
     }
-    if !plugins::ensure(&project, !a.project.no_auto_install, false, &printer) {
+    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
         return exit::not_started();
     }
     // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
@@ -1201,48 +1250,26 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
         },
         None => project.run_timeout,
     };
-    // `--keep-runs`, else `DRE_KEEP_RUNS`, else `flags: keep_runs`.
-    let keep_runs = match keep_runs_setting(a.keep_runs.as_deref()) {
-        Ok(k) => k,
-        Err(e) => {
-            printer.error(&e);
-            return exit::not_started();
-        }
+    // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
+    let count = |flag: &Option<String>, name, var| {
+        count_setting(flag.as_deref(), name, var)
+            .map_err(|e| printer.error(&e))
+            .ok()
     };
-    // `--row-concurrency`, else `DRE_ROW_CONCURRENCY`.
-    let row_concurrency = match dre_core::settings::flag_or_env(
-        a.row_concurrency.as_deref(),
+    let Some(keep_runs) = count(&a.keep_runs, "--keep-runs", dre_core::settings::KEEP_RUNS) else {
+        return exit::not_started();
+    };
+    let Some(row_concurrency) = count(
+        &a.row_concurrency,
         "--row-concurrency",
         dre_core::settings::ROW_CONCURRENCY,
-    ) {
-        None => None,
-        Some((v, from)) => match v.trim().parse::<usize>() {
-            Ok(n) if n > 0 => Some(n),
-            _ => {
-                printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
-                return exit::not_started();
-            }
-        },
+    ) else {
+        return exit::not_started();
     };
-    // `--threads`, else `DRE_THREADS`.
-    let threads =
-        match dre_core::settings::flag_or_env(a.threads.as_deref(), "--threads", dre_core::settings::THREADS)
-        {
-            None => None,
-            Some((v, from)) => match v.trim().parse::<usize>() {
-                Ok(n) if n > 0 => Some(n),
-                _ => {
-                    printer.error(&format!("{from} must be a whole number of 1 or more, got `{v}`"));
-                    return exit::not_started();
-                }
-            },
-        };
-    let mut diags = dre_core::Diagnostics::default();
-    check_plugin_uses(&project, &a.project, &mut diags);
-    if !diags.has_errors() {
-        dre_core::options::check(&project, false, &mut diags);
-    }
-    if !report_diags(&diags, &printer) {
+    let Some(threads) = count(&a.threads, "--threads", dre_core::settings::THREADS) else {
+        return exit::not_started();
+    };
+    if !check_project(&project, &a.project, &printer, Checks::PluginUsesAndOptions) {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {
@@ -1347,7 +1374,11 @@ fn clean(a: CleanArgs) -> ExitCode {
         }
     };
     if a.prune {
-        let keep = match keep_runs_setting(a.keep_runs.as_deref()) {
+        let keep = match count_setting(
+            a.keep_runs.as_deref(),
+            "--keep-runs",
+            dre_core::settings::KEEP_RUNS,
+        ) {
             Ok(Some(k)) => k,
             Ok(None) => {
                 dre_core::target::project_flag_u64(root, "keep_runs").map_or(1, |k| k.max(1) as usize)
@@ -1391,10 +1422,14 @@ fn clean(a: CleanArgs) -> ExitCode {
     }
 }
 
-/// `--keep-runs`, else `DRE_KEEP_RUNS` (the project's `flags: keep_runs` is the caller's
-/// fallback).
-fn keep_runs_setting(flag: Option<&str>) -> Result<Option<usize>, String> {
-    match dre_core::settings::flag_or_env(flag, "--keep-runs", dre_core::settings::KEEP_RUNS) {
+/// A count of 1 or more from `flag_name`, else the environment variable `var`; any fallback
+/// after that is the caller's.
+fn count_setting(
+    flag: Option<&str>,
+    flag_name: &'static str,
+    var: &'static str,
+) -> Result<Option<usize>, String> {
+    match dre_core::settings::flag_or_env(flag, flag_name, var) {
         None => Ok(None),
         Some((v, from)) => match v.trim().parse::<usize>() {
             Ok(n) if n > 0 => Ok(Some(n)),
@@ -1403,6 +1438,8 @@ fn keep_runs_setting(flag: Option<&str>) -> Result<Option<usize>, String> {
     }
 }
 
+/// `dre deps` has no `--no-auto-install`, and it doesn't use [`load_project`]: it writes no
+/// manifest, and it syncs a project that has other errors, since it only needs what's declared.
 fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
     if !plugins::sync_packages(&a.project_dir, printer) {
         return exit::failed();
@@ -1439,6 +1476,28 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         exit::ok()
     } else {
         exit::failed()
+    }
+}
+
+#[cfg(test)]
+mod count_setting_tests {
+    use super::count_setting;
+
+    #[test]
+    fn counts_are_one_or_more() {
+        let max = usize::MAX.to_string();
+        for flag in ["--keep-runs", "--row-concurrency", "--threads"] {
+            let parse = |v: &str| count_setting(Some(v), flag, "DRE_TEST_COUNT_UNSET");
+            assert_eq!(parse("1"), Ok(Some(1)));
+            assert_eq!(parse(&max), Ok(Some(usize::MAX)));
+            assert_eq!(parse(" 4 "), Ok(Some(4)));
+            for bad in ["0", "-1", "abc"] {
+                assert_eq!(
+                    parse(bad),
+                    Err(format!("{flag} must be a whole number of 1 or more, got `{bad}`"))
+                );
+            }
+        }
     }
 }
 

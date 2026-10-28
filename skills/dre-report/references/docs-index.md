@@ -8,7 +8,7 @@ Search this index for the question's terms, then open the linked page. These loc
 
 - [Getting started](docs/getting-started.md): Build your first DRE report: let a coding agent with DRE's skills set it up for you, or write the SQL and YAML yourself and run it from the command line.
 - [Install](docs/install.md): Install DRE on macOS, Linux or Windows with the install script, Homebrew, Scoop, pip or cargo, verify the download, and check the installed command.
-  Terms/options: `--help`, `--profile`, `--project-dir`, `--source`, `--type`, `-aarch64.zip`, `DRE_INSTALL_DIR`, `DRE_VERSION`, `PATH`, `SHA256SUMS`, `cd`, `dre`, `dre-cli`, `dre.exe`, `dre.lock`, `install.sh`, `project-file-missing`.
+  Terms/options: `--help`, `--profile`, `--project-dir`, `--source`, `--type`, `-aarch64.zip`, `DRE_INSTALL_DIR`, `DRE_VERSION`, `GITHUB_TOKEN`, `PATH`, `SHA256SUMS`, `cd`, `dre`, `dre-cli`, `dre.exe`, `dre.lock`, `install.sh`, `project-file-missing`, `sudo`.
 - [Your first report in 10 minutes](docs/first-report.md): Build an Excel report with DuckDB, then add variables, tabs, formats, Sets, a schedule and local delivery.
   Terms/options: `--accept-schema-change`, `--var`, `category`, `local`, `month`, `out/North.xlsx`, `out/South.xlsx`, `path:`, `py`, `python`, `python3`, `region`, `revenue`, `run_results.json`, `sales`, `sales.sql`, `target/`, `weekday_sales`.
 - [Concepts](docs/concepts.md): Reports, Sets, Bindings, templates, lookups, plugins, delivery, logs, verification and selecting.

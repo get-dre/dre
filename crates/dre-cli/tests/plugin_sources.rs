@@ -10,11 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use common::{Run, test_plugins};
-use sha2::{Digest, Sha256};
-
-fn sha(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
-}
+use dre_core::checksum::sha256_hex as sha;
 
 fn platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)

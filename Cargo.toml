@@ -50,8 +50,8 @@ debug = 0
 # Hashing and (un)gzipping run on whole plugin and `dre` binaries, which are tens of MB in a debug
 # build (hundreds with full debug info on Linux). Unoptimised, that took seconds per install and
 # per test; optimised, milliseconds. Release builds already optimise everything.
-# CI's build cache doesn't notice profile changes: bump `prefix-key` in ci.yml and skills.yml with
-# any change here.
+# CI's build cache doesn't notice profile changes: bump `prefix-key` in ci.yml's lint, test-linux
+# and test jobs with any change here.
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.dev.package.miniz_oxide]
