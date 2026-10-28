@@ -15,7 +15,8 @@ fn project(report: &str) -> (TestProject, std::path::PathBuf) {
         "connections:\n  warehouse:\n    targets:\n      dev: {{type: duckdb, path: data.duckdb}}\n\
          destinations:\n\
          \x20 outbox:\n    targets:\n      dev: {{type: local}}\n\
-         \x20 mail:\n    targets:\n      dev: {{type: fixture, dir: \"{}\"}}\n",
+         \x20 mail:\n    targets:\n      dev: {{type: fixture, dir: \"{}\"}}\n\
+         \x20 archive:\n    targets:\n      dev: {{deliver: false}}\n",
         rec.to_string_lossy().replace('\\', "/")
     );
     let mut p = TestProject::new(
@@ -139,6 +140,34 @@ fn zip_true_names_the_zip_after_the_output_and_zipcrypto_warns() {
             .contains("wire")
     );
     assert!(read(&legacy, "detail_fees.csv", None).is_err());
+}
+
+#[test]
+fn files_in_a_zip_have_no_location_of_their_own_whatever_the_destination() {
+    for dest in [
+        "{profile: mail, to: a@example.com, zip: true}",
+        "{profile: outbox, path: out/detail.zip, zip: true}",
+    ] {
+        let (p, _) = project(&format!(
+            "{PACK}    destination:\n      - {dest}\n      - {{profile: archive}}\n"
+        ));
+        p.dre("run", &["pack"]).ok();
+        let r: Value = p.json("target/run/pack/default/run_results.json");
+        let detail = r["output_results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "detail")
+            .unwrap();
+        // The zip's delivery is recorded on the entry, not on the files inside it.
+        for f in detail["files"].as_array().unwrap() {
+            assert!(f["delivered_to"].is_null(), "{dest}: {f}");
+        }
+        assert_eq!(detail["deliveries"][0]["status"], "delivered", "{dest}");
+        assert!(detail["deliveries"][0]["location"].is_string(), "{dest}");
+        // It was delivered, so no "delivers nowhere" note for the output.
+        assert!(detail["delivery"].is_null(), "{dest}: {}", detail["delivery"]);
+    }
 }
 
 #[test]
