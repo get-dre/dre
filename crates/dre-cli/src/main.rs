@@ -475,12 +475,12 @@ fn main() -> ExitCode {
         Command::Explain(a) => explain(&a.code),
         Command::History(a) => history::history(a),
         Command::Unlock(a) => history::unlock(a),
-        Command::Release(a) => release(a, printer),
+        Command::Release(a) => release(a, &printer),
         Command::Validate(a) => validate(a, &printer),
         Command::Run(a) => run(*a, printer),
         Command::Compile(a) => compile(a, printer),
-        Command::Query(a) => query(a, printer),
-        Command::Catalog(a) => catalog(a, printer),
+        Command::Query(a) => query(a, &printer),
+        Command::Catalog(a) => catalog(a, &printer),
         Command::Mcp(a) => extensions::handoff("mcp", a, &printer),
         Command::Extension(a) => extensions::manage(a, &printer),
         Command::Clean(a) => clean(a),
@@ -488,16 +488,16 @@ fn main() -> ExitCode {
         Command::Schedule(schedule::ScheduleCommand::Ls(a)) => schedule::ls(a),
         Command::System(system::SystemCommand::Update(a)) => system::update(a, &printer),
         Command::Deps(a) => deps(a, &printer),
-        Command::Init(a) => init::init(a.profiles_dir, &printer),
-        Command::New(a) => init::new(a.dir, a.profile, a.plugin, &printer),
+        Command::Init(a) => init::init(a.profiles_dir.as_deref(), &printer),
+        Command::New(a) => init::new(&a.dir, a.profile, a.plugin, &printer),
         Command::Plugin(PluginCommand::List) => plugin_list(),
         Command::Plugin(PluginCommand::Install(a)) => {
-            plugins::install(a.plugin, a.project_dir, false, &printer)
+            plugins::install(&a.plugin, &a.project_dir, false, &printer)
         }
         Command::Plugin(PluginCommand::Update(a)) => {
-            plugins::install(a.plugin, a.project_dir, true, &printer)
+            plugins::install(&a.plugin, &a.project_dir, true, &printer)
         }
-        Command::Plugin(PluginCommand::Remove(a)) => plugins::remove(a.plugin, a.project_dir, &printer),
+        Command::Plugin(PluginCommand::Remove(a)) => plugins::remove(&a.plugin, &a.project_dir, &printer),
     }
 }
 
@@ -771,8 +771,8 @@ fn compile_for_validate(
     (ui.plans, ui.targets)
 }
 
-fn catalog(a: CatalogArgs, printer: output::Printer) -> ExitCode {
-    json_command(&a.project, a.output, &printer, |project| {
+fn catalog(a: CatalogArgs, printer: &output::Printer) -> ExitCode {
+    json_command(&a.project, a.output, printer, |project| {
         let request =
             std::fs::read_to_string(project.root.join(&a.tables_file)).map_err(|e| e.to_string())?;
         let request =
@@ -781,8 +781,8 @@ fn catalog(a: CatalogArgs, printer: output::Printer) -> ExitCode {
     })
 }
 
-fn query(a: QueryArgs, printer: output::Printer) -> ExitCode {
-    json_command(&a.project, a.output, &printer, |project| {
+fn query(a: QueryArgs, printer: &output::Printer) -> ExitCode {
+    json_command(&a.project, a.output, printer, |project| {
         let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
         dre_core::query::execute(project, &a.profile, &sql, a.max_rows)
     })
@@ -1130,11 +1130,11 @@ fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
 }
 
 /// `dre release`: deliver a run's held deliveries.
-fn release(a: ReleaseArgs, printer: output::Printer) -> ExitCode {
-    let Some((project, _)) = load_project(&a.project, &printer) else {
+fn release(a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
+    let Some((project, _)) = load_project(&a.project, printer) else {
         return exit::not_started();
     };
-    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
+    if !ready_plugins(&project, &a.project, NeedPlugins::All, printer) {
         return exit::not_started();
     }
     let by =

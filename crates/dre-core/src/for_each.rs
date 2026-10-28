@@ -20,8 +20,8 @@ pub struct Table {
 
 impl Table {
     /// One batch from a result's batches (an empty one keeps the schema).
-    pub fn new(name: &str, schema: SchemaRef, batches: &[RecordBatch]) -> Result<Table, String> {
-        let batch = arrow::compute::concat_batches(&schema, batches).map_err(|e| e.to_string())?;
+    pub fn new(name: &str, schema: &SchemaRef, batches: &[RecordBatch]) -> Result<Table, String> {
+        let batch = arrow::compute::concat_batches(schema, batches).map_err(|e| e.to_string())?;
         Ok(Table {
             name: name.to_string(),
             batch,
@@ -287,7 +287,7 @@ mod tests {
             ("v", Arc::new(StringArray::from(other.to_vec())) as ArrayRef),
         ])
         .unwrap();
-        Table::new(name, b.schema(), &[b]).unwrap()
+        Table::new(name, &b.schema(), &[b]).unwrap()
     }
 
     #[test]

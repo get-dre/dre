@@ -1126,7 +1126,7 @@ impl Loader {
                 source_decls.push(yf.clone());
             }
             self.classify(
-                yf,
+                &yf,
                 &mut fragments,
                 &mut plugin_decls,
                 &mut set_files,
@@ -1963,7 +1963,7 @@ impl Loader {
 
     fn classify(
         &mut self,
-        yf: Rc<YamlFile>,
+        yf: &Rc<YamlFile>,
         fragments: &mut Vec<Fragment>,
         plugins: &mut Vec<(Rc<YamlFile>, Mapping)>,
         sets: &mut Vec<Rc<YamlFile>>,
@@ -2002,7 +2002,7 @@ impl Loader {
                 if dependency_file {
                     for k in m.keys().map(String::as_str) {
                         if OLD_PLUGIN_KEYS.contains(&k) {
-                            self.old_plugin_key(&yf, k);
+                            self.old_plugin_key(yf, k);
                         }
                     }
                 }
@@ -3486,15 +3486,7 @@ impl Loader {
                     format!("report `{name}`: `default_set` needs a `sets:` list"),
                 );
             }
-            let b = self.finish_binding(
-                &name,
-                None,
-                &base,
-                None,
-                queries.clone(),
-                r.file.display.clone(),
-                used,
-            );
+            let b = self.finish_binding(&name, None, &base, None, queries.clone(), &r.file.display, used);
             bindings.push(b);
         }
 
@@ -3794,15 +3786,7 @@ impl Loader {
                     }
                 };
             }
-            let bind = self.finish_binding(
-                report,
-                Some(name),
-                &b,
-                tab_names.as_ref(),
-                qs,
-                display.to_path_buf(),
-                used,
-            );
+            let bind = self.finish_binding(report, Some(name), &b, tab_names.as_ref(), qs, display, used);
             out.push(bind);
         }
         out
@@ -3818,15 +3802,7 @@ impl Loader {
     ) -> Binding {
         let saved = std::mem::take(&mut self.diags);
         let mut scratch = Usage::default();
-        let b = self.finish_binding(
-            report,
-            None,
-            base,
-            None,
-            queries.to_vec(),
-            file.to_path_buf(),
-            &mut scratch,
-        );
+        let b = self.finish_binding(report, None, base, None, queries.to_vec(), file, &mut scratch);
         self.diags = saved;
         b
     }
@@ -3839,7 +3815,7 @@ impl Loader {
         base: &BindingBase,
         tab_names: Option<&Mapping>,
         mut queries: Vec<QueryEntry>,
-        file: PathBuf,
+        file: &Path,
         used: &mut Usage,
     ) -> Binding {
         let ctx = match &set {
@@ -3854,21 +3830,21 @@ impl Loader {
                         Value::String(s) => e.tab_name = Some(s.clone()),
                         _ => self.diags.error(
                             Code::InvalidField,
-                            Some(file.clone()),
+                            Some(file.to_path_buf()),
                             None,
                             format!("{ctx}: {}", one_tab_per_file(q)),
                         ),
                     },
                     None => self.diags.error(
                         Code::UnknownQuery,
-                        Some(file.clone()),
+                        Some(file.to_path_buf()),
                         None,
                         format!("{ctx}: `tab_names` names `{q}`, which isn't one of this Binding's queries"),
                     ),
                 }
             }
         }
-        let outputs = self.typed_outputs(&base.outputs, &ctx, &file, &queries, used);
+        let outputs = self.typed_outputs(&base.outputs, &ctx, file, &queries, used);
         if let Some(p) = &base.profile {
             used.connection(p, None, None);
         }
@@ -5288,15 +5264,7 @@ impl Loader {
         if let Some(p) = &profile {
             used.connection(p, None, None);
         }
-        let b = self.finish_binding(
-            name,
-            None,
-            &base,
-            None,
-            vec![query.clone()],
-            path.to_path_buf(),
-            used,
-        );
+        let b = self.finish_binding(name, None, &base, None, vec![query.clone()], path, used);
         Report {
             name: name.to_string(),
             description: None,
