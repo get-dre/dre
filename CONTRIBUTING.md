@@ -61,6 +61,11 @@ gofmt -l go                              # prints nothing when the Go code is fo
 for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
 ```
 
+Rust code follows the [Google Rust style guide](https://google.github.io/styleguide/rustguide.html)
+with DRE's own rules, for new and changed code. The `rust-style` agent skill in
+[`.agents/skills/rust-style`](.agents/skills/rust-style/SKILL.md) has the rules and an audit
+command; any coding agent can use it, and so can you.
+
 The plugin integration tests (Postgres, object store, SFTP, FTP, email) run against local
 emulators, and each one skips itself when its service isn't configured. See the `test-linux`
 job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the services and environment
