@@ -582,7 +582,8 @@ pub fn execute(
 /// file is always 1, as only one process can write it), and `--threads` (`DRE_THREADS`) over
 /// the whole run.
 struct Limits {
-    /// The connections each Binding uses.
+    /// The connections each Binding uses, by the Binding's index in the plan. `Running::started`
+    /// and the run's outcomes have the same length, so one index reads all three.
     uses: Vec<Vec<String>>,
     per_connection: BTreeMap<String, usize>,
     cap: usize,
@@ -831,16 +832,17 @@ pub fn run_targets(
             deliver,
         });
     }
-    match missing.len() {
-        0 => Ok(RunTargets {
+    match missing.as_slice() {
+        [] => Ok(RunTargets {
             name: project.target_name.clone(),
             from: project.target_from.to_string(),
             profiles: out,
         }),
-        1 => Err(format!("{}; nothing was run", missing[0])),
-        n => Err(format!(
-            "{n} profiles this run uses have no entry for it; nothing was run:\n    {}",
-            missing.join("\n    ")
+        [one] => Err(format!("{one}; nothing was run")),
+        all => Err(format!(
+            "{} profiles this run uses have no entry for it; nothing was run:\n    {}",
+            all.len(),
+            all.join("\n    ")
         )),
     }
 }
@@ -944,7 +946,10 @@ pub fn choose_bindings(
                 .default_set
                 .clone()
                 .or_else(|| project.default_set.clone().filter(|d| names.contains(d)))
-                .or_else(|| (names.len() == 1).then(|| names[0].clone()));
+                .or_else(|| match names.as_slice() {
+                    [only] => Some(only.clone()),
+                    _ => None,
+                });
             match pick {
                 Some(p) => report.binding(&p).cloned().into_iter().collect(),
                 None if opts.interactive => match ui.choose_set(&report.name, &names)? {
@@ -1065,7 +1070,8 @@ struct BindingRun<'a> {
     started: Instant,
     started_at: chrono::DateTime<chrono::Utc>,
     produced: Vec<Produced>,
-    /// Each of the Binding's outputs, in order.
+    /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
+    /// (`oi`) reads both.
     outs: Vec<OutputRun>,
     /// How many tries the delivery being made took (a plugin retrying a temporary error).
     attempts: u32,
@@ -2589,6 +2595,7 @@ impl<'a> BindingRun<'a> {
         let entries: BTreeMap<&str, &QueryEntry> =
             self.b.queries.iter().map(|q| (q.query.as_str(), q)).collect();
         for p in &mut self.produced {
+            // Every result set comes from one of the Binding's queries.
             let q = entries[p.query.as_str()];
             p.name = q.tab_name.clone().unwrap_or_else(|| q.query.clone());
             p.anchor = q.anchor.clone();
@@ -3256,8 +3263,10 @@ impl<'a> BindingRun<'a> {
                 })?;
                 let loc = delivered.path;
                 self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-                if d.zip_file.is_none() {
-                    self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
+                if d.zip_file.is_none()
+                    && let Some((_, at)) = self.outs[oi].files.get_mut(i)
+                {
+                    at.get_or_insert_with(|| loc.clone());
                 }
                 locations.push(loc);
             }
@@ -3282,11 +3291,15 @@ impl<'a> BindingRun<'a> {
             && let Some((title, text)) = self.outs[oi].message.clone()
         {
             let t = Instant::now();
+            let path = targets
+                .first()
+                .map(|f| f.local_path.clone())
+                .ok_or("the message has no file to deliver")?;
             let message = dre_protocol::msg::Message {
                 title,
                 text,
                 html: None,
-                path: targets[0].local_path.clone(),
+                path,
             };
             let attach: Vec<DeliveryFile> = d
                 .attach
@@ -3308,7 +3321,9 @@ impl<'a> BindingRun<'a> {
                 .map_err(failed)?;
             self.attempts = p.last_attempts();
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-            self.outs[oi].files[0].1.get_or_insert_with(|| loc.clone());
+            if let Some((_, at)) = self.outs[oi].files.first_mut() {
+                at.get_or_insert_with(|| loc.clone());
+            }
             let _ = p.close();
             return Ok(Some(loc));
         }
@@ -3332,8 +3347,12 @@ impl<'a> BindingRun<'a> {
                 .map_err(failed)?;
             self.attempts = self.attempts.max(p.last_attempts());
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
+            // Targets and files don't line up with `zip:`: the one target is the zip, and only
+            // the output's first file gets its location.
             for i in batch {
-                self.outs[oi].files[i].1.get_or_insert_with(|| loc.clone());
+                if let Some((_, at)) = self.outs[oi].files.get_mut(i) {
+                    at.get_or_insert_with(|| loc.clone());
+                }
             }
             locations.push(loc);
         }

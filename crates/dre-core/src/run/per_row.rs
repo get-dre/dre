@@ -423,13 +423,13 @@ impl BindingRun<'_> {
         {
             let first = if two_pass { Phase::Render } else { Phase::All };
             let cancel = self.opts.cancel.clone();
-            let mut prepared = rows.iter().enumerate().map(|(n, &i)| {
+            let mut prepared = rows.iter().zip(&names).zip(&eaches).map(|((&i, name), each)| {
                 self.row_job(
                     oi,
                     &pop,
                     i,
-                    &names[n],
-                    &eaches[n],
+                    name,
+                    each,
                     &folder,
                     single,
                     droppable,
@@ -748,7 +748,11 @@ impl BindingRun<'_> {
                 ),
             ));
         };
-        let original = results["retry_of"].as_str().unwrap_or(id).to_string();
+        let original = results
+            .get("retry_of")
+            .and_then(Json::as_str)
+            .unwrap_or(id)
+            .to_string();
         if original != id && read(&original).is_none() {
             return Err(Fail::new(
                 Code::RetryFailed,
@@ -776,7 +780,8 @@ impl BindingRun<'_> {
             }
             // Earlier retries of the same run.
             for run in self.runs.list() {
-                if read(&run).is_some_and(|r| r["retry_of"].as_str() == Some(original.as_str()))
+                if read(&run)
+                    .is_some_and(|r| r.get("retry_of").and_then(Json::as_str) == Some(original.as_str()))
                     && let Ok(text) =
                         std::fs::read_to_string(self.runs.run_dir(&run).join(format!("{stem}.done.json")))
                     && let Ok(keys) = serde_json::from_str::<Vec<String>>(&text)
@@ -1434,7 +1439,7 @@ fn record_path_in(project: &Project, p: &Path) -> PathBuf {
 fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<PluginProcess>) -> Result<(), Fail> {
     if shared.is_message {
         let (title, text) = job.message.clone().unwrap_or_default();
-        let (path, _) = &job.files[0];
+        let (path, _) = job.files.first().ok_or("the message has no file to write")?;
         std::fs::write(path, crate::message::file_body(&title, &text)).map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -1595,11 +1600,15 @@ pub(crate) fn deliver_row(
         if let Some((title, text)) = message
             && p.has(CAP_MESSAGE)
         {
+            let path = targets
+                .first()
+                .map(|f| f.local_path.clone())
+                .ok_or("the message has no file to deliver")?;
             let m = dre_protocol::msg::Message {
                 title: title.clone(),
                 text: text.clone(),
                 html: None,
-                path: targets[0].local_path.clone(),
+                path,
             };
             let attach: Vec<DeliveryFile> = d
                 .attach
