@@ -9,10 +9,9 @@
 # GITHUB_TOKEN    sent to GitHub's API when finding the newest release, for its higher rate limit
 #
 # Plugins aren't installed here: `dre deps` (or `dre init`) downloads the ones a project needs.
+# No pipefail: `printf | grep -q` would then fail on a large page (grep exits early, printf gets
+# SIGPIPE). The commands whose failure matters run outside pipelines instead.
 set -eu
-# A failing command in a pipeline fails the pipeline, where the shell can (dash can't; the
-# pipelines whose failure matters are checked one by one below).
-if (set -o pipefail) 2>/dev/null; then set -o pipefail; fi
 
 repo="get-dre/dre"
 dir="${DRE_INSTALL_DIR:-$HOME/.local/bin}"
@@ -54,13 +53,17 @@ if [ -z "$tag" ]; then
     list="$(api "https://api.github.com/repos/$repo/releases?per_page=100&page=$page")" ||
       fail "can't list the releases of $repo from GitHub's API. A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
     tag="$(printf '%s\n' "$list" | sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' | head -n 1)"
-    if ! printf '%s\n' "$list" | grep -q '"tag_name"'; then
-      # No releases on this page: past the last one, or an error such as the rate limit.
-      message="$(printf '%s\n' "$list" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
-      [ -z "$message" ] ||
-        fail "GitHub's API says: $message. A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
-      break
-    fi
+    case "$list" in
+      *'"tag_name"'*) ;;
+      *)
+        # No releases on this page: past the last one (`[]`), or an error such as the rate limit.
+        [ "$(printf '%s' "$list" | tr -d ' \n\r\t')" = "[]" ] && break
+        message="$(printf '%s\n' "$list" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
+        hint="A valid GITHUB_TOKEN raises its rate limit; DRE_VERSION (e.g. DRE_VERSION=v0.8.0) skips the lookup"
+        [ -z "$message" ] || fail "GitHub's API says: ${message%.}. $hint"
+        fail "can't list the releases of $repo: GitHub's API sent something unexpected. $hint"
+        ;;
+    esac
     page=$((page + 1))
   done
   [ -n "$tag" ] || fail "can't find a release of $repo"

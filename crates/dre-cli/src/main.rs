@@ -817,7 +817,7 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
         return exit::not_started();
     };
     if !ready_plugins(&project, &a.project, NeedPlugins::IfInstalling, &printer)
-        || !check_project(&project, &a.project, &printer, false)
+        || !check_project(&project, &a.project, &printer, Checks::PluginUses)
     {
         return exit::not_started();
     }
@@ -991,17 +991,26 @@ fn ready_plugins(
     }
 }
 
-/// Check that the project's plugins are declared and, with `options`, every connection's
-/// settings. False after printing the diagnostics, when there are errors.
+/// What [`check_project`] checks.
+#[derive(Clone, Copy, PartialEq)]
+enum Checks {
+    /// The project's plugins are declared (`dre compile`).
+    PluginUses,
+    /// That, then every connection's settings (`dre run`).
+    PluginUsesAndOptions,
+}
+
+/// Check the project as `checks` says. False after printing the diagnostics, when there are
+/// errors.
 fn check_project(
     project: &dre_core::project::Project,
     args: &ProjectArgs,
     printer: &output::Printer,
-    options: bool,
+    checks: Checks,
 ) -> bool {
     let mut diags = dre_core::Diagnostics::default();
     check_plugin_uses(project, args, &mut diags);
-    if options && !diags.has_errors() {
+    if checks == Checks::PluginUsesAndOptions && !diags.has_errors() {
         dre_core::options::check(project, false, &mut diags);
     }
     report_diags(&diags, printer)
@@ -1260,7 +1269,7 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     let Some(threads) = count(&a.threads, "--threads", dre_core::settings::THREADS) else {
         return exit::not_started();
     };
-    if !check_project(&project, &a.project, &printer, true) {
+    if !check_project(&project, &a.project, &printer, Checks::PluginUsesAndOptions) {
         return exit::not_started();
     }
     let opts = dre_core::run::RunOptions {

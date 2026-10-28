@@ -1,5 +1,5 @@
 //! SHA-256 checksums as lowercase hex, the one format DRE writes them in (manifests, releases,
-//! held files, plugin downloads).
+//! held files, plugin downloads). [`hex`] also writes SQL hex literals (`dialect.rs`).
 
 use std::path::Path;
 
