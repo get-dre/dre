@@ -20,7 +20,7 @@ lint that finds it, where one exists. "Library" means the rule binds in `dre-pro
 | Flat file layout `[chrome]` | not adopted | | DRE uses module directories (`run/`, `config/`). |
 | Name a leaf module after its main item (`foo` in `foo.rs`) | optional | | |
 | Non-leaf modules hold only `mod` and re-exports | optional | | Small glue is fine. |
-| No glob imports | tidy-up | `wildcard_imports`, `enum_glob_use` | `use super::*` in tests is fine. |
+| No glob imports | tidy-up | `wildcard_imports`, `enum_glob_use` | `use super::*` in tests and split-out child modules, and enum variants inside a function, are fine. |
 | One module per `use` statement | not adopted | | Needs nightly rustfmt (`imports_granularity`). |
 | Import a trait in the function that uses it | optional | | Unless the file uses it a lot. |
 | Call free functions through their module (`mem::take`) | optional | | |
@@ -127,7 +127,7 @@ lint that finds it, where one exists. "Library" means the rule binds in `dre-pro
 |---|---|---|---|
 | Annotate types that inference hides | tidy-up | | `.parse()`, `.into()`, `.collect()`, long chains. |
 | `if let` instead of a check then an unwrap | tidy-up | `unnecessary_unwrap` (default), `manual_let_else` | |
-| `expect` with a reason instead of `unwrap` | tidy-up | `unwrap_used` | Tests exempt. |
+| `expect` with a reason instead of `unwrap` | tidy-up | `unwrap_used` | Tests and `lock().unwrap()` exempt. |
 | List the variants of a `non_exhaustive` enum in a `match` | optional | `match_wildcard_for_single_variants` | |
 | Context strings in `assert!` | tidy-up | grep | Non-test code. |
 | Short iterator chains, no `for_each`, no chains in `for` headers | tidy-up | `needless_for_each` | |

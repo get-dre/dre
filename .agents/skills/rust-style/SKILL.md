@@ -54,14 +54,16 @@ here.
 
 - **`expect("<why this cannot fail>")` instead of `unwrap()`** in non-test code. The message says
   why the value is there, not what failed: `expect("the regex is a literal")`, not
-  `expect("regex failed")`.
+  `expect("regex failed")`. `lock().unwrap()` (and `wait`, `into_inner` on a `Mutex` or
+  `Condvar`) stays: it panics on a poisoned lock, which is the rule above.
 - **`if let` / `let ... else` instead of a check then an unwrap** (`is_some()` then `unwrap()`).
 - **Borrowed parameters**: `&str`, `&[T]`, `&T`, `Option<&T>`, not `&String`, `&Vec<T>`,
   `&Box<T>`, `&Option<T>`.
 - **No needless `.clone()`**: clone only for a real copy, not to dodge a borrow a small change
   fixes. Cloning an `Rc`/`Arc` is fine.
-- **No glob imports** (`use foo::*`), except `use super::*` in a test module and enum variants
-  in a short `match`-heavy function.
+- **No glob imports** (`use foo::*`), except `use super::*` in a test module or in a child module
+  split out of its parent's file, and enum variants imported inside one function (an explicit
+  list there can shadow `String` or `Ordering`).
 - **`assert!` with context** in non-test code: the value that failed or why it must hold. Not a
   restatement of the condition.
 - **`#[derive]`** instead of a hand-written impl that a derive produces.
