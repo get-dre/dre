@@ -102,3 +102,30 @@ fn a_bad_keep_runs_is_a_config_error() {
         "{out:?}"
     );
 }
+
+#[test]
+fn the_count_flags_reject_bad_values_with_one_message() {
+    let p = project("");
+    for bad in ["0", "-1", "abc"] {
+        let errors: Vec<String> = ["--keep-runs", "--row-concurrency", "--threads"]
+            .iter()
+            .map(|flag| {
+                // `=` so clap takes `-1` as the value, not as a flag.
+                let out = p.dre("run", &[&format!("{flag}={bad}")]);
+                assert_eq!(out.code, 2, "{flag} {bad}: {out:?}");
+                // The error line alone: the first run also reports installing plugins.
+                let line = out
+                    .stdout
+                    .lines()
+                    .find(|l| l.contains("must be"))
+                    .unwrap_or_default();
+                line.replace(flag, "FLAG")
+            })
+            .collect();
+        assert!(
+            errors[0].contains("FLAG must be a whole number of 1 or more, got `"),
+            "{errors:?}"
+        );
+        assert!(errors.iter().all(|e| *e == errors[0]), "{bad}: {errors:?}");
+    }
+}

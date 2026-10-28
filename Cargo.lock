@@ -2252,7 +2252,6 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
- "sha2 0.11.0",
  "tar",
  "tempfile",
  "umya-spreadsheet",
@@ -2264,7 +2263,6 @@ dependencies = [
 name = "dre-core"
 version = "0.8.0"
 dependencies = [
- "anyhow",
  "arrow 59.3.0",
  "calamine",
  "chrono",
@@ -2272,7 +2270,6 @@ dependencies = [
  "croner",
  "csv",
  "dre-protocol",
- "encoding_rs",
  "flate2",
  "libc",
  "minijinja 3.0.3",

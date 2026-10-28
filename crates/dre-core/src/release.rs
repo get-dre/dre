@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as Json};
-use sha2::Digest;
 
 use crate::codes::Code;
 use crate::engine::Events;
@@ -68,19 +67,11 @@ pub struct HeldFile {
     pub sha256: String,
 }
 
-pub fn sha256_file(p: &Path) -> std::io::Result<String> {
-    let bytes = std::fs::read(p)?;
-    Ok(sha2::Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
-}
-
 /// A file and its SHA-256 now, for a held delivery.
 pub fn held_file(path: &Path) -> HeldFile {
     HeldFile {
         path: path.to_path_buf(),
-        sha256: sha256_file(path).unwrap_or_default(),
+        sha256: crate::checksum::sha256_file(path).unwrap_or_default(),
     }
 }
 
@@ -243,7 +234,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
             .files
             .iter()
             .chain(&e.attach)
-            .filter(|f| sha256_file(&f.path).ok().as_deref() != Some(f.sha256.as_str()))
+            .filter(|f| crate::checksum::sha256_file(&f.path).ok().as_deref() != Some(f.sha256.as_str()))
             .map(|f| f.path.display().to_string())
             .collect();
         if !changed.is_empty() {

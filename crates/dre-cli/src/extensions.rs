@@ -7,7 +7,6 @@
 //! the extension, which reads and checks them itself.
 use crate::output::{Printer, Tone};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -181,7 +180,7 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
         ));
     }
     let bytes = download(artifact, file_name)?;
-    let digest = hex_sha256(&bytes);
+    let digest = dre_core::checksum::sha256_hex(&bytes);
     let file = executable(name);
     let binary = if artifact.url.ends_with(".tar.gz") || artifact.url.ends_with(".tgz") {
         unpack(&bytes, &file)?
@@ -228,15 +227,11 @@ fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
         .as_deref()
         .ok_or("the extension artifact is not signed; download refused")?;
     let bytes = dre_core::manager::fetch(&artifact.url)?;
-    if !hex_sha256(&bytes).eq_ignore_ascii_case(&artifact.sha256) {
+    if !dre_core::checksum::sha256_hex(&bytes).eq_ignore_ascii_case(&artifact.sha256) {
         return Err("extension artifact checksum mismatch; download discarded".into());
     }
     verify(&bytes, signature, file_name)?;
     Ok(bytes)
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Check `bytes` against a minisign signature from the trusted key, whose signed (trusted)

@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde_json::{Map as JsonMap, Value as Json, json};
-use sha2::{Digest, Sha256};
 
 use crate::project::{Project, ScheduleEntry};
 use crate::schedule;
@@ -265,7 +264,7 @@ fn hash(v: &Json) -> String {
         "dre_schedule_v{FORMAT_VERSION}\n{}",
         crate::manifest::canonical(v)
     );
-    crate::manifest::hex(&Sha256::digest(text.as_bytes()))
+    crate::checksum::sha256_hex(text.as_bytes())
 }
 
 /// What a schedule's definition hash covers: its resolved timing (named or inline), firing
