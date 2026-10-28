@@ -67,17 +67,18 @@ pub fn read_frame(r: &mut impl Read) -> Result<Frame, FrameError> {
     let mut body = vec![0u8; len as usize];
     r.read_exact(&mut body)
         .map_err(|_| FrameError::Malformed(format!("stream ended inside a {len}-byte frame")))?;
-    match body[0] {
-        JSON_TAG => serde_json::from_slice(&body[1..])
+    match body.split_first() {
+        Some((&JSON_TAG, json)) => serde_json::from_slice(json)
             .map(Frame::Json)
             .map_err(|e| FrameError::Malformed(format!("invalid JSON: {e}"))),
-        ARROW_TAG => {
+        Some((&ARROW_TAG, _)) => {
             body.remove(0);
             Ok(Frame::Arrow(body))
         }
-        t => Err(FrameError::Malformed(format!(
+        Some((t, _)) => Err(FrameError::Malformed(format!(
             "unknown frame type byte 0x{t:02x}"
         ))),
+        None => Err(FrameError::Malformed("empty frame".into())),
     }
 }
 

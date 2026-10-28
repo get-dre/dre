@@ -127,6 +127,7 @@ pub fn closest<'a>(key: &str, names: impl Iterator<Item = &'a str>) -> Option<&'
 /// Levenshtein distance.
 fn distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
+    // `row` has one more entry than `b`, so `j + 1` and `b.len()` are in range.
     let mut row: Vec<usize> = (0..=b.len()).collect();
     for (i, ca) in a.chars().enumerate() {
         let mut prev = row[0];

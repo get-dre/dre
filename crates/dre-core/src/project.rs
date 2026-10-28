@@ -1140,8 +1140,10 @@ impl Loader {
         let sql_index = self.index_sql(&found.sql);
         project.sql = sql_index
             .iter()
-            .filter(|(_, paths)| paths.len() == 1)
-            .map(|(name, paths)| (name.clone(), paths[0].clone()))
+            .filter_map(|(name, paths)| match paths.as_slice() {
+                [path] => Some((name.clone(), path.clone())),
+                _ => None,
+            })
             .collect();
         // Queries resolve by bare basename; whatever no report YAML references is unmanaged.
         let mut referenced: BTreeSet<String> = fragments
@@ -1188,10 +1190,12 @@ impl Loader {
             .map(|r| (r.name.clone(), r.file.clone()))
             .collect();
         for (name, path) in &sql_index {
-            if referenced.contains(name) || path.len() != 1 {
+            let [path] = path.as_slice() else {
+                continue;
+            };
+            if referenced.contains(name) {
                 continue;
             }
-            let path = &path[0];
             if let Some(other) = managed_names.get(name) {
                 self.diags.error(
                     Code::DuplicateReportName,
@@ -2757,9 +2761,9 @@ impl Loader {
         }
         // Report each cycle once, at the ref that closes it.
         let mut reported: BTreeSet<Vec<String>> = BTreeSet::new();
-        for start in graph.keys() {
+        for (start, edges) in &graph {
             let mut path = vec![start.clone()];
-            let mut stack = vec![graph[start].iter()];
+            let mut stack = vec![edges.iter()];
             while let Some(it) = stack.last_mut() {
                 let Some((next, line)) = it.next() else {
                     stack.pop();
@@ -2772,10 +2776,10 @@ impl Loader {
                     key.sort();
                     if reported.insert(key) {
                         cycle.push(next.clone());
-                        let file = index[path.last().expect("the path holds the current node")][0].clone();
+                        let file = path.last().and_then(|n| index.get(n)).and_then(|p| p.first());
                         self.diags.error(
                             Code::RefCycle,
-                            Some(file),
+                            file.cloned(),
                             Some(*line),
                             format!("`ref()` cycle: {}", cycle.join(" → ")),
                         );
@@ -2791,6 +2795,7 @@ impl Loader {
         names
     }
 
+    /// `.sql` files by basename. Every list holds at least one path.
     fn index_sql(&mut self, sql: &[PathBuf]) -> BTreeMap<String, Vec<PathBuf>> {
         let mut index: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
         for p in sql {
@@ -2802,10 +2807,10 @@ impl Loader {
             index.entry(stem).or_default().push(p.clone());
         }
         for (name, paths) in &index {
-            if paths.len() > 1 {
+            if let [_, second, ..] = paths.as_slice() {
                 self.diags.error(
                     Code::DuplicateSqlName,
-                    Some(paths[1].clone()),
+                    Some(second.clone()),
                     None,
                     format!(
                         "`{name}.sql` exists more than once: {}; .sql basenames must be unique project-wide",
@@ -2833,15 +2838,16 @@ impl Loader {
             let definers: Vec<usize> = (0..frags.len())
                 .filter(|i| frags[*i].map.contains_key("queries"))
                 .collect();
-            if definers.len() > 1 {
-                let second = &frags[definers[1]].file;
+            // `definers` holds indexes into `frags`.
+            if let [first, second, ..] = definers.as_slice() {
+                let second = &frags[*second].file;
                 self.diags.error(
                     Code::DuplicateReportName,
                     Some(second.display.clone()),
                     key_line(second, "queries"),
                     format!(
                         "report `{name}` is declared in both {} and {}; report names must be unique project-wide",
-                        frags[definers[0]].file.display.display(),
+                        frags[*first].file.display.display(),
                         second.display.display()
                     ),
                 );
@@ -4843,7 +4849,9 @@ impl Loader {
                     self,
                     format!(
                         "destination `{}`: a per-row output's `path` must differ per row, but `{p}` doesn't use `each.*`; every row would overwrite the last (add e.g. `{{{{ each.{} }}}}`)",
-                        d.profile, key[0]
+                        // `key` is never empty: an empty one is rejected where it's parsed.
+                        d.profile,
+                        key[0]
                     ),
                 );
             }
@@ -6717,7 +6725,7 @@ fn metadata_layers(project: &Project, folders: &[&FolderCfg]) -> Vec<MetaLayer> 
 
 fn folder_layers<'a>(folders: &'a BTreeMap<Vec<String>, FolderCfg>, folder: &[String]) -> Vec<&'a FolderCfg> {
     (0..=folder.len())
-        .filter_map(|n| folders.get(&folder[..n].to_vec()))
+        .filter_map(|n| folders.get(folder.get(..n)?))
         .collect()
 }
 

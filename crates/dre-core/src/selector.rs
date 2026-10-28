@@ -124,11 +124,11 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
         .iter()
         .filter(|f| f.last().is_some_and(|l| l == token))
         .collect();
-    match folders.len() {
-        0 => Err(SelectorError::NoMatch {
+    match folders.as_slice() {
+        [] => Err(SelectorError::NoMatch {
             token: token.to_string(),
         }),
-        1 => Ok(under(folders[0])),
+        [folder] => Ok(under(folder)),
         _ => Err(SelectorError::Ambiguous {
             token: token.to_string(),
             candidates: folders.into_iter().cloned().collect(),

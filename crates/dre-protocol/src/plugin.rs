@@ -788,6 +788,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
                 }
             },
         };
+        // `i` indexes `provides`, which lists `plugins` (asserted non-empty) in order.
         let (about, h) = plugins[i].handler();
         let _ = shared().name.set(about.name.to_string());
         out.send(&Response::Hello {

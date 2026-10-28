@@ -260,17 +260,16 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
 }
 
 /// Rows of cells, left-aligned in columns.
-fn columns<const N: usize>(rows: Vec<[String; N]>) -> String {
-    let widths: Vec<usize> = (0..N)
-        .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap_or(0))
-        .collect();
+pub(crate) fn columns<const N: usize>(rows: Vec<[String; N]>) -> String {
+    let mut widths = [0; N];
+    for r in &rows {
+        for (w, c) in widths.iter_mut().zip(r) {
+            *w = (*w).max(c.chars().count());
+        }
+    }
     let mut out = String::new();
     for r in rows {
-        let line: Vec<String> = r
-            .iter()
-            .enumerate()
-            .map(|(i, c)| format!("{c:<w$}", w = widths[i]))
-            .collect();
+        let line: Vec<String> = r.iter().zip(widths).map(|(c, w)| format!("{c:<w$}")).collect();
         out.push_str(line.join("  ").trim_end());
         out.push('\n');
     }

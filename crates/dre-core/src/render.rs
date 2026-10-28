@@ -1097,6 +1097,7 @@ impl Lookups {
         }
         let t = self.table(name)?;
         let rows = t.rows.len() as u64;
+        // `table` found `name` in `defs`.
         let load = match self.defs[name].load {
             Load::Inline => false,
             Load::TempTable => true,
@@ -1276,11 +1277,11 @@ fn choose_profile(
         }
         None => match used.as_slice() {
             [] => Ok(None),
-            [(_, p), rest @ ..] => {
+            [(first, p), rest @ ..] => {
                 if let Some((k, q)) = rest.iter().find(|(_, q)| q != p) {
                     return Err(fail(format!(
                         "reads source `{}` on connection `{p}` and source `{k}` on `{q}`; one statement runs on one connection",
-                        used[0].0
+                        first
                     )));
                 }
                 Ok(Some(p.clone()))

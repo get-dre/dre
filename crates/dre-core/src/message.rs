@@ -136,17 +136,20 @@ pub fn default_text(results: &[(String, Arc<QueryResult>)], locale: Locale) -> S
     let mut blocks = Vec::new();
     for (query, r) in results {
         let label = |c: &str| escape(c);
-        let block = match (r.row_count, r.columns.len()) {
-            (0, _) => format!("{}: no rows", label(query)),
-            (1, 1) => format!("{}: {}", label(&r.columns[0]), shown(&r.rows[0][0], locale)),
-            (1, _) => r
-                .columns
+        let block = match (
+            r.row_count,
+            r.columns.as_slice(),
+            r.rows.first().map(Vec::as_slice),
+        ) {
+            (0, _, _) => format!("{}: no rows", label(query)),
+            (1, [column], Some([value])) => format!("{}: {}", label(column), shown(value, locale)),
+            (1, columns, Some(row)) => columns
                 .iter()
-                .zip(&r.rows[0])
+                .zip(row)
                 .map(|(c, v)| format!("{}: {}", label(c), shown(v, locale)))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            (n, _) => {
+            (n, _, _) => {
                 let mut lines = vec![format!("**{}**", label(query))];
                 for row in r.rows.iter().take(DEFAULT_LIST_ROWS) {
                     let cells: Vec<String> = row.iter().map(|v| shown(v, locale)).collect();

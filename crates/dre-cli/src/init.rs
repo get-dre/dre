@@ -470,6 +470,7 @@ fn add_profile(
     match lines.iter().position(|l| l.trim_end() == header) {
         Some(start) => {
             // The section runs until the next top-level key; add the profile at its end.
+            // `start` is a line's index, so `start + 1 <= lines.len()`.
             let mut end = lines[start + 1..]
                 .iter()
                 .position(|l| !l.is_empty() && !l.starts_with([' ', '#']))
@@ -526,6 +527,7 @@ fn init_inner(profiles_dir: Option<PathBuf>, printer: &Printer, input: impl BufR
         return Err("the plugin registry lists no sources".into());
     }
     eprintln!("Which database do you want to report from?");
+    // Without `allow_none`, `pick` returns exactly one choice.
     let source = p.pick("Source (number or name)", &sources, false)?[0];
     let fields = install_and_describe(source, printer)?;
     let profile = p.ask("Name for this connection profile", Some("warehouse"))?;

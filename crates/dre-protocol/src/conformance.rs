@@ -172,13 +172,12 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
             let mut p = start(path).map_err(|e| e.to_string())?;
             p.write_raw(&frame_json(r#"{"type":"cancel","id":999}"#))
                 .map_err(|e| e.to_string())?;
-            for (req, want) in [
-                (r#"{"type":"describe","id":41}"#, "describe"),
-                (r#"{"type":"frobnicate","id":42}"#, "error"),
+            for (req, want, id) in [
+                (r#"{"type":"describe","id":41}"#, "describe", 41),
+                (r#"{"type":"frobnicate","id":42}"#, "error", 42),
             ] {
                 p.write_raw(&frame_json(req)).map_err(|e| e.to_string())?;
                 let v = p.recv_raw(TIMEOUT).map_err(|e| e.to_string())?;
-                let id = req[req.len() - 3..req.len() - 1].parse::<u64>().unwrap();
                 if v["type"] != want || v["id"] != id {
                     return Err(format!(
                         "sent {req}, expected a `{want}` reply with id {id}, got {v}"

@@ -787,10 +787,12 @@ impl Ui for Printer {
                 if answer == "a" || answer == "all" {
                     return Ok(None);
                 }
-                if let Ok(n) = answer.parse::<usize>()
-                    && (1..=sets.len()).contains(&n)
+                if let Some(set) = answer
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|n| sets.get(n.checked_sub(1)?))
                 {
-                    return Ok(Some(sets[n - 1].clone()));
+                    return Ok(Some(set.clone()));
                 }
                 if sets.iter().any(|s| s == answer) {
                     return Ok(Some(answer.to_string()));

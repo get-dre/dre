@@ -70,29 +70,34 @@ fn push_text(out: &mut Vec<Inline>, c: char) {
 /// The index of the next unescaped `pat` at or after `from`.
 fn find(chars: &[char], from: usize, pat: &[char]) -> Option<usize> {
     let mut i = from;
-    while i + pat.len() <= chars.len() {
-        if chars[i] == '\\' {
-            i += 2;
-            continue;
+    while let Some(rest) = chars.get(i..).filter(|r| r.len() >= pat.len()) {
+        match rest {
+            ['\\', ..] => i += 2,
+            _ if rest.starts_with(pat) => return Some(i),
+            _ => i += 1,
         }
-        if chars[i..i + pat.len()] == *pat {
-            return Some(i);
-        }
-        i += 1;
     }
     None
 }
 
+/// The character `\` escapes at the start of `chars`, if any.
+fn escaped(chars: &[char]) -> Option<char> {
+    match chars {
+        ['\\', n, ..] if n.is_ascii_punctuation() => Some(*n),
+        _ => None,
+    }
+}
+
 fn unescape(chars: &[char]) -> String {
     let mut out = String::new();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1].is_ascii_punctuation() {
-            out.push(chars[i + 1]);
-            i += 2;
+    let mut rest = chars;
+    while let Some((&c, tail)) = rest.split_first() {
+        if let Some(n) = escaped(rest) {
+            out.push(n);
+            rest = tail.get(1..).unwrap_or_default();
         } else {
-            out.push(chars[i]);
-            i += 1;
+            out.push(c);
+            rest = tail;
         }
     }
     out
@@ -102,10 +107,11 @@ fn parse_span(chars: &[char]) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut i = 0;
     let word = |j: usize| chars.get(j).is_some_and(|c| c.is_alphanumeric());
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\\' && i + 1 < chars.len() && chars[i + 1].is_ascii_punctuation() {
-            push_text(&mut out, chars[i + 1]);
+    // The sub-slices below are in range: `find` only returns an index whose pattern fits
+    // before the end, and never one before `from`.
+    while let Some(&c) = chars.get(i) {
+        if let Some(n) = chars.get(i..).and_then(escaped) {
+            push_text(&mut out, n);
             i += 2;
             continue;
         }
@@ -292,21 +298,21 @@ pub fn to_html(text: &str) -> String {
     let parsed = parse(text);
     let mut out = String::new();
     let mut i = 0;
-    while i < parsed.len() {
-        match &parsed[i] {
+    while let Some(line) = parsed.get(i) {
+        match line {
             Line::Blank => i += 1,
             Line::Bullet(_) => {
                 out.push_str("<ul>\n");
-                while let Some(Line::Bullet(_)) = parsed.get(i) {
-                    out.push_str(&format!("<li>{}</li>\n", render_line(&parsed[i], &d)));
+                while let Some(l @ Line::Bullet(_)) = parsed.get(i) {
+                    out.push_str(&format!("<li>{}</li>\n", render_line(l, &d)));
                     i += 1;
                 }
                 out.push_str("</ul>\n");
             }
             Line::Text(_) => {
                 let mut lines = Vec::new();
-                while let Some(Line::Text(_)) = parsed.get(i) {
-                    lines.push(render_line(&parsed[i], &d));
+                while let Some(l @ Line::Text(_)) = parsed.get(i) {
+                    lines.push(render_line(l, &d));
                     i += 1;
                 }
                 out.push_str(&format!("<p>{}</p>\n", lines.join("<br>\n")));

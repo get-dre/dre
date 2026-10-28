@@ -114,10 +114,12 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
             .iter()
             .filter(|p| matches!(ext(p).as_str(), "yml" | "yaml"))
             .collect();
+        // From here `paths`, and `data` or `config`, are non-empty.
         if data.is_empty() && config.is_empty() {
             continue;
         }
         if data.len() > 1 || config.len() > 1 {
+            // Two data or two config files mean `paths` has at least two.
             diags.error(
                 Code::DuplicateLookup,
                 Some((*paths[1]).clone()),
@@ -571,7 +573,7 @@ impl Table {
         let mut fields = Vec::new();
         let mut arrays: Vec<ArrayRef> = Vec::new();
         for (i, (c, t)) in self.columns.iter().zip(&self.types).enumerate() {
-            let col = self.rows.iter().map(|r| &r[i]);
+            let col = self.rows.iter().map(|r| r.get(i).unwrap_or(&Cell::Null));
             let (dt, a): (DataType, ArrayRef) = match t {
                 ColType::String => (
                     DataType::Utf8,

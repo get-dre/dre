@@ -370,8 +370,10 @@ fn installed(command: &str, pins: &[dre_core::config::dependencies::ExtensionEnt
 
 fn project_dir(args: &[String]) -> PathBuf {
     args.windows(2)
-        .find(|pair| pair[0] == "--project-dir")
-        .map(|pair| PathBuf::from(&pair[1]))
+        .find_map(|pair| match pair {
+            [flag, dir] if flag == "--project-dir" => Some(PathBuf::from(dir)),
+            _ => None,
+        })
         .or_else(|| {
             args.iter()
                 .find_map(|arg| arg.strip_prefix("--project-dir=").map(PathBuf::from))
