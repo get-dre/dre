@@ -412,31 +412,38 @@ impl ConnectionField {
             choices: Vec::new(),
         }
     }
+    #[must_use]
     pub fn kind(mut self, kind: FieldKind) -> Self {
         self.kind = Some(kind);
         self
     }
+    #[must_use]
     pub fn choices(mut self, choices: &[&str]) -> Self {
         self.choices = choices.iter().map(|c| c.to_string()).collect();
         self.kind.get_or_insert(FieldKind::String);
         self
     }
+    #[must_use]
     pub fn required(mut self) -> Self {
         self.required = true;
         self
     }
+    #[must_use]
     pub fn secret(mut self) -> Self {
         self.secret = true;
         self
     }
+    #[must_use]
     pub fn default(mut self, v: impl Into<Value>) -> Self {
         self.default = Some(v.into());
         self
     }
+    #[must_use]
     pub fn same_as_source(mut self, source_type: &str) -> Self {
         self.same_as_source = Some(source_type.into());
         self
     }
+    #[must_use]
     pub fn manual(mut self) -> Self {
         self.manual = true;
         self

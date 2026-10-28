@@ -154,6 +154,7 @@ pub fn of(kind: &str) -> Option<&'static Dialect> {
 
 impl Dialect {
     /// `value` as a SQL string literal.
+    #[must_use]
     pub fn literal(&self, value: &str) -> String {
         match self.literal_style {
             LiteralStyle::Hex(template) => template.replace("{hex}", &crate::checksum::hex(value.as_bytes())),

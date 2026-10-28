@@ -211,6 +211,7 @@ pub fn parse_sheet(v: &Value) -> (SheetStyle, Vec<String>) {
 
 impl CellStyle {
     /// `self` with every key `over` sets replacing it.
+    #[must_use]
     pub fn merged(&self, over: &CellStyle) -> CellStyle {
         let font = match (&self.font, &over.font) {
             (Some(a), Some(b)) => Some(Font {
@@ -238,6 +239,7 @@ impl CellStyle {
 
 impl SheetStyle {
     /// `self` (the output's) with the tab's style over it.
+    #[must_use]
     pub fn merged(&self, over: &SheetStyle) -> SheetStyle {
         SheetStyle {
             cells: self.cells.merged(&over.cells),

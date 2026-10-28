@@ -53,7 +53,9 @@ pub fn run(path: &Path) -> Vec<Check> {
 /// Like [`run`], with extra environment variables for every plugin process (for plugins whose
 /// capabilities depend on their environment).
 pub fn run_with_env(path: &Path, env: &[(&str, &str)]) -> Vec<Check> {
-    let file = path.file_name().unwrap().to_string_lossy().to_string();
+    let file = path
+        .file_name()
+        .map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().to_string());
     if let Some((kind, name)) = parse_executable_name(&file) {
         return run_plugin(path, &PluginId::new(kind, name), false, env);
     }
@@ -493,6 +495,10 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, env: &[(&str, &str)]) -> Ve
 }
 
 /// Panic with a readable report unless every check passes. For use in plugin tests.
+///
+/// # Panics
+///
+/// Panics when a check fails: that is how it fails the test.
 pub fn assert_conforms(path: &Path) {
     let checks = run(path);
     let failed: Vec<String> = checks

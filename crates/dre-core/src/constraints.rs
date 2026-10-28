@@ -121,6 +121,7 @@ pub fn compatible(reqs: &[&VersionReq]) -> bool {
 }
 
 /// The combined requirement: every comparator from every requirement.
+#[must_use]
 pub fn combine(reqs: &[&VersionReq]) -> VersionReq {
     let mut comparators: Vec<Comparator> = Vec::new();
     for c in reqs.iter().flat_map(|r| r.comparators.iter()) {

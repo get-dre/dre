@@ -187,6 +187,15 @@ impl fmt::Display for RenderError {
     }
 }
 
+/// A template function's error when an earlier render panicked holding shared state (a
+/// poisoned lock): the state isn't read, the render fails.
+fn poisoned<T>(_: std::sync::PoisonError<T>) -> Error {
+    Error::new(
+        ErrorKind::InvalidOperation,
+        "an earlier render stopped part-way (a bug); run again",
+    )
+}
+
 /// What `columns()` found, by relation and connection.
 type ColumnsCache = BTreeMap<(String, Option<String>), Value>;
 
@@ -249,12 +258,15 @@ impl Renderer {
         } else {
             UndefinedBehavior::Strict
         });
-        env.set_syntax(
-            minijinja::syntax::SyntaxConfig::builder()
-                .keep_trailing_newline(true)
-                .build()
-                .expect("default delimiters are valid"),
-        );
+        let syntax = minijinja::syntax::SyntaxConfig::builder()
+            .keep_trailing_newline(true)
+            .build()
+            .map_err(|e| RenderError {
+                file: PathBuf::new(),
+                line: None,
+                message: format!("can't set up the template syntax: {e}"),
+            })?;
+        env.set_syntax(syntax);
         // Message text is portable Markdown: every value it prints is escaped, so a `*` or `_`
         // in the data stays literal (`| safe` opts out).
         env.set_auto_escape_callback(|name| {
@@ -286,7 +298,7 @@ impl Renderer {
         let raised_c = raised.clone();
         env.add_function("raise_error", move |message: String| -> Result<Value, Error> {
             if parse {
-                raised_c.lock().unwrap().get_or_insert(message);
+                raised_c.lock().map_err(poisoned)?.get_or_insert(message);
                 return Ok(Value::from(""));
             }
             Err(Error::new(ErrorKind::InvalidOperation, message))
@@ -367,7 +379,7 @@ impl Renderer {
                         return Err(fail("the project declares no `sources:`".into()));
                     };
                     let r = resolve(&source, &table).map_err(fail)?;
-                    calls.lock().unwrap().push((source.clone(), table.clone()));
+                    calls.lock().map_err(poisoned)?.push((source.clone(), table.clone()));
                     let q = if parse || !r.quoting.any() {
                         None
                     } else {
@@ -386,7 +398,7 @@ impl Renderer {
                         }
                     };
                     let text = r.relation(q.as_deref());
-                    relations.lock().unwrap().push((text.clone(), r));
+                    relations.lock().map_err(poisoned)?.push((text.clone(), r));
                     Ok(Value::from(text))
                 },
             );
@@ -460,7 +472,7 @@ impl Renderer {
                 let what = format!("columns('{}')", crate::secrets::mask(&rel));
                 let profile = choose_profile(&what, &rel, profile, &rels)?;
                 let key = (rel.clone(), profile.clone());
-                if let Some(v) = cache.lock().unwrap().get(&key) {
+                if let Some(v) = cache.lock().map_err(poisoned)?.get(&key) {
                     return Ok(v.clone());
                 }
                 let Some(runner) = &runner_c else {
@@ -483,7 +495,7 @@ impl Renderer {
                         })
                         .collect::<Vec<_>>(),
                 );
-                cache.lock().unwrap().insert(key, v.clone());
+                cache.lock().map_err(poisoned)?.insert(key, v.clone());
                 Ok(v)
             },
         );
@@ -544,11 +556,19 @@ impl Renderer {
     }
 
     /// Warnings raised since the last call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a render panicked while holding the warnings (their lock is poisoned).
     pub fn take_warnings(&self) -> Vec<String> {
         std::mem::take(&mut *self.warnings.lock().unwrap())
     }
 
     /// `(source, table)` of every `source()` called since the last call, in order, each once.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a render panicked while holding the calls (their lock is poisoned).
     pub fn take_sources(&self) -> Vec<(String, String)> {
         let mut out: Vec<(String, String)> = Vec::new();
         for c in std::mem::take(&mut *self.source_calls.lock().unwrap()) {
@@ -560,6 +580,10 @@ impl Renderer {
     }
 
     /// Set (or clear) the destination `destination.*` reads.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a render panicked while reading it (its lock is poisoned).
     pub fn set_destination(&self, d: Option<Connection>) {
         *self.destination.lock().unwrap() = d;
     }
@@ -571,6 +595,11 @@ impl Renderer {
 
     /// Render `src` with `ctx`'s keys (a map) added to the context (`results`, `outputs`). With
     /// `markdown`, it's message text: every printed value is escaped for portable Markdown.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an earlier render panicked while holding the renderer's state (a poisoned
+    /// lock).
     pub fn render_with(
         &self,
         file: &Path,

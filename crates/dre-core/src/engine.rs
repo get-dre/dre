@@ -93,6 +93,10 @@ impl Events {
     }
 
     /// Send an event. Nobody listening (the run was abandoned) isn't an error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the held events are poisoned (a thread panicked while adding one).
     pub fn emit(&self, e: RunEvent) {
         match &self.held {
             Some(h) => h.lock().unwrap().push(e),
@@ -108,6 +112,10 @@ impl Events {
     }
 
     /// Send the held events as one block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the held events are poisoned (a thread panicked while adding one).
     pub fn flush(&self) {
         if let Some(h) = &self.held {
             let events = std::mem::take(&mut *h.lock().unwrap());
@@ -297,6 +305,10 @@ impl RunStore {
     }
 
     /// Claim `profile`'s `path` for `binding`; the Binding that already has it, if another.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the claims are poisoned (another Binding's thread panicked while claiming).
     pub fn claim(&self, profile: &str, path: &str, binding: &str) -> Option<String> {
         let mut claims = self.claims.as_ref()?.lock().unwrap();
         let owner = claims

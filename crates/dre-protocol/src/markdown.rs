@@ -27,6 +27,7 @@ pub enum Line {
 const ESCAPABLE: &[char] = &['\\', '*', '_', '`', '[', ']'];
 
 /// `s` with every character that means something in the subset backslash-escaped.
+#[must_use]
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -220,11 +221,13 @@ fn render(text: &str, d: &Dialect) -> String {
 
 /// Slack's `mrkdwn`, which has no escapes: `&`, `<` and `>` become entities, and literal `*`, `~`
 /// and `` ` `` become look-alikes so they can't start formatting.
+#[must_use]
 pub fn to_slack(text: &str) -> String {
     render(text, &CHAT)
 }
 
 /// Google Chat's text formatting (the same marks as Slack's).
+#[must_use]
 pub fn to_google_chat(text: &str) -> String {
     render(text, &CHAT)
 }
@@ -261,6 +264,7 @@ const CHAT: Dialect = Dialect {
 };
 
 /// The Markdown Microsoft Teams renders in an Adaptive Card text block.
+#[must_use]
 pub fn to_teams(text: &str) -> String {
     render(
         text,
@@ -277,6 +281,7 @@ pub fn to_teams(text: &str) -> String {
 }
 
 /// `t` safe as HTML text or an attribute value.
+#[must_use]
 pub fn html_escape(t: &str) -> String {
     t.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -286,6 +291,7 @@ pub fn html_escape(t: &str) -> String {
 
 /// An HTML fragment: lines become paragraphs (consecutive lines joined by `<br>`), bullets a
 /// list.
+#[must_use]
 pub fn to_html(text: &str) -> String {
     let d = Dialect {
         text: html_escape,
@@ -331,6 +337,7 @@ fn render_line(l: &Line, d: &Dialect) -> String {
 }
 
 /// Plain text: marks removed, links as `text (url)`, bullets as `- `.
+#[must_use]
 pub fn to_plain(text: &str) -> String {
     render(
         text,
@@ -353,6 +360,7 @@ pub fn to_plain(text: &str) -> String {
 
 /// `text` cut to at most `max` characters including `marker`, at a line break when one is close
 /// enough; `None` when it already fits.
+#[must_use]
 pub fn truncate(text: &str, max: usize, marker: &str) -> Option<String> {
     if text.chars().count() <= max {
         return None;

@@ -50,6 +50,22 @@ pub enum VariableType {
     Enum,
 }
 
+impl VariableType {
+    /// The name YAML uses for it.
+    fn name(&self) -> &'static str {
+        match self {
+            VariableType::String => "string",
+            VariableType::Integer => "integer",
+            VariableType::Number => "number",
+            VariableType::Boolean => "boolean",
+            VariableType::Date => "date",
+            VariableType::Array => "array",
+            VariableType::Object => "object",
+            VariableType::Enum => "enum",
+        }
+    }
+}
+
 impl Definition {
     /// Problems with the declaration itself: `pattern`/`max_length` on a non-string, or a
     /// pattern that isn't a valid regular expression.
@@ -86,13 +102,7 @@ impl Definition {
             VariableType::Enum => !value.is_null() && self.allowed.as_ref().is_some_and(|v| !v.is_empty()),
         };
         if !valid {
-            return Err(format!(
-                "variable `{name}` must have type {}",
-                serde_json::to_value(&self.kind)
-                    .unwrap()
-                    .as_str()
-                    .expect("a JSON value serializes")
-            ));
+            return Err(format!("variable `{name}` must have type {}", self.kind.name()));
         }
         if self
             .allowed

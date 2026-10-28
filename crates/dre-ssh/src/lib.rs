@@ -244,7 +244,7 @@ impl Ssh {
         let mut session = match tokio::time::timeout(timeout, connecting).await {
             Err(_) => return Err(temporary(format!("timed out connecting to {host}:{port}"))),
             Ok(Err(e)) => {
-                if let Some(why) = refused.lock().unwrap().take() {
+                if let Some(why) = refused.lock().ok().and_then(|mut r| r.take()) {
                     return Err(fail(why));
                 }
                 let m = format!("can't connect to {host}:{port}: {e}");

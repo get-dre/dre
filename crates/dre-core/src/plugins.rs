@@ -101,13 +101,8 @@ pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
     let p = version_dir.join(MANIFEST);
-    crate::fs::write_atomic(
-        &p,
-        serde_json::to_string_pretty(m)
-            .expect("a JSON value serializes")
-            .as_bytes(),
-    )
-    .map_err(|e| format!("can't write {}: {e}", p.display()))
+    let text = serde_json::to_string_pretty(m).map_err(|e| format!("can't write {}: {e}", p.display()))?;
+    crate::fs::write_atomic(&p, text.as_bytes()).map_err(|e| format!("can't write {}: {e}", p.display()))
 }
 
 fn is_executable(p: &Path) -> bool {
@@ -138,20 +133,22 @@ pub fn probe(path: &Path) -> Result<Vec<PluginId>, String> {
         return Ok(vec![PluginId::new(kind, name)]);
     }
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    if let Some((m, ids)) = ASKED.lock().unwrap().get(path)
-        && *m == modified
-    {
-        return Ok(ids.clone());
+    // A poisoned cache is skipped, not read: asking again gives the same answer.
+    if let Some(ids) = ASKED.lock().ok().and_then(|a| {
+        a.get(path)
+            .filter(|(m, _)| *m == modified)
+            .map(|(_, ids)| ids.clone())
+    }) {
+        return Ok(ids);
     }
     let quiet: dre_protocol::host::LogSink = std::sync::Arc::new(|_, _| {});
     let p = dre_protocol::host::PluginProcess::start(path, quiet)
         .map_err(|e| format!("can't ask {} what it provides: {e}", path.display()))?;
     let ids = p.info().provides.clone();
     let _ = p.close();
-    ASKED
-        .lock()
-        .unwrap()
-        .insert(path.to_path_buf(), (modified, ids.clone()));
+    if let Ok(mut asked) = ASKED.lock() {
+        asked.insert(path.to_path_buf(), (modified, ids.clone()));
+    }
     Ok(ids)
 }
 

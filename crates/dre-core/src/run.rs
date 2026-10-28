@@ -369,6 +369,10 @@ pub struct Plan<'a> {
 
 /// Run what `opts` selects: [`plan`] it, then run the plan on a worker thread while this thread
 /// shows its events through `ui`.
+///
+/// # Panics
+///
+/// Panics if the worker thread panics (a bug), so the panic isn't lost.
 pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary {
     let mut summary = RunSummary::default();
     let Some(plan) = plan(project, opts, ui, &mut summary) else {
@@ -486,6 +490,11 @@ pub fn plan<'a>(
 /// Run a plan's Bindings, reporting through `events`; a cancelled run starts no further
 /// Binding. One at a time, in order, unless a connection's entry sets `threads:` above 1 or the
 /// run sets `--threads` (see [`Limits`]).
+///
+/// # Panics
+///
+/// Panics if a Binding running at once with others panics (a bug): the shared state's lock is
+/// then poisoned.
 pub fn execute(
     project: &Project,
     plan: &Plan<'_>,
@@ -3807,6 +3816,7 @@ impl Session {
 /// Hides a sensitive statement's plugin diagnostics while it runs. The plugin's stderr is logged
 /// from another thread, so the scope waits for the lines the plugin wrote before showing
 /// diagnostics again; if the plugin keeps writing, they stay hidden until the next statement.
+#[must_use = "dropping the scope shows diagnostics again at once"]
 struct OpaqueLogScope(Arc<AtomicBool>, Option<dre_protocol::host::StderrSync>);
 
 impl OpaqueLogScope {

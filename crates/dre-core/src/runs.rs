@@ -81,6 +81,7 @@ pub enum LockError {
 
 /// Holds a Binding's lock; dropping it releases the lock.
 #[derive(Debug)]
+#[must_use = "dropping the guard releases the lock at once"]
 pub struct Guard {
     path: PathBuf,
     run_id: String,
@@ -160,7 +161,7 @@ impl BindingRuns {
         std::fs::create_dir_all(&self.dir).map_err(LockError::Io)?;
         let path = self.dir.join(LOCK);
         let me = Holder::me(run_id, started);
-        let body = serde_json::to_string_pretty(&me).expect("a holder serializes") + "\n";
+        let body = serde_json::to_string_pretty(&me).map_err(|e| LockError::Io(e.into()))? + "\n";
         let mut took_over = None;
         for _ in 0..2 {
             match std::fs::OpenOptions::new()
@@ -221,15 +222,12 @@ impl BindingRuns {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return Ok(None);
         };
-        let old: Vec<PathBuf> = entries
+        let old: Vec<std::ffi::OsString> = entries
             .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                let name = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                ![CURRENT, LOCK, RUNS].contains(&name.as_str())
+            .map(|e| e.file_name())
+            .filter(|n| {
+                let name = n.to_string_lossy();
+                ![CURRENT, LOCK, RUNS].contains(&name.as_ref())
                     && !(name.starts_with('.') && name.ends_with(".tmp"))
             })
             .collect();
@@ -244,8 +242,8 @@ impl BindingRuns {
         let id = format!("{}-legacy", started.format("%Y%m%dT%H%M%SZ"));
         let to = self.run_dir(&id);
         std::fs::create_dir_all(&to)?;
-        for p in old {
-            std::fs::rename(&p, to.join(p.file_name().expect("the path ends in a file name")))?;
+        for name in old {
+            std::fs::rename(self.dir.join(&name), to.join(&name))?;
         }
         if self.current().is_none() {
             self.switch(&id)?;
@@ -361,7 +359,7 @@ mod tests {
         }
         drop(g);
         assert!(r.holder().is_none());
-        r.lock("b", now).unwrap();
+        drop(r.lock("b", now).unwrap());
     }
 
     #[test]
@@ -385,7 +383,7 @@ mod tests {
         std::fs::write(r.dir().join(LOCK), serde_json::to_string(&elsewhere).unwrap()).unwrap();
         assert!(matches!(r.lock("new", Utc::now()), Err(LockError::Held(_))));
         assert_eq!(r.unlock().unwrap().unwrap().host, "some-other-host");
-        r.lock("new", Utc::now()).unwrap();
+        drop(r.lock("new", Utc::now()).unwrap());
     }
 
     #[test]

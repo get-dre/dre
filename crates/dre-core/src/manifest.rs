@@ -660,8 +660,9 @@ fn slash(p: &Path) -> String {
 }
 
 /// `v` as compact JSON with every object's keys sorted: the same bytes for the same value.
+#[must_use]
 pub fn canonical(v: &Json) -> String {
-    serde_json::to_string(&sorted(v.clone())).expect("a JSON value serializes")
+    sorted(v.clone()).to_string()
 }
 
 /// `v` with every object's keys sorted, so the bytes don't depend on insertion order.
@@ -805,8 +806,11 @@ pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
 // -- writing ----------------------------------------------------------------------------------
 
 /// The manifest's text: pretty JSON, secrets masked, newline-terminated.
+#[must_use]
 pub fn render(doc: &Json) -> String {
-    crate::secrets::to_json_pretty(doc).expect("a JSON value serializes") + "\n"
+    let mut doc = doc.clone();
+    crate::secrets::redact_json(&mut doc);
+    format!("{doc:#}\n")
 }
 
 /// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of
