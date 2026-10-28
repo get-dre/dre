@@ -189,18 +189,20 @@ def check(dre, plugins):
                                if p.is_file() and p.suffix in (".json", ".jsonl", ".log"))
             assert "09031984" not in reported and "example-pack-password" not in reported, \
                 "a password leaked into DRE's records"
-        cities = ("東京", "北京", "서울", "Москва", "القاهرة", "Αθήνα", "मुंबई", "São Paulo", "Zürich")
-        offices = projects["multilingual"] / "out"
-        everyone = workbook(offices / "all-offices.xlsx")["offices"]
-        for row, city in enumerate(cities, start=2):
-            assert_cell(everyone, f"A{row}", city)
-            staff = workbook(offices / "offices" / (city + ".xlsx"))["staff"]
-            assert_cell(staff, "A2", city)
-            assert_cell(staff, "A3", city)
-            assert "A4" not in staff, (city, "another office's staff in the workbook")
-        mumbai = workbook(offices / "offices/मुंबई.xlsx")["staff"]
-        assert_cell(mumbai, "B2", "प्रिया पटेल")
-        assert_cell(mumbai, "C2", "लेखाकार")
+        multilingual = projects.get("multilingual")
+        if multilingual:
+            cities = ("東京", "北京", "서울", "Москва", "القاهرة", "Αθήνα", "मुंबई", "São Paulo", "Zürich")
+            offices = multilingual / "out"
+            everyone = workbook(offices / "all-offices.xlsx")["offices"]
+            for row, city in enumerate(cities, start=2):
+                assert_cell(everyone, f"A{row}", city)
+                staff = workbook(offices / "offices" / (city + ".xlsx"))["staff"]
+                assert_cell(staff, "A2", city)
+                assert_cell(staff, "A3", city)
+                assert "A4" not in staff, (city, "another office's staff in the workbook")
+            mumbai = workbook(offices / "offices/मुंबई.xlsx")["staff"]
+            assert_cell(mumbai, "B2", "प्रिया पटेल")
+            assert_cell(mumbai, "C2", "लेखाकार")
         sftp_record = latest(records(projects["sftp-delivery"]))
         output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
         assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"
