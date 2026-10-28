@@ -802,11 +802,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
                 .chain(std::iter::once(&CAP_VALIDATE))
                 .map(|c| c.to_string())
                 .collect(),
-            provides: if provides.len() > 1 {
-                provides.clone()
-            } else {
-                Vec::new()
-            },
+            provides: if provides.len() > 1 { provides } else { Vec::new() },
         });
         shared().version.store(chosen, Ordering::SeqCst);
         break i;

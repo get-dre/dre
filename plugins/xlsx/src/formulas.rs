@@ -195,7 +195,7 @@ pub fn render(
 }
 
 /// A formula's cached result from the value DRE would have written.
-pub fn cached(v: &Option<Excel>) -> String {
+pub fn cached(v: Option<&Excel>) -> String {
     match v {
         None => String::new(),
         Some(Excel::Number(n) | Excel::Date(n) | Excel::DateTime(n) | Excel::Time(n)) => n.to_string(),
@@ -216,7 +216,7 @@ pub struct Acc {
 }
 
 impl Acc {
-    pub fn add(&mut self, v: &Option<Excel>) {
+    pub fn add(&mut self, v: Option<&Excel>) {
         let Some(v) = v else { return };
         self.count += 1;
         if let Excel::Number(n) | Excel::Date(n) | Excel::DateTime(n) | Excel::Time(n) = v {

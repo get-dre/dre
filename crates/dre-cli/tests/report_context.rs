@@ -390,7 +390,7 @@ fn extensions_install_only_with_consent_and_a_trusted_signature() {
     let signer = Signer::new();
     p.write("companion", "#!/bin/sh\necho companion-ready\n");
     let signed = signer.sign(p.read("companion").as_bytes());
-    companion_registry(&p, "0.1.0-rc.2", Some(signed.clone()), None);
+    companion_registry(&p, "0.1.0-rc.2", Some(signed), None);
     let key = signer.key();
     let registry = p.path("index.json");
     let env = [

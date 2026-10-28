@@ -233,7 +233,7 @@ impl Format for Xlsx {
                             );
                             let result = acc.result(*agg);
                             let value = result.parse::<f64>().ok().map(cells::Excel::Number);
-                            widths.total(c, &value, col_formats[c].code());
+                            widths.total(c, value.as_ref(), col_formats[c].code());
                             let f = rust_xlsxwriter::Formula::new(f).set_result(result);
                             ws.write_formula_with_format(row, col, f, &fmt)?;
                         }
@@ -303,8 +303,8 @@ impl Format for Xlsx {
                             None => None,
                         };
                         // Totals see what the sheet holds: a row formula's cached result.
-                        accs[c].add(&v);
-                        widths.value(c, &v, col_formats[c].code());
+                        accs[c].add(v.as_ref());
+                        widths.value(c, v.as_ref(), col_formats[c].code());
                         let style = data_styles[c][usize::from(written % 2 == 1)].as_ref();
                         cells.write(
                             ws,

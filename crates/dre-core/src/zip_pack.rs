@@ -141,7 +141,7 @@ mod tests {
         std::fs::create_dir_all(b.parent().unwrap()).unwrap();
         std::fs::write(&a, "x\n1\n").unwrap();
         std::fs::write(&b, "y\n2\n").unwrap();
-        let files = vec![a.clone(), b.clone()];
+        let files = vec![a.clone(), b];
         let plain = d.path().join("plain.zip");
         build(&plain, &files, None, Encryption::Aes256).unwrap();
         assert_eq!(read(&plain, "summary.csv", None).unwrap(), "x\n1\n");
@@ -157,7 +157,7 @@ mod tests {
             assert!(read(&z, "detail.csv", None).is_err(), "{enc:?}");
         }
         assert!(build(&d.path().join("e.zip"), &files, Some(""), Encryption::Aes256).is_err());
-        let clash = vec![a.clone(), d.path().join("summary.csv")];
+        let clash = vec![a, d.path().join("summary.csv")];
         let e = entry_names(&clash).unwrap_err();
         assert!(e.contains("two files named `summary.csv`"), "{e}");
     }

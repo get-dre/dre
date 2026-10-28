@@ -213,7 +213,7 @@ fn build(
                 b = b.with_access_key(k);
             } else if conn_bool(c, "use_managed_identity").unwrap_or(false) {
                 b = MicrosoftAzureBuilder::from_env()
-                    .with_client_options(client.clone())
+                    .with_client_options(client)
                     .with_container_name(bucket);
             } else if conn_bool(c, "use_azure_cli").unwrap_or(false) {
                 b = b.with_config(AzureConfigKey::UseAzureCli, "true");
@@ -604,8 +604,7 @@ fn gcs_upload(
         }
     };
     // 308 means "resume incomplete" in this protocol, not a redirect.
-    let (rules, _) =
-        Rules::from_settings(Rules::default(), c, &Map::new(), &[]).map_err(|e| failed(e.to_string()))?;
+    let (rules, _) = Rules::from_settings(Rules::default(), c, &Map::new(), &[]).map_err(failed)?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)

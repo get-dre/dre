@@ -69,7 +69,7 @@ fn sheet(path: &Path, name: &str) -> Vec<Vec<Data>> {
 
 fn sheet_names(path: &Path) -> Vec<String> {
     let wb: Xlsx<_> = open_workbook(path).unwrap();
-    wb.sheet_names().to_vec()
+    wb.sheet_names()
 }
 
 fn ints(n: i64) -> RecordBatch {

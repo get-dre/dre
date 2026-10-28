@@ -183,7 +183,7 @@ pub fn install(spec: String, project_dir: PathBuf, update: bool, printer: &Print
     };
     match installed {
         Ok(mut locked) => {
-            locked.from = source_key.clone();
+            locked.from = source_key;
             let provides: Vec<String> = locked.provides.iter().map(|p| p.to_string()).collect();
             printer.line(
                 Tone::Good,

@@ -44,7 +44,7 @@ fn project(files: &[(&str, &str)]) -> TestProject {
 
 fn sheets(p: &TestProject, rel: &str) -> Vec<String> {
     let wb: Xlsx<_> = open_workbook(p.path(rel)).unwrap();
-    wb.sheet_names().to_vec()
+    wb.sheet_names()
 }
 
 fn cells(p: &TestProject, rel: &str, sheet: &str) -> Vec<Vec<String>> {

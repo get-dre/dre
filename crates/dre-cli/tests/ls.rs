@@ -127,7 +127,7 @@ fn json_is_the_manifests_shape_for_what_matched() {
     // With no selector it's the whole manifest.
     let r = p.dre("ls", &["--output", "json"]);
     let j: Value = serde_json::from_str(&r.stdout).unwrap();
-    let mut all = full.clone();
+    let mut all = full;
     all["schedules"] = json!({});
     assert_eq!(j, all);
 }

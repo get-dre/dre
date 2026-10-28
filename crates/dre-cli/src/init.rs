@@ -460,8 +460,7 @@ fn add_profile(
     profile.insert("targets".into(), Value::Object(targets));
     let mut root = Mapping::new();
     root.insert(name.into(), Value::Object(profile));
-    let block: String = dre_core::config::to_yaml(&root)
-        .map_err(|e| e.to_string())?
+    let block: String = dre_core::config::to_yaml(&root)?
         .lines()
         .map(|l| format!("  {l}\n"))
         .collect();

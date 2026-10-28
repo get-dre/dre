@@ -461,7 +461,7 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
         host,
         port,
         connect_timeout,
-        rules: rules.clone(),
+        rules,
         tls,
         ssh,
     })
@@ -721,7 +721,7 @@ impl Source for Postgres {
         // PQcancel does, on a new connection). Not through an SSH tunnel or a Unix socket.
         if s.ssh.is_none() && !s.host.starts_with('/') {
             let token = session.client.cancel_token();
-            let (host, port, tls) = (s.host.clone(), s.port, s.tls.clone());
+            let (host, port, tls) = (s.host.clone(), s.port, s.tls);
             dre_protocol::plugin::on_cancel(move || {
                 let (token, host, tls) = (token.clone(), host.clone(), tls.clone());
                 std::thread::spawn(move || cancel_on_server(&token, &host, port, tls));

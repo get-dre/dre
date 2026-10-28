@@ -448,7 +448,7 @@ impl Renderer {
         // Per rendered file: a later query may have recreated the relation.
         let columns_cache: Arc<Mutex<ColumnsCache>> = Arc::default();
         let cache = columns_cache.clone();
-        let rels = relations.clone();
+        let rels = relations;
         env.add_function(
             "columns",
             move |rel: String, kwargs: Kwargs| -> Result<Value, Error> {
