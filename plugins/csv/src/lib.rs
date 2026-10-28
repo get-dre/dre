@@ -189,8 +189,8 @@ fn write_batch(
     for i in 0..batch.num_rows() {
         *row += 1;
         let mut cells = Vec::with_capacity(names.len());
-        for (c, f) in formatters.iter().enumerate() {
-            let col = batch.column(c);
+        let columns = batch.columns().iter().zip(&formatters).zip(&text).zip(names);
+        for (((col, f), &text), name) in columns {
             if col.is_null(i) {
                 cells.push(o.null.clone());
                 continue;
@@ -201,7 +201,7 @@ fn write_batch(
             } else {
                 v
             };
-            cells.push(o.field(&v, text[c], *row, &names[c])?);
+            cells.push(o.field(&v, text, *row, name)?);
         }
         out.line(&cells.join(&o.delimiter))?;
     }

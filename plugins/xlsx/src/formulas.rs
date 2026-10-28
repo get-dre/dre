@@ -152,7 +152,7 @@ impl SetFormulas {
         self.totals
             .iter()
             .position(Option::is_some)
-            .map(|i| names[i].clone())
+            .and_then(|i| names.get(i).cloned())
     }
 }
 

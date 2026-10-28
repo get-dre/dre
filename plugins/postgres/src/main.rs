@@ -169,7 +169,8 @@ impl<'a> FromSql<'a> for Numeric {
     fn from_sql(_: &Type, raw: &'a [u8]) -> std::result::Result<Self, Box<dyn StdError + Sync + Send>> {
         let rd = |i: usize| -> std::result::Result<u16, Box<dyn StdError + Sync + Send>> {
             raw.get(i..i + 2)
-                .map(|b| u16::from_be_bytes([b[0], b[1]]))
+                .and_then(|b| b.try_into().ok())
+                .map(u16::from_be_bytes)
                 .ok_or_else(|| "short numeric".into())
         };
         let ndigits = rd(0)? as usize;
@@ -228,6 +229,7 @@ impl<'a> FromSql<'a> for Numeric {
     }
 }
 
+/// `cols` and `b` hold one entry per column, so a column index is valid in both.
 struct Builders {
     cols: Vec<Col>,
     b: Vec<Box<dyn ArrayBuilder>>,
@@ -276,8 +278,8 @@ impl Builders {
             };
         }
         let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("January 1 is a valid date");
-        for i in 0..self.cols.len() {
-            match self.cols[i] {
+        for (i, col) in self.cols.iter().enumerate() {
+            match *col {
                 Col::Bool => put!(i, BooleanBuilder, row.try_get::<_, Option<bool>>(i)?),
                 Col::I16 => put!(i, Int16Builder, row.try_get::<_, Option<i16>>(i)?),
                 Col::I32 => put!(i, Int32Builder, row.try_get::<_, Option<i32>>(i)?),

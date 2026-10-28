@@ -421,29 +421,22 @@ pub fn excel_date_format(code: &str) -> String {
     let mut i = 0;
     // `m`/`mm` after an hour or before seconds means minutes.
     let mut after_hour = false;
-    while i < chars.len() {
-        let c = chars[i];
-        let run = |ch: char| {
-            chars[i..]
-                .iter()
-                .take_while(|x| x.eq_ignore_ascii_case(&ch))
-                .count()
-        };
+    while let Some(rest @ &[c, ..]) = chars.get(i..) {
+        let run = |ch: char| rest.iter().take_while(|x| x.eq_ignore_ascii_case(&ch)).count();
+        if let ['\\', next, ..] = rest {
+            push_literal(&mut out, *next);
+            i += 2;
+            continue;
+        }
         match c.to_ascii_lowercase() {
             '"' => {
-                let end = chars[i + 1..]
-                    .iter()
-                    .position(|&x| x == '"')
-                    .map_or(chars.len(), |p| i + 1 + p);
-                for &x in &chars[i + 1..end] {
+                let quoted = rest.iter().skip(1).take_while(|&&x| x != '"');
+                let mut len = 0;
+                for &x in quoted {
                     push_literal(&mut out, x);
+                    len += 1;
                 }
-                i = end + 1;
-                continue;
-            }
-            '\\' if i + 1 < chars.len() => {
-                push_literal(&mut out, chars[i + 1]);
-                i += 2;
+                i += len + 2;
                 continue;
             }
             'y' => {
@@ -479,8 +472,8 @@ pub fn excel_date_format(code: &str) -> String {
             }
             'm' => {
                 let n = run(c);
-                let rest: String = chars[i + n..].iter().collect::<String>().to_ascii_lowercase();
-                let minutes = n <= 2 && (after_hour || rest.trim_start_matches([':', ' ']).starts_with('s'));
+                let after: String = rest.iter().skip(n).collect::<String>().to_ascii_lowercase();
+                let minutes = n <= 2 && (after_hour || after.trim_start_matches([':', ' ']).starts_with('s'));
                 out.push_str(match (minutes, n) {
                     (true, 1) => "%-M",
                     (true, _) => "%M",
@@ -492,7 +485,12 @@ pub fn excel_date_format(code: &str) -> String {
                 after_hour = false;
                 i += n;
             }
-            'a' if lower[char_offset(&chars, i)..].starts_with("am/pm") => {
+            'a' if rest
+                .iter()
+                .take(5)
+                .collect::<String>()
+                .eq_ignore_ascii_case("am/pm") =>
+            {
                 out.push_str("%p");
                 i += 5;
             }
@@ -503,10 +501,6 @@ pub fn excel_date_format(code: &str) -> String {
         }
     }
     out
-}
-
-fn char_offset(chars: &[char], i: usize) -> usize {
-    chars[..i].iter().map(|c| c.len_utf8()).sum()
 }
 
 fn push_literal(out: &mut String, c: char) {
@@ -529,33 +523,31 @@ pub fn excel_number(x: f64, code: &str, locale: Locale) -> Option<String> {
     let mut toks = Vec::new();
     let mut pct = false;
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        let close = |q: char| {
-            chars[i + 1..]
-                .iter()
-                .position(|&x| x == q)
-                .map_or(chars.len(), |p| i + 1 + p)
+    while let Some(rest @ &[c, ..]) = chars.get(i..) {
+        // The text up to the closing `q` (or the end), and how many chars it spans.
+        let inside = |q: char| -> (String, usize) {
+            let s: String = rest.iter().skip(1).take_while(|&&x| x != q).collect();
+            let n = s.chars().count();
+            (s, n)
         };
+        if let ['\\', next, ..] = rest {
+            toks.push(Tok::Lit(next.to_string()));
+            i += 2;
+            continue;
+        }
         match c {
             '"' => {
-                let end = close('"');
-                toks.push(Tok::Lit(chars[i + 1..end].iter().collect()));
-                i = end + 1;
-                continue;
-            }
-            '\\' if i + 1 < chars.len() => {
-                toks.push(Tok::Lit(chars[i + 1].to_string()));
-                i += 2;
+                let (lit, n) = inside('"');
+                toks.push(Tok::Lit(lit));
+                i += n + 2;
                 continue;
             }
             '[' => {
-                let end = close(']');
-                let inner: String = chars[i + 1..end].iter().collect();
+                let (inner, n) = inside(']');
                 if let Some(sym) = inner.strip_prefix('$') {
                     toks.push(Tok::Lit(sym.split('-').next().unwrap_or("").to_string()));
                 }
-                i = end + 1;
+                i += n + 2;
                 continue;
             }
             '_' | '*' => {
@@ -583,6 +575,7 @@ pub fn excel_number(x: f64, code: &str, locale: Locale) -> Option<String> {
             })
             .collect()
     };
+    // `first <= last`, both positions in `toks`.
     let prefix = lit(&toks[..first]);
     let suffix = lit(&toks[last + 1..]);
     let pattern: String = toks[first..=last]
@@ -810,16 +803,13 @@ fn edits(a: &str, b: &str) -> usize {
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     for (i, ca) in a.chars().enumerate() {
         let mut cur = vec![i + 1];
-        for (j, cb) in b.iter().enumerate() {
-            cur.push(
-                (prev[j] + usize::from(ca != *cb))
-                    .min(prev[j + 1] + 1)
-                    .min(cur[j] + 1),
-            );
+        for ((cb, &diag), &up) in b.iter().zip(&prev).zip(prev.iter().skip(1)) {
+            let left = cur.last().copied().unwrap_or(i + 1);
+            cur.push((diag + usize::from(ca != *cb)).min(up + 1).min(left + 1));
         }
         prev = cur;
     }
-    prev[b.len()]
+    prev.last().copied().unwrap_or(0)
 }
 
 #[cfg(test)]

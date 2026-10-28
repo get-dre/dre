@@ -50,6 +50,8 @@ struct Payload {
     values: HashMap<String, String>,
 }
 
+/// `names`, `formats`, `formulas`, `widths` and `styles` hold one entry per column of `batch`, in
+/// order, so a column index found in `names` is valid in each of them.
 struct Collected {
     query: String,
     index: usize,
@@ -130,6 +132,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
         });
     }
     fmts.finish()?;
+    // An index into `results`, and so into `bound` (same length).
     let find = |b: &Binding| -> Result<usize> {
         let q = b.query.as_deref().unwrap_or_default();
         let idx = b.result_index.unwrap_or(1);
@@ -233,8 +236,9 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
             let col_of = |n: &str| res.names.iter().position(|x| x == n).map(|i| i as u32);
             for (k, row) in (part * max_rows..((part + 1) * max_rows).min(total)).enumerate() {
                 let r = first + k as u32;
-                for c in 0..res.names.len() {
-                    let formula = row_formula(res.formulas[c].as_deref(), col_of, r - 1)
+                let columns = res.names.iter().zip(&res.formats).zip(&res.formulas);
+                for (c, ((col, format), formulas)) in columns.enumerate() {
+                    let formula = row_formula(formulas.as_deref(), col_of, r - 1)
                         .map_err(|n| format!("sheet `{name}`: column `{n}` isn't on the sheet"))?;
                     write_value(
                         ws,
@@ -242,8 +246,8 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
                         (c as u32 + 1, r),
                         res.batch.column(c).as_ref(),
                         row,
-                        &res.names[c],
-                        &res.formats[c],
+                        col,
+                        format,
                         formula.as_deref(),
                     )?;
                 }
@@ -273,6 +277,7 @@ fn sheet<'a>(book: &'a mut Spreadsheet, name: &str) -> Result<&'a mut Worksheet>
 
 fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Collected) -> Result<()> {
     let header = b.header.unwrap_or(true);
+    // Indexes into `res.names`, so valid in each of its per-column vectors.
     let cols: Vec<usize> = match &b.columns {
         Some(list) => list
             .iter()

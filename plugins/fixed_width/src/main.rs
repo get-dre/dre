@@ -119,7 +119,7 @@ fn picture(p: &str) -> std::result::Result<(usize, Option<Num>), String> {
         return Err(bad());
     }
     let (decimals, point) = match points.first() {
-        Some(&i) => (sym.len() - i - 1, (sym[i] == '.').then_some('.')),
+        Some(&i) => (sym.len() - i - 1, (sym.get(i) == Some(&'.')).then_some('.')),
         None => (0, None),
     };
     let visible = usize::from(point.is_some());
@@ -519,21 +519,22 @@ fn round(int: &str, frac: &str, places: usize) -> (String, String) {
     if frac.len() <= places {
         return (int.to_string(), format!("{frac:0<places$}"));
     }
-    let mut digits: Vec<u8> = format!("{int}{}", &frac[..places]).into_bytes();
-    if frac.as_bytes()[places] >= b'5' {
-        let mut i = digits.len();
-        loop {
-            if i == 0 {
-                digits.insert(0, b'1');
-                break;
-            }
-            i -= 1;
-            if digits[i] == b'9' {
-                digits[i] = b'0';
+    // `frac` is ASCII digits (`parse_decimal`), so `places` is a char boundary.
+    let (kept, dropped) = frac.split_at_checked(places).unwrap_or((frac, ""));
+    let mut digits: Vec<u8> = format!("{int}{kept}").into_bytes();
+    if dropped.as_bytes().first().is_some_and(|&d| d >= b'5') {
+        let mut carry = true;
+        for d in digits.iter_mut().rev() {
+            if *d == b'9' {
+                *d = b'0';
             } else {
-                digits[i] += 1;
+                *d += 1;
+                carry = false;
                 break;
             }
+        }
+        if carry {
+            digits.insert(0, b'1');
         }
     }
     let s = String::from_utf8(digits).expect("ascii digits");
@@ -690,15 +691,14 @@ impl Format for FixedWidth {
             for r in 0..batch.num_rows() {
                 row += 1;
                 let mut line = String::new();
-                for (k, c) in cols.iter().enumerate() {
-                    let l = &layouts[k];
-                    if batch.column(idx[k]).is_null(r) {
+                for (((c, l), &i), fmt) in cols.iter().zip(&layouts).zip(&idx).zip(&fmts) {
+                    if batch.column(i).is_null(r) {
                         let fill = c.null_fill.unwrap_or(l.pad);
                         line.extend(std::iter::repeat_n(fill, c.width));
                         continue;
                     }
                     let mut v = String::new();
-                    write!(v, "{}", fmts[k].value(r))
+                    write!(v, "{}", fmt.value(r))
                         .map_err(|_| format!("row {row}, column `{}`: can't format the value", c.name))?;
                     if let Some(n) = l.num {
                         line.push_str(&c.number_cell(l, n, &v, row)?);
