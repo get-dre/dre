@@ -160,16 +160,21 @@ const PER_ROW: &str = "queries: [members]\noutput:\n  name: letter\n  format: cs
 
 #[test]
 fn a_retry_delivers_only_the_rows_whose_destination_failed() {
-    let host = host(Script::new(&[]).fail(Call::Deliver, 1, "the mailbox is full"));
+    // Rows deliver on concurrent workers, in no set order: fail member 101's letter by its
+    // path, never by call order.
+    let host = host(Script::new(&[]).fail_on(Call::Deliver, "out/101.csv", "the mailbox is full"));
     let ctx = context(&host);
     let (dir, project) = project(PER_ROW, &ctx);
     let first = run_once(&ctx, &project, &options());
     assert!(first.failed());
     let delivered = |host: &MemoryHost| -> Vec<String> {
-        host.calls()
+        let mut calls: Vec<String> = host
+            .calls()
             .into_iter()
             .filter(|c| c.starts_with("destination/drop Deliver"))
-            .collect()
+            .collect();
+        calls.sort();
+        calls
     };
     assert_eq!(
         delivered(&host),
@@ -184,11 +189,12 @@ fn a_retry_delivers_only_the_rows_whose_destination_failed() {
         retry_failed: Some(run_id),
         ..options()
     };
-    let second = run_once(&ctx, &project, &retry);
+    // The mailbox has room again.
+    let retry_host = self::host(Script::new(&[]));
+    let second = run_once(&context(&retry_host), &project, &retry);
     assert!(!second.failed(), "{:?}", second.outcomes);
     // Only member 101's letter is sent again.
-    assert_eq!(delivered(&host).len(), 3);
-    assert_eq!(delivered(&host)[2], "destination/drop Deliver out/101.csv");
+    assert_eq!(delivered(&retry_host), ["destination/drop Deliver out/101.csv"]);
 }
 
 #[test]
