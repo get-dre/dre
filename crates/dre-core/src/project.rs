@@ -909,10 +909,17 @@ pub struct LoadOptions {
     pub settings: crate::settings::Settings,
 }
 
-/// Parse and validate the project at `root`. Returns the resolved project when it could be
-/// built at all, plus every diagnostic found along the way.
+/// [`load_with`] in an empty context: no environment variables (no `DRE_*` setting, no
+/// `env_var()` value) and plugins run as child processes.
 pub fn load(root: &Path, opts: &LoadOptions) -> (Option<Project>, Diagnostics) {
+    load_with(root, opts, &crate::Context::empty())
+}
+
+/// Parse and validate the project at `root` in `ctx` (its environment and secrets). Returns the
+/// resolved project when it could be built at all, plus every diagnostic found along the way.
+pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Option<Project>, Diagnostics) {
     let mut l = Loader {
+        ctx: ctx.clone(),
         root: root.to_path_buf(),
         target: crate::target::TargetPath::default_for(root),
         target_inside: Some(PathBuf::from(TARGET_DIR)),
@@ -925,6 +932,8 @@ pub fn load(root: &Path, opts: &LoadOptions) -> (Option<Project>, Diagnostics) {
 }
 
 struct Loader {
+    /// The command's environment and secrets.
+    ctx: crate::Context,
     root: PathBuf,
     /// The resolved target folder.
     target: crate::target::TargetPath,
@@ -1043,14 +1052,19 @@ impl Loader {
                 return None;
             }
         };
-        match crate::target::resolve(&self.root, self.opts.target_path.as_deref(), project_target) {
+        match crate::target::resolve(
+            &self.root,
+            self.opts.target_path.as_deref(),
+            project_target,
+            self.ctx.env(),
+        ) {
             Ok(t) => {
                 self.target_inside = crate::target::inside(&self.root, &t.dir);
                 // Databricks Workspace files don't reliably keep a rename: run folders' `current`
                 // pointer and atomic writes need a Volume (or local disk).
                 if crate::slash(&t.dir).to_string_lossy().starts_with("/Workspace/") {
-                    let from_file =
-                        self.opts.target_path.is_none() && crate::settings::env(crate::target::ENV).is_none();
+                    let from_file = self.opts.target_path.is_none()
+                        && self.ctx.env().setting(crate::target::ENV).is_none();
                     self.diags.warning(
                         Code::TargetPathOnWorkspace,
                         from_file.then(|| PathBuf::from(PROJECT_FILE)),
@@ -1065,7 +1079,7 @@ impl Loader {
             }
             Err(e) => {
                 let from_file =
-                    self.opts.target_path.is_none() && crate::settings::env(crate::target::ENV).is_none();
+                    self.opts.target_path.is_none() && self.ctx.env().setting(crate::target::ENV).is_none();
                 self.diags.error(
                     Code::InvalidTargetPath,
                     from_file.then(|| PathBuf::from(PROJECT_FILE)),
@@ -1087,9 +1101,12 @@ impl Loader {
         project.packages = packages::resolve(&self.root, &declared, &mut self.diags);
         self.check_macro_namespaces(&project);
 
-        let (profiles_dir, found_by) =
-            crate::profiles::locate(self.opts.profiles_dir.as_deref(), Some(&self.root));
-        project.profiles = Profiles::load(&profiles_dir, found_by, &mut self.diags);
+        let (profiles_dir, found_by) = crate::profiles::locate(
+            self.opts.profiles_dir.as_deref(),
+            Some(&self.root),
+            self.ctx.env(),
+        );
+        project.profiles = Profiles::load(&profiles_dir, found_by, self.ctx.secrets(), &mut self.diags);
         project.profiles.run = project.run_target();
         self.record_settings(&mut project);
 
@@ -1278,7 +1295,7 @@ impl Loader {
         let meta = self.typed_metadata(&yf.display, pf.meta, "meta");
         let default_profile_line = pf.default_profile.as_ref().and_then(de::Located::line);
         let default_profile = self.typed_string(&yf.display, pf.default_profile, "default_profile");
-        let run_target = crate::profiles::RunTarget::resolve(self.opts.target.as_deref());
+        let run_target = crate::profiles::RunTarget::resolve(self.opts.target.as_deref(), self.ctx.env());
         let default_set = self.typed_string(&yf.display, pf.default_set, "default_set");
         let vars = match pf.vars {
             None
@@ -1456,7 +1473,7 @@ impl Loader {
                 .collect(),
             folders: Vec::new(),
             files: Vec::new(),
-            inputs: crate::parse::Inputs::default(),
+            inputs: crate::parse::Inputs::new(self.ctx.clone()),
             parse_errors: BTreeMap::new(),
             sources: BTreeMap::new(),
             profiles: Profiles::default(),
@@ -1494,14 +1511,14 @@ impl Loader {
         };
         let dir = project.profiles.path.parent().map(|d| d.display().to_string());
         s.set("profiles_dir", dir, dir_source);
-        let env_or_default = |var: &'static str| match settings::env(var) {
+        let env_or_default = |var: &'static str| match self.ctx.env().setting(var) {
             Some(_) => Source::Env(var),
             None => Source::Default,
         };
         s.set(
             "plugins_dir",
             Some(
-                crate::slash(&crate::plugins::plugins_dir(Some(&self.root)))
+                crate::slash(&crate::plugins::plugins_dir(self.ctx.env(), Some(&self.root)))
                     .display()
                     .to_string(),
             ),
@@ -1509,7 +1526,7 @@ impl Loader {
         );
         s.set(
             "registry_url",
-            Some(crate::manager::registry_url()),
+            Some(crate::manager::registry_url(self.ctx.env())),
             env_or_default(settings::REGISTRY_URL),
         );
     }
@@ -1641,7 +1658,7 @@ impl Loader {
             None => {}
             Some(de::Located {
                 value: Loose::Ok(n), ..
-            }) if n > 0 => crate::manager::set_project_http_timeout(n),
+            }) if n > 0 => self.ctx.set_project_http_timeout(n),
             Some(v) => self.diags.error(
                 Code::InvalidField,
                 file.map(Path::to_path_buf),
@@ -2578,6 +2595,7 @@ impl Loader {
             timezone: self.opts.timezone.clone(),
             schedule: None,
             started_at: None,
+            process: self.ctx.clone(),
         };
         project.inputs = inputs.clone();
         let failed: BTreeSet<PathBuf> = self
@@ -5775,6 +5793,7 @@ impl Loader {
                         packages: project.packages.clone(),
                         project_name: project.name.clone(),
                         dispatch: project.dispatch.clone(),
+                        process: self.ctx.clone(),
                     }) else {
                         continue;
                     };
@@ -6313,7 +6332,7 @@ impl Loader {
             .into_iter()
             .filter(|c| c.func == "env_var" && !c.has_default)
         {
-            if std::env::var_os(&c.name).is_none() {
+            if self.ctx.env().var(&c.name).is_none() {
                 self.diags.error(
                     Code::UnsetEnvVar,
                     f.clone(),

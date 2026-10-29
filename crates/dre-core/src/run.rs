@@ -16,24 +16,27 @@ use arrow::datatypes::SchemaRef;
 use arrow::ipc::reader::FileReader;
 use arrow::ipc::writer::FileWriter;
 use chrono::NaiveDate;
-use dre_protocol::host::{Execution, HostError, LogSink, PluginProcess};
+use dre_protocol::host::{Execution, HostError, LogSink};
 use dre_protocol::msg::{ColumnOptions, DeliveryFile, ResultSetMeta};
 use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE, CAP_READ_ONLY, CAP_SESSIONS};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
 use crate::codes::{Code, ErrorCode};
+use crate::context::Context;
 use crate::dates::Calendar;
 use crate::engine::{CancelToken, Events, RunEvent, RunStore};
 use crate::lookups::Table;
 use crate::message::QueryResult;
 use crate::parse::ParsedBinding;
+use crate::plugin_host::{Described, Open, Plugin, PluginHost, WriteRequest};
 use crate::profiles::{Entry, LOCAL_TYPE, ProfileTarget, Profiles, Role};
 use crate::project::{Binding, PluginKind, Project, QueryEntry, Report};
 use crate::render::{
     Column, Connection, Connections, Mode, QueryRows, QueryRunner, RenderError, Renderer, RendererConfig,
 };
 use crate::run_results::{self, Delivery, RunResults};
+use crate::secrets::Secrets;
 use crate::selector;
 use crate::sqlsplit::{self, StatementKind};
 
@@ -373,9 +376,9 @@ pub struct Plan<'a> {
 /// # Panics
 ///
 /// Panics if the worker thread panics (a bug), so the panic isn't lost.
-pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary {
+pub fn run(ctx: &Context, project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary {
     let mut summary = RunSummary::default();
-    let Some(plan) = plan(project, opts, ui, &mut summary) else {
+    let Some(plan) = plan(ctx, project, opts, ui, &mut summary) else {
         return summary;
     };
     ui.targets(&plan.targets);
@@ -384,7 +387,7 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
     let (tx, rx) = std::sync::mpsc::channel();
     let cancel = opts.cancel.clone();
     let outcomes = std::thread::scope(|s| {
-        let worker = s.spawn(|| execute(project, &plan, opts, &cancel, Events::new(tx)));
+        let worker = s.spawn(|| execute(ctx, project, &plan, opts, &cancel, Events::new(tx)));
         for e in rx {
             crate::engine::dispatch(ui, e, &plugin_log, &sql_log);
         }
@@ -401,6 +404,7 @@ pub fn run(project: &Project, opts: &RunOptions, ui: &mut dyn Ui) -> RunSummary 
 /// report's failed outcome in `summary`; a failure that stops the whole run is `None`, with
 /// `summary.error` set.
 pub fn plan<'a>(
+    ctx: &Context,
     project: &'a Project,
     opts: &RunOptions,
     ui: &mut dyn Ui,
@@ -474,7 +478,7 @@ pub fn plan<'a>(
         }
     };
     // Every profile the run uses needs an entry for it, before anything runs.
-    match run_targets(project, &planned, opts) {
+    match run_targets(ctx, project, &planned, opts) {
         Ok(targets) => Some(Plan {
             bindings: planned,
             targets,
@@ -496,20 +500,21 @@ pub fn plan<'a>(
 /// Panics if a Binding running at once with others panics (a bug): the shared state's lock is
 /// then poisoned.
 pub fn execute(
+    ctx: &Context,
     project: &Project,
     plan: &Plan<'_>,
     opts: &RunOptions,
     cancel: &CancelToken,
     events: Events,
 ) -> Vec<BindingOutcome> {
-    let limits = Limits::new(project, plan, opts);
+    let limits = Limits::new(ctx, project, plan, opts);
     let target = opts
         .output_json
         .as_ref()
         .map(|p| project.root.join(p))
         .unwrap_or_else(|| project.target_dir.clone());
     if limits.sequential() {
-        let store = RunStore::new(&target);
+        let store = RunStore::new(&target, ctx.secrets());
         let mut outcomes = Vec::new();
         for (report, b) in &plan.bindings {
             if cancel.is_cancelled() {
@@ -519,14 +524,14 @@ pub fn execute(
                 report: report.name.clone(),
                 set: b.set.clone(),
             });
-            let mut r = BindingRun::new(project, report, b, opts, events.clone(), &store);
+            let mut r = BindingRun::new(ctx, project, report, b, opts, events.clone(), &store);
             let outcome = r.run();
             events.emit(RunEvent::BindingEnd(outcome.clone()));
             outcomes.push(outcome);
         }
         return outcomes;
     }
-    let store = RunStore::concurrent(&target);
+    let store = RunStore::concurrent(&target, ctx.secrets());
     let n = plan.bindings.len();
     let state = std::sync::Mutex::new(Running::new(n));
     let wake = std::sync::Condvar::new();
@@ -568,7 +573,7 @@ pub fn execute(
                         report: report.name.clone(),
                         set: b.set.clone(),
                     });
-                    let mut r = BindingRun::new(project, report, b, opts, held.clone(), &store);
+                    let mut r = BindingRun::new(ctx, project, report, b, opts, held.clone(), &store);
                     let outcome = r.run();
                     held.emit(RunEvent::BindingEnd(outcome.clone()));
                     held.emit_now(RunEvent::Running {
@@ -636,7 +641,7 @@ impl Running {
 }
 
 impl Limits {
-    fn new(project: &Project, plan: &Plan<'_>, opts: &RunOptions) -> Limits {
+    fn new(ctx: &Context, project: &Project, plan: &Plan<'_>, opts: &RunOptions) -> Limits {
         let schedule_vars = opts
             .schedule
             .as_ref()
@@ -650,6 +655,7 @@ impl Limits {
             timezone: opts.timezone.clone(),
             schedule: opts.schedule.clone(),
             started_at: None,
+            process: ctx.clone(),
         };
         let uses: Vec<Vec<String>> = plan
             .bindings
@@ -777,6 +783,7 @@ impl RunTargets {
 /// one's entry. A profile without an entry for the run is an error naming them all; profiles
 /// nothing planned uses aren't checked.
 pub fn run_targets(
+    ctx: &Context,
     project: &Project,
     planned: &[(&Report, Binding)],
     opts: &RunOptions,
@@ -795,6 +802,7 @@ pub fn run_targets(
         timezone: opts.timezone.clone(),
         schedule: opts.schedule.clone(),
         started_at: None,
+        process: ctx.clone(),
     };
     let mut used: Vec<(Role, String)> = Vec::new();
     for (report, b) in planned {
@@ -1044,6 +1052,8 @@ struct Statement {
 }
 
 struct BindingRun<'a> {
+    /// The run's context: its plugin host, secrets and caches.
+    ctx: Context,
     project: &'a Project,
     report: &'a Report,
     b: &'a Binding,
@@ -1169,29 +1179,30 @@ struct RenderedDest {
 /// Why a Binding (or one of its steps) failed.
 type Fail = crate::error::Error;
 
-fn masked_source_error(error: &HostError, sensitive: bool) -> String {
+fn masked_source_error(secrets: &Secrets, error: &HostError, sensitive: bool) -> String {
     let error = error.to_string();
-    crate::secrets::mask_source_error(&error, sensitive).into_owned()
+    secrets.mask_source_error(&error, sensitive).into_owned()
 }
 
-fn masked_sql_summary(sql: &str, max: usize, sensitive: bool) -> String {
+fn masked_sql_summary(secrets: &Secrets, sql: &str, max: usize, sensitive: bool) -> String {
     if sensitive {
         crate::secrets::MASK.to_string()
     } else {
-        dre_protocol::util::summarize(&crate::secrets::mask(sql), max)
+        dre_protocol::util::summarize(&secrets.mask(sql), max)
     }
 }
 
-fn protected_sql(sql: &str, sensitive: bool) -> std::borrow::Cow<'_, str> {
+fn protected_sql<'a>(secrets: &Secrets, sql: &'a str, sensitive: bool) -> std::borrow::Cow<'a, str> {
     if sensitive {
         std::borrow::Cow::Borrowed(crate::secrets::MASK)
     } else {
-        crate::secrets::mask(sql)
+        secrets.mask(sql)
     }
 }
 
 impl<'a> BindingRun<'a> {
     fn new(
+        ctx: &Context,
         project: &'a Project,
         report: &'a Report,
         b: &'a Binding,
@@ -1234,6 +1245,7 @@ impl<'a> BindingRun<'a> {
             crate::runs::new_run_id(started_at)
         };
         BindingRun {
+            ctx: ctx.clone(),
             project,
             report,
             b,
@@ -1271,6 +1283,7 @@ impl<'a> BindingRun<'a> {
     /// What `connection`, `destination` and `profile()` read for this Binding.
     fn connections(&self) -> Arc<ProfileConnections> {
         Arc::new(ProfileConnections {
+            ctx: self.ctx.clone(),
             profiles: self.project.profiles.clone(),
             root: self.project.root.clone(),
             plugins: self.project.plugins.clone(),
@@ -1300,6 +1313,7 @@ impl<'a> BindingRun<'a> {
             context.clone(),
             self.vars.clone(),
             self.opts.vars.clone(),
+            &self.ctx,
         ));
         let r = Renderer::new(RendererConfig {
             root: &self.project.root,
@@ -1309,6 +1323,7 @@ impl<'a> BindingRun<'a> {
             cli_vars: self.opts.vars.clone(),
             runner: Some(Arc::new(PoolRunner {
                 pool: pool.clone(),
+                secrets: self.ctx.secrets().clone(),
                 default: name.clone(),
                 log: self.ui.sql_log(),
             })),
@@ -1324,6 +1339,7 @@ impl<'a> BindingRun<'a> {
             packages: self.project.packages.clone(),
             project_name: self.project.name.clone(),
             dispatch: self.project.dispatch.clone(),
+            process: self.ctx.clone(),
         })
         .map_err(|e| e.to_string())?;
         let r = Arc::new(r);
@@ -1341,6 +1357,7 @@ impl<'a> BindingRun<'a> {
             timezone: self.opts.timezone.clone(),
             schedule: self.opts.schedule.clone(),
             started_at: Some(self.started_at),
+            process: self.ctx.clone(),
         }
     }
 
@@ -1449,7 +1466,11 @@ impl<'a> BindingRun<'a> {
         let guard = if dry {
             None
         } else {
-            match self.runs.lock(&self.run_id, self.started_at) {
+            match self.runs.lock(
+                &self.run_id,
+                self.started_at,
+                &crate::runs::host_name(self.ctx.env()),
+            ) {
                 Ok(g) => Some(g),
                 Err(e) => {
                     let error = self.lock_failure(e);
@@ -1648,7 +1669,7 @@ impl<'a> BindingRun<'a> {
                         bad.file.display(),
                         bad.line,
                         self.report.name,
-                        masked_sql_summary(&bad.text, 60, bad.sensitive)
+                        masked_sql_summary(self.ctx.secrets(), &bad.text, 60, bad.sensitive)
                     ).into());
                 }
                 for conn in per_connection.keys() {
@@ -1694,7 +1715,7 @@ impl<'a> BindingRun<'a> {
         self.name_result_sets()?;
         // A password option (`password:`, `zip: {password}`) read through `env_var()` is a secret.
         for o in &self.b.outputs {
-            crate::secrets::register_secret_fields(&o.options, &[]);
+            self.ctx.secrets().register_secret_fields(&o.options, &[]);
             let mut passwords: Vec<&str> = o
                 .options
                 .get("password")
@@ -1702,14 +1723,16 @@ impl<'a> BindingRun<'a> {
                 .into_iter()
                 .collect();
             for d in &o.destinations {
-                crate::secrets::register_secret_fields(&d.options, &[]);
+                self.ctx.secrets().register_secret_fields(&d.options, &[]);
                 passwords.extend(d.zip.as_ref().and_then(|z| z.password.as_deref()));
             }
             for pw in passwords {
-                crate::secrets::register_secret_field(&Json::String(pw.to_string()));
+                self.ctx
+                    .secrets()
+                    .register_secret_field(&Json::String(pw.to_string()));
                 // A password written in the YAML is a secret too (validate warns about it).
                 if !crate::preflight::is_templated(pw) {
-                    crate::secrets::register_values([pw.to_string()]);
+                    self.ctx.secrets().register_values([pw.to_string()]);
                 }
             }
         }
@@ -2090,8 +2113,8 @@ impl<'a> BindingRun<'a> {
         std::fs::write(&path, crate::message::file_body(&title, &text)).map_err(|e| e.to_string())?;
         self.outs[oi].files.push((path, None));
         // Protect preview and metadata copies; report files and deliveries retain their values.
-        let shown_title = crate::secrets::mask_message_title(&title);
-        let shown_text = crate::secrets::mask_markdown(&text);
+        let shown_title = self.ctx.secrets().mask_message_title(&title);
+        let shown_text = self.ctx.secrets().mask_markdown(&text);
         if self.opts.preview.is_some() {
             let mut notes = Vec::new();
             if let Some(n) = self.opts.preview {
@@ -2116,7 +2139,7 @@ impl<'a> BindingRun<'a> {
             self.ui.step(
                 Level::Info,
                 "Message",
-                &crate::message::excerpt(&title, &text, 100),
+                &crate::message::excerpt(&title, &text, 100, self.ctx.secrets()),
                 None,
             );
         }
@@ -2202,10 +2225,10 @@ impl<'a> BindingRun<'a> {
                 q.query
             ).into());
         }
-        let sensitive = crate::secrets::contains_secret(&sql);
+        let sensitive = self.ctx.secrets().contains_secret(&sql);
         std::fs::write(
             self.compiled_dir.join(format!("{}.sql", q.query)),
-            crate::secrets::mask(&sql).as_bytes(),
+            self.ctx.secrets().mask(&sql).as_bytes(),
         )
         .map_err(|e| e.to_string())?;
         // Hash the exact rendered SQL before masking display artifacts. Integrations can
@@ -2290,7 +2313,7 @@ impl<'a> BindingRun<'a> {
         let sql_log = self.ui.sql_log();
         sql_log(
             &format!("{}:{}", st.file.display(), st.line),
-            &protected_sql(&st.text, st.sensitive),
+            &protected_sql(self.ctx.secrets(), &st.text, st.sensitive),
         );
         let spool_path = self.run_dir.join(".spool").join(format!("{i}.arrow"));
         let mut writer: Option<FileWriter<File>> = None;
@@ -2300,7 +2323,7 @@ impl<'a> BindingRun<'a> {
             let (p, _log_scope) = s
                 .statement(st.sensitive)
                 .map_err(|e| Fail::new(Code::ConnectionFailed, e))?;
-            p.execute(&st.text, self.row_limit(), |schema, batch| {
+            p.execute(&st.text, self.row_limit(), &mut |schema, batch| {
                 if writer.is_none() {
                     let f = File::create(&spool_path).map_err(|e| e.to_string())?;
                     writer = Some(FileWriter::try_new(f, schema).map_err(|e| e.to_string())?);
@@ -2316,7 +2339,7 @@ impl<'a> BindingRun<'a> {
                     "{}:{}: {}",
                     st.file.display(),
                     st.line,
-                    masked_source_error(&e, st.sensitive)
+                    masked_source_error(self.ctx.secrets(), &e, st.sensitive)
                 );
                 Fail::from_plugin(&e, message).or(Code::QueryFailed)
             })?
@@ -2370,7 +2393,7 @@ impl<'a> BindingRun<'a> {
                     st.query
                 ));
             }
-            crate::secret_columns::register(&spool_path, &secret)?;
+            crate::secret_columns::register(&spool_path, &secret, self.ctx.secrets())?;
             self.produced.push(Produced {
                 query: st.query.clone(),
                 connection: st.connection.clone(),
@@ -2478,7 +2501,7 @@ impl<'a> BindingRun<'a> {
             let r = index.find(&q.query).expect("checked above");
             let spool = self.run_dir.join(".spool").join(format!("{i}.arrow"));
             let (schema, rows) = crate::saved::stream_to_spool(&dir.join(&r.file), &spool)?;
-            crate::secret_columns::register(&spool, &self.secret_columns(&q.query))?;
+            crate::secret_columns::register(&spool, &self.secret_columns(&q.query), self.ctx.secrets())?;
             self.produced.push(Produced {
                 query: q.query.clone(),
                 connection: r.connection.clone(),
@@ -2788,10 +2811,12 @@ impl<'a> BindingRun<'a> {
                 .into());
             }
         }
-        let plugin = find_plugin(self.project, PluginKind::Format, &out.format)
+        let plugin = find_plugin(&self.ctx, self.project, PluginKind::Format, &out.format)
             .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
-        let mut p = plugin
-            .start(self.ui.plugin_log(), Some(&self.project.root))
+        let mut p = self
+            .ctx
+            .host()
+            .start(&plugin, self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
         let template = match &out.template {
             _ if crate::document::FORMATS.contains(&out.format.as_str()) => {
@@ -2837,13 +2862,13 @@ impl<'a> BindingRun<'a> {
                     }
                 })
                 .collect();
-            p.write_begin(
-                &path.to_string_lossy(),
-                &out.format,
-                options.clone(),
-                metas,
-                template.clone(),
-            )
+            p.write(WriteRequest {
+                path: path.to_string_lossy().into_owned(),
+                format: out.format.clone(),
+                options: options.clone(),
+                result_sets: metas,
+                template: template.clone(),
+            })
             .map_err(|e| e.to_string())?;
             for &i in &idxs {
                 let r = &self.produced[i];
@@ -2855,18 +2880,18 @@ impl<'a> BindingRun<'a> {
                 for b in reader {
                     let b = b.map_err(|e| e.to_string())?;
                     any = true;
-                    p.send_batch(&b)
+                    p.write_batch(&b)
                         .map_err(|e| format!("{} format: {e}", out.format))?;
                 }
                 if !any {
-                    p.send_batch(&RecordBatch::new_empty(schema))
+                    p.write_batch(&RecordBatch::new_empty(schema))
                         .map_err(|e| format!("{} format: {e}", out.format))?;
                 }
-                p.send(&dre_protocol::msg::Request::ResultSetEnd {})
+                p.end_result_set()
                     .map_err(|e| format!("{} format: {e}", out.format))?;
             }
-            let (files, warnings) = p
-                .write_finish_with_warnings()
+            let crate::plugin_host::Written { files, warnings } = p
+                .finish()
                 .map_err(|e| Fail::from_plugin(&e, format!("{} format: {e}", out.format)))?;
             for w in warnings {
                 self.ui.warn(&format!("  {} format: {w}", out.format));
@@ -2884,7 +2909,7 @@ impl<'a> BindingRun<'a> {
                 self.outs[oi].files.push((f, None));
             }
         }
-        let _ = p.close();
+        p.close();
         Ok(())
     }
 
@@ -3182,7 +3207,7 @@ impl<'a> BindingRun<'a> {
             }
         };
         let kind = out.kind.clone();
-        let connection = render_connection(out)?;
+        let connection = render_connection(out, self.ctx.env())?;
         let zipped: Vec<(PathBuf, Option<String>)> = d.zip_file.iter().map(|z| (z.clone(), None)).collect();
         let files = if d.zip_file.is_some() {
             &zipped
@@ -3287,10 +3312,12 @@ impl<'a> BindingRun<'a> {
                 format!("delivery through `{kind}` failed: {e}; the output is still in target/"),
             )
         };
-        let plugin = find_plugin(self.project, PluginKind::Destination, &kind)
+        let plugin = find_plugin(&self.ctx, self.project, PluginKind::Destination, &kind)
             .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-        let mut p = plugin
-            .start(self.ui.plugin_log(), Some(&self.project.root))
+        let mut p = self
+            .ctx
+            .host()
+            .start(&plugin, self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
         let is_message = self.b.outputs[oi].is_message();
         // A message goes to a destination that takes messages as a message; to any other, as
@@ -3325,21 +3352,27 @@ impl<'a> BindingRun<'a> {
                     remote_path: None,
                 })
                 .collect();
-            let loc = p
-                .deliver_message(&message, &attach, connection, d.options.clone())
+            let delivered = p
+                .deliver(crate::plugin_host::Delivery {
+                    files: attach,
+                    message: Some(message),
+                    connection,
+                    options: d.options.clone(),
+                })
                 .map_err(failed)?;
-            self.attempts = p.last_attempts();
+            self.attempts = delivered.attempts;
+            let loc = delivered.location;
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             if d.zip_file.is_none()
                 && let Some((_, at)) = self.outs[oi].files.first_mut()
             {
                 at.get_or_insert_with(|| loc.clone());
             }
-            let _ = p.close();
+            p.close();
             return Ok(Some(loc));
         }
         if !is_message && p.has(CAP_MESSAGE_ONLY) {
-            let _ = p.close();
+            p.close();
             return Err(format!(
                 "`{kind}` only takes messages, but this output is `{}`; deliver the file elsewhere and link it from a message",
                 self.b.outputs[oi].format
@@ -3353,10 +3386,16 @@ impl<'a> BindingRun<'a> {
         for batch in batches {
             let t = Instant::now();
             let files: Vec<DeliveryFile> = batch.iter().map(|&i| targets[i].clone()).collect();
-            let loc = p
-                .deliver_files(&files, connection.clone(), d.options.clone())
+            let delivered = p
+                .deliver(crate::plugin_host::Delivery {
+                    files,
+                    message: None,
+                    connection: connection.clone(),
+                    options: d.options.clone(),
+                })
                 .map_err(failed)?;
-            self.attempts = self.attempts.max(p.last_attempts());
+            self.attempts = self.attempts.max(delivered.attempts);
+            let loc = delivered.location;
             self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
             // With `zip:` the one target is the zip: the files in it keep no location of their
             // own, as with a local destination, and the entry's delivery records the zip's.
@@ -3369,7 +3408,7 @@ impl<'a> BindingRun<'a> {
             }
             locations.push(loc);
         }
-        let _ = p.close();
+        p.close();
         Ok(Some(locations.join(", ")))
     }
 
@@ -3395,19 +3434,19 @@ impl<'a> BindingRun<'a> {
         let path = self.schema_dir.join("last_success.json");
         let mut current = self.snapshot();
         let Ok(prev) = std::fs::read_to_string(&path) else {
-            crate::schema::redact(&mut current);
+            crate::schema::redact(&mut current, self.ctx.secrets());
             self.protected_snapshot = Some(current);
             return Vec::new();
         };
         let Ok(mut prev) = serde_json::from_str::<Json>(&prev) else {
-            crate::schema::redact(&mut current);
+            crate::schema::redact(&mut current, self.ctx.secrets());
             self.protected_snapshot = Some(current);
             return Vec::new();
         };
         let original = prev.clone();
-        crate::schema::redact(&mut prev);
-        crate::schema::redact(&mut current);
-        if crate::secrets::enabled() {
+        crate::schema::redact(&mut prev, self.ctx.secrets());
+        crate::schema::redact(&mut current, self.ctx.secrets());
+        if self.ctx.secrets().enabled() {
             crate::schema::align_protection(&mut prev, &mut current);
         }
         if prev != original {
@@ -3429,7 +3468,7 @@ impl<'a> BindingRun<'a> {
         std::fs::create_dir_all(&self.schema_dir)?;
         let snapshot = self.protected_snapshot.clone().unwrap_or_else(|| {
             let mut snapshot = self.snapshot();
-            crate::schema::redact(&mut snapshot);
+            crate::schema::redact(&mut snapshot, self.ctx.secrets());
             snapshot
         });
         crate::fs::write_atomic(
@@ -3490,8 +3529,8 @@ impl<'a> BindingRun<'a> {
                 dropped: run.dropped.clone(),
                 for_each: run.for_each.clone(),
                 message: run.message.clone().map(|(title, text)| run_results::Message {
-                    title: crate::secrets::mask_message_title(&title).into_owned(),
-                    text: crate::secrets::mask_markdown(&text).into_owned(),
+                    title: self.ctx.secrets().mask_message_title(&title).into_owned(),
+                    text: self.ctx.secrets().mask_markdown(&text).into_owned(),
                 }),
             });
         }
@@ -3595,19 +3634,19 @@ impl<'a> BindingRun<'a> {
             };
             sql_log(
                 &format!("{}:{}{verb}", st.file.display(), st.line),
-                &protected_sql(&st.text, st.sensitive),
+                &protected_sql(self.ctx.secrets(), &st.text, st.sensitive),
             );
             if st.kind == StatementKind::TempCreate {
                 let result = {
                     let (process, _log_scope) = s.statement(st.sensitive)?;
-                    process.execute(&st.text, None, |_, _| Ok(()))
+                    process.execute(&st.text, None, &mut |_, _| Ok(()))
                 };
                 if let Err(e) = result {
                     failures.push(format!(
                         "{}:{}: {}",
                         st.file.display(),
                         st.line,
-                        masked_source_error(&e, st.sensitive)
+                        masked_source_error(self.ctx.secrets(), &e, st.sensitive)
                     ));
                 }
                 continue;
@@ -3621,7 +3660,7 @@ impl<'a> BindingRun<'a> {
                     "{}:{}: {}",
                     st.file.display(),
                     st.line,
-                    masked_source_error(&e, st.sensitive)
+                    masked_source_error(self.ctx.secrets(), &e, st.sensitive)
                 );
                 if let Some((f, l)) = unexecuted_setup.get(&st.connection) {
                     msg.push_str(&format!(
@@ -3646,9 +3685,6 @@ impl<'a> BindingRun<'a> {
     /// Declared source `columns` against the real table, once per source table, connection and
     /// target in this process: each must exist, and match its `data_type` (loosely) where given.
     fn check_source_columns(&mut self, pool: &Arc<Pool>, failures: &mut Vec<String>) {
-        /// `(project, source.table, connection, target)`.
-        type Checked = std::collections::BTreeSet<(PathBuf, String, String, String)>;
-        static CHECKED: std::sync::LazyLock<Mutex<Checked>> = std::sync::LazyLock::new(Mutex::default);
         for q in self.parsed.queries.clone() {
             let Some(conn) = q.connection.clone() else {
                 continue;
@@ -3673,7 +3709,7 @@ impl<'a> BindingRun<'a> {
                     conn.clone(),
                     self.project.profiles.target_of(Role::Connection, &conn),
                 );
-                if !CHECKED.lock().unwrap().insert(id) {
+                if !self.ctx.first_check(id) {
                     continue;
                 }
                 let quote = if r.quoting.any() {
@@ -3691,6 +3727,7 @@ impl<'a> BindingRun<'a> {
                 let rel = r.relation(quote.as_deref());
                 let runner = PoolRunner {
                     pool: pool.clone(),
+                    secrets: self.ctx.secrets().clone(),
                     default: Some(conn.clone()),
                     log: self.ui.sql_log(),
                 };
@@ -3730,6 +3767,8 @@ impl<'a> BindingRun<'a> {
 
 /// The source session, started on first use (rendering may need it for `run_query()`).
 struct Session {
+    host: Arc<dyn PluginHost>,
+    secrets: Secrets,
     path: Result<crate::plugins::Located, String>,
     connection: Result<JsonMap<String, Json>, String>,
     cwd: PathBuf,
@@ -3742,11 +3781,12 @@ struct Session {
     read_only: bool,
     /// A lookup was loaded into a temp table, so the session must stay open as it is.
     loaded: bool,
-    proc_: Option<PluginProcess>,
+    proc_: Option<Box<dyn Plugin>>,
 }
 
 impl Session {
     fn new(
+        ctx: &Context,
         path: Result<crate::plugins::Located, String>,
         connection: Result<JsonMap<String, Json>, String>,
         cwd: PathBuf,
@@ -3756,11 +3796,14 @@ impl Session {
         let opaque_log = Arc::new(AtomicBool::new(false));
         let protect = Arc::clone(&opaque_log);
         let downstream = log;
+        let secrets = ctx.secrets().clone();
         let log: LogSink = Arc::new(move |plugin, line| {
-            let line = crate::secrets::mask_source_error(line, protect.load(Ordering::SeqCst));
+            let line = secrets.mask_source_error(line, protect.load(Ordering::SeqCst));
             downstream(plugin, &line);
         });
         Session {
+            host: ctx.host().clone(),
+            secrets: ctx.secrets().clone(),
             path,
             connection,
             cwd,
@@ -3781,34 +3824,39 @@ impl Session {
         }
     }
 
-    fn get(&mut self) -> Result<&mut PluginProcess, String> {
+    fn get(&mut self) -> Result<&mut dyn Plugin, String> {
         if self.proc_.is_none() {
             let plugin = self.path.clone()?;
             let connection = self.connection.clone()?;
-            let mut p = plugin
-                .start(self.log.clone(), Some(&self.cwd))
-                .map_err(|e| masked_source_error(&e, false))?;
-            let ro = self.unmanaged && self.read_only && p.has(CAP_READ_ONLY);
-            p.open(connection, ro).map_err(|e| {
-                let protected = masked_source_error(&e, false);
+            let mut p = self
+                .host
+                .start(&plugin, self.log.clone(), Some(&self.cwd))
+                .map_err(|e| masked_source_error(&self.secrets, &e, false))?;
+            let open = if self.unmanaged && self.read_only && p.has(CAP_READ_ONLY) {
+                Open::ReadOnly
+            } else {
+                Open::ReadWrite
+            };
+            p.open(connection, open).map_err(|e| {
+                let protected = masked_source_error(&self.secrets, &e, false);
                 format!("can't open the source connection: {protected}")
             })?;
             self.proc_ = Some(p);
         }
-        Ok(self.proc_.as_mut().expect("the process was started above"))
+        Ok(self.proc_.as_deref_mut().expect("the process was started above"))
     }
 
-    fn statement(&mut self, sensitive: bool) -> Result<(&mut PluginProcess, OpaqueLogScope), String> {
+    fn statement(&mut self, sensitive: bool) -> Result<(&mut dyn Plugin, OpaqueLogScope), String> {
         let opaque_log = Arc::clone(&self.opaque_log);
         let process = self.get()?;
-        let stderr = sensitive.then(|| process.stderr_sync());
+        let stderr = if sensitive { process.stderr_sync() } else { None };
         let scope = OpaqueLogScope::new(opaque_log, sensitive, stderr);
         Ok((process, scope))
     }
 
     fn close(&mut self) {
         if let Some(p) = self.proc_.take() {
-            let _ = p.close();
+            p.close();
         }
     }
 }
@@ -3891,11 +3939,15 @@ impl Pool {
         }
         let output = self.target(name)?;
         let id = crate::project::PluginId::new(PluginKind::Source, output.kind.clone());
-        let path = crate::plugins::locate_in(&self.connections.root, &self.connections.plugins, &id)
+        let ctx = &self.connections.ctx;
+        let path = ctx
+            .host()
+            .locate(&self.connections.root, &self.connections.plugins, &id)
             .map_err(String::from);
         let session = Arc::new(Mutex::new(Session::new(
+            ctx,
             path,
-            render_connection(&output),
+            render_connection(&output, ctx.env()),
             self.cwd.clone(),
             self.log.clone(),
             self.unmanaged,
@@ -3920,6 +3972,7 @@ impl Pool {
 /// else on the renderer's own (`default`).
 struct PoolRunner {
     pool: Arc<Pool>,
+    secrets: Secrets,
     default: Option<String>,
     log: LogSink,
 }
@@ -3937,7 +3990,7 @@ impl QueryRunner for PoolRunner {
     fn run_query(&self, sql: &str, max_rows: u64, profile: Option<&str>) -> Result<QueryRows, String> {
         let session = self.session(profile)?;
         let mut s = session.lock().map_err(|_| "session lock poisoned".to_string())?;
-        let sensitive = crate::secrets::contains_secret(sql);
+        let sensitive = self.secrets.contains_secret(sql);
         // An unmanaged report may only read, and run_query() runs before the file's own
         // statements are checked, so it gets the same rule up front.
         if s.unmanaged
@@ -3947,15 +4000,15 @@ impl QueryRunner for PoolRunner {
         {
             return Err(format!(
                 "run_query() in an unmanaged report may only read, but got `{}`; give the report a YAML to declare it",
-                masked_sql_summary(&bad.text, 60, sensitive)
+                masked_sql_summary(&self.secrets, &bad.text, 60, sensitive)
             ));
         }
-        (self.log)("run_query()", &protected_sql(sql, sensitive));
+        (self.log)("run_query()", &protected_sql(&self.secrets, sql, sensitive));
         let (p, _log_scope) = s.statement(sensitive)?;
         let mut out = QueryRows::default();
         let mut too_many = false;
         let exec = p
-            .execute(sql, Some(max_rows + 1), |schema, batch| {
+            .execute(sql, Some(max_rows + 1), &mut |schema, batch| {
                 if out.columns.is_empty() {
                     out.columns = schema.fields().iter().map(|f| f.name().clone()).collect();
                 }
@@ -3966,7 +4019,12 @@ impl QueryRunner for PoolRunner {
                 out.rows.extend(crate::values::batch_rows(&batch));
                 Ok(())
             })
-            .map_err(|e| format!("run_query() failed: {}", masked_source_error(&e, sensitive)))?;
+            .map_err(|e| {
+                format!(
+                    "run_query() failed: {}",
+                    masked_source_error(&self.secrets, &e, sensitive)
+                )
+            })?;
         if too_many {
             return Err(format!(
                 "run_query() returned more than {max_rows} rows; it's meant for small lookups — raise the cap with `run_query(sql, max_rows=N)` or `run_query_max_rows` in dre_project.yml"
@@ -3983,16 +4041,16 @@ impl QueryRunner for PoolRunner {
     fn columns(&self, sql: &str, profile: Option<&str>) -> Result<Vec<Column>, String> {
         let session = self.session(profile)?;
         let mut s = session.lock().map_err(|_| "session lock poisoned".to_string())?;
-        let sensitive = crate::secrets::contains_secret(sql);
-        (self.log)("columns()", &protected_sql(sql, sensitive));
+        let sensitive = self.secrets.contains_secret(sql);
+        (self.log)("columns()", &protected_sql(&self.secrets, sql, sensitive));
         let (p, _log_scope) = s.statement(sensitive)?;
         let mut schema: Option<SchemaRef> = None;
         let exec = p
-            .execute(sql, Some(1), |sch, _| {
+            .execute(sql, Some(1), &mut |sch, _| {
                 schema.get_or_insert_with(|| sch.clone());
                 Ok(())
             })
-            .map_err(|e| masked_source_error(&e, sensitive))?;
+            .map_err(|e| masked_source_error(&self.secrets, &e, sensitive))?;
         if let Execution::Result { schema: sch, .. } = exec {
             schema.get_or_insert(sch);
         }
@@ -4016,7 +4074,6 @@ impl QueryRunner for PoolRunner {
             return Ok(None);
         }
         let batch = table.to_batch()?;
-        let schema = batch.schema();
         (self.log)(
             &format!("lookup `{name}`"),
             &format!(
@@ -4024,7 +4081,7 @@ impl QueryRunner for PoolRunner {
                 batch.num_rows()
             ),
         );
-        let r = s.get()?.load(name, &schema, [batch]).map_err(|e| e.to_string())?;
+        let r = s.get()?.load(name, batch).map_err(|e| e.to_string())?;
         s.loaded = true;
         Ok(Some(r))
     }
@@ -4049,11 +4106,15 @@ fn render_json(renderer: &Renderer, file: &Path, v: &Json) -> Result<Json, Rende
 }
 
 /// Render `env_var()` (and only that) inside a profile output's string fields.
-pub(crate) fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String, Json>, String> {
+pub(crate) fn render_connection(
+    output: &ProfileTarget,
+    process: &crate::Env,
+) -> Result<JsonMap<String, Json>, String> {
     let mut env = minijinja::Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    env.add_function("env_var", |name: String, default: Option<String>| -> Result<String, minijinja::Error> {
-        std::env::var(&name).ok().or(default).ok_or_else(|| {
+    let process = process.clone();
+    env.add_function("env_var", move |name: String, default: Option<String>| -> Result<String, minijinja::Error> {
+        process.var(&name).map(str::to_string).or(default).ok_or_else(|| {
             minijinja::Error::new(
                 minijinja::ErrorKind::UndefinedError,
                 format!("`env_var('{name}')`: environment variable `{name}` is not set and no default is given"),
@@ -4084,40 +4145,29 @@ pub(crate) fn render_connection(output: &ProfileTarget) -> Result<JsonMap<String
 /// Locate the plugin for a declared type among the project's packages, honouring `dre.lock`
 /// pins and declared constraints.
 pub fn find_plugin(
+    ctx: &Context,
     project: &Project,
     kind: PluginKind,
     name: &str,
 ) -> Result<crate::plugins::Located, crate::plugins::LocateError> {
-    crate::plugins::locate(project, &crate::project::PluginId::new(kind, name))
+    ctx.host().locate(
+        &project.root,
+        &project.plugins,
+        &crate::project::PluginId::new(kind, name),
+    )
 }
 
 /// `connection`, `destination` and `profile()` from `profiles.yml`, for the run's target. A
 /// field is secret when the plugin's `describe` says so; when the plugin can't be asked, when its
 /// name looks like one; and always when its value comes from a `DRE_SECRET_*` variable.
 struct ProfileConnections {
+    /// The run's plugin host, secrets and `describe` cache.
+    ctx: Context,
     /// Each profile's entry for the run comes from here.
     profiles: Profiles,
     root: PathBuf,
     plugins: Vec<crate::project::PluginRequirement>,
     log: LogSink,
-}
-
-/// What `describe` said, by `(project, role, type)`, `None` when it couldn't be asked: each
-/// plugin is asked once per process, not once per Binding.
-static DESCRIBED: std::sync::LazyLock<Mutex<BTreeMap<DescribeKey, Option<Described>>>> =
-    std::sync::LazyLock::new(Mutex::default);
-
-/// `(project root, role, plugin type)`.
-type DescribeKey = (PathBuf, Role, String);
-
-#[derive(Clone)]
-struct Described {
-    secrets: Vec<String>,
-    identifier_quote: Option<String>,
-    string_literal: Option<String>,
-    capabilities: Vec<String>,
-    /// A message destination's length limit.
-    message_limit: Option<u64>,
 }
 
 const SECRET_NAME_WORDS: &[&str] = &["password", "secret", "token", "key", "credential"];
@@ -4159,8 +4209,8 @@ impl ProfileConnections {
                     .cloned(),
             ),
         }
-        crate::secrets::register_secret_fields(&out.fields, &secrets);
-        let fields = render_connection(&out)?;
+        self.ctx.secrets().register_secret_fields(&out.fields, &secrets);
+        let fields = render_connection(&out, self.ctx.env())?;
         Ok(Connection {
             profile: name.to_string(),
             target,
@@ -4170,17 +4220,19 @@ impl ProfileConnections {
         })
     }
 
-    /// The plugin's `describe` reply, asked once per plugin type.
+    /// The plugin's `describe` reply, asked once per plugin type in a run.
     fn described(&self, role: Role, kind: &str) -> Option<Described> {
         let key = (self.root.clone(), role, kind.to_string());
-        if let Some(v) = DESCRIBED.lock().unwrap().get(&key) {
-            return v.clone();
-        }
+        self.ctx.described(key, || self.describe(role, kind))
+    }
+
+    /// Ask the plugin for its `describe` reply; `None` when it can't be asked.
+    fn describe(&self, role: Role, kind: &str) -> Option<Described> {
         let plugin_kind = match role {
             Role::Connection => PluginKind::Source,
             Role::Destination => PluginKind::Destination,
         };
-        let asked = (|| {
+        {
             if kind == LOCAL_TYPE {
                 return Some(Described {
                     secrets: Vec::new(),
@@ -4191,11 +4243,12 @@ impl ProfileConnections {
                 });
             }
             let id = crate::project::PluginId::new(plugin_kind, kind);
-            let plugin = crate::plugins::locate_in(&self.root, &self.plugins, &id).ok()?;
-            let mut p = plugin.start(self.log.clone(), Some(&self.root)).ok()?;
+            let host = self.ctx.host();
+            let plugin = host.locate(&self.root, &self.plugins, &id).ok()?;
+            let mut p = host.start(&plugin, self.log.clone(), Some(&self.root)).ok()?;
             let capabilities = p.info().capabilities.clone();
-            let d = p.description().ok();
-            let _ = p.close();
+            let d = p.describe().ok();
+            p.close();
             let d = d?;
             Some(Described {
                 secrets: d
@@ -4209,9 +4262,7 @@ impl ProfileConnections {
                 capabilities,
                 message_limit: d.message_limit,
             })
-        })();
-        DESCRIBED.lock().unwrap().insert(key, asked.clone());
-        asked
+        }
     }
 }
 
@@ -4387,3 +4438,6 @@ pub fn clean(t: &Path) -> std::io::Result<bool> {
         Ok(false)
     }
 }
+
+#[cfg(test)]
+mod tests;

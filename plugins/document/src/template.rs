@@ -272,7 +272,10 @@ pub fn render(ctx: &Context, data: &Data) -> Result<Rendered, String> {
 /// The environment: core's (`var()`, `run.*`, `target.name`, dates, number filters), with
 /// HTML escaping, the `date` filter, `table()`, and includes looked up inside the project.
 fn environment(ctx: &Context, root: &Path, locale: Locale) -> Result<Environment<'static>, String> {
-    let mut env = dre_core::document::environment(ctx)?;
+    // The plugin's own process: number filter errors mask its `DRE_SECRET_*` values.
+    static SECRETS: std::sync::LazyLock<dre_core::secrets::Secrets> =
+        std::sync::LazyLock::new(|| dre_core::secrets::Secrets::new(&dre_core::Env::from_process()));
+    let mut env = dre_core::document::environment(ctx, &SECRETS)?;
     env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
     let r = root.to_path_buf();
     env.set_path_join_callback(move |name, parent| {

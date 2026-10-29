@@ -17,13 +17,13 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 
+use crate::context::Env;
+
 pub const PREFIX: &str = "DRE_SECRET_";
 pub const MASK: &str = "*****";
 pub const MASKED_SOURCE_ERROR: &str =
     "source error details omitted because the request contains a masked secret";
 const MIN_LEN: usize = 4;
-
-static ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn eligible(value: &str) -> bool {
     !value.is_empty()
@@ -57,25 +57,15 @@ fn replace_standalone(s: &str, x: &str) -> String {
     out
 }
 
-/// Secret values, longest first so a secret containing another is masked whole. Starts with
-/// `DRE_SECRET_*`; [`register_secret_field`] adds the variables secret profile fields read.
-static SECRETS: LazyLock<RwLock<Arc<Secrets>>> = LazyLock::new(|| {
-    RwLock::new(Arc::new(Secrets::new(sorted(
-        std::env::vars()
-            .filter(|(k, _)| k.starts_with(PREFIX))
-            .map(|(_, v)| v),
-    ))))
-});
-
 /// The secret values, and the forms they take in Markdown and in collapsed titles.
-struct Secrets {
+struct Values {
     plain: Vec<String>,
     markdown: Vec<String>,
     title: Vec<String>,
 }
 
-impl Secrets {
-    fn new(plain: Vec<String>) -> Secrets {
+impl Values {
+    fn new(plain: Vec<String>) -> Values {
         let markdown = sorted(
             plain
                 .iter()
@@ -86,7 +76,7 @@ impl Secrets {
                 .iter()
                 .flat_map(|s| [s.clone(), s.split_whitespace().collect::<Vec<_>>().join(" ")]),
         );
-        Secrets {
+        Values {
             plain,
             markdown,
             title,
@@ -99,10 +89,6 @@ fn sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
     v.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
     v.dedup();
     v
-}
-
-fn secrets() -> Arc<Secrets> {
-    SECRETS.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// The environment variables a template reads through `env_var('NAME')` (either quote).
@@ -129,26 +115,6 @@ pub fn secret_field_name(name: &str) -> bool {
         || name == "apikey"
 }
 
-/// Mask the values of the environment variables a secret profile field reads through
-/// `env_var()`, at any depth of `value`.
-pub fn register_secret_field(value: &serde_json::Value) {
-    let mut text = Vec::new();
-    collect_strings(value, &mut text);
-    register(text.iter().flat_map(|s| env_references(s)))
-}
-
-/// Mask the `env_var()` values that the secret fields of `fields` (a profile target) read,
-/// nested blocks (`ssh:`) included. `secret` adds names a plugin declares secret.
-pub fn register_secret_fields(fields: &serde_json::Map<String, serde_json::Value>, secret: &[String]) {
-    for (name, value) in fields {
-        if secret_field_name(name) || secret.contains(name) {
-            register_secret_field(value);
-        } else if let serde_json::Value::Object(nested) = value {
-            register_secret_fields(nested, &[]);
-        }
-    }
-}
-
 fn collect_strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
     match value {
         serde_json::Value::String(s) => out.push(s),
@@ -164,29 +130,6 @@ fn collect_strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
         }
         _ => {}
     }
-}
-
-fn register(names: impl Iterator<Item = String>) {
-    register_values(names.into_iter().filter_map(|name| std::env::var(name).ok()));
-}
-
-/// Mask these values from now on: a query's `secret_columns`.
-pub fn register_values(values: impl IntoIterator<Item = String>) {
-    let values: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
-    if values.is_empty() {
-        return;
-    }
-    let mut guard = SECRETS.write().unwrap_or_else(|e| e.into_inner());
-    let merged = sorted(guard.plain.iter().cloned().chain(values));
-    *guard = Arc::new(Secrets::new(merged));
-}
-
-pub fn set_enabled(on: bool) {
-    ENABLED.store(on, Ordering::Relaxed);
-}
-
-pub(crate) fn enabled() -> bool {
-    ENABLED.load(Ordering::Relaxed)
 }
 
 fn mask_with<'a>(s: &'a str, secrets: &[String]) -> Cow<'a, str> {
@@ -207,53 +150,12 @@ fn mask_with<'a>(s: &'a str, secrets: &[String]) -> Cow<'a, str> {
     Cow::Owned(out)
 }
 
-/// `s` with every secret value replaced by `*****`.
-pub fn mask(s: &str) -> Cow<'_, str> {
-    if !ENABLED.load(Ordering::Relaxed) {
-        return Cow::Borrowed(s);
-    }
-    mask_with(s, &secrets().plain)
-}
-
-/// Mask a rendered message without changing the report payload. Markdown interpolation has
-/// already escaped punctuation, so both literal and escaped secret values must be matched.
-pub(crate) fn mask_markdown(s: &str) -> Cow<'_, str> {
-    if !ENABLED.load(Ordering::Relaxed) {
-        return Cow::Borrowed(s);
-    }
-    mask_with(s, &secrets().markdown)
-}
-
-/// Message titles collapse whitespace before delivery. Match that representation as well as
-/// the literal secret when protecting a title in logs and run metadata.
-pub(crate) fn mask_message_title(s: &str) -> Cow<'_, str> {
-    if !ENABLED.load(Ordering::Relaxed) {
-        return Cow::Borrowed(s);
-    }
-    mask_with(s, &secrets().title)
-}
-
-/// Whether masking is enabled and `s` contains a complete registered secret.
-pub fn contains_secret(s: &str) -> bool {
-    ENABLED.load(Ordering::Relaxed) && matches!(mask_with(s, &secrets().plain), Cow::Owned(_))
-}
-
 fn mask_source_error_with<'a>(error: &'a str, sensitive: bool, secrets: &[String]) -> Cow<'a, str> {
     if sensitive {
         Cow::Borrowed(MASKED_SOURCE_ERROR)
     } else {
         mask_with(error, secrets)
     }
-}
-
-/// Mask a source error before it reaches logs or output. Source plugins can transform or truncate
-/// a request in their diagnostics, so exact replacement is not sufficient for a secret-bearing
-/// request. In that case the opaque detail is omitted instead.
-pub fn mask_source_error(error: &str, sensitive: bool) -> Cow<'_, str> {
-    if !ENABLED.load(Ordering::Relaxed) {
-        return Cow::Borrowed(error);
-    }
-    mask_source_error_with(error, sensitive, &secrets().plain)
 }
 
 fn unique_masked_names_with(names: &[String], secrets: &[String]) -> Vec<String> {
@@ -320,30 +222,162 @@ fn redact_json_with(v: &mut serde_json::Value, secrets: &[String]) {
     }
 }
 
-/// `v` with every secret value replaced by `*****` in all strings and object keys. Colliding
-/// masked keys receive `#2`, `#3`, and so on rather than silently replacing another entry.
-pub fn redact_json(v: &mut serde_json::Value) {
-    if ENABLED.load(Ordering::Relaxed) {
-        redact_json_with(v, &secrets().plain);
+/// The secret values one command masks: `DRE_SECRET_*` from its environment, then whatever the
+/// command registers as it goes (secret profile fields, `secret_columns`). Cloning shares the
+/// values, so every thread of a run masks the same set; two commands in one process each have
+/// their own.
+#[derive(Clone)]
+pub struct Secrets {
+    values: Arc<RwLock<Arc<Values>>>,
+    enabled: Arc<AtomicBool>,
+    env: Env,
+}
+
+impl Secrets {
+    /// The `DRE_SECRET_*` values of `env`, masked; secret fields read their variables from it.
+    pub fn new(env: &Env) -> Secrets {
+        let plain = sorted(
+            env.vars()
+                .filter(|(k, _)| k.starts_with(PREFIX))
+                .map(|(_, v)| v.to_string()),
+        );
+        Secrets {
+            values: Arc::new(RwLock::new(Arc::new(Values::new(plain)))),
+            enabled: Arc::new(AtomicBool::new(true)),
+            env: env.clone(),
+        }
+    }
+
+    fn current(&self) -> Arc<Values> {
+        self.values.read().unwrap().clone()
+    }
+
+    /// `mask_secrets:` in `dre_project.yml`: off masks nothing.
+    pub fn set_enabled(&self, on: bool) {
+        self.enabled.store(on, Ordering::Relaxed);
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    /// Mask the values of the environment variables a secret profile field reads through
+    /// `env_var()`, at any depth of `value`.
+    pub fn register_secret_field(&self, value: &serde_json::Value) {
+        let mut text = Vec::new();
+        collect_strings(value, &mut text);
+        let names: Vec<String> = text.iter().flat_map(|s| env_references(s)).collect();
+        self.register_values(
+            names
+                .iter()
+                .filter_map(|name| self.env.var(name).map(str::to_string)),
+        );
+    }
+
+    /// Mask the `env_var()` values that the secret fields of `fields` (a profile target) read,
+    /// nested blocks (`ssh:`) included. `secret` adds names a plugin declares secret.
+    pub fn register_secret_fields(
+        &self,
+        fields: &serde_json::Map<String, serde_json::Value>,
+        secret: &[String],
+    ) {
+        for (name, value) in fields {
+            if secret_field_name(name) || secret.contains(name) {
+                self.register_secret_field(value);
+            } else if let serde_json::Value::Object(nested) = value {
+                self.register_secret_fields(nested, &[]);
+            }
+        }
+    }
+
+    /// Mask these values from now on: a query's `secret_columns`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the set of values is poisoned (a thread panicked while changing it).
+    pub fn register_values(&self, values: impl IntoIterator<Item = String>) {
+        let values: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
+        if values.is_empty() {
+            return;
+        }
+        let mut guard = self.values.write().unwrap();
+        let merged = sorted(guard.plain.iter().cloned().chain(values));
+        *guard = Arc::new(Values::new(merged));
+    }
+
+    /// `s` with every secret value replaced by `*****`.
+    pub fn mask<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        if !self.enabled() {
+            return Cow::Borrowed(s);
+        }
+        mask_with(s, &self.current().plain)
+    }
+
+    /// Mask a rendered message without changing the report payload. Markdown interpolation has
+    /// already escaped punctuation, so both literal and escaped secret values must be matched.
+    pub(crate) fn mask_markdown<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        if !self.enabled() {
+            return Cow::Borrowed(s);
+        }
+        mask_with(s, &self.current().markdown)
+    }
+
+    /// Message titles collapse whitespace before delivery. Match that representation as well as
+    /// the literal secret when protecting a title in logs and run metadata.
+    pub(crate) fn mask_message_title<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        if !self.enabled() {
+            return Cow::Borrowed(s);
+        }
+        mask_with(s, &self.current().title)
+    }
+
+    /// Whether masking is enabled and `s` contains a complete registered secret.
+    pub fn contains_secret(&self, s: &str) -> bool {
+        self.enabled() && matches!(mask_with(s, &self.current().plain), Cow::Owned(_))
+    }
+
+    /// Mask a source error before it reaches logs or output. Source plugins can transform or
+    /// truncate a request in their diagnostics, so exact replacement is not sufficient for a
+    /// secret-bearing request. In that case the opaque detail is omitted instead.
+    pub fn mask_source_error<'a>(&self, error: &'a str, sensitive: bool) -> Cow<'a, str> {
+        if !self.enabled() {
+            return Cow::Borrowed(error);
+        }
+        mask_source_error_with(error, sensitive, &self.current().plain)
+    }
+
+    /// `v` with every secret value replaced by `*****` in all strings and object keys. Colliding
+    /// masked keys receive `#2`, `#3`, and so on rather than silently replacing another entry.
+    pub fn redact_json(&self, v: &mut serde_json::Value) {
+        if self.enabled() {
+            redact_json_with(v, &self.current().plain);
+        }
+    }
+
+    fn redacted<T: serde::Serialize>(&self, v: &T) -> serde_json::Result<serde_json::Value> {
+        let mut v = serde_json::to_value(v)?;
+        self.redact_json(&mut v);
+        Ok(v)
+    }
+
+    /// Pretty JSON of `v` with secrets redacted first.
+    pub fn to_json_pretty<T: serde::Serialize>(&self, v: &T) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(&self.redacted(v)?)
+    }
+
+    /// One-line JSON of `v` with secrets redacted first.
+    pub fn to_json_line<T: serde::Serialize>(&self, v: &T) -> serde_json::Result<String> {
+        serde_json::to_string(&self.redacted(v)?)
     }
 }
 
-fn redacted<T: serde::Serialize>(v: &T) -> serde_json::Result<serde_json::Value> {
-    let mut v = serde_json::to_value(v)?;
-    redact_json(&mut v);
-    Ok(v)
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Secrets")
+            .field("enabled", &self.enabled())
+            .finish_non_exhaustive()
+    }
 }
-
-/// Pretty JSON of `v` with secrets redacted first.
-pub fn to_json_pretty<T: serde::Serialize>(v: &T) -> serde_json::Result<String> {
-    serde_json::to_string_pretty(&redacted(v)?)
-}
-
-/// One-line JSON of `v` with secrets redacted first.
-pub fn to_json_line<T: serde::Serialize>(v: &T) -> serde_json::Result<String> {
-    serde_json::to_string(&redacted(v)?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

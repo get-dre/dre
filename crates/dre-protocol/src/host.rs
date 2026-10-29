@@ -328,41 +328,6 @@ impl Canceller {
     }
 }
 
-/// Every plugin process this program has running, by a number of its own, so a cancelled run
-/// can reach all of them wherever they were started.
-static RUNNING: Mutex<Vec<(u64, Canceller)>> = Mutex::new(Vec::new());
-static NEXT_PROCESS: AtomicU64 = AtomicU64::new(1);
-
-/// Send `cancel` to every running plugin's current request (protocol 1). Returns how many had one.
-///
-/// # Panics
-///
-/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
-pub fn cancel_all() -> usize {
-    let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
-    all.iter().filter(|c| c.cancel()).count()
-}
-
-/// Kill every running plugin process.
-///
-/// # Panics
-///
-/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
-pub fn kill_all() {
-    let all: Vec<Canceller> = RUNNING.lock().unwrap().iter().map(|(_, c)| c.clone()).collect();
-    for c in all {
-        c.kill();
-    }
-}
-
-/// How many plugin processes are running.
-///
-/// # Panics
-///
-/// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
-pub fn running() -> usize {
-    RUNNING.lock().unwrap().len()
-}
 /// A message from the plugin.
 pub enum Incoming {
     Json(Response),
@@ -390,8 +355,6 @@ pub struct PluginProcess {
     path: PathBuf,
     /// Shared with [`Canceller`]s, which can kill it.
     child: Arc<Mutex<Child>>,
-    /// This process's entry in [`RUNNING`].
-    registered: u64,
     /// Shared with [`Canceller`]s; `None` once closed.
     stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
     rx: Receiver<std::result::Result<Frame, FrameError>>,
@@ -471,7 +434,8 @@ impl PluginProcess {
     ///
     /// # Panics
     ///
-    /// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
+    /// The thread forwarding the plugin's stderr panics if its log tail is poisoned (a thread
+    /// panicked while changing it).
     pub fn spawn_in(
         path: &Path,
         log: LogSink,
@@ -570,20 +534,10 @@ impl PluginProcess {
         let serve = parse_executable_name(&label).map(|(k, n)| PluginId::new(k, n));
         let child = Arc::new(Mutex::new(child));
         let current = Arc::new(AtomicU64::new(0));
-        let registered = NEXT_PROCESS.fetch_add(1, Ordering::SeqCst);
-        RUNNING.lock().unwrap().push((
-            registered,
-            Canceller {
-                stdin: stdin.clone(),
-                current: current.clone(),
-                child: child.clone(),
-            },
-        ));
         Ok(PluginProcess {
             label,
             path: path.to_path_buf(),
             child,
-            registered,
             stdin,
             rx,
             log,
@@ -1348,9 +1302,6 @@ impl PluginProcess {
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
-        if let Ok(mut r) = RUNNING.lock() {
-            r.retain(|(id, _)| *id != self.registered);
-        }
         if let Ok(mut stdin) = self.stdin.lock() {
             stdin.take();
         }

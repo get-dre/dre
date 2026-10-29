@@ -71,15 +71,20 @@ fn parts(name: &str, dialect: &Dialect) -> Result<Vec<String>, String> {
         .collect()
 }
 
-fn rows(project: &Project, profile: &str, sql: &str) -> Result<Vec<Value>, String> {
-    let value = crate::query::execute(project, profile, sql, 100_000)?;
+fn rows(ctx: &crate::Context, project: &Project, profile: &str, sql: &str) -> Result<Vec<Value>, String> {
+    let value = crate::query::execute(ctx, project, profile, sql, 100_000)?;
     if value["truncated"] == true {
         return Err("catalogue exceeds 100000 rows; narrow the requested schema".into());
     }
     Ok(value["rows"].as_array().cloned().unwrap_or_default())
 }
 
-pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Value, String> {
+pub fn build(
+    ctx: &crate::Context,
+    project: &Project,
+    profile: &str,
+    request: &Request,
+) -> Result<Value, String> {
     let Entry::Use(target) = project.profiles.entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` is unavailable"));
     };
@@ -96,7 +101,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         "databricks" => "select current_catalog(), current_schema()",
         _ => return Err(unsupported()),
     };
-    let defaults = rows(project, profile, defaults)?;
+    let defaults = rows(ctx, project, profile, defaults)?;
     let first = defaults.first();
     let catalog = first
         .and_then(|r| r[0].as_str())
@@ -119,6 +124,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
             }
             // Let PostgreSQL resolve search_path and quoted names instead of guessing the schema.
             let resolved = rows(
+                ctx,
                 project,
                 profile,
                 &format!(
@@ -178,6 +184,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
         filters.join(" or ")
     };
     let tables = rows(
+        ctx,
         project,
         profile,
         &format!(
@@ -210,7 +217,7 @@ pub fn build(project: &Project, profile: &str, request: &Request) -> Result<Valu
             ),
             _ => return Err(unsupported()),
         };
-        let columns: Vec<Value> = rows(project, profile, &sql)?
+        let columns: Vec<Value> = rows(ctx, project, profile, &sql)?
             .iter()
             .map(|r| json!({"name":r[0], "type":r[1], "description":r[2]}))
             .collect();

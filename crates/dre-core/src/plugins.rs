@@ -7,14 +7,14 @@
 //! the plugin manager. Executables placed by hand (development, tests) sit flat in the directory:
 //! `dre-plugin-<package>`, or `dre-<kind>-<name>` for a package of that one plugin, called `<name>`.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use dre_protocol::{PluginId, executable_name, parse_executable_name, parse_package_executable_name};
 use semver::{Version, VersionReq};
 
 use crate::codes::Code;
+use crate::context::Env;
+pub use crate::plugin_host::Prober;
 use serde::{Deserialize, Serialize};
 
 /// What an installed version's directory holds besides the executable.
@@ -48,22 +48,22 @@ impl InstalledPackage {
 pub const DEPS_DIR: &str = "dre_deps";
 
 /// `DRE_PLUGINS_DIR`, when set: plugins live and install there, for every project.
-pub fn override_dir() -> Option<PathBuf> {
-    crate::settings::env(crate::settings::PLUGINS_DIR).map(PathBuf::from)
+pub fn override_dir(env: &Env) -> Option<PathBuf> {
+    env.setting(crate::settings::PLUGINS_DIR).map(PathBuf::from)
 }
 
 /// The shared download cache, which project installs link from; also where `dre init` installs
 /// before a project exists.
-pub fn cache_dir() -> PathBuf {
-    override_dir().unwrap_or_else(|| crate::dre_home().join("plugins"))
+pub fn cache_dir(env: &Env) -> PathBuf {
+    override_dir(env).unwrap_or_else(|| env.dre_home().join("plugins"))
 }
 
 /// Where a project's plugins live (`None`: outside any project, the cache).
-pub fn plugins_dir(project: Option<&Path>) -> PathBuf {
-    match (override_dir(), project) {
+pub fn plugins_dir(env: &Env, project: Option<&Path>) -> PathBuf {
+    match (override_dir(env), project) {
         (Some(d), _) => d,
         (None, Some(root)) => root.join(DEPS_DIR).join("plugins"),
-        (None, None) => cache_dir(),
+        (None, None) => cache_dir(env),
     }
 }
 
@@ -121,44 +121,13 @@ fn is_executable(p: &Path) -> bool {
     true
 }
 
-/// What an executable said it provides, and the file's modification time when asked.
-type Asked = (Option<std::time::SystemTime>, Vec<PluginId>);
-
-/// The plugins an executable serves, from its name when that's `dre-<kind>-<name>`, else from
-/// its handshake. Asked once per file and modification time.
-pub fn probe(path: &Path) -> Result<Vec<PluginId>, String> {
-    static ASKED: Mutex<BTreeMap<PathBuf, Asked>> = Mutex::new(BTreeMap::new());
-    let file = path.file_name().unwrap_or_default().to_string_lossy();
-    if let Some((kind, name)) = parse_executable_name(&file) {
-        return Ok(vec![PluginId::new(kind, name)]);
-    }
-    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    // A poisoned cache is skipped, not read: asking again gives the same answer.
-    if let Some(ids) = ASKED.lock().ok().and_then(|a| {
-        a.get(path)
-            .filter(|(m, _)| *m == modified)
-            .map(|(_, ids)| ids.clone())
-    }) {
-        return Ok(ids);
-    }
-    let quiet: dre_protocol::host::LogSink = std::sync::Arc::new(|_, _| {});
-    let p = dre_protocol::host::PluginProcess::start(path, quiet)
-        .map_err(|e| format!("can't ask {} what it provides: {e}", path.display()))?;
-    let ids = p.info().provides.clone();
-    let _ = p.close();
-    if let Ok(mut asked) = ASKED.lock() {
-        asked.insert(path.to_path_buf(), (modified, ids.clone()));
-    }
-    Ok(ids)
-}
-
 /// Every package under `dir`, flat ones first, then versioned ones in version order.
-pub fn discover(dir: &Path) -> Vec<InstalledPackage> {
-    scan(dir, None)
+pub fn discover(dir: &Path, prober: &Prober) -> Vec<InstalledPackage> {
+    scan(dir, None, prober)
 }
 
 /// [`discover`], limited to the package `only` when given (so no other executable is started).
-fn scan(dir: &Path, only: Option<&str>) -> Vec<InstalledPackage> {
+fn scan(dir: &Path, only: Option<&str>, prober: &Prober) -> Vec<InstalledPackage> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return out;
@@ -177,7 +146,7 @@ fn scan(dir: &Path, only: Option<&str>) -> Vec<InstalledPackage> {
                 name,
                 version: None,
                 path: p.clone(),
-                provides: probe(p).unwrap_or_default(),
+                provides: prober.probe(p).unwrap_or_default(),
             });
         }
     }
@@ -222,8 +191,9 @@ pub fn find(
     name: &str,
     req: Option<&VersionReq>,
     pin: Option<&Version>,
+    prober: &Prober,
 ) -> Vec<InstalledPackage> {
-    let all = scan(dir, Some(name));
+    let all = scan(dir, Some(name), prober);
     let flat = || {
         all.iter()
             .filter(|p| p.version.is_none())
@@ -269,23 +239,14 @@ pub struct Located {
     pub package: String,
 }
 
-impl Located {
-    /// Start the plugin (in `cwd`, the project directory) and complete the handshake.
-    pub fn start(
-        &self,
-        log: dre_protocol::host::LogSink,
-        cwd: Option<&Path>,
-    ) -> dre_protocol::host::Result<dre_protocol::host::PluginProcess> {
-        dre_protocol::host::PluginProcess::start_for(&self.path, Some(&self.plugin), log, cwd)
-    }
-}
-
 /// The installed copies of a declared package, honouring its `dre.lock` pin and constraint;
 /// `Err` for a `local:` package that can't be used.
 fn installed(
     root: &Path,
     lock: &crate::lock::Lock,
     req: &crate::project::PluginRequirement,
+    env: &Env,
+    prober: &Prober,
 ) -> Result<Vec<InstalledPackage>, String> {
     use crate::project::PluginSource;
     if let PluginSource::Local(p) = &req.source {
@@ -300,7 +261,7 @@ fn installed(
         return Ok(vec![InstalledPackage {
             name: req.name.clone(),
             version: None,
-            provides: probe(&path)?,
+            provides: prober.probe(&path)?,
             path,
         }]);
     }
@@ -308,8 +269,8 @@ fn installed(
         .get(&req.name)
         .filter(|l| l.from == req.source.lock_key())
         .map(|l| l.version.clone());
-    let dir = plugins_dir(Some(root));
-    Ok(find(&dir, &req.name, Some(&req.req()), pin.as_ref()))
+    let dir = plugins_dir(env, Some(root));
+    Ok(find(&dir, &req.name, Some(&req.req()), pin.as_ref(), prober))
 }
 
 /// Why [`locate`] found nothing.
@@ -335,21 +296,19 @@ impl From<LocateError> for String {
     }
 }
 
-/// Find the plugin `id` among the project's declared packages.
-pub fn locate(project: &crate::project::Project, id: &PluginId) -> Result<Located, LocateError> {
-    locate_in(&project.root, &project.plugins, id)
-}
-
-/// [`locate`], given the project's root and declared packages.
+/// Find the plugin `id` among the declared packages of the project at `root`, installed in
+/// `env`'s plugins directory.
 pub fn locate_in(
     root: &Path,
     plugins: &[crate::project::PluginRequirement],
     id: &PluginId,
+    env: &Env,
+    prober: &Prober,
 ) -> Result<Located, LocateError> {
     let lock = crate::lock::Lock::load(root).unwrap_or_default();
     let mut missing = Vec::new();
     for req in plugins {
-        let found = installed(root, &lock, req).map_err(LocateError::Unavailable)?;
+        let found = installed(root, &lock, req, env, prober).map_err(LocateError::Unavailable)?;
         if found.is_empty() {
             missing.push(format!("`{}`", req.name));
         }
@@ -374,7 +333,7 @@ pub fn locate_in(
             } else {
                 "aren't installed"
             },
-            plugins_dir(Some(root)).display()
+            plugins_dir(env, Some(root)).display()
         ))
     })
 }
@@ -382,13 +341,14 @@ pub fn locate_in(
 /// Check that a declared package provides every plugin the project uses: from the installed
 /// packages, else from `dre.lock`. A package that's neither installed nor locked is already an
 /// install error, so plugins it might provide aren't reported again.
-pub fn check_uses(project: &crate::project::Project, diags: &mut crate::Diagnostics) {
+pub fn check_uses(project: &crate::project::Project, env: &Env, diags: &mut crate::Diagnostics) {
+    let prober = Prober::default();
     let lock = crate::lock::Lock::load(&project.root).unwrap_or_default();
     let mut known: Vec<PluginId> = Vec::new();
     // A package whose declarations conflict is already an error.
     let mut unknown = project.plugins_incomplete;
     for req in &project.plugins {
-        let found = installed(&project.root, &lock, req).unwrap_or_default();
+        let found = installed(&project.root, &lock, req, env, &prober).unwrap_or_default();
         let from_lock = lock
             .get(&req.name)
             .filter(|l| l.from == req.source.lock_key())

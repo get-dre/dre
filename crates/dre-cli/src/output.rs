@@ -20,12 +20,13 @@ use dre_protocol::host::LogSink;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use crate::progress::{RowMeter, describe, short_name};
+use dre_core::secrets::Secrets;
 use serde_json::json;
 
 // Protect strings and keys while they still hold literal values, including JSON fragments
 // embedded in ordinary log lines. Text masking cannot recover values after JSON escaping.
-fn protected_json<T: serde::Serialize>(value: &T) -> String {
-    dre_core::secrets::to_json_line(value).expect("JSON output must serialize")
+fn protected_json<T: serde::Serialize>(secrets: &Secrets, value: &T) -> String {
+    secrets.to_json_line(value).expect("JSON output must serialize")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
@@ -81,6 +82,8 @@ struct Rows {
 }
 
 struct Inner {
+    /// What every line masks: the command's secrets.
+    secrets: Secrets,
     verbosity: Verbosity,
     format: LogFormat,
     color: bool,
@@ -113,7 +116,7 @@ pub struct Printer {
 }
 
 impl Printer {
-    pub fn new(verbosity: Verbosity, format: LogFormat, color: ColorChoice) -> Printer {
+    pub fn new(verbosity: Verbosity, format: LogFormat, color: ColorChoice, secrets: Secrets) -> Printer {
         let color = match color {
             ColorChoice::Always => true,
             ColorChoice::Never => false,
@@ -123,6 +126,7 @@ impl Printer {
         } && format == LogFormat::Text;
         Printer {
             inner: Arc::new(Mutex::new(Inner {
+                secrets,
                 verbosity,
                 format,
                 color,
@@ -164,7 +168,7 @@ impl Printer {
             if i.format != LogFormat::Json {
                 return Some(i.diagnostic(d));
             }
-            let message = dre_core::secrets::mask(&d.message).into_owned();
+            let message = i.secrets.mask(&d.message).into_owned();
             i.json(
                 json!({"event": "diagnostic", "severity": d.severity, "code": d.code,
                 "file": d.file, "line": d.line, "message": message}),
@@ -207,7 +211,10 @@ impl Printer {
     /// Record the run's parameters in the log file (and as a JSON event).
     pub fn log_params(&self, params: &serde_json::Value) {
         self.with(|i| {
-            i.file_log("INFO", &format!("Parameters {}", protected_json(params)));
+            i.file_log(
+                "INFO",
+                &format!("Parameters {}", protected_json(&i.secrets, params)),
+            );
             if i.format == LogFormat::Json {
                 i.json(json!({"event": "run_parameters", "parameters": params}));
             }
@@ -303,7 +310,7 @@ impl Printer {
 impl Inner {
     /// A diagnostic's text, its `error[...]`/`warning[...]` prefix coloured.
     fn diagnostic(&self, d: &dre_core::Diagnostic) -> String {
-        let text = dre_core::secrets::mask(&d.to_string()).into_owned();
+        let text = self.secrets.mask(&d.to_string()).into_owned();
         let tone = match d.severity {
             dre_core::Severity::Error => Tone::Bad,
             dre_core::Severity::Warning => Tone::Warn,
@@ -344,7 +351,8 @@ impl Inner {
             .collect::<Vec<_>>()
             .join("\n");
         let out = format!("{verb}  {text}");
-        self.suspend(|| println_stdout(&out));
+        let out = self.secrets.mask(&out).into_owned();
+        self.suspend(|| print_line(&out));
     }
 
     /// Run `f` (which prints) with the progress bars out of the way.
@@ -447,7 +455,10 @@ impl Inner {
 
     fn json(&self, mut v: serde_json::Value) {
         v["ts"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
-        let line = dre_core::secrets::to_json_line(&v).expect("serializing a serde_json::Value cannot fail");
+        let line = self
+            .secrets
+            .to_json_line(&v)
+            .expect("serializing a serde_json::Value cannot fail");
         self.suspend(|| print_line(&line));
     }
 
@@ -461,7 +472,10 @@ impl Inner {
         } else {
             format!(" [{}]", self.current)
         };
-        let line = dre_core::secrets::mask(&format!("{ts} {level:<5}{ctx} {msg}\n")).into_owned();
+        let line = self
+            .secrets
+            .mask(&format!("{ts} {level:<5}{ctx} {msg}\n"))
+            .into_owned();
         match self.log.as_mut() {
             Some(f) => f.write(&line),
             None if !self.seen_binding => self.header.push(line),
@@ -489,11 +503,6 @@ impl LogFile {
     fn write(&mut self, entry: &str) {
         let _ = self.file.write_all(entry.as_bytes());
     }
-}
-
-/// Everything printed goes through here, so `DRE_SECRET_*` values are masked on the console.
-fn println_stdout(s: &str) {
-    print_line(&dre_core::secrets::mask(s));
 }
 
 /// Print a line as is: JSON events are already redacted, and masking the text again could break them.
@@ -530,6 +539,30 @@ fn label(report: &str, set: Option<&str>) -> String {
     match set {
         Some(s) => format!("{report} [{s}]"),
         None => report.to_string(),
+    }
+}
+
+impl dre_core::start::Console for Printer {
+    fn installed(&self, what: &str) {
+        self.line(Tone::Note, "Installed", what);
+    }
+    fn error(&self, message: &str) {
+        Printer::error(self, message);
+    }
+    fn diagnostic(&self, d: &dre_core::Diagnostic) {
+        self.diag(d);
+    }
+    fn note(&self, verb: &str, text: &str) {
+        self.detail(Tone::Note, verb, text);
+    }
+    fn start_logs(&self) {
+        self.log_runs();
+    }
+    fn params(&self, params: &serde_json::Value) {
+        self.log_params(params);
+    }
+    fn timeout(&self, timeout: Option<std::time::Duration>) {
+        crate::signals::set_timeout(timeout);
     }
 }
 
@@ -668,10 +701,10 @@ impl Ui for Printer {
                 let schedule_values = schedule_vars.cloned().unwrap_or_default();
                 i.file_log(
                     "INFO",
-                    &format!("Schedule {name} vars {}", protected_json(&schedule_values)),
+                    &format!("Schedule {name} vars {}", protected_json(&i.secrets, &schedule_values)),
                 );
             }
-            let variables = protected_json(vars);
+            let variables = protected_json(&i.secrets, vars);
             i.file_log("INFO", &format!("Vars {variables}"));
             if i.format == LogFormat::Json {
                 i.json(json!({"event": "binding_vars", "schedule": schedule, "schedule_vars": schedule_vars, "vars": vars}));

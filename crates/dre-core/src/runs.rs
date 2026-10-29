@@ -51,10 +51,10 @@ pub struct Holder {
 }
 
 impl Holder {
-    fn me(run_id: &str, started: DateTime<Utc>) -> Holder {
+    fn me(run_id: &str, started: DateTime<Utc>, host: &str) -> Holder {
         Holder {
             run_id: run_id.to_string(),
-            host: host_name(),
+            host: host.to_string(),
             pid: std::process::id(),
             started_at: started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         }
@@ -156,11 +156,11 @@ impl BindingRuns {
     /// Take the Binding's lock for `run_id`. A lock left by a process on this host that has
     /// gone is taken over (the guard says so); one held by a live process, or by any process on
     /// another host (a shared folder), is [`LockError::Held`]: DRE never guesses about a run it
-    /// can't see.
-    pub fn lock(&self, run_id: &str, started: DateTime<Utc>) -> Result<Guard, LockError> {
+    /// can't see. `host` is this machine's name ([`host_name`]).
+    pub fn lock(&self, run_id: &str, started: DateTime<Utc>, host: &str) -> Result<Guard, LockError> {
         std::fs::create_dir_all(&self.dir).map_err(LockError::Io)?;
         let path = self.dir.join(LOCK);
-        let me = Holder::me(run_id, started);
+        let me = Holder::me(run_id, started, host);
         let body = serde_json::to_string_pretty(&me).map_err(|e| LockError::Io(e.into()))? + "\n";
         let mut took_over = None;
         for _ in 0..2 {
@@ -272,8 +272,8 @@ impl BindingRuns {
 
 /// This machine's name, for the lock: `DRE_HOST_NAME` if set (containers that share a target
 /// folder and reuse names), else the OS's.
-pub fn host_name() -> String {
-    if let Ok(v) = std::env::var("DRE_HOST_NAME")
+pub fn host_name(env: &crate::Env) -> String {
+    if let Some(v) = env.var("DRE_HOST_NAME")
         && !v.trim().is_empty()
     {
         return v.trim().to_string();
@@ -288,8 +288,8 @@ pub fn host_name() -> String {
         }
     }
     #[cfg(windows)]
-    if let Ok(v) = std::env::var("COMPUTERNAME") {
-        return v;
+    if let Some(v) = env.var("COMPUTERNAME") {
+        return v.to_string();
     }
     "unknown".to_string()
 }
@@ -349,8 +349,8 @@ mod tests {
     fn a_second_run_is_refused_while_the_first_holds_the_lock() {
         let (_d, r) = runs();
         let now = Utc::now();
-        let g = r.lock("a", now).unwrap();
-        match r.lock("b", now) {
+        let g = r.lock("a", now, &host_name(&crate::Env::default())).unwrap();
+        match r.lock("b", now, &host_name(&crate::Env::default())) {
             Err(LockError::Held(h)) => {
                 assert_eq!(h.run_id, "a");
                 assert_eq!(h.pid, std::process::id());
@@ -359,7 +359,7 @@ mod tests {
         }
         drop(g);
         assert!(r.holder().is_none());
-        drop(r.lock("b", now).unwrap());
+        drop(r.lock("b", now, &host_name(&crate::Env::default())).unwrap());
     }
 
     #[test]
@@ -368,12 +368,14 @@ mod tests {
         std::fs::create_dir_all(r.dir()).unwrap();
         let dead = Holder {
             run_id: "old".into(),
-            host: host_name(),
+            host: host_name(&crate::Env::default()),
             pid: 999_999,
             started_at: "2026-10-09T06:00:00Z".into(),
         };
         std::fs::write(r.dir().join(LOCK), serde_json::to_string(&dead).unwrap()).unwrap();
-        let g = r.lock("new", Utc::now()).unwrap();
+        let g = r
+            .lock("new", Utc::now(), &host_name(&crate::Env::default()))
+            .unwrap();
         assert_eq!(g.took_over.as_ref().map(|h| h.run_id.as_str()), Some("old"));
         drop(g);
         let elsewhere = Holder {
@@ -381,9 +383,15 @@ mod tests {
             ..dead
         };
         std::fs::write(r.dir().join(LOCK), serde_json::to_string(&elsewhere).unwrap()).unwrap();
-        assert!(matches!(r.lock("new", Utc::now()), Err(LockError::Held(_))));
+        assert!(matches!(
+            r.lock("new", Utc::now(), &host_name(&crate::Env::default())),
+            Err(LockError::Held(_))
+        ));
         assert_eq!(r.unlock().unwrap().unwrap().host, "some-other-host");
-        drop(r.lock("new", Utc::now()).unwrap());
+        drop(
+            r.lock("new", Utc::now(), &host_name(&crate::Env::default()))
+                .unwrap(),
+        );
     }
 
     #[test]

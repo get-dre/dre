@@ -88,6 +88,7 @@ struct Job {
 
 /// What every worker shares.
 struct Shared<'a> {
+    ctx: Context,
     project: &'a Project,
     pop: &'a Population,
     format: String,
@@ -376,6 +377,7 @@ impl BindingRun<'_> {
             .unwrap_or(crate::project::DEFAULT_ROW_CONCURRENCY)
             .clamp(1, 64);
         let shared = Shared {
+            ctx: self.ctx.clone(),
             project: self.project,
             pop: &pop,
             format: o.format.clone(),
@@ -1224,8 +1226,8 @@ fn worker(
     jobs: &Mutex<mpsc::Receiver<Job>>,
     results: mpsc::Sender<(usize, Job, RowRecord)>,
 ) {
-    let mut format: Option<PluginProcess> = None;
-    let mut dests: HashMap<String, PluginProcess> = HashMap::new();
+    let mut format: Option<Box<dyn Plugin>> = None;
+    let mut dests: HashMap<String, Box<dyn Plugin>> = HashMap::new();
     loop {
         if shared.cancel.is_cancelled() {
             break;
@@ -1257,10 +1259,10 @@ fn worker(
         let _ = results.send((job.i, job, record));
     }
     if let Some(p) = format {
-        let _ = p.close();
+        p.close();
     }
     for (_, p) in dests {
-        let _ = p.close();
+        p.close();
     }
 }
 
@@ -1288,19 +1290,18 @@ fn row_failed(
 fn run_job(
     shared: &Shared<'_>,
     job: &Job,
-    format: &mut Option<PluginProcess>,
-    dests: &mut HashMap<String, PluginProcess>,
+    format: &mut Option<Box<dyn Plugin>>,
+    dests: &mut HashMap<String, Box<dyn Plugin>>,
 ) -> Option<RowRecord> {
     if let Some(pre) = &job.pre {
         return Some(pre.clone());
     }
-    let root = &shared.project.root;
     if job.phase != Phase::Deliver
         && let Err(e) = make_files(shared, job, format)
     {
         // A plugin that failed may be broken: the next row starts a fresh one.
         if let Some(p) = format.take() {
-            let _ = p.close();
+            p.close();
         }
         return Some(row_failed(
             job,
@@ -1382,13 +1383,13 @@ fn run_job(
             None => job.files.iter().map(|(f, _)| f.clone()).collect(),
         };
         let r = deliver_row(
+            &shared.ctx,
             shared.project,
             &shared.log,
             d,
             &local,
             job.message.as_ref(),
             dests,
-            root,
         );
         let (status, location, error) = match r {
             Ok(Some(loc)) => ("delivered", Some(job.mask.apply(&loc)), None),
@@ -1436,7 +1437,7 @@ fn record_path_in(project: &Project, p: &Path) -> PathBuf {
 }
 
 /// Write a row's files through the format plugin (or a message's `.md`).
-fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<PluginProcess>) -> Result<(), Fail> {
+fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<Box<dyn Plugin>>) -> Result<(), Fail> {
     if shared.is_message {
         let (title, text) = job.message.clone().unwrap_or_default();
         let (path, _) = job.files.first().ok_or("the message has no file to write")?;
@@ -1445,33 +1446,34 @@ fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<PluginProcess>
     }
     let slices = shared.pop.slices(job.i)?;
     if format.is_none() {
-        let plugin = find_plugin(shared.project, PluginKind::Format, &shared.format)
+        let plugin = find_plugin(&shared.ctx, shared.project, PluginKind::Format, &shared.format)
             .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
         *format = Some(
-            plugin
-                .start(shared.log.clone(), Some(&shared.project.root))
+            shared
+                .ctx
+                .host()
+                .start(&plugin, shared.log.clone(), Some(&shared.project.root))
                 .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?,
         );
     }
-    let p = format.as_mut().expect("started");
+    let p = format.as_deref_mut().expect("started");
     let fmt_err =
         |e: HostError| Fail::from_plugin(&e, format!("{} format: {e}", shared.format)).or(Code::FormatFailed);
     for (path, qs) in &job.files {
         let metas: Vec<ResultSetMeta> = qs.iter().map(|&q| shared.metas[q].clone()).collect();
-        p.write_begin(
-            &path.to_string_lossy(),
-            &shared.format,
-            job.options.clone().unwrap_or_else(|| shared.options.clone()),
-            metas,
-            job.template.clone(),
-        )
+        p.write(WriteRequest {
+            path: path.to_string_lossy().into_owned(),
+            format: shared.format.clone(),
+            options: job.options.clone().unwrap_or_else(|| shared.options.clone()),
+            result_sets: metas,
+            template: job.template.clone(),
+        })
         .map_err(fmt_err)?;
         for &q in qs {
             let b = &slices[q];
-            p.write_result_set(&b.schema(), vec![b.clone()])
-                .map_err(fmt_err)?;
+            crate::plugin_host::write_result_set(p, &b.schema(), vec![b.clone()]).map_err(fmt_err)?;
         }
-        let (_files, warnings) = p.write_finish_with_warnings().map_err(fmt_err)?;
+        let warnings = p.finish().map_err(fmt_err)?.warnings;
         for w in warnings {
             shared.events.warn(&format!(
                 "  row `{}`: {} format: {}",
@@ -1506,14 +1508,15 @@ fn make_zips(job: &Job) -> Result<(), String> {
 /// Deliver a row's files (or its message) to one destination. `Ok(None)`: the entry delivers
 /// nowhere (`deliver: false`).
 pub(crate) fn deliver_row(
+    ctx: &Context,
     project: &Project,
     log: &LogSink,
     d: &RowDest,
     files: &[PathBuf],
     message: Option<&(String, String)>,
-    plugins: &mut HashMap<String, PluginProcess>,
-    root: &Path,
+    plugins: &mut HashMap<String, Box<dyn Plugin>>,
 ) -> Result<Option<String>, Fail> {
+    let root = &project.root;
     let profiles = &project.profiles;
     let out = match profiles.entry(Role::Destination, &d.profile) {
         Entry::Use(o) => o,
@@ -1529,7 +1532,7 @@ pub(crate) fn deliver_row(
         }
     };
     let kind = out.kind.clone();
-    let connection = render_connection(out)?;
+    let connection = render_connection(out, ctx.env())?;
     let targets: Vec<DeliveryFile> = files
         .iter()
         .map(|f| {
@@ -1588,10 +1591,11 @@ pub(crate) fn deliver_row(
     }
     let failed = |e: HostError| Fail::from_plugin(&e, format!("delivery through `{kind}` failed: {e}"));
     if !plugins.contains_key(&kind) {
-        let plugin = find_plugin(project, PluginKind::Destination, &kind)
+        let plugin = find_plugin(ctx, project, PluginKind::Destination, &kind)
             .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-        let p = plugin
-            .start(log.clone(), Some(&project.root))
+        let p = ctx
+            .host()
+            .start(&plugin, log.clone(), Some(&project.root))
             .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
         plugins.insert(kind.clone(), p);
     }
@@ -1619,7 +1623,13 @@ pub(crate) fn deliver_row(
                 })
                 .collect();
             return p
-                .deliver_message(&m, &attach, connection.clone(), d.options.clone())
+                .deliver(crate::plugin_host::Delivery {
+                    files: attach,
+                    message: Some(m),
+                    connection: connection.clone(),
+                    options: d.options.clone(),
+                })
+                .map(|r| r.location)
                 .map_err(failed);
         }
         if message.is_none() && p.has(CAP_MESSAGE_ONLY) {
@@ -1634,8 +1644,14 @@ pub(crate) fn deliver_row(
         for batch in batches {
             let files: Vec<DeliveryFile> = batch.iter().map(|&i| targets[i].clone()).collect();
             locations.push(
-                p.deliver_files(&files, connection.clone(), d.options.clone())
-                    .map_err(failed)?,
+                p.deliver(crate::plugin_host::Delivery {
+                    files,
+                    message: None,
+                    connection: connection.clone(),
+                    options: d.options.clone(),
+                })
+                .map_err(failed)?
+                .location,
             );
         }
         Ok(locations.join(", "))
@@ -1643,7 +1659,7 @@ pub(crate) fn deliver_row(
     if result.is_err() {
         // A destination plugin that failed may be broken: the next row starts a fresh one.
         if let Some(p) = plugins.remove(&kind) {
-            let _ = p.close();
+            p.close();
         }
     }
     result.map(Some)

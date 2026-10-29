@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, VecDeque};
 use arrow::datatypes::{DataType, Field};
 use serde_json::{Value as Json, json};
 
+use crate::secrets::Secrets;
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Key {
     Name(String, usize),
@@ -30,32 +32,32 @@ struct ResultSet {
 type Entries = BTreeMap<Key, ResultSet>;
 
 /// Redact secret-derived fields without touching structural JSON keys.
-pub(crate) fn redact(snapshot: &mut Json) {
+pub(crate) fn redact(snapshot: &mut Json, secrets: &Secrets) {
     let Some(result_sets) = snapshot.get_mut("result_sets").and_then(Json::as_array_mut) else {
         return;
     };
 
-    mask_names(result_sets);
+    mask_names(result_sets, secrets);
     for result_set in result_sets {
         let Some(columns) = result_set.get_mut("columns").and_then(Json::as_array_mut) else {
             continue;
         };
-        mask_names(columns);
+        mask_names(columns, secrets);
         for column in columns {
-            mask_field(column, "type", "type_protected");
+            mask_field(column, "type", "type_protected", secrets);
         }
     }
 }
 
-fn mask_names(entries: &mut [Json]) {
+fn mask_names(entries: &mut [Json], secrets: &Secrets) {
     for entry in entries {
-        mask_field(entry, "name", "name_protected");
+        mask_field(entry, "name", "name_protected", secrets);
     }
 }
 
-fn mask_field(entry: &mut Json, field: &str, marker: &str) {
+fn mask_field(entry: &mut Json, field: &str, marker: &str, secrets: &Secrets) {
     let Some(std::borrow::Cow::Owned(protected)) =
-        entry.get(field).and_then(Json::as_str).map(crate::secrets::mask)
+        entry.get(field).and_then(Json::as_str).map(|s| secrets.mask(s))
     else {
         return;
     };

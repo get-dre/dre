@@ -88,7 +88,7 @@ fn window(a: &LsArgs) -> Result<Window, String> {
 }
 
 /// Diagnostics go to stderr, so stdout holds only data.
-pub fn ls(a: LsArgs) -> ExitCode {
+pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
     let window = match window(&a) {
         Ok(w) => w,
         Err(e) => {
@@ -100,7 +100,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         profiles_dir: a.profiles_dir.clone(),
         ..Default::default()
     };
-    let (project, diags) = project::load(&a.project_dir, &opts);
+    let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
     // A schedule with an error is left out of the project, which a consumer would read as
     // removed; so an error stops the command. Profiles aren't needed, so their errors don't.
     let errors: Vec<&dre_core::Diagnostic> = diags
@@ -118,7 +118,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
             return crate::exit::not_started();
         }
     };
-    dre_core::secrets::set_enabled(project.mask_secrets);
+    ctx.secrets().set_enabled(project.mask_secrets);
     let text = a.output == Output::Text;
     let req = Request {
         window,
@@ -135,7 +135,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
         }
     };
     if text {
-        print!("{}", dre_core::secrets::mask(&table(&doc)));
+        print!("{}", ctx.secrets().mask(&table(&doc)));
         for p in doc["problems"].as_array().into_iter().flatten() {
             eprintln!(
                 "warning[{}]: schedule `{}`: {}",
@@ -145,7 +145,7 @@ pub fn ls(a: LsArgs) -> ExitCode {
             );
         }
     } else {
-        print!("{}", dre_core::manifest::render(&doc));
+        print!("{}", dre_core::manifest::render(&doc, ctx.secrets()));
     }
     crate::exit::ok()
 }

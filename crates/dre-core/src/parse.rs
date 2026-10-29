@@ -27,7 +27,7 @@ use crate::render::{Limited, Mode, Renderer, RendererConfig, ResolvedSource, Run
 pub const PARSE_FAILED: Code = Code::ParseFailed;
 
 /// What the parse pass renders `run.*`, `var()` and `target.name` with: the run's inputs.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Inputs {
     pub target: String,
     /// `--var`.
@@ -42,6 +42,24 @@ pub struct Inputs {
     pub schedule: Option<String>,
     /// When the run started (`run.now` without `DRE_RUN_AT`); `None`: now.
     pub started_at: Option<DateTime<Utc>>,
+    /// The command's context: what `env_var()` reads and what messages mask.
+    pub process: crate::Context,
+}
+
+impl Inputs {
+    /// No inputs yet: no target and nothing from the command line.
+    pub fn new(process: crate::Context) -> Inputs {
+        Inputs {
+            target: String::new(),
+            cli_vars: BTreeMap::new(),
+            date: None,
+            scheduled_at: None,
+            timezone: None,
+            schedule: None,
+            started_at: None,
+            process,
+        }
+    }
 }
 
 /// A problem found by the parse pass, at a file and line.
@@ -251,6 +269,7 @@ pub fn binding(
         context.clone(),
         vars.clone(),
         inputs.cli_vars.clone(),
+        &inputs.process,
     ));
     let mut out = ParsedBinding::default();
     let error = |out: &mut ParsedBinding, code: Code, file: PathBuf, line: Option<usize>, msg: String| {
@@ -320,6 +339,7 @@ pub fn binding(
         packages: project.packages.clone(),
         project_name: project.name.clone(),
         dispatch: project.dispatch.clone(),
+        process: inputs.process.clone(),
     });
     let renderer = match renderer {
         Ok(r) => Some(r),

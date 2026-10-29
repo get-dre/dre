@@ -17,10 +17,12 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{NaiveDate, Utc};
 
+use crate::context::Env;
 use crate::dates::{Calendar, Date, DateTime};
 
 use crate::lookups::{self, Cell, Load, Lookup, Table};
 use crate::packages::{DispatchOrder, Package};
+use crate::secrets::Secrets;
 use minijinja::value::{Enumerator, Kwargs, Object, ObjectRepr, Value};
 use minijinja::{Environment, Error, ErrorKind, UndefinedBehavior};
 use serde_json::{Map as JsonMap, Value as Json};
@@ -246,6 +248,8 @@ pub struct RendererConfig<'a> {
     /// The project's name: the root namespace in `dispatch()` search orders.
     pub project_name: String,
     pub dispatch: DispatchOrder,
+    /// The command's context: what `env_var()` reads and what error messages mask.
+    pub process: crate::Context,
 }
 
 impl Renderer {
@@ -290,7 +294,7 @@ impl Renderer {
         });
         crate::mutable::register(&mut env);
 
-        add_vars(&mut env, cfg.vars, cfg.cli_vars);
+        add_vars(&mut env, cfg.vars, cfg.cli_vars, cfg.process.env().clone());
         // The parse pass has no data, so a `raise_error()` there may only mean `run_query()` came
         // back empty: it doesn't stop the render, but if rendering fails anyway, its message is the
         // one reported.
@@ -305,7 +309,7 @@ impl Renderer {
         });
         let source_type = cfg.source_type.clone();
         crate::dates::register(&mut env, cfg.context.calendar, cfg.context.date);
-        crate::numbers::register(&mut env, cfg.context.locale);
+        crate::numbers::register(&mut env, cfg.context.locale, cfg.process.secrets());
         env.add_global("target", Value::from_object(Target(cfg.context.target.clone())));
         env.add_global("run", Value::from_object(Run(cfg.context)));
         let destination: Arc<Mutex<Option<Connection>>> = Arc::default();
@@ -432,6 +436,7 @@ impl Renderer {
         });
         let default_max = cfg.run_query_max_rows;
         let runner_c = runner.clone();
+        let secrets = cfg.process.secrets().clone();
         let rels = relations.clone();
         env.add_function(
             "run_query",
@@ -469,7 +474,7 @@ impl Renderer {
                 if parse {
                     return Ok(Value::from(Vec::<Value>::new()));
                 }
-                let what = format!("columns('{}')", crate::secrets::mask(&rel));
+                let what = format!("columns('{}')", secrets.mask(&rel));
                 let profile = choose_profile(&what, &rel, profile, &rels)?;
                 let key = (rel.clone(), profile.clone());
                 if let Some(v) = cache.lock().map_err(poisoned)?.get(&key) {
@@ -723,7 +728,12 @@ fn regex_lite(s: &str, ok: impl Fn(char, usize) -> bool) -> bool {
     !s.is_empty() && s.chars().enumerate().all(|(i, c)| ok(c, i))
 }
 
-fn add_vars(env: &mut Environment<'static>, vars: JsonMap<String, Json>, cli: BTreeMap<String, String>) {
+fn add_vars(
+    env: &mut Environment<'static>,
+    vars: JsonMap<String, Json>,
+    cli: BTreeMap<String, String>,
+    process: Env,
+) {
     env.add_function(
         "var",
         move |name: String, default: Option<Value>| -> Result<Value, Error> {
@@ -741,10 +751,10 @@ fn add_vars(env: &mut Environment<'static>, vars: JsonMap<String, Json>, cli: BT
             })
         },
     );
-    env.add_function("env_var", |name: String, default: Option<Value>| -> Result<Value, Error> {
-        match std::env::var(&name) {
-            Ok(v) => Ok(Value::from(v)),
-            Err(_) => default.ok_or_else(|| {
+    env.add_function("env_var", move |name: String, default: Option<Value>| -> Result<Value, Error> {
+        match process.var(&name) {
+            Some(v) => Ok(Value::from(v)),
+            None => default.ok_or_else(|| {
                 Error::new(
                     ErrorKind::UndefinedError,
                     format!("`env_var('{name}')`: environment variable `{name}` is not set and no default is given"),
@@ -763,9 +773,10 @@ pub fn add_common(
     context: RunContext,
     vars: JsonMap<String, Json>,
     cli_vars: BTreeMap<String, String>,
+    secrets: &Secrets,
 ) {
     crate::mutable::register(env);
-    add_vars(env, vars, cli_vars);
+    add_vars(env, vars, cli_vars, Env::default());
     env.add_function(
         "env_var",
         |name: String, _default: Option<Value>| -> Result<Value, Error> {
@@ -779,7 +790,7 @@ pub fn add_common(
         Err(Error::new(ErrorKind::InvalidOperation, message))
     });
     crate::dates::register(env, context.calendar, context.date);
-    crate::numbers::register(env, context.locale);
+    crate::numbers::register(env, context.locale, secrets);
     env.add_global("target", Value::from_object(Target(context.target.clone())));
     env.add_global("run", Value::from_object(Run(context)));
 }
@@ -809,16 +820,17 @@ impl Limited {
         context: RunContext,
         vars: JsonMap<String, Json>,
         cli_vars: BTreeMap<String, String>,
+        process: &crate::Context,
     ) -> Limited {
         let mut env = Environment::new();
         env.set_undefined_behavior(UndefinedBehavior::Strict);
         crate::mutable::register(&mut env);
-        add_vars(&mut env, vars, cli_vars);
+        add_vars(&mut env, vars, cli_vars, process.env().clone());
         env.add_function("raise_error", |message: String| -> Result<Value, Error> {
             Err(Error::new(ErrorKind::InvalidOperation, message))
         });
         crate::dates::register(&mut env, context.calendar, context.date);
-        crate::numbers::register(&mut env, context.locale);
+        crate::numbers::register(&mut env, context.locale, process.secrets());
         env.add_global("target", Value::from_object(Target(context.target.clone())));
         env.add_global("run", Value::from_object(Run(context)));
         for f in LIMITED_FUNCTIONS {
@@ -1649,6 +1661,10 @@ mod tests {
             packages: Vec::new(),
             project_name: "acme".into(),
             dispatch: DispatchOrder::new(),
+            process: crate::Context::new(
+                crate::Env::from_vars([("PATH", "/usr/bin:/bin")]),
+                Arc::new(crate::plugin_host::memory::MemoryHost::new()),
+            ),
         })
         .unwrap();
         (dir, r)
@@ -1913,8 +1929,7 @@ mod tests {
             render(&r, "{{ env_var('DRE_TEST_UNSET_VAR', 'x') }}").unwrap(),
             "x"
         );
-        let home = std::env::var("PATH").unwrap();
-        assert_eq!(render(&r, "{{ env_var('PATH') }}").unwrap(), home);
+        assert_eq!(render(&r, "{{ env_var('PATH') }}").unwrap(), "/usr/bin:/bin");
         assert!(
             render(&r, "{{ env_var('DRE_TEST_UNSET_VAR') }}")
                 .unwrap_err()
@@ -2002,6 +2017,10 @@ mod tests {
             packages: Vec::new(),
             project_name: "acme".into(),
             dispatch: DispatchOrder::new(),
+            process: crate::Context::new(
+                crate::Env::from_vars([("PATH", "/usr/bin:/bin")]),
+                Arc::new(crate::plugin_host::memory::MemoryHost::new()),
+            ),
         })
         .unwrap();
         let src = "{% set res = run_query('select') %}{{ res.columns | join(',') }}|\

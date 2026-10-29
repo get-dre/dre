@@ -118,14 +118,14 @@ impl Default for RunTarget {
 
 impl RunTarget {
     /// `--target` (`flag`), else `DRE_TARGET`, else `dev`.
-    pub fn resolve(flag: Option<&str>) -> RunTarget {
+    pub fn resolve(flag: Option<&str>, env: &crate::Env) -> RunTarget {
         if let Some(t) = flag.filter(|t| !t.is_empty()) {
             return RunTarget {
                 name: t.to_string(),
                 from: TargetSource::Flag,
             };
         }
-        if let Some(t) = crate::settings::env(TARGET_ENV) {
+        if let Some(t) = env.setting(TARGET_ENV) {
             return RunTarget {
                 name: t,
                 from: TargetSource::Env,
@@ -204,28 +204,33 @@ pub struct Profiles {
 
 /// Resolve the profiles directory: `--profiles-dir` > `DRE_PROFILES_DIR` > `~/.dre`.
 /// `dre init` writes here; projects look in their own directory first (see [`locate`]).
-pub fn profiles_dir(cli: Option<&Path>) -> PathBuf {
-    locate(cli, None).0
+pub fn profiles_dir(cli: Option<&Path>, env: &crate::Env) -> PathBuf {
+    locate(cli, None, env).0
 }
 
 /// Find the profiles directory for a project, with the reason it was chosen:
 /// `--profiles-dir` > `DRE_PROFILES_DIR` > the project directory (when it holds a
 /// profiles.yml) > `~/.dre`. With the default `--project-dir .` this is dbt's order.
-pub fn locate(cli: Option<&Path>, project: Option<&Path>) -> (PathBuf, &'static str) {
+pub fn locate(cli: Option<&Path>, project: Option<&Path>, env: &crate::Env) -> (PathBuf, &'static str) {
     if let Some(p) = cli {
         return (p.to_path_buf(), "--profiles-dir");
     }
-    if let Some(p) = crate::settings::env(crate::settings::PROFILES_DIR) {
+    if let Some(p) = env.setting(crate::settings::PROFILES_DIR) {
         return (PathBuf::from(p), "DRE_PROFILES_DIR");
     }
     if let Some(p) = project.filter(|p| p.join(PROFILES_FILE).is_file()) {
         return (p.to_path_buf(), "the project directory");
     }
-    (crate::dre_home(), "~/.dre")
+    (env.dre_home(), "~/.dre")
 }
 
 impl Profiles {
-    pub fn load(dir: &Path, found_by: &'static str, diags: &mut Diagnostics) -> Profiles {
+    pub fn load(
+        dir: &Path,
+        found_by: &'static str,
+        secrets: &crate::secrets::Secrets,
+        diags: &mut Diagnostics,
+    ) -> Profiles {
         let path = crate::slash(&dir.join(PROFILES_FILE));
         let mut out = Profiles {
             path: path.clone(),
@@ -325,7 +330,7 @@ impl Profiles {
         // added when a run asks it (`run::ProfileConnections::view`).
         for profile in out.connections.values().chain(out.destinations.values()) {
             for target in profile.targets.values() {
-                crate::secrets::register_secret_fields(&target.fields, &[]);
+                secrets.register_secret_fields(&target.fields, &[]);
             }
         }
         out
@@ -765,7 +770,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(PROFILES_FILE), yaml).unwrap();
         let mut diags = Diagnostics::default();
-        let p = Profiles::load(dir.path(), "--profiles-dir", &mut diags);
+        let secrets = crate::secrets::Secrets::new(&crate::Env::default());
+        let p = Profiles::load(dir.path(), "--profiles-dir", &secrets, &mut diags);
         (p, diags)
     }
 

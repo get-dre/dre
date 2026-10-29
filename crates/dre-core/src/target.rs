@@ -57,9 +57,14 @@ impl TargetPath {
 /// Resolve the target path for the project at `root`: `flag`, else `DRE_TARGET_PATH`, else the
 /// project file's `target_path` (`project_value`), else `target/`. Checks that it's local and
 /// clear of the project's sources.
-pub fn resolve(root: &Path, flag: Option<&str>, project_value: Option<&str>) -> Result<TargetPath, String> {
-    let env = crate::settings::env(ENV);
-    let (value, source) = match (flag, env.as_deref(), project_value) {
+pub fn resolve(
+    root: &Path,
+    flag: Option<&str>,
+    project_value: Option<&str>,
+    env: &crate::Env,
+) -> Result<TargetPath, String> {
+    let from_env = env.setting(ENV);
+    let (value, source) = match (flag, from_env.as_deref(), project_value) {
         (Some(v), _, _) => (v, Source::Flag),
         (None, Some(v), _) if !v.is_empty() => (v, Source::Env),
         (None, _, Some(v)) => (v, Source::Project),
@@ -74,7 +79,7 @@ pub fn resolve(root: &Path, flag: Option<&str>, project_value: Option<&str>) -> 
             "is a URL; the target path must be a local or mounted path (a Databricks Volume under /Volumes/..., an NFS/EFS share, a gcsfuse mount). To copy outputs to object storage, deliver them with a destination".into(),
         ));
     }
-    let expanded = expand_home(value);
+    let expanded = expand_home(value, env);
     let dir = clean(&if expanded.is_absolute() {
         expanded
     } else {
@@ -96,8 +101,8 @@ fn looks_like_url(v: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
 }
 
-fn expand_home(v: &str) -> PathBuf {
-    let home = || std::env::home_dir().unwrap_or_default();
+fn expand_home(v: &str, env: &crate::Env) -> PathBuf {
+    let home = || env.home();
     if v == "~" {
         return home();
     }

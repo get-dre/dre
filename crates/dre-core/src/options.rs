@@ -46,7 +46,7 @@ type Blocks = BTreeMap<String, (Map<String, Value>, Option<Value>, Vec<Use>)>;
 /// found by kind and name alone: core knows nothing of any plugin's options. Each destination
 /// profile's output is its entry for the run. A declared plugin that can't be found is an error, or
 /// a warning with `offline` (`dre validate --no-auto-install`, which doesn't install plugins).
-pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
+pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut Diagnostics) {
     // (kind, plugin) -> distinct option blocks -> where each is used.
     let mut blocks: BTreeMap<(PluginKind, String), Blocks> = BTreeMap::new();
     // Destination type -> what each entry of it sends: checked against its capabilities.
@@ -178,7 +178,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
             }
             continue;
         }
-        let plugin = match find_plugin(project, kind, &name) {
+        let plugin = match find_plugin(ctx, project, kind, &name) {
             Ok(p) => p,
             // Already an error (`undeclared-plugin`).
             Err(crate::plugins::LocateError::NotProvided(_)) => continue,
@@ -204,7 +204,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 continue;
             }
         };
-        let mut p = match plugin.start(log.clone(), Some(&project.root)) {
+        let mut p = match ctx.host().start(&plugin, log.clone(), Some(&project.root)) {
             Ok(p) => p,
             Err(e) => {
                 diags.warning(
@@ -252,11 +252,11 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                     ),
                 );
             }
-            let _ = p.close();
+            p.close();
             continue;
         }
         for (options, template, uses) in blocks.into_values() {
-            match p.validate_with(options, template) {
+            match p.validate(options, template) {
                 Ok((errors, warnings)) => {
                     for u in &uses {
                         for e in &errors {
@@ -279,7 +279,7 @@ pub fn check(project: &Project, offline: bool, diags: &mut Diagnostics) {
                 }
             }
         }
-        let _ = p.close();
+        p.close();
     }
 }
 
@@ -322,7 +322,12 @@ pub fn all_entries(project: &Project) -> Vec<EntryRef> {
 /// `validate_connection`). A value from an unset `env_var()` is reported once as an
 /// `unset-env-var` warning (CI often validates without secrets) and sent unresolved, so it isn't
 /// reported again as missing.
-pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Diagnostics) {
+pub fn check_connections(
+    ctx: &crate::Context,
+    project: &Project,
+    entries: &[EntryRef],
+    diags: &mut Diagnostics,
+) {
     let log: LogSink = Arc::new(|_, _| {});
     let file = project.profiles.file.clone();
     let mut unset_reported = std::collections::BTreeSet::new();
@@ -348,10 +353,10 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
     }
     for ((kind, name), entries) in by_plugin {
         // A missing plugin is reported by the plugin checks.
-        let Ok(plugin) = find_plugin(project, kind, &name) else {
+        let Ok(plugin) = find_plugin(ctx, project, kind, &name) else {
             continue;
         };
-        let mut p = match plugin.start(log.clone(), Some(&project.root)) {
+        let mut p = match ctx.host().start(&plugin, log.clone(), Some(&project.root)) {
             Ok(p) => p,
             Err(e) => {
                 diags.warning(
@@ -370,7 +375,7 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
             let mut known = t.clone();
             let mut unresolved = Vec::new();
             for (k, v) in &t.fields {
-                let unset: Vec<String> = unset_env_vars(v);
+                let unset: Vec<String> = unset_env_vars(v, ctx.env());
                 if unset.is_empty() {
                     continue;
                 }
@@ -390,7 +395,7 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
                     }
                 }
             }
-            let rendered = match crate::run::render_connection(&known) {
+            let rendered = match crate::run::render_connection(&known, ctx.env()) {
                 Ok(r) => r,
                 Err(e) => {
                     diags.error(
@@ -435,20 +440,20 @@ pub fn check_connections(project: &Project, entries: &[EntryRef], diags: &mut Di
                 }
             }
         }
-        let _ = p.close();
+        p.close();
     }
 }
 
 /// The variables of `env_var()` calls without a default that aren't set, anywhere in `v`.
-fn unset_env_vars(v: &Value) -> Vec<String> {
+fn unset_env_vars(v: &Value, env: &crate::Env) -> Vec<String> {
     match v {
         Value::String(s) if crate::preflight::is_templated(s) => crate::preflight::calls(s)
             .into_iter()
-            .filter(|c| c.func == "env_var" && !c.has_default && std::env::var_os(&c.name).is_none())
+            .filter(|c| c.func == "env_var" && !c.has_default && env.var(&c.name).is_none())
             .map(|c| c.name)
             .collect(),
-        Value::Array(a) => a.iter().flat_map(unset_env_vars).collect(),
-        Value::Object(o) => o.values().flat_map(unset_env_vars).collect(),
+        Value::Array(a) => a.iter().flat_map(|x| unset_env_vars(x, env)).collect(),
+        Value::Object(o) => o.values().flat_map(|x| unset_env_vars(x, env)).collect(),
         _ => Vec::new(),
     }
 }

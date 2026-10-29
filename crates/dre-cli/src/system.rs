@@ -107,7 +107,7 @@ struct Receipt {
     source: String,
 }
 
-pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
+pub fn update(ctx: &dre_core::Context, a: UpdateArgs, printer: &output::Printer) -> ExitCode {
     let exe = match std::env::current_exe().and_then(|p| p.canonicalize()) {
         Ok(p) => p,
         Err(e) => {
@@ -129,7 +129,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
         return crate::exit::failed();
     }
     let current = current_version();
-    let releases = match manager::github_releases(REPO) {
+    let releases = match manager::github_releases(ctx, REPO) {
         Ok(r) => r,
         Err(e) => {
             printer.error(&format!(
@@ -210,7 +210,7 @@ pub fn update(a: UpdateArgs, printer: &output::Printer) -> ExitCode {
         println!("dre {current} is the latest version");
         return crate::exit::ok();
     }
-    match replace(&exe, wanted) {
+    match replace(ctx, &exe, wanted) {
         Ok(()) => {
             let verb = if newer { "Updated" } else { "Downgraded" };
             println!("{verb} dre from {current} to {}", wanted.version);
@@ -377,7 +377,7 @@ fn python_of(exe: &Path) -> PathBuf {
 
 /// Download `release`'s archive for this platform, check it against SHA256SUMS, and swap the
 /// binary (and its receipt) in. Nothing on disk changes before the final swap.
-fn replace(exe: &Path, release: &Release) -> Result<(), String> {
+fn replace(ctx: &dre_core::Context, exe: &Path, release: &Release) -> Result<(), String> {
     let windows = cfg!(windows);
     let archive = format!(
         "dre-{}-{}.{}",
@@ -393,7 +393,7 @@ fn replace(exe: &Path, release: &Release) -> Result<(), String> {
             .map(|(_, u)| u.clone())
             .ok_or_else(|| format!("release {} has no {name}", release.tag))
     };
-    let sums = manager::fetch(&asset("SHA256SUMS")?).map_err(|e| format!("the update failed: {e}"))?;
+    let sums = manager::fetch(ctx, &asset("SHA256SUMS")?).map_err(|e| format!("the update failed: {e}"))?;
     let sums = String::from_utf8_lossy(&sums);
     let want = sums
         .lines()
@@ -406,7 +406,7 @@ fn replace(exe: &Path, release: &Release) -> Result<(), String> {
                 release.tag
             )
         })?;
-    let bytes = manager::fetch(&asset(&archive)?).map_err(|e| format!("the update failed: {e}"))?;
+    let bytes = manager::fetch(ctx, &asset(&archive)?).map_err(|e| format!("the update failed: {e}"))?;
     let got = dre_core::checksum::sha256_hex(&bytes);
     if got != want {
         return Err(format!(

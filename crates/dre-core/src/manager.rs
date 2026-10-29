@@ -4,6 +4,7 @@
 //! Index location: `DRE_REGISTRY_URL`, default [`DEFAULT_REGISTRY`]. It may be an `https://`
 //! URL, a `file://` URL or a plain path. Format: `docs/registry.md`.
 
+use crate::context::{Context, Env};
 use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
@@ -98,11 +99,11 @@ pub struct Artifact {
 /// Name the package to declare for each `undeclared-plugin` error, from DRE's registry, or say
 /// that the registry has no such plugin. The registry is fetched now, so a newly published
 /// package is known without a new `dre`. Unreachable: unchanged.
-pub fn explain_undeclared(diags: &mut crate::Diagnostics) {
+pub fn explain_undeclared(ctx: &Context, diags: &mut crate::Diagnostics) {
     if !diags.iter_mut().any(|d| d.plugin.is_some()) {
         return;
     }
-    let Ok(index) = Index::load() else { return };
+    let Ok(index) = Index::load(ctx) else { return };
     for d in diags.iter_mut() {
         let Some((kind, name)) = &d.plugin else { continue };
         let id = PluginId::new(*kind, name.clone());
@@ -147,30 +148,31 @@ pub fn platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-pub fn registry_url() -> String {
-    crate::settings::env(crate::settings::REGISTRY_URL).unwrap_or_else(|| DEFAULT_REGISTRY.to_string())
+pub fn registry_url(env: &Env) -> String {
+    env.setting(crate::settings::REGISTRY_URL)
+        .unwrap_or_else(|| DEFAULT_REGISTRY.to_string())
 }
 
 /// The GitHub API DRE talks to: `DRE_GITHUB_API_URL` (GitHub Enterprise, tests), else GitHub's.
-pub fn github_api() -> String {
-    crate::settings::env(crate::settings::GITHUB_API_URL)
+pub fn github_api(env: &Env) -> String {
+    env.setting(crate::settings::GITHUB_API_URL)
         .unwrap_or_else(|| "https://api.github.com".into())
         .trim_end_matches('/')
         .to_string()
 }
 
 /// Whether requests to `url` should carry `GITHUB_TOKEN`: GitHub itself or the configured API.
-fn is_github(url: &str) -> bool {
-    url.starts_with("https://github.com/") || url.starts_with(&format!("{}/", github_api()))
+fn is_github(env: &Env, url: &str) -> bool {
+    url.starts_with("https://github.com/") || url.starts_with(&format!("{}/", github_api(env)))
 }
 
 /// Download `url` (or read a local path or `file://` URL). Downloads give up on a connection
-/// after 30s and on a response that sends nothing for [`http_timeout`] (no total limit, so a
+/// after 30s and on a response that sends nothing for [`Context::http_timeout`] (no total limit, so a
 /// slow but healthy download finishes), and are tried 3 times on connection errors, timeouts,
 /// 429 (honouring `Retry-After`) and 5xx.
-pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
+pub fn fetch(ctx: &Context, url: &str) -> Result<Vec<u8>, String> {
     if url.starts_with("http://") || url.starts_with("https://") {
-        return fetch_http(url, http_timeout(), &mut std::thread::sleep);
+        return fetch_http(ctx.env(), url, ctx.http_timeout(), &mut std::thread::sleep);
     }
     let path = url.strip_prefix("file://").unwrap_or(url);
     std::fs::read(path).map_err(|e| format!("can't read {path}: {e}"))
@@ -182,24 +184,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_TIMEOUT: u64 = 60;
 const ATTEMPTS: u32 = 3;
 
-static PROJECT_HTTP_TIMEOUT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-
-/// `flags: http_timeout` from the project being run (set once, when it loads).
-pub fn set_project_http_timeout(secs: u64) {
-    let _ = PROJECT_HTTP_TIMEOUT.set(secs);
-}
-
-/// How long a download may receive nothing: `DRE_HTTP_TIMEOUT`, else the project's
-/// `flags: http_timeout`, else 60 seconds.
-pub fn http_timeout() -> Duration {
-    let env = crate::settings::env(crate::settings::HTTP_TIMEOUT).and_then(|v| v.trim().parse::<u64>().ok());
-    Duration::from_secs(
-        env.or_else(|| PROJECT_HTTP_TIMEOUT.get().copied())
-            .filter(|s| *s > 0)
-            .unwrap_or(DEFAULT_HTTP_TIMEOUT),
-    )
-}
-
 /// Why one try failed.
 enum Try {
     /// Trying again may work; `after` is the server's `Retry-After`.
@@ -210,10 +194,15 @@ enum Try {
     Fail(String),
 }
 
-fn fetch_http(url: &str, idle: Duration, sleep: &mut dyn FnMut(Duration)) -> Result<Vec<u8>, String> {
+fn fetch_http(
+    env: &Env,
+    url: &str,
+    idle: Duration,
+    sleep: &mut dyn FnMut(Duration),
+) -> Result<Vec<u8>, String> {
     let mut attempt = 1;
     loop {
-        match fetch_once(url, idle) {
+        match fetch_once(env, url, idle) {
             Ok(body) => return Ok(body),
             Err(Try::Again { after, .. }) if attempt < ATTEMPTS => {
                 let wait = after.unwrap_or_else(|| backoff(attempt));
@@ -243,7 +232,7 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_secs_f64(base * (0.75 + f64::from(nanos % 1000) / 2000.0))
 }
 
-fn fetch_once(url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
+fn fetch_once(env: &Env, url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_recv_response(Some(idle))
@@ -251,7 +240,7 @@ fn fetch_once(url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
         .build()
         .into();
     let mut req = agent.get(url).header("User-Agent", "dre");
-    if is_github(url) {
+    if is_github(env, url) {
         // A release asset's API URL answers with its metadata unless asked for the file.
         let accept = if url.contains("/releases/assets/") {
             "application/octet-stream"
@@ -259,7 +248,7 @@ fn fetch_once(url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
             "application/vnd.github+json"
         };
         req = req.header("Accept", accept);
-        if let Ok(t) = std::env::var("GITHUB_TOKEN")
+        if let Some(t) = env.var("GITHUB_TOKEN")
             && !t.is_empty()
         {
             req = req.header("Authorization", &format!("Bearer {t}"));
@@ -342,22 +331,22 @@ fn read_with_idle_timeout(
 
 impl Index {
     /// The default registry.
-    pub fn load() -> Result<Index, String> {
-        Index::load_from(&registry_url())
+    pub fn load(ctx: &Context) -> Result<Index, String> {
+        Index::load_from(ctx, &registry_url(ctx.env()))
     }
 
-    pub fn load_from(url: &str) -> Result<Index, String> {
-        let body = fetch(url)?;
+    pub fn load_from(ctx: &Context, url: &str) -> Result<Index, String> {
+        let body = fetch(ctx, url)?;
         serde_json::from_slice(&body)
             .map_err(|e| format!("the plugin registry at {url} isn't a valid index: {e}"))
     }
 
     /// The index a package installs from, given where the project declares it comes from.
-    pub fn for_source(source: &PluginSource, name: &str) -> Result<Index, String> {
+    pub fn for_source(ctx: &Context, source: &PluginSource, name: &str) -> Result<Index, String> {
         match source {
-            PluginSource::Default => Index::load(),
-            PluginSource::Registry(u) => Index::load_from(u),
-            PluginSource::Github(repo) => github_index(repo, name),
+            PluginSource::Default => Index::load(ctx),
+            PluginSource::Registry(u) => Index::load_from(ctx, u),
+            PluginSource::Github(repo) => github_index(ctx, repo, name),
             PluginSource::Local(p) => Err(format!(
                 "plugin package `{name}` is used from {p}; there's nothing to install"
             )),
@@ -498,8 +487,8 @@ pub struct Release {
 /// `repo`'s releases from the GitHub API (`DRE_GITHUB_API_URL`, `GITHUB_TOKEN`), skipping
 /// drafts and tags that aren't versions, newest first by [`version_order`]. Every page is read:
 /// a repository that also releases its plugins (`duckdb-v1.0.0`) can list many of those first.
-pub fn github_releases(repo: &str) -> Result<Vec<Release>, String> {
-    let mut out: Vec<Release> = list_github_releases(repo)?
+pub fn github_releases(ctx: &Context, repo: &str) -> Result<Vec<Release>, String> {
+    let mut out: Vec<Release> = list_github_releases(ctx, repo)?
         .into_iter()
         .filter(|r| !r.draft)
         .filter_map(|r| {
@@ -516,15 +505,15 @@ pub fn github_releases(repo: &str) -> Result<Vec<Release>, String> {
 }
 
 /// Every release of `repo`, page by page, as the API lists them (newest first).
-fn list_github_releases(repo: &str) -> Result<Vec<GithubRelease>, String> {
+fn list_github_releases(ctx: &Context, repo: &str) -> Result<Vec<GithubRelease>, String> {
     const PER_PAGE: usize = 100;
     let mut releases = Vec::new();
     for page in 1.. {
         let url = format!(
             "{}/repos/{repo}/releases?per_page={PER_PAGE}&page={page}",
-            github_api()
+            github_api(ctx.env())
         );
-        let body = fetch(&url)?;
+        let body = fetch(ctx, &url)?;
         let batch: Vec<GithubRelease> =
             serde_json::from_slice(&body).map_err(|e| format!("{url}: unexpected reply from GitHub: {e}"))?;
         let last = batch.len() < PER_PAGE;
@@ -558,8 +547,8 @@ struct GithubAsset {
 /// each platform it has an asset for, named like the registry's:
 /// `dre-plugin-<name>-<version>-<platform>.tar.gz`, or the bare executable. A single plugin's
 /// release named `dre-<kind>-<name>-<version>-<platform>` works too.
-fn github_index(repo: &str, name: &str) -> Result<Index, String> {
-    let releases = list_github_releases(repo)?;
+fn github_index(ctx: &Context, repo: &str, name: &str) -> Result<Index, String> {
+    let releases = list_github_releases(ctx, repo)?;
     let package_stem = format!("dre-plugin-{name}");
     let own_tag = format!("{name}-v");
     let mut provides: Vec<PluginId> = Vec::new();
@@ -638,6 +627,7 @@ fn github_index(repo: &str, name: &str) -> Result<Index, String> {
 /// Download, verify and install one version into `<dir>/<package>/<version>/`. Returns its lock
 /// entry.
 pub fn install(
+    ctx: &Context,
     dir: &Path,
     package: &IndexPackage,
     v: &IndexVersion,
@@ -653,7 +643,7 @@ pub fn install(
     let published = if !art.sha256.is_empty() {
         Some(art.sha256.clone())
     } else if let Some(u) = &art.sha256_url {
-        let text = String::from_utf8_lossy(&fetch(u)?).to_string();
+        let text = String::from_utf8_lossy(&fetch(ctx, u)?).to_string();
         Some(text.split_whitespace().next().unwrap_or_default().to_string())
     } else {
         None
@@ -678,7 +668,7 @@ pub fn install(
             return Err(refuse());
         }
     }
-    let bytes = fetch(&art.url)?;
+    let bytes = fetch(ctx, &art.url)?;
     let got = crate::checksum::sha256_hex(&bytes);
     // Nothing published: the lock's pin, if any, is what the download must match.
     let expected = published.as_deref().or(want);
@@ -709,7 +699,7 @@ pub fn install(
     std::fs::rename(&tmp, &dst).map_err(|e| format!("can't install {}: {e}", dst.display()))?;
     // A source that doesn't list what the package provides: ask the executable.
     let provides = if package.provides.is_empty() {
-        crate::plugins::probe(&dst)?
+        crate::plugins::Prober::default().probe(&dst)?
     } else {
         package.provides.clone()
     };
@@ -783,12 +773,13 @@ pub enum Synced {
 /// up the newest allowed release. Without it (auto-install before run/validate), any installed
 /// match will do and the registry is only consulted for what's missing.
 pub fn sync(
+    ctx: &Context,
     project: &Project,
     install_missing: bool,
     resolve: bool,
     mut log: impl FnMut(&str),
 ) -> Result<Vec<Synced>, Vec<String>> {
-    let dir = crate::plugins::plugins_dir(Some(&project.root));
+    let dir = crate::plugins::plugins_dir(ctx.env(), Some(&project.root));
     let mut lock = Lock::load(&project.root).map_err(|e| vec![e])?;
     let mut indexes: std::collections::BTreeMap<String, Index> = std::collections::BTreeMap::new();
     let mut out = Vec::new();
@@ -823,10 +814,15 @@ pub fn sync(
             .filter(|l| l.from == req.source.lock_key())
             .cloned();
         if !moved
-            && let Some(p) =
-                crate::plugins::find(&dir, name, Some(&req.req()), pin.as_ref().map(|l| &l.version))
-                    .into_iter()
-                    .next()
+            && let Some(p) = crate::plugins::find(
+                &dir,
+                name,
+                Some(&req.req()),
+                pin.as_ref().map(|l| &l.version),
+                &crate::plugins::Prober::default(),
+            )
+            .into_iter()
+            .next()
         {
             // A hand-placed (flat) package satisfies any pin; versioned installs must match it,
             // and when resolving, an unpinned versioned install goes back to the registry.
@@ -855,9 +851,9 @@ pub fn sync(
         // cache only holds the default registry's builds: it's keyed by name and version.
         if let Some(l) = &pin
             && req.source.is_default()
-            && dir != crate::plugins::cache_dir()
+            && dir != crate::plugins::cache_dir(ctx.env())
         {
-            let cached = version_dir(&crate::plugins::cache_dir(), name, &l.version);
+            let cached = version_dir(&crate::plugins::cache_dir(ctx.env()), name, &l.version);
             if crate::plugins::read_manifest(&cached).is_some()
                 && crate::plugins::link_version(&cached, &version_dir(&dir, name, &l.version)).is_ok()
             {
@@ -884,16 +880,18 @@ pub fn sync(
         };
         let index = match indexes.entry(ikey) {
             std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-            std::collections::btree_map::Entry::Vacant(e) => match Index::for_source(&req.source, name) {
-                Ok(i) => e.insert(i),
-                Err(e) if req.source.is_default() => return Err(vec![e]),
-                Err(e) => {
-                    errors.push(e);
-                    continue;
+            std::collections::btree_map::Entry::Vacant(e) => {
+                match Index::for_source(ctx, &req.source, name) {
+                    Ok(i) => e.insert(i),
+                    Err(e) if req.source.is_default() => return Err(vec![e]),
+                    Err(e) => {
+                        errors.push(e);
+                        continue;
+                    }
                 }
-            },
+            }
         };
-        match install_one(&dir, index, req, pin.as_ref()).map(|(mut l, fresh)| {
+        match install_one(ctx, &dir, index, req, pin.as_ref()).map(|(mut l, fresh)| {
             l.from = req.source.lock_key();
             (l, fresh)
         }) {
@@ -929,6 +927,7 @@ pub fn sync(
 /// exact version was already in `dir`, identical to the registry's, and only needed its lock
 /// entry.
 fn install_one(
+    ctx: &Context,
     dir: &Path,
     index: &Index,
     req: &PluginRequirement,
@@ -988,21 +987,22 @@ fn install_one(
     }
     let expect = pin.map(|l| &l.sha256);
     if req.source.is_default() {
-        install_linked(dir, package, v, expect).map(|l| (l, true))
+        install_linked(ctx, dir, package, v, expect).map(|l| (l, true))
     } else {
-        install(dir, package, v, expect).map(|l| (l, true))
+        install(ctx, dir, package, v, expect).map(|l| (l, true))
     }
 }
 
 /// Install into `dir` through the shared cache: download there once, then link into `dir`.
 pub fn install_linked(
+    ctx: &Context,
     dir: &Path,
     package: &IndexPackage,
     v: &IndexVersion,
     pin: Option<&Checksums>,
 ) -> Result<Locked, String> {
-    let cache = crate::plugins::cache_dir();
-    let locked = install(&cache, package, v, pin)?;
+    let cache = crate::plugins::cache_dir(ctx.env());
+    let locked = install(ctx, &cache, package, v, pin)?;
     if dir != cache {
         crate::plugins::link_version(
             &version_dir(&cache, &package.name, &v.version),
@@ -1047,7 +1047,9 @@ mod tests {
         "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 
     fn get(url: &str, waits: &mut Vec<Duration>) -> Result<Vec<u8>, String> {
-        fetch_http(url, Duration::from_millis(500), &mut |w| waits.push(w))
+        fetch_http(&Env::default(), url, Duration::from_millis(500), &mut |w| {
+            waits.push(w)
+        })
     }
 
     #[test]

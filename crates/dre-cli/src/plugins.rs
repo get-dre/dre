@@ -11,38 +11,9 @@ use semver::VersionReq;
 
 use crate::output::{Printer, Tone};
 
-/// Install whatever the project declares but lacks. Returns false (after printing why) if any
-/// plugin is missing and couldn't be installed. With `resolve` (`dre deps`), plugins not pinned
-/// in `dre.lock` are resolved against the registry and pinned.
-pub fn ensure(project: &Project, install: bool, resolve: bool, printer: &Printer) -> bool {
-    match manager::sync(project, install, resolve, |m| {
-        printer.line(Tone::Note, "Installed", m.trim_start_matches("installed "))
-    }) {
-        Ok(_) => true,
-        Err(errors) => {
-            for e in errors {
-                printer.error(&e);
-            }
-            false
-        }
-    }
-}
-
-/// Install missing or outdated macro packages. Runs before the project loads, which needs them.
-pub fn sync_packages(root: &std::path::Path, printer: &Printer) -> bool {
-    match dre_core::packages::sync(root, true, |m| printer.line(Tone::Note, "Installed", m)) {
-        Ok(()) => true,
-        Err(errors) => {
-            for e in errors {
-                printer.error(&e);
-            }
-            false
-        }
-    }
-}
-
 /// `dre validate`: install missing plugins, or (with `--no-auto-install`) warn about them.
 pub fn check_for_validate(
+    ctx: &dre_core::Context,
     project: &Project,
     install: bool,
     diags: &mut dre_core::Diagnostics,
@@ -51,7 +22,7 @@ pub fn check_for_validate(
     if diags.has_errors() {
         return;
     }
-    let r = manager::sync(project, install, false, |m| {
+    let r = manager::sync(ctx, project, install, false, |m| {
         printer.line(Tone::Note, "Installed", m.trim_start_matches("installed "))
     });
     if let Err(errors) = r {
@@ -76,11 +47,11 @@ fn parse(spec: &str) -> Result<(String, Option<VersionReq>), String> {
     }
 }
 
-fn project_at(dir: &std::path::Path) -> Option<Project> {
+fn project_at(ctx: &dre_core::Context, dir: &std::path::Path) -> Option<Project> {
     if !dir.join(project::PROJECT_FILE).is_file() {
         return None;
     }
-    project::load(dir, &LoadOptions::default()).0
+    project::load_with(dir, &LoadOptions::default(), ctx).0
 }
 
 /// The package called `name` in `index`, or why there isn't one.
@@ -104,7 +75,13 @@ fn package<'a>(index: &'a Index, name: &str) -> Result<&'a IndexPackage, String>
 }
 
 /// `dre plugin install` / `dre plugin update`.
-pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) -> ExitCode {
+pub fn install(
+    ctx: &dre_core::Context,
+    spec: &str,
+    project_dir: &Path,
+    update: bool,
+    printer: &Printer,
+) -> ExitCode {
     let (name, cli_req) = match parse(spec) {
         Ok(x) => x,
         Err(e) => {
@@ -112,7 +89,7 @@ pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) 
             return crate::exit::failed();
         }
     };
-    let project = project_at(project_dir);
+    let project = project_at(ctx, project_dir);
     // A package the project declares installs from wherever it's declared to come from.
     let declared = project
         .iter()
@@ -128,7 +105,7 @@ pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) 
         );
         return crate::exit::ok();
     }
-    let index = match Index::for_source(&source, &name) {
+    let index = match Index::for_source(ctx, &source, &name) {
         Ok(i) => i,
         Err(e) => {
             printer.error(&e);
@@ -175,11 +152,11 @@ pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) 
         ));
         return crate::exit::failed();
     };
-    let dir = dre_core::plugins::plugins_dir(project.as_ref().map(|p| p.root.as_path()));
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), project.as_ref().map(|p| p.root.as_path()));
     let installed = if source.is_default() {
-        manager::install_linked(&dir, package, version, None)
+        manager::install_linked(ctx, &dir, package, version, None)
     } else {
-        manager::install(&dir, package, version, None)
+        manager::install(ctx, &dir, package, version, None)
     };
     match installed {
         Ok(mut locked) => {
@@ -218,7 +195,7 @@ pub fn install(spec: &str, project_dir: &Path, update: bool, printer: &Printer) 
 }
 
 /// `dre plugin remove`.
-pub fn remove(spec: &str, project_dir: &Path, printer: &Printer) -> ExitCode {
+pub fn remove(ctx: &dre_core::Context, spec: &str, project_dir: &Path, printer: &Printer) -> ExitCode {
     let (name, version) = match spec.split_once('@') {
         Some((i, v)) => match semver::Version::parse(v) {
             Ok(v) => (i, Some(v)),
@@ -230,8 +207,8 @@ pub fn remove(spec: &str, project_dir: &Path, printer: &Printer) -> ExitCode {
         None => (spec, None),
     };
     let in_project = project_dir.join(project::PROJECT_FILE).is_file();
-    let dir = dre_core::plugins::plugins_dir(in_project.then_some(project_dir));
-    let targets: Vec<_> = dre_core::plugins::discover(&dir)
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), in_project.then_some(project_dir));
+    let targets: Vec<_> = dre_core::plugins::discover(&dir, &dre_core::plugins::Prober::default())
         .into_iter()
         .filter(|p| p.name == name)
         .filter(|p| version.is_none() || p.version == version)
@@ -257,7 +234,7 @@ pub fn remove(spec: &str, project_dir: &Path, printer: &Printer) -> ExitCode {
         printer.line(Tone::Good, "Removed", &format!("plugin package `{}` {v}", t.name));
     }
     // Drop the lock pin if the pinned version is gone.
-    if let Some(p) = project_at(project_dir)
+    if let Some(p) = project_at(ctx, project_dir)
         && let Ok(mut lock) = Lock::load(&p.root)
     {
         let gone = lock.get(name).is_some_and(|l| {
