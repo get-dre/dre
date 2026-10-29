@@ -1,0 +1,355 @@
+{
+  "description": "DRE plugin protocol conformance cases. Each case is a request sequence and the properties its replies must have; a runner drives a plugin over stdin and stdout and checks them. The format is described in docs/protocol.md (Conformance).",
+  "cases": [
+    {
+      "name": "asking for a plugin the package doesn't provide gets an error reply",
+      "scope": "package",
+      "steps": [
+        {"hello": {"plugin": "format/dre_conformance_unknown"}, "expect": {"type": "error"}}
+      ]
+    },
+    {
+      "name": "handshake negotiates a supported version and reports its identity",
+      "steps": [
+        {
+          "hello": {},
+          "expect": {
+            "type": "hello",
+            "id": {"$absent": true},
+            "protocol_version": "${max_version}",
+            "kind": "${kind}",
+            "name": "${name}",
+            "version": {"$nonempty": true},
+            "capabilities": {"$every": {"$in": "${capabilities}"}},
+            "provides": {"$one_of": [{"$absent": true}, {"$contains": "${plugin}"}]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unsupported protocol range is refused, not hung on",
+      "steps": [
+        {
+          "hello": {"min_version": "${far_version}", "max_version": "${far_version}"},
+          "expect": {"type": "version_mismatch", "max_version": {"$lt": "${far_version}"}}
+        }
+      ]
+    },
+    {
+      "name": "protocol 0 is still spoken, for an older core, without request ids",
+      "steps": [
+        {"hello": {"min_version": 0, "max_version": 0}, "expect": {"type": "hello", "protocol_version": 0}},
+        {"send": {"type": "describe"}, "expect": {"type": "describe", "id": {"$absent": true}}}
+      ]
+    },
+    {
+      "name": "replies carry the request's id, and a cancel for a request that isn't running is ignored",
+      "steps": [
+        {"send": {"type": "cancel", "id": 999}},
+        {"send": {"type": "describe", "id": 41}, "expect": {"type": "describe", "id": 41}},
+        {"send": {"type": "frobnicate", "id": 42}, "expect": {"type": "error", "id": 42}}
+      ]
+    },
+    {
+      "name": "describe is answered",
+      "steps": [
+        {"send": {"type": "describe", "id": 1}, "expect": {"type": "describe", "id": 1, "connection_fields": {"$type": "array"}}}
+      ]
+    },
+    {
+      "name": "describe gives the identifier quote character",
+      "kinds": ["source"],
+      "steps": [
+        {"send": {"type": "describe", "id": 1}, "expect": {"type": "describe", "id": 1, "identifier_quote": {"$len": 1}}}
+      ]
+    },
+    {
+      "name": "validate is advertised, answered, and refuses an option the plugin doesn't declare",
+      "steps": [
+        {"hello": {}, "expect": {"type": "hello", "capabilities": {"$contains": "validate"}}},
+        {"send": {"type": "validate", "id": 1, "options": {}}, "expect": {"type": "validated", "id": 1, "errors": {"$type": "array"}}},
+        {
+          "send": {"type": "validate", "id": 2, "options": {"dre_conformance_unknown_option": true}},
+          "expect": {"type": "validated", "id": 2, "errors": {"$contains": {"$contains": "dre_conformance_unknown_option"}}}
+        }
+      ]
+    },
+    {
+      "name": "validate_connection is answered without connecting, and an unknown key only warns",
+      "kinds": ["source", "destination"],
+      "steps": [
+        {
+          "send": {"type": "validate_connection", "id": 1, "connection": {"dre_conformance_unknown_key": true}},
+          "expect": {"type": "validated", "id": 1, "warnings": {"$contains": {"$contains": "dre_conformance_unknown_key"}}}
+        }
+      ]
+    },
+    {
+      "name": "an unknown request gets an error reply with a known kind, and the plugin keeps serving",
+      "steps": [
+        {
+          "send": {"type": "frobnicate", "id": 1},
+          "expect": {
+            "type": "error",
+            "id": 1,
+            "message": {"$nonempty": true},
+            "kind": {"$one_of": [{"$absent": true}, {"$in": "${error_kinds}"}]},
+            "code": {"$one_of": [{"$absent": true}, {"$contains": "/"}]}
+          }
+        },
+        {"send": {"type": "describe", "id": 2}, "expect": {"type": "describe", "id": 2}}
+      ]
+    },
+    {
+      "name": "a request meant for another plugin kind gets an error reply",
+      "kinds": ["source"],
+      "steps": [
+        {"send": {"type": "finish", "id": 1}, "expect": {"type": "error", "id": 1}}
+      ]
+    },
+    {
+      "name": "a request meant for another plugin kind gets an error reply",
+      "kinds": ["format", "destination"],
+      "steps": [
+        {"send": {"type": "check", "id": 1, "sql": "select 1"}, "expect": {"type": "error", "id": 1}}
+      ]
+    },
+    {
+      "name": "a malformed frame is reported or ends the plugin, never hangs",
+      "steps": [
+        {"send_raw": "000000025821", "expect": {"type": "error"}, "or_exit": true}
+      ]
+    },
+    {
+      "name": "a write of an empty result set makes a valid file (or asks for options)",
+      "kinds": ["format"],
+      "steps": [
+        {
+          "send": {
+            "type": "write",
+            "id": 1,
+            "path": "${tmp}/empty.${name}",
+            "format": "${name}",
+            "options": {},
+            "result_sets": [{"name": "empty", "query": "empty", "result_index": 1}]
+          }
+        },
+        {"send_arrow": {"columns": [{"name": "id", "type": "int64"}, {"name": "name", "type": "utf8"}], "rows": 0}},
+        {"send": {"type": "result_set_end", "id": 1}},
+        {
+          "send": {"type": "finish", "id": 1},
+          "expect": {
+            "$one_of": [
+              {"type": "written", "id": 1, "files": {"$nonempty": true, "$every": {"$file_exists": true}}},
+              {"type": "error", "id": 1, "kind": "config"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a write of a result set with rows, across several Arrow frames, makes a valid file (or asks for options)",
+      "kinds": ["format"],
+      "steps": [
+        {
+          "send": {
+            "type": "write",
+            "id": 1,
+            "path": "${tmp}/rows.${name}",
+            "format": "${name}",
+            "options": {},
+            "result_sets": [{"name": "rows", "query": "rows", "result_index": 1}]
+          }
+        },
+        {
+          "send_arrow": {
+            "rows": 3,
+            "columns": [
+              {"name": "id", "type": "int64", "values": [1, 2, null]},
+              {"name": "name", "type": "utf8", "values": ["a", "b, \"quoted\"", null]},
+              {"name": "amount", "type": "float64", "values": [1.5, -2.25, null]},
+              {"name": "ok", "type": "boolean", "values": [true, false, null]}
+            ]
+          }
+        },
+        {
+          "send_arrow": {
+            "rows": 2,
+            "columns": [
+              {"name": "id", "type": "int64", "values": [4, 5]},
+              {"name": "name", "type": "utf8", "values": ["d", "é"]},
+              {"name": "amount", "type": "float64", "values": [0, 1000000]},
+              {"name": "ok", "type": "boolean", "values": [true, true]}
+            ]
+          }
+        },
+        {"send": {"type": "result_set_end", "id": 1}},
+        {
+          "send": {"type": "finish", "id": 1},
+          "expect": {
+            "$one_of": [
+              {"type": "written", "id": 1, "files": {"$nonempty": true, "$every": {"$file_exists": true}}},
+              {"type": "error", "id": 1, "kind": "config"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a source opens a session, streams a result set and honours row_limit",
+      "kinds": ["source"],
+      "session": ["rows", "empty"],
+      "steps": [
+        {"send": {"type": "open", "id": 1, "connection": "${connection}", "read_only": false}, "expect": {"type": "ok", "id": 1}},
+        {"send": {"type": "execute", "id": 2, "sql": "${sql.rows}"}, "expect": {"type": "result", "id": 2, "columns": {"$nonempty": true}}},
+        {"result_set": {"id": 2, "rows": {"$min": 3}}},
+        {"send": {"type": "execute", "id": 3, "sql": "${sql.rows}", "row_limit": 2}, "expect": {"type": "result", "id": 3}},
+        {"result_set": {"id": 3, "rows": 2}},
+        {"send": {"type": "execute", "id": 4, "sql": "${sql.empty}"}, "expect": {"type": "result", "id": 4}},
+        {"result_set": {"id": 4, "rows": 0}}
+      ]
+    },
+    {
+      "name": "a statement without a result set replies no_result",
+      "kinds": ["source"],
+      "session": ["no_result"],
+      "steps": [
+        {"send": {"type": "open", "id": 1, "connection": "${connection}", "read_only": false}, "expect": {"type": "ok", "id": 1}},
+        {"send": {"type": "execute", "id": 2, "sql": "${sql.no_result}"}, "expect": {"type": "no_result", "id": 2}}
+      ]
+    },
+    {
+      "name": "check verifies a statement without running it",
+      "kinds": ["source"],
+      "requires": ["check"],
+      "session": ["rows"],
+      "steps": [
+        {"send": {"type": "open", "id": 1, "connection": "${connection}", "read_only": false}, "expect": {"type": "ok", "id": 1}},
+        {"send": {"type": "check", "id": 2, "sql": "${sql.rows}"}, "expect": {"type": "ok", "id": 2}}
+      ]
+    },
+    {
+      "name": "a failed statement gets an error reply and the session keeps serving",
+      "kinds": ["source"],
+      "session": ["rows", "error"],
+      "steps": [
+        {"send": {"type": "open", "id": 1, "connection": "${connection}", "read_only": false}, "expect": {"type": "ok", "id": 1}},
+        {
+          "send": {"type": "execute", "id": 2, "sql": "${sql.error}"},
+          "expect": {"type": "error", "id": 2, "message": {"$nonempty": true}, "kind": {"$one_of": [{"$absent": true}, {"$in": "${error_kinds}"}]}}
+        },
+        {"send": {"type": "execute", "id": 3, "sql": "${sql.rows}"}, "expect": {"type": "result", "id": 3}},
+        {"result_set": {"id": 3, "rows": {"$min": 1}}}
+      ]
+    },
+    {
+      "name": "a cancel stops a running statement, which replies cancelled, and the plugin keeps serving",
+      "kinds": ["source"],
+      "session": ["slow"],
+      "steps": [
+        {"send": {"type": "open", "id": 1, "connection": "${connection}", "read_only": false}, "expect": {"type": "ok", "id": 1}},
+        {"send": {"type": "execute", "id": 2, "sql": "${sql.slow}"}},
+        {"send": {"type": "cancel", "id": 2}, "expect": {"type": "error", "id": 2, "kind": "cancelled"}},
+        {"send": {"type": "describe", "id": 3}, "expect": {"type": "describe", "id": 3}}
+      ]
+    },
+    {
+      "name": "deliver with options gets a reply and the plugin keeps serving",
+      "kinds": ["destination"],
+      "steps": [
+        {
+          "send": {
+            "type": "deliver",
+            "id": 1,
+            "local_path": "/nonexistent/dre-conformance/a.csv",
+            "remote_path": "dre-conformance/a.csv",
+            "connection": {},
+            "options": {"conformance": true}
+          },
+          "expect": {"$one_of": [{"type": "delivered", "id": 1}, {"type": "error", "id": 1}]}
+        },
+        {"send": {"type": "describe", "id": 2}, "expect": {"type": "describe", "id": 2}}
+      ]
+    },
+    {
+      "name": "a multi-file deliver gets a reply and the plugin keeps serving",
+      "kinds": ["destination"],
+      "requires": ["multi_file"],
+      "steps": [
+        {
+          "send": {
+            "type": "deliver",
+            "id": 1,
+            "files": [
+              {"local_path": "/nonexistent/dre-conformance/a.csv", "remote_path": "dre-conformance/a.csv"},
+              {"local_path": "/nonexistent/dre-conformance/b.csv", "remote_path": "dre-conformance/b.csv"}
+            ],
+            "connection": {},
+            "options": {}
+          },
+          "expect": {"$one_of": [{"type": "delivered", "id": 1}, {"type": "error", "id": 1}]}
+        },
+        {"send": {"type": "describe", "id": 2}, "expect": {"type": "describe", "id": 2}}
+      ]
+    },
+    {
+      "name": "a message deliver gets a reply and the plugin keeps serving",
+      "kinds": ["destination"],
+      "requires": ["message"],
+      "steps": [
+        {
+          "send": {
+            "type": "deliver",
+            "id": 1,
+            "connection": {},
+            "options": {},
+            "message": {"title": "Conformance", "text": "**DRE** conformance check", "path": "/nonexistent/dre-conformance/message.md"}
+          },
+          "expect": {"$one_of": [{"type": "delivered", "id": 1}, {"type": "error", "id": 1}]}
+        },
+        {"send": {"type": "describe", "id": 2}, "expect": {"type": "describe", "id": 2}}
+      ]
+    },
+    {
+      "name": "a message_only plugin also advertises message",
+      "kinds": ["destination"],
+      "requires": ["message_only"],
+      "steps": [
+        {"hello": {}, "expect": {"type": "hello", "capabilities": {"$contains": "message"}}}
+      ]
+    },
+    {
+      "name": "a message_only plugin refuses a file deliver and keeps serving",
+      "kinds": ["destination"],
+      "requires": ["message_only"],
+      "steps": [
+        {
+          "send": {
+            "type": "deliver",
+            "id": 1,
+            "local_path": "/nonexistent/dre-conformance/a.csv",
+            "remote_path": "dre-conformance/a.csv",
+            "connection": {},
+            "options": {}
+          },
+          "expect": {"type": "error", "id": 1}
+        },
+        {"send": {"type": "describe", "id": 2}, "expect": {"type": "describe", "id": 2}}
+      ]
+    },
+    {
+      "name": "close ends the process with exit code 0",
+      "steps": [
+        {"send": {"type": "close", "id": 1}},
+        {"exit": 0}
+      ]
+    },
+    {
+      "name": "end of input ends the process",
+      "steps": [
+        {"close_input": true},
+        {"exit": {"$any": true}}
+      ]
+    }
+  ]
+}

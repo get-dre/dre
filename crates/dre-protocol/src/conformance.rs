@@ -38,12 +38,38 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 pub struct Check {
     /// The plugin checked (`<kind>/<name>`), or the package for checks of the package itself.
     pub plugin: String,
+    /// The case's name, from `conformance/protocol.json`.
     pub name: String,
     /// True for a case that passed or didn't apply.
     pub passed: bool,
+    /// Why the case failed; empty otherwise.
     pub detail: String,
     /// Why the case didn't apply to this plugin; `None` when it ran.
     pub skipped: Option<String>,
+}
+
+impl Check {
+    /// A case that ran, passing or failing with the reason.
+    fn ran(plugin: &str, name: &str, r: Result<(), String>) -> Check {
+        Check {
+            plugin: plugin.to_string(),
+            name: name.to_string(),
+            passed: r.is_ok(),
+            detail: r.err().unwrap_or_default(),
+            skipped: None,
+        }
+    }
+
+    /// A case that doesn't apply to the plugin.
+    fn skipped(plugin: &str, name: &str, why: String) -> Check {
+        Check {
+            plugin: plugin.to_string(),
+            name: name.to_string(),
+            passed: true,
+            detail: String::new(),
+            skipped: Some(why),
+        }
+    }
 }
 
 /// What the session cases run: a connection that opens, and statements by role. The roles the
@@ -57,6 +83,8 @@ pub struct Session {
 }
 
 impl Session {
+    /// A session opened with `connection` (a profile target's fields), with no statements yet.
+    #[must_use]
     pub fn new(connection: Map<String, Value>) -> Session {
         Session {
             connection,
@@ -129,16 +157,19 @@ fn cases() -> Vec<Case> {
 }
 
 /// Run every case against the plugin executable at `path`.
+#[must_use]
 pub fn run(path: &Path) -> Vec<Check> {
     run_with(path, &Options::default())
 }
 
 /// Like [`run`], with extra environment variables for every plugin process.
+#[must_use]
 pub fn run_with_env(path: &Path, env: &[(&str, &str)]) -> Vec<Check> {
     run_with(path, &Options::default().env(env))
 }
 
 /// Run every case against the plugin executable at `path`, as `options` say.
+#[must_use]
 pub fn run_with(path: &Path, options: &Options) -> Vec<Check> {
     let file = path
         .file_name()
@@ -149,13 +180,11 @@ pub fn run_with(path: &Path, options: &Options) -> Vec<Check> {
         return run_plugin(path, &id, false, &cases, options);
     }
     let fail = |detail: String| {
-        vec![Check {
-            plugin: file.clone(),
-            name: "the executable is named dre-plugin-<package> or dre-<kind>-<name>".into(),
-            passed: false,
-            detail,
-            skipped: None,
-        }]
+        vec![Check::ran(
+            &file,
+            "the executable is named dre-plugin-<package> or dre-<kind>-<name>",
+            Err(detail),
+        )]
     };
     let Some(package) = parse_package_executable_name(&file) else {
         return fail(format!("`{file}` is neither"));
@@ -194,21 +223,32 @@ pub fn run_with(path: &Path, options: &Options) -> Vec<Check> {
 /// Every case for one plugin. `ask`: name it in the handshake (a package's plugins).
 fn run_plugin(path: &Path, id: &PluginId, ask: bool, cases: &[Case], options: &Options) -> Vec<Check> {
     let asked = ask.then_some(id);
-    let capabilities: Vec<String> = greet(path, asked, options)
-        .ok()
-        .and_then(|h| h.get("capabilities").cloned())
-        .and_then(|c| serde_json::from_value(c).ok())
-        .unwrap_or_default();
+    let capabilities: Vec<String> = match greet(path, asked, options) {
+        Ok(h) => match h.get("capabilities").cloned().map(serde_json::from_value) {
+            Some(Ok(c)) => c,
+            None => Vec::new(),
+            Some(Err(e)) => {
+                let why = format!("`capabilities` isn't a list of names: {e}");
+                return vec![Check::ran(
+                    &id.to_string(),
+                    "the plugin starts and answers hello",
+                    Err(why),
+                )];
+            }
+        },
+        // Without a handshake, which cases apply is unknown: fail, rather than skip them.
+        Err(e) => {
+            return vec![Check::ran(
+                &id.to_string(),
+                "the plugin starts and answers hello",
+                Err(e),
+            )];
+        }
+    };
     let mut out = Vec::new();
     for case in cases.iter().filter(|c| c.scope.is_none()) {
         if let Some(reason) = not_applicable(case, id.kind, &capabilities, options) {
-            out.push(Check {
-                plugin: id.to_string(),
-                name: case.name.clone(),
-                passed: true,
-                detail: String::new(),
-                skipped: Some(reason),
-            });
+            out.push(Check::skipped(&id.to_string(), &case.name, reason));
             continue;
         }
         let vars = Vars::new(Some(id), options);
@@ -222,13 +262,7 @@ fn run_plugin(path: &Path, id: &PluginId, ask: bool, cases: &[Case], options: &O
 }
 
 fn finish(plugin: &str, case: &Case, r: Result<(), String>) -> Check {
-    Check {
-        plugin: plugin.to_string(),
-        name: case.name.clone(),
-        passed: r.is_ok(),
-        detail: r.err().unwrap_or_default(),
-        skipped: None,
-    }
+    Check::ran(plugin, &case.name, r)
 }
 
 /// Why `case` doesn't apply, or `None` when it does.
@@ -556,7 +590,7 @@ impl Driver {
                 Frame::Arrow(_) => return Err("Arrow data where a reply was expected".into()),
                 Frame::Json(v) => {
                     conforms(&v)?;
-                    if v["type"] != "log" && v["type"] != "progress" {
+                    if !is_chatter(&v) {
                         self.last = v.clone();
                         return Ok(v);
                     }
@@ -564,6 +598,11 @@ impl Driver {
             }
         }
     }
+}
+
+/// A `log` or `progress` message: a plugin may send one at any time, before any reply.
+fn is_chatter(v: &Value) -> bool {
+    v["type"] == "log" || v["type"] == "progress"
 }
 
 /// Whether a message a plugin sent matches the message schema.
@@ -602,9 +641,8 @@ fn run_steps(
         }
     }
     for (i, step) in case.steps.iter().enumerate() {
-        let step = match substitute(&Value::Object(step.clone()), vars)? {
-            Value::Object(s) => s,
-            _ => unreachable!("an object stays an object"),
+        let Value::Object(step) = substitute(&Value::Object(step.clone()), vars)? else {
+            unreachable!("substitute keeps an object an object");
         };
         run_step(&mut d, asked, &step).map_err(|e| format!("step {}: {e}", i + 1))?;
     }
@@ -670,7 +708,7 @@ fn result_set(d: &mut Driver, spec: &Value) -> Result<(), String> {
             }
             Frame::Json(v) => {
                 conforms(&v)?;
-                if v["type"] == "log" || v["type"] == "progress" {
+                if is_chatter(&v) {
                     continue;
                 }
                 if frames == 0 {
@@ -702,11 +740,29 @@ fn arrow_frame(spec: &Value) -> Result<Vec<u8>, String> {
     }
     let schema = Arc::new(Schema::new(fields));
     let rows = spec["rows"].as_u64().unwrap_or(0) as usize;
-    let columns = schema
+    let mut columns: Vec<arrow::array::ArrayRef> = Vec::new();
+    for (f, c) in schema
         .fields()
         .iter()
-        .map(|f| arrow::array::new_null_array(f.data_type(), rows))
-        .collect();
+        .zip(spec["columns"].as_array().into_iter().flatten())
+    {
+        columns.push(match c["values"].as_array() {
+            None => arrow::array::new_null_array(f.data_type(), rows),
+            Some(v) if v.len() != rows => {
+                return Err(format!("`{}` has {} values for {rows} rows", f.name(), v.len()));
+            }
+            Some(v) => match f.data_type() {
+                DataType::Int64 => Arc::new(arrow::array::Int64Array::from_iter(v.iter().map(Value::as_i64))),
+                DataType::Float64 => {
+                    Arc::new(arrow::array::Float64Array::from_iter(v.iter().map(Value::as_f64)))
+                }
+                DataType::Boolean => Arc::new(arrow::array::BooleanArray::from_iter(
+                    v.iter().map(Value::as_bool),
+                )),
+                _ => Arc::new(arrow::array::StringArray::from_iter(v.iter().map(Value::as_str))),
+            },
+        });
+    }
     let batch = arrow::array::RecordBatch::try_new(schema, columns).map_err(|e| e.to_string())?;
     frame::encode_batch(&batch).map_err(|e| e.to_string())
 }
@@ -756,6 +812,11 @@ mod tests {
         let cases = cases();
         assert!(cases.len() > 20);
         for c in &cases {
+            assert!(
+                matches!(c.scope.as_deref(), None | Some("package")),
+                "{}: scope",
+                c.name
+            );
             for r in &c.requires {
                 assert!(CAPABILITIES.contains(&r.as_str()), "{}: {r}", c.name);
             }

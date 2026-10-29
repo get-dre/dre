@@ -379,7 +379,7 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "plugin panicked: %v\n%s", p, debug.Stack())
-			s.send(&errorReplyMsg{envelope: newEnvelope("error"), Kind: "internal", Message: fmt.Sprintf("plugin panicked: %v", p)})
+			s.send(&errorReply{envelope: newEnvelope("error"), Kind: "internal", Message: fmt.Sprintf("plugin panicked: %v", p)})
 			code = 101
 		}
 	}()
@@ -392,16 +392,16 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			s.send(errorReply(err))
+			s.send(errorFrom(err))
 			return 2
 		}
 		if f.Tag == TagArrow {
-			s.send(errorMsg("unexpected Arrow frame"))
+			s.send(newError("unexpected Arrow frame"))
 			continue
 		}
 		var req map[string]json.RawMessage
 		if err := json.Unmarshal(f.Body, &req); err != nil {
-			s.send(errorMsg("unsupported request `?`"))
+			s.send(newError("unsupported request `?`"))
 			continue
 		}
 		var id uint64
@@ -413,21 +413,21 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 			continue
 		}
 		if !s.greeted {
-			s.send(errorMsg("the first request must be `hello`"))
+			s.send(newError("the first request must be `hello`"))
 			continue
 		}
 		if t == "close" {
 			s.closeDB()
-			s.send(okMsg())
+			s.send(newOK())
 			return 0
 		}
 		if Cancelled() {
 			// Cancelled before it started: it never runs.
-			s.send(s.errorReply(errors.New("cancelled before it started")))
+			s.send(s.failure(errors.New("cancelled before it started")))
 			continue
 		}
 		if err := s.handle(t, req); err != nil {
-			s.send(s.errorReply(err))
+			s.send(s.failure(err))
 		}
 	}
 }
@@ -446,10 +446,10 @@ func (s *server) send(v message) {
 	}
 }
 
-// errorReply is the `error` reply for a failed request: kind `cancelled` if core cancelled
+// failure is the `error` reply for a failed request: kind `cancelled` if core cancelled
 // it, else an *Error's kind and code, else the message alone.
-func (s *server) errorReply(err error) *errorReplyMsg {
-	m := errorReply(err)
+func (s *server) failure(err error) *errorReply {
+	m := errorFrom(err)
 	var e *Error
 	switch {
 	case Cancelled():
@@ -492,7 +492,7 @@ func (s *server) closeDB() {
 func (s *server) hello(req map[string]json.RawMessage) {
 	var lo, hi int
 	if json.Unmarshal(req["min_version"], &lo) != nil || json.Unmarshal(req["max_version"], &hi) != nil {
-		s.send(errorMsg("unsupported request `hello`"))
+		s.send(newError("unsupported request `hello`"))
 		return
 	}
 	lo, hi = max(lo, ProtocolMin), min(hi, ProtocolMax)
@@ -512,7 +512,7 @@ func (s *server) hello(req map[string]json.RawMessage) {
 			}
 		}
 		if !found {
-			s.send(errorMsg(fmt.Sprintf("this executable provides %s, not %s", strings.Join(provides, ", "), want)))
+			s.send(newError(fmt.Sprintf("this executable provides %s, not %s", strings.Join(provides, ", "), want)))
 			panic(exitCode(1))
 		}
 	}
@@ -674,7 +674,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		s.dbMu.Lock()
 		s.db = db
 		s.dbMu.Unlock()
-		s.send(okMsg())
+		s.send(newOK())
 		return nil
 	case "execute":
 		var r struct {
@@ -702,7 +702,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		if note != "" {
 			slog.Debug(note)
 		}
-		s.send(okMsg())
+		s.send(newOK())
 		return nil
 	case "load":
 		var name string
@@ -921,11 +921,11 @@ func ValidName(name string) bool {
 	return true
 }
 
-func errorMsg(m string) *errorReplyMsg {
-	return &errorReplyMsg{envelope: newEnvelope("error"), Message: m}
+func newError(m string) *errorReply {
+	return &errorReply{envelope: newEnvelope("error"), Message: m}
 }
 
-func errorReply(err error) *errorReplyMsg { return errorMsg(err.Error()) }
+func errorFrom(err error) *errorReply { return newError(err.Error()) }
 
 func str(raw json.RawMessage) string {
 	var s string

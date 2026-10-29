@@ -333,3 +333,24 @@ fn the_go_clickhouse_source_reads_a_server() {
     assert_eq!(text("s"), r#"{"a":1,"b":"x,y"}"#);
     assert_eq!(text("arr"), "[1,2]");
 }
+
+/// The suite's session cases (streaming, `row_limit`, `check`, a failed statement, cancel) on a
+/// ClickHouse server, through the Go SDK.
+#[test]
+fn the_go_clickhouse_source_passes_the_session_cases() {
+    let Some(bin) = go_plugin("dre-plugin-clickhouse") else {
+        return;
+    };
+    let Ok(addr) = std::env::var("DRE_TEST_CLICKHOUSE_HTTP") else {
+        eprintln!("skipped: set DRE_TEST_CLICKHOUSE_HTTP to run");
+        return;
+    };
+    let (host, port) = addr.rsplit_once(':').unwrap();
+    let conn = json!({"host": host, "port": port.parse::<u16>().unwrap(), "user": "dre", "password": "dre"});
+    let session = conformance::Session::new(conn.as_object().unwrap().clone())
+        .statement("rows", "SELECT number AS n FROM system.numbers LIMIT 10")
+        .statement("empty", "SELECT 1 AS n WHERE 0")
+        .statement("error", "SELECT * FROM dre_conformance_missing")
+        .statement("slow", "SELECT count() FROM system.numbers");
+    conformance::assert_conforms_with(&bin, &conformance::Options::default().session(session));
+}

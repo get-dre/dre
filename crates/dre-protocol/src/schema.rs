@@ -14,6 +14,7 @@ pub const PUBLISHED: &str = include_str!("../conformance/schema.json");
 
 /// The schema document: `$defs.Request` is any message core sends, `$defs.Response` any message
 /// a plugin sends, and `x-dre` the version range, capabilities and error kinds.
+#[must_use]
 pub fn document() -> Value {
     let mut generator = SchemaSettings::draft2020_12().into_generator();
     generator.subschema_for::<Envelope<Request>>();
@@ -42,6 +43,7 @@ pub fn document() -> Value {
 /// # Panics
 ///
 /// Never in practice: a `serde_json::Value` always serialises.
+#[must_use]
 pub fn render() -> String {
     let mut s = serde_json::to_string_pretty(&document()).expect("a schema serialises");
     s.push('\n');
@@ -52,14 +54,20 @@ pub fn render() -> String {
 mod tests {
     use super::*;
 
-    /// CI fails here when `msg.rs` changes without the published file. Regenerate it with
+    /// CI fails here when `msg.rs` changes without the published file. Regenerate it (and the
+    /// Go SDK's copies of the conformance files) with
     /// `DRE_UPDATE_SCHEMA=1 cargo test -p dre-protocol --lib schema`.
     #[test]
     fn the_published_schema_matches_the_code() {
         let fresh = render();
         if std::env::var_os("DRE_UPDATE_SCHEMA").is_some() {
-            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/conformance/schema.json");
-            std::fs::write(path, &fresh).unwrap();
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("conformance");
+            std::fs::write(dir.join("schema.json"), &fresh).unwrap();
+            // The Go SDK's plugintest embeds a copy of every published file.
+            let go = dir.join("../../../go/plugin/plugintest/conformance");
+            for name in ["schema.json", "protocol.json", "delivery.json"] {
+                std::fs::copy(dir.join(name), go.join(name)).unwrap();
+            }
             return;
         }
         assert!(

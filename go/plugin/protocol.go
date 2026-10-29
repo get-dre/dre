@@ -97,7 +97,7 @@ type loadedReply struct {
 	Warning  string `json:"warning,omitempty"`
 }
 
-type errorReplyMsg struct {
+type errorReply struct {
 	envelope
 	Message string `json:"message"`
 	Kind    string `json:"kind,omitempty"`
@@ -118,7 +118,7 @@ type progressMsg struct {
 	Total   int64  `json:"total"`
 }
 
-func okMsg() *okReply { return &okReply{newEnvelope("ok")} }
+func newOK() *okReply { return &okReply{newEnvelope("ok")} }
 
 // nonNil is s, or an empty list for nil, so it's sent as [] rather than null.
 func nonNil[T any](s []T) []T {

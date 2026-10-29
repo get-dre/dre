@@ -4,6 +4,9 @@ package plugin_test
 // which dre-protocol generates from its message types: the schema is the source of truth.
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -21,5 +24,19 @@ func TestConstantsMatchTheSchema(t *testing.T) {
 	}
 	if !slices.Equal(x.ErrorKinds, plugin.ErrorKinds) {
 		t.Fatalf("error kinds: SDK %v, schema %v", plugin.ErrorKinds, x.ErrorKinds)
+	}
+}
+
+// The copy plugintest embeds is the published one, so the suite works outside this repository.
+func TestTheEmbeddedCasesAreThePublishedOnes(t *testing.T) {
+	for _, name := range []string{"schema.json", "protocol.json", "delivery.json"} {
+		published, err := os.ReadFile(filepath.Join("..", "..", "crates", "dre-protocol", "conformance", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(published, plugintest.CaseFile(t, name)) {
+			t.Errorf("plugintest/conformance/%s differs from crates/dre-protocol/conformance/%s; "+
+				"update it with `DRE_UPDATE_SCHEMA=1 cargo test -p dre-protocol --lib schema`", name, name)
+		}
 	}
 }

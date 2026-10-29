@@ -164,28 +164,21 @@ impl Store for Memory {
 /// # Panics
 ///
 /// Panics if the published cases don't parse (a test keeps them parsing).
+#[must_use]
 pub fn run() -> Vec<Check> {
     let cases: Cases = serde_json::from_str(DELIVERY_CASES).expect("conformance/delivery.json parses");
     cases
         .cases
         .iter()
-        .map(|c| {
-            let r = run_case(c);
-            Check {
-                plugin: "dre-protocol delivery".into(),
-                name: c.name.clone(),
-                passed: r.is_ok(),
-                detail: r.err().unwrap_or_default(),
-                skipped: None,
-            }
-        })
+        .map(|c| Check::ran("dre-protocol delivery", &c.name, run_case(c)))
         .collect()
 }
 
 fn run_case(c: &Case) -> Result<(), String> {
     let base = match c.base.as_deref() {
+        None | Some("default") => Rules::default(),
         Some("legacy") => Rules::legacy(),
-        _ => Rules::default(),
+        Some(other) => return Err(format!("unknown base rules `{other}`")),
     };
     let rules = match Rules::from_settings(base, &c.connection, &c.options, &[]) {
         Ok((r, _)) => r,
@@ -215,8 +208,10 @@ fn run_case(c: &Case) -> Result<(), String> {
             return Err(format!("{} landed at {}, expected {}", l.remote, d.path, l.path));
         }
     }
-    let (Some(remote), Some(x)) = (&c.remote, &c.expect) else {
-        return Ok(());
+    let (remote, x) = match (&c.remote, &c.expect) {
+        (Some(r), Some(x)) => (r, x),
+        (None, None) if !c.deliveries.is_empty() => return Ok(()),
+        _ => return Err("a case needs `remote` with `expect`, or `deliveries`".into()),
     };
     if let Some(want) = &x.settings_error {
         return Err(format!("expected the settings to be refused (`{want}`)"));

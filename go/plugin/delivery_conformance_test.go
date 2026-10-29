@@ -1,7 +1,7 @@
 package plugin
 
-// The delivery cases every SDK shares (crates/dre-protocol/conformance/delivery.json), against
-// this module's delivery code with an in-memory store.
+// The delivery cases every SDK shares (crates/dre-protocol/conformance/delivery.json, copied to
+// plugintest/conformance), against this module's delivery code with an in-memory store.
 
 import (
 	"encoding/json"
@@ -112,7 +112,7 @@ func (s *memoryStore) Delete(remote string) error {
 }
 
 func TestTheSDKFollowsEveryDeliveryCase(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "crates", "dre-protocol", "conformance", "delivery.json"))
+	b, err := os.ReadFile(filepath.Join("plugintest", "conformance", "delivery.json"))
 	if err != nil {
 		t.Fatalf("the shared delivery cases: %v", err)
 	}

@@ -15,7 +15,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -77,14 +76,10 @@ func Conformance(t *testing.T, p plugin.Package, o Options) {
 // RunConformance runs every case for every role of p.
 func RunConformance(t testing.TB, p plugin.Package, o Options) []Check {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(ConformanceDir(t), "protocol.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var file struct {
 		Cases []conformanceCase `json:"cases"`
 	}
-	if err := json.Unmarshal(b, &file); err != nil {
+	if err := json.Unmarshal(CaseFile(t, "protocol.json"), &file); err != nil {
 		t.Fatalf("protocol.json: %v", err)
 	}
 	r := &runner{schema: Schema(t), pkg: p, opts: o}
@@ -180,7 +175,7 @@ func toAny(s []string) []any {
 	return out
 }
 
-func (r *runner) runCase(role *plugin.Role, c conformanceCase) error {
+func (r *runner) runCase(role *plugin.Role, c conformanceCase) (err error) {
 	tmp, err := os.MkdirTemp("", "dre-conformance-")
 	if err != nil {
 		return err
@@ -188,7 +183,11 @@ func (r *runner) runCase(role *plugin.Role, c conformanceCase) error {
 	defer os.RemoveAll(tmp)
 	vars := r.vars(role, tmp)
 	d := r.spawn(role)
-	defer d.stop()
+	defer func() {
+		if stopErr := d.stop(); err == nil {
+			err = stopErr
+		}
+	}()
 	if len(c.Steps) == 0 || c.Steps[0]["hello"] == nil {
 		if err := d.writeJSON(hello(role, nil)); err != nil {
 			return err
@@ -266,10 +265,14 @@ func (r *runner) spawn(role *plugin.Role) *driver {
 	return d
 }
 
-// stop ends the plugin and waits for Serve to return, so the next case's Serve is the only one.
-func (d *driver) stop() {
+// stop ends the plugin and waits for Serve to return, so the next case's Serve is the only one
+// (Serve keeps package-wide state); a plugin still running after end of input fails the case.
+func (d *driver) stop() error {
 	d.in.Close()
-	d.wait(5 * time.Second)
+	if _, ok := d.wait(replyTimeout); !ok {
+		return errors.New("still running after end of input")
+	}
+	return nil
 }
 
 func (d *driver) wait(timeout time.Duration) (int, bool) {
@@ -489,12 +492,54 @@ func arrowFrame(spec any) ([]byte, error) {
 	n, _ := s["rows"].(float64)
 	cols := make([]arrow.Array, len(fields))
 	for i, f := range fields {
-		cols[i] = array.MakeArrayOfNull(memory.DefaultAllocator, f.Type, int(n))
+		col, _ := asList(s["columns"])[i].(map[string]any)
+		values, has := col["values"].([]any)
+		if has && len(values) != int(n) {
+			return nil, fmt.Errorf("`%s` has %d values for %v rows", f.Name, len(values), n)
+		}
+		cols[i] = column(f.Type, values, int(n))
 		defer cols[i].Release()
 	}
 	rec := array.NewRecord(schema, cols, int64(n))
 	defer rec.Release()
 	return plugin.EncodeRecord(rec)
+}
+
+// column is values as an Arrow array of type t, or n nulls without values.
+func column(t arrow.DataType, values []any, n int) arrow.Array {
+	if values == nil {
+		return array.MakeArrayOfNull(memory.DefaultAllocator, t, n)
+	}
+	b := array.NewBuilder(memory.DefaultAllocator, t)
+	defer b.Release()
+	for _, v := range values {
+		switch x := v.(type) {
+		case nil:
+			b.AppendNull()
+		case float64:
+			switch bb := b.(type) {
+			case *array.Int64Builder:
+				bb.Append(int64(x))
+			case *array.Float64Builder:
+				bb.Append(x)
+			default:
+				b.AppendNull()
+			}
+		case bool:
+			if bb, ok := b.(*array.BooleanBuilder); ok {
+				bb.Append(x)
+			} else {
+				b.AppendNull()
+			}
+		case string:
+			if bb, ok := b.(*array.StringBuilder); ok {
+				bb.Append(x)
+			} else {
+				b.AppendNull()
+			}
+		}
+	}
+	return b.NewArray()
 }
 
 // substitute replaces every ${name}: a string that is only a placeholder becomes its value,

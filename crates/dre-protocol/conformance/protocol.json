@@ -148,6 +148,54 @@
       ]
     },
     {
+      "name": "a write of a result set with rows, across several Arrow frames, makes a valid file (or asks for options)",
+      "kinds": ["format"],
+      "steps": [
+        {
+          "send": {
+            "type": "write",
+            "id": 1,
+            "path": "${tmp}/rows.${name}",
+            "format": "${name}",
+            "options": {},
+            "result_sets": [{"name": "rows", "query": "rows", "result_index": 1}]
+          }
+        },
+        {
+          "send_arrow": {
+            "rows": 3,
+            "columns": [
+              {"name": "id", "type": "int64", "values": [1, 2, null]},
+              {"name": "name", "type": "utf8", "values": ["a", "b, \"quoted\"", null]},
+              {"name": "amount", "type": "float64", "values": [1.5, -2.25, null]},
+              {"name": "ok", "type": "boolean", "values": [true, false, null]}
+            ]
+          }
+        },
+        {
+          "send_arrow": {
+            "rows": 2,
+            "columns": [
+              {"name": "id", "type": "int64", "values": [4, 5]},
+              {"name": "name", "type": "utf8", "values": ["d", "é"]},
+              {"name": "amount", "type": "float64", "values": [0, 1000000]},
+              {"name": "ok", "type": "boolean", "values": [true, true]}
+            ]
+          }
+        },
+        {"send": {"type": "result_set_end", "id": 1}},
+        {
+          "send": {"type": "finish", "id": 1},
+          "expect": {
+            "$one_of": [
+              {"type": "written", "id": 1, "files": {"$nonempty": true, "$every": {"$file_exists": true}}},
+              {"type": "error", "id": 1, "kind": "config"}
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "a source opens a session, streams a result set and honours row_limit",
       "kinds": ["source"],
       "session": ["rows", "empty"],

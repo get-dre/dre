@@ -5,32 +5,32 @@ package plugintest
 // required, items, additionalProperties, minimum and pattern.
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 )
 
-// ConformanceDir is the folder of the published schema and conformance cases, in this
-// repository.
-func ConformanceDir(t testing.TB) string {
+// cases holds the published schema and conformance cases: a copy of
+// crates/dre-protocol/conformance, embedded so the suite works wherever this module is used. A
+// test in go/plugin keeps the copy in step with the original.
+//
+//go:embed conformance/*.json
+var cases embed.FS
+
+// CaseFile is one published file: schema.json, protocol.json or delivery.json.
+func CaseFile(t testing.TB, name string) []byte {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("can't find the plugintest source to locate the conformance cases")
+	b, err := cases.ReadFile("conformance/" + name)
+	if err != nil {
+		t.Fatalf("the conformance file %s: %v", name, err)
 	}
-	dir := filepath.Join(filepath.Dir(file), "..", "..", "..", "crates", "dre-protocol", "conformance")
-	if _, err := os.Stat(filepath.Join(dir, "schema.json")); err != nil {
-		t.Fatalf("the conformance cases aren't at %s: %v", dir, err)
-	}
-	return dir
+	return b
 }
 
 // SchemaDoc is the parsed schema.
@@ -49,12 +49,8 @@ type Protocol struct {
 // Schema reads the published schema.
 func Schema(t testing.TB) *SchemaDoc {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(ConformanceDir(t), "schema.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var root map[string]any
-	if err := json.Unmarshal(b, &root); err != nil {
+	if err := json.Unmarshal(CaseFile(t, "schema.json"), &root); err != nil {
 		t.Fatalf("schema.json: %v", err)
 	}
 	return &SchemaDoc{root: root}

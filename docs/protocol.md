@@ -568,7 +568,8 @@ database can't express; the cases that need it are skipped.
 
 In Rust, `dre_protocol::conformance::assert_conforms(path)` (or `assert_conforms_with` with
 `conformance::Options`, for a session or environment variables) fails a test on any failed
-case. In Go, `plugintest.Conformance(t, pkg, plugintest.Options{})` runs the same cases against
+case. In Go, `plugintest.Conformance(t, pkg, plugintest.Options{})` (module
+`github.com/get-dre/dre/go/plugin`, which embeds a copy of the cases) runs the same cases against
 a `plugin.Package` in-process. Every first-party plugin, Rust and Go, passes the suite in its
 tests.
 
@@ -588,7 +589,7 @@ range (naming the plugin, for a package) and expects a `hello` reply. Steps:
 | `{"hello": {...}}` | Send a `hello`, its fields overriding the default range (`plugin` too) |
 | `{"send": {...}}` | Send the JSON message as given |
 | `{"send_raw": "<hex>"}` | Write these bytes as they are |
-| `{"send_arrow": {"columns": [{"name", "type"}], "rows": n}}` | Send an Arrow frame of `n` null rows (`int64`, `float64`, `utf8`, `boolean`) |
+| `{"send_arrow": {"columns": [{"name", "type", "values"}], "rows": n}}` | Send an Arrow frame of `n` rows: each column's `values` (`null` for a null), or `n` nulls without them; types `int64`, `float64`, `utf8`, `boolean` |
 | `{"result_set": {"id": n, "rows": m}}` | Read Arrow frames (at least one, its columns those of the last `result` reply), then a `result_end` with id `n` whose `rows` is the rows sent and matches `m` |
 | `{"close_input": true}` | Close the plugin's stdin |
 | `{"exit": m}` | Wait for the process to exit; its exit code must match `m` |
