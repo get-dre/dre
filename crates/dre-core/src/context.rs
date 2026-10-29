@@ -126,14 +126,17 @@ impl Context {
         Context::new(env, host)
     }
 
+    /// The command's environment variables.
     pub fn env(&self) -> &Env {
         &self.0.env
     }
 
+    /// The values the command masks.
     pub fn secrets(&self) -> &Secrets {
         &self.0.secrets
     }
 
+    /// What finds, starts and stops the command's plugins.
     pub fn host(&self) -> &Arc<dyn PluginHost> {
         &self.0.host
     }

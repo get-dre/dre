@@ -288,7 +288,6 @@ pub fn release(
             &files,
             e.message.as_ref(),
             &mut plugins,
-            &project.root,
         ) {
             Ok(Some(loc)) => {
                 r.status = "delivered".into();

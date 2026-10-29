@@ -291,6 +291,10 @@ impl Secrets {
     }
 
     /// Mask these values from now on: a query's `secret_columns`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the set of values is poisoned (a thread panicked while changing it).
     pub fn register_values(&self, values: impl IntoIterator<Item = String>) {
         let values: Vec<String> = values.into_iter().filter(|v| eligible(v)).collect();
         if values.is_empty() {

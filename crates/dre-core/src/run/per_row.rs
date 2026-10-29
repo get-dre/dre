@@ -1296,7 +1296,6 @@ fn run_job(
     if let Some(pre) = &job.pre {
         return Some(pre.clone());
     }
-    let root = &shared.project.root;
     if job.phase != Phase::Deliver
         && let Err(e) = make_files(shared, job, format)
     {
@@ -1391,7 +1390,6 @@ fn run_job(
             &local,
             job.message.as_ref(),
             dests,
-            root,
         );
         let (status, location, error) = match r {
             Ok(Some(loc)) => ("delivered", Some(job.mask.apply(&loc)), None),
@@ -1517,8 +1515,8 @@ pub(crate) fn deliver_row(
     files: &[PathBuf],
     message: Option<&(String, String)>,
     plugins: &mut HashMap<String, Box<dyn Plugin>>,
-    root: &Path,
 ) -> Result<Option<String>, Fail> {
+    let root = &project.root;
     let profiles = &project.profiles;
     let out = match profiles.entry(Role::Destination, &d.profile) {
         Entry::Use(o) => o,

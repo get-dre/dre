@@ -99,6 +99,7 @@ pub trait Plugin: Send {
     /// What the plugin said in its handshake.
     fn info(&self) -> &PluginInfo;
 
+    /// Whether the handshake listed `capability`.
     fn has(&self, capability: &str) -> bool {
         self.info().capabilities.iter().any(|c| c == capability)
     }
@@ -215,17 +216,75 @@ impl Running {
     }
 }
 
+/// A process's place in its host's [`Running`] list, given up when it's dropped.
+struct Registration {
+    id: u64,
+    running: Arc<Running>,
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        if let Ok(mut list) = self.running.list.lock() {
+            list.retain(|(id, _)| *id != self.id);
+        }
+    }
+}
+
+/// How long a plugin has to complete its handshake: `DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS`, else
+/// the protocol's default.
+fn handshake_timeout(env: &Env) -> std::time::Duration {
+    env.setting("DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS")
+        .and_then(|v| v.parse().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(dre_protocol::host::DEFAULT_HANDSHAKE_TIMEOUT)
+}
+
+/// Start `path`, asking for `plugin` (`None`: a package's first), in `running` from before the
+/// handshake, so a kill reaches a plugin that never completes it.
+fn spawn(
+    path: &Path,
+    plugin: Option<&PluginId>,
+    log: LogSink,
+    cwd: Option<&Path>,
+    env: &Env,
+    running: &Arc<Running>,
+) -> HostResult<(PluginProcess, Registration)> {
+    let mut process = PluginProcess::spawn_in(path, log, &[], cwd)?;
+    let id = running.next.fetch_add(1, Ordering::SeqCst);
+    running.list.lock().unwrap().push((id, process.canceller()));
+    let registration = Registration {
+        id,
+        running: running.clone(),
+    };
+    if plugin.is_some() {
+        process.ask_for(plugin.cloned());
+    }
+    process.handshake(
+        (dre_protocol::CORE_MIN_VERSION, dre_protocol::MAX_VERSION),
+        handshake_timeout(env),
+    )?;
+    Ok((process, registration))
+}
+
 impl SubprocessHost {
     /// A host finding plugins as `env` says.
     pub fn new(env: &Env) -> SubprocessHost {
+        let running: Arc<Running> = Arc::default();
         SubprocessHost {
             env: env.clone(),
-            running: Arc::default(),
-            prober: Prober::default(),
+            prober: Prober {
+                asked: Mutex::default(),
+                host: Some((env.clone(), running.clone())),
+            },
+            running,
         }
     }
 
     /// How many plugin processes this host has running.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the list of running plugins is poisoned (a thread panicked while changing it).
     pub fn running(&self) -> usize {
         self.running.list.lock().unwrap().len()
     }
@@ -242,13 +301,17 @@ impl PluginHost for SubprocessHost {
     }
 
     fn start(&self, plugin: &Located, log: LogSink, cwd: Option<&Path>) -> HostResult<Box<dyn Plugin>> {
-        let process = PluginProcess::start_for(&plugin.path, Some(&plugin.plugin), log, cwd)?;
-        let id = self.running.next.fetch_add(1, Ordering::SeqCst);
-        self.running.list.lock().unwrap().push((id, process.canceller()));
+        let (process, registration) = spawn(
+            &plugin.path,
+            Some(&plugin.plugin),
+            log,
+            cwd,
+            &self.env,
+            &self.running,
+        )?;
         Ok(Box::new(Subprocess {
             process: Some(process),
-            id,
-            running: self.running.clone(),
+            _registration: registration,
         }))
     }
 
@@ -268,21 +331,12 @@ impl PluginHost for SubprocessHost {
 struct Subprocess {
     /// `None` only while closing.
     process: Option<PluginProcess>,
-    id: u64,
-    running: Arc<Running>,
+    _registration: Registration,
 }
 
 impl Subprocess {
-    fn p(&mut self) -> &mut PluginProcess {
+    fn process(&mut self) -> &mut PluginProcess {
         self.process.as_mut().expect("the process is open until close")
-    }
-}
-
-impl Drop for Subprocess {
-    fn drop(&mut self) {
-        if let Ok(mut list) = self.running.list.lock() {
-            list.retain(|(id, _)| *id != self.id);
-        }
     }
 }
 
@@ -295,7 +349,7 @@ impl Plugin for Subprocess {
     }
 
     fn describe(&mut self) -> HostResult<Description> {
-        self.p().description()
+        self.process().description()
     }
 
     fn validate(
@@ -303,7 +357,7 @@ impl Plugin for Subprocess {
         options: Map<String, Value>,
         template: Option<Value>,
     ) -> HostResult<(Vec<String>, Vec<String>)> {
-        self.p().validate_with(options, template)
+        self.process().validate_with(options, template)
     }
 
     fn validate_connection(
@@ -311,19 +365,19 @@ impl Plugin for Subprocess {
         connection: Map<String, Value>,
         unresolved: Vec<String>,
     ) -> HostResult<(Vec<String>, Vec<String>)> {
-        self.p().validate_connection(connection, unresolved)
+        self.process().validate_connection(connection, unresolved)
     }
 
     fn open(&mut self, connection: Map<String, Value>, open: Open) -> HostResult<()> {
         match open {
-            Open::ReadWrite => self.p().open(connection, false),
-            Open::ReadOnly => self.p().open(connection, true),
-            Open::Sandboxed => self.p().open_sandboxed(connection),
+            Open::ReadWrite => self.process().open(connection, false),
+            Open::ReadOnly => self.process().open(connection, true),
+            Open::Sandboxed => self.process().open_sandboxed(connection),
         }
     }
 
     fn check(&mut self, sql: &str) -> HostResult<()> {
-        self.p().check(sql)
+        self.process().check(sql)
     }
 
     fn execute(
@@ -332,34 +386,34 @@ impl Plugin for Subprocess {
         row_limit: Option<u64>,
         on_batch: &mut dyn FnMut(&SchemaRef, RecordBatch) -> Result<(), String>,
     ) -> HostResult<Execution> {
-        self.p().execute(sql, row_limit, on_batch)
+        self.process().execute(sql, row_limit, on_batch)
     }
 
     fn load(&mut self, name: &str, batch: RecordBatch) -> HostResult<(String, Option<String>)> {
         let schema = batch.schema();
-        self.p().load(name, &schema, [batch])
+        self.process().load(name, &schema, [batch])
     }
 
     fn write(&mut self, r: WriteRequest) -> HostResult<()> {
-        self.p()
+        self.process()
             .write_begin(&r.path, &r.format, r.options, r.result_sets, r.template)
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> HostResult<()> {
-        self.p().send_batch(batch)
+        self.process().send_batch(batch)
     }
 
     fn end_result_set(&mut self) -> HostResult<()> {
-        self.p().send(&dre_protocol::msg::Request::ResultSetEnd {})
+        self.process().send(&dre_protocol::msg::Request::ResultSetEnd {})
     }
 
     fn finish(&mut self) -> HostResult<Written> {
-        let (files, warnings) = self.p().write_finish_with_warnings()?;
+        let (files, warnings) = self.process().write_finish_with_warnings()?;
         Ok(Written { files, warnings })
     }
 
     fn deliver(&mut self, d: Delivery) -> HostResult<Delivered> {
-        let p = self.p();
+        let p = self.process();
         let location = match &d.message {
             Some(m) => p.deliver_message(m, &d.files, d.connection, d.options)?,
             None => p.deliver_files(&d.files, d.connection, d.options)?,
@@ -389,11 +443,17 @@ type Asked = (Option<std::time::SystemTime>, Vec<PluginId>);
 #[derive(Default)]
 pub struct Prober {
     asked: Mutex<BTreeMap<PathBuf, Asked>>,
+    /// A [`SubprocessHost`]'s environment and running list, so its probes can be stopped too.
+    host: Option<(Env, Arc<Running>)>,
 }
 
 impl Prober {
     /// The plugins an executable serves, from its name when that's `dre-<kind>-<name>`, else
     /// from its handshake.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cache of answers is poisoned (a thread panicked while changing it).
     pub fn probe(&self, path: &Path) -> Result<Vec<PluginId>, String> {
         let file = path.file_name().unwrap_or_default().to_string_lossy();
         if let Some((kind, name)) = parse_executable_name(&file) {
@@ -411,8 +471,13 @@ impl Prober {
             return Ok(ids);
         }
         let quiet: LogSink = Arc::new(|_, _| {});
-        let p = PluginProcess::start(path, quiet)
-            .map_err(|e| format!("can't ask {} what it provides: {e}", path.display()))?;
+        // A host's probe stays in its running list until the probe is done.
+        let started = match &self.host {
+            Some((env, running)) => spawn(path, None, quiet, None, env, running).map(|(p, r)| (p, Some(r))),
+            None => PluginProcess::start(path, quiet).map(|p| (p, None)),
+        };
+        let (p, _registration) =
+            started.map_err(|e| format!("can't ask {} what it provides: {e}", path.display()))?;
         let ids = p.info().provides.clone();
         let _ = p.close();
         self.asked

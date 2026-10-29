@@ -16,7 +16,9 @@ use crate::{Diagnostic, Diagnostics, Env, Severity};
 pub trait Console: Ui {
     /// A package or plugin was installed: `what` names it and its version.
     fn installed(&self, what: &str);
+    /// Something stopped the command.
     fn error(&self, message: &str);
+    /// A problem found in the project.
     fn diagnostic(&self, d: &Diagnostic);
     /// A detail of the command: a resolved setting (`Setting`), the profiles used (`Profiles`).
     fn note(&self, verb: &str, text: &str);
@@ -93,10 +95,7 @@ pub fn load_for_run(
         console.diagnostic(d);
     }
     if diags.has_errors() {
-        console.error(&format!(
-            "the project has {} error(s); fix them before running (see `dre validate`)",
-            diags.error_count()
-        ));
+        console.error(&has_errors(&diags));
         return None;
     }
     project.map(|p| (p, checksum))
@@ -200,10 +199,7 @@ pub fn check_project(
         console.diagnostic(d);
     }
     if diags.has_errors() {
-        console.error(&format!(
-            "the project has {} error(s); fix them before running (see `dre validate`)",
-            diags.error_count()
-        ));
+        console.error(&has_errors(&diags));
         return false;
     }
     true
@@ -233,6 +229,14 @@ pub fn count_setting(
             _ => Err(format!("{from} must be a whole number of 1 or more, got `{v}`")),
         },
     }
+}
+
+/// What stops a command when the project has errors.
+fn has_errors(diags: &Diagnostics) -> String {
+    format!(
+        "the project has {} error(s); fix them before running (see `dre validate`)",
+        diags.error_count()
+    )
 }
 
 /// `dre run` as the command line gave it.
@@ -305,22 +309,26 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
         None => project.run_timeout,
     };
     // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
-    let count = |flag: &Option<String>, name, var| {
-        count_setting(env, flag.as_deref(), name, var)
+    let count = |flag: Option<&str>, name, var| {
+        count_setting(env, flag, name, var)
             .map_err(|e| console.error(&e))
             .ok()
     };
-    let Some(keep_runs) = count(&req.keep_runs, "--keep-runs", crate::settings::KEEP_RUNS) else {
+    let Some(keep_runs) = count(
+        req.keep_runs.as_deref(),
+        "--keep-runs",
+        crate::settings::KEEP_RUNS,
+    ) else {
         return Started::NotStarted;
     };
     let Some(row_concurrency) = count(
-        &req.row_concurrency,
+        req.row_concurrency.as_deref(),
         "--row-concurrency",
         crate::settings::ROW_CONCURRENCY,
     ) else {
         return Started::NotStarted;
     };
-    let Some(threads) = count(&req.threads, "--threads", crate::settings::THREADS) else {
+    let Some(threads) = count(req.threads.as_deref(), "--threads", crate::settings::THREADS) else {
         return Started::NotStarted;
     };
     if !check_project(

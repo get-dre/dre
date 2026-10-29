@@ -103,6 +103,7 @@ pub struct MemoryHost {
 }
 
 impl MemoryHost {
+    /// A host serving no plugin yet.
     pub fn new() -> MemoryHost {
         MemoryHost::default()
     }
@@ -114,6 +115,10 @@ impl MemoryHost {
     }
 
     /// Every call so far, in order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the call list is poisoned (a thread panicked while changing it).
     pub fn calls(&self) -> Vec<String> {
         self.state.calls.lock().unwrap().clone()
     }
