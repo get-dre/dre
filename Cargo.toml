@@ -23,7 +23,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde-saphyr = { version = "2.0", default-features = false, features = ["deserialize", "serialize"] }
 schemars = "1.2"
 clap = { version = "4", features = ["derive"] }
-minijinja = { version = "3", features = ["serde", "loop_controls", "preserve_order"] }
+minijinja = { version = "3", features = ["serde", "loop_controls", "preserve_order", "unstable_machinery"] }
 minijinja-contrib = { version = "3", features = ["pycompat"] }
 regex = "1"
 chrono = "0.4"

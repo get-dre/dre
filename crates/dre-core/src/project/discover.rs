@@ -217,7 +217,7 @@ impl Loader {
                 continue;
             };
             let is_sql = !file.starts_with(MACROS_DIR);
-            for (name, line) in preflight::refs(&src) {
+            for (name, line) in preflight::Scan::new(&src).refs_at().iter().cloned() {
                 if index.contains_key(&name) {
                     if is_sql {
                         let stem = file

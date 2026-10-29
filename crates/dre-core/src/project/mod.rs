@@ -665,10 +665,7 @@ impl Binding {
 
 /// Whether a template reads `each.*`.
 pub fn mentions_each(src: &str) -> bool {
-    static EACH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"\beach\s*(\.|\[)").expect("the pattern is a valid regex")
-    });
-    EACH.is_match(src)
+    preflight::Scan::new(src).paths("each").next().is_some()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]

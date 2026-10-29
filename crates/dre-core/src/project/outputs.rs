@@ -311,16 +311,12 @@ impl Loader {
     /// Warn when a password (`password:`, `zip: {password}`) reads `each.<column>` of a column
     /// the driver query doesn't mark in `secret_columns`: it would show in logs and results.
     fn check_password_columns(&mut self, o: &Output, ctx: &str, file: &Path, queries: &[QueryEntry]) {
-        static EACH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"\beach\.([A-Za-z_][A-Za-z0-9_]*)").expect("the pattern is a valid regex")
-        });
-        // `results.<query>` and the column after it: `.first.col`, `.last.col`, `.value`, `.col`.
-        static RESULTS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"\bresults\.([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:first|last|rows\[\d+\]))?(?:\.([A-Za-z_][A-Za-z0-9_]*))?").expect("the pattern is a valid regex")
-        });
-        static VAR: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"\bvar\s*\(").expect("the pattern is a valid regex")
-        });
+        // The `each.<column>`s a template reads.
+        let each_columns = |scan: &preflight::Scan| -> Vec<String> {
+            scan.paths("each")
+                .filter_map(|p| p.attr(0).map(str::to_string))
+                .collect()
+        };
         let secret_of = |q: &str| -> Vec<&String> {
             queries
                 .iter()
@@ -358,7 +354,8 @@ impl Loader {
                 );
                 continue;
             }
-            if VAR.is_match(pw) {
+            let scan = preflight::Scan::new(pw);
+            if scan.called_names().iter().any(|n| n == "var") {
                 warn(
                     self,
                     format!(
@@ -368,9 +365,8 @@ impl Loader {
             }
             if let Some(fe) = &o.for_each {
                 let secret = secret_of(&fe.query);
-                for c in EACH.captures_iter(pw) {
-                    let col = &c[1];
-                    if !secret.iter().any(|s| s.as_str() == col) {
+                for col in each_columns(&scan) {
+                    if !secret.iter().any(|s| **s == col) {
                         warn(
                             self,
                             format!(
@@ -381,13 +377,9 @@ impl Loader {
                     }
                 }
             }
-            for c in RESULTS.captures_iter(pw) {
-                let q = &c[1];
+            for (q, col) in scan.paths("results").filter_map(result_column) {
                 let secret = secret_of(q);
-                let col = c
-                    .get(2)
-                    .map(|m| m.as_str())
-                    .filter(|c| !matches!(*c, "value" | "row_count"));
+                let col = col.filter(|c| !matches!(*c, "value" | "row_count"));
                 let covered = match col {
                     Some(col) => secret.iter().any(|s| s.as_str() == col),
                     None => !secret.is_empty(),
@@ -413,8 +405,7 @@ impl Loader {
             texts.extend(o.destinations.iter().filter_map(|d| d.path.as_deref()));
             let mut seen = Vec::new();
             for t in texts {
-                for c in EACH.captures_iter(t) {
-                    let col = c[1].to_string();
+                for col in each_columns(&preflight::Scan::new(t)) {
                     let lower = col.to_ascii_lowercase();
                     let looks_secret = ["password", "passwd", "pwd", "passcode", "pin", "secret"]
                         .iter()
@@ -513,7 +504,8 @@ impl Loader {
                 err(self, format!("{what} doesn't compile{line}: {msg}"));
                 continue;
             }
-            for (name, _) in preflight::attributes(src, "results") {
+            let scan = preflight::Scan::new(src);
+            for (name, _) in scan.attributes("results") {
                 if !fed.contains(&name.as_str()) {
                     err(
                         self,
@@ -528,7 +520,7 @@ impl Loader {
                     );
                 }
             }
-            if !o.is_message() && !preflight::attributes(src, "outputs").is_empty() {
+            if !o.is_message() && !scan.attributes("outputs").is_empty() {
                 err(
                     self,
                     format!(
@@ -537,7 +529,7 @@ impl Loader {
                 );
                 continue;
             }
-            for (name, _) in preflight::attributes(src, "outputs") {
+            for (name, _) in scan.attributes("outputs") {
                 let other = all.iter().find(|x| x.name.as_deref() == Some(name.as_str()));
                 match other {
                     None => err(
@@ -1533,4 +1525,16 @@ pub(super) fn output_feeds(queries: Option<&Loose<Vec<String>>>, query: &str) ->
         Some(Loose::Ok(q)) => q.iter().any(|n| n == query),
         _ => true,
     }
+}
+
+/// `results.<query>` and the column read after it (`.first.col`, `.last.col`, `.rows[0].col`,
+/// `.col`), from a read of `results`.
+fn result_column(p: &preflight::Path) -> Option<(&str, Option<&str>)> {
+    let query = p.attr(0)?;
+    let rest = match (p.attr(1), p.steps.get(2)) {
+        (Some("first" | "last"), _) => 2,
+        (Some("rows"), Some(preflight::Step::Index(_))) => 3,
+        _ => 1,
+    };
+    Some((query, p.attr(rest)))
 }

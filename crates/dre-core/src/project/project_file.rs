@@ -517,7 +517,13 @@ impl Loader {
             .macros
             .iter()
             .filter_map(|m| std::fs::read_to_string(self.root.join(m)).ok())
-            .flat_map(|src| preflight::macro_defs(&src).into_iter().map(|d| d.name))
+            .flat_map(|src| {
+                preflight::Scan::new(&src)
+                    .macros()
+                    .iter()
+                    .map(|d| d.name.clone())
+                    .collect::<Vec<_>>()
+            })
             .collect();
         for p in &project.templates.packages {
             let clash = if RESERVED_NAMES.contains(&p.name.as_str()) {

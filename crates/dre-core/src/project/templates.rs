@@ -1,6 +1,7 @@
 //! Templates: the Jinja pre-flight checks and the parse pass.
 
 use super::*;
+use crate::preflight::Scan;
 
 impl Loader {
     /// Render every Binding without a database ([`crate::parse`]): each query's connection and
@@ -83,25 +84,28 @@ impl Loader {
     pub(super) fn preflight(&mut self, project: &Project, _used: &Usage) {
         let cli_owned: Vec<String> = self.opts.vars.keys().cloned().collect();
         let cli: BTreeSet<&str> = cli_owned.iter().map(String::as_str).collect();
-        let mut sources: BTreeMap<PathBuf, String> = BTreeMap::new();
-        let mut read = |root: &Path, p: &Path| -> Option<String> {
-            if let Some(s) = sources.get(p) {
-                return Some(s.clone());
-            }
-            let s = std::fs::read_to_string(root.join(p)).ok()?;
-            sources.insert(p.to_path_buf(), s.clone());
-            Some(s)
+        // Each file is read and scanned once, however many Bindings use it.
+        let mut sources: BTreeMap<PathBuf, Option<Rc<(String, Scan)>>> = BTreeMap::new();
+        let root = self.root.clone();
+        let mut read = |p: &Path| -> Option<Rc<(String, Scan)>> {
+            sources
+                .entry(p.to_path_buf())
+                .or_insert_with(|| {
+                    let src = std::fs::read_to_string(root.join(p)).ok()?;
+                    let scan = Scan::new(&src);
+                    Some(Rc::new((src, scan)))
+                })
+                .clone()
         };
         let mut checked: BTreeSet<PathBuf> = BTreeSet::new();
-        let root = self.root.clone();
         // Macros: syntax, env_var, run.*; their definitions, for var() checks per Binding.
-        let mut defs: BTreeMap<String, (PathBuf, preflight::MacroDef)> = BTreeMap::new();
+        let mut defs: BTreeMap<String, (PathBuf, Rc<(String, Scan)>, usize)> = BTreeMap::new();
         for m in &project.templates.macros {
-            if let Some(src) = read(&root, m) {
-                self.check_template_text(m, &src, 0, None, &cli);
+            if let Some(file) = read(m) {
+                self.check_template_text(m, &file.0, &file.1, 0, None);
                 checked.insert(m.clone());
-                for d in preflight::macro_defs(&src) {
-                    defs.insert(d.name.clone(), (m.clone(), d));
+                for (i, d) in file.1.macros().iter().enumerate() {
+                    defs.insert(d.name.clone(), (m.clone(), file.clone(), i));
                 }
             }
         }
@@ -118,14 +122,14 @@ impl Loader {
                 let mut called: Vec<String> = Vec::new();
                 let mut refs: Vec<String> = Vec::new();
                 for q in &b.queries {
-                    let Some(src) = read(&root, &q.path) else { continue };
+                    let Some(file) = read(&q.path) else { continue };
                     let first = checked.insert(q.path.clone());
-                    self.check_vars(&q.path, &src, 0, &b.vars, &cli, &ctx);
+                    self.check_vars(&q.path, &file.1, 0, &b.vars, &cli, &ctx);
                     if first {
-                        self.check_template_text(&q.path, &src, 0, None, &cli);
+                        self.check_template_text(&q.path, &file.0, &file.1, 0, None);
                     }
-                    called.extend(preflight::called_names(&src));
-                    refs.extend(preflight::refs(&src).into_iter().map(|(n, _)| n));
+                    called.extend(file.1.called_names().iter().cloned());
+                    refs.extend(file.1.refs().map(str::to_string));
                 }
                 // SQL this Binding pulls in through ref(), checked in the Binding's context.
                 let mut seen_refs = BTreeSet::new();
@@ -136,25 +140,26 @@ impl Loader {
                     if !seen_refs.insert(name) {
                         continue;
                     }
-                    let Some(src) = read(&root, path) else { continue };
-                    self.check_vars(path, &src, 0, &b.vars, &cli, &ctx);
+                    let Some(file) = read(path) else { continue };
+                    self.check_vars(path, &file.1, 0, &b.vars, &cli, &ctx);
                     if checked.insert(path.clone()) {
-                        self.check_template_text(path, &src, 0, None, &cli);
+                        self.check_template_text(path, &file.0, &file.1, 0, None);
                     }
-                    called.extend(preflight::called_names(&src));
-                    refs.extend(preflight::refs(&src).into_iter().map(|(n, _)| n));
+                    called.extend(file.1.called_names().iter().cloned());
+                    refs.extend(file.1.refs().map(str::to_string));
                 }
                 // Macros this Binding calls, directly or through other macros.
                 let mut seen = BTreeSet::new();
                 while let Some(name) = called.pop() {
-                    let Some((file, def)) = defs.get(&name) else {
+                    let Some((path, file, i)) = defs.get(&name) else {
                         continue;
                     };
                     if !seen.insert(name) {
                         continue;
                     }
-                    self.check_vars(file, &def.body, def.line_offset, &b.vars, &cli, &ctx);
-                    called.extend(preflight::called_names(&def.body));
+                    let body = &file.1.macros()[*i].body;
+                    self.check_vars(path, body, 0, &b.vars, &cli, &ctx);
+                    called.extend(body.called_names().iter().cloned());
                 }
                 // Templated output values render with the same context.
                 let mut values: Vec<String> = Vec::new();
@@ -166,23 +171,28 @@ impl Loader {
                     values.extend(t.bindings.iter().filter_map(|tb| tb.value.clone()));
                 }
                 for v in values.iter().filter(|v| preflight::is_templated(v)) {
-                    let yf = std::fs::read_to_string(root.join(&r.file)).unwrap_or_default();
-                    let line = yf.lines().position(|l| l.contains(v.as_str())).map(|i| i + 1);
-                    self.check_template_text(&r.file, v, line.map_or(0, |l| l - 1), line, &cli);
-                    self.check_vars(&r.file, v, line.map_or(0, |l| l - 1), &b.vars, &cli, &ctx);
+                    let yaml = read(&r.file);
+                    let line = yaml
+                        .as_ref()
+                        .and_then(|y| y.0.lines().position(|l| l.contains(v.as_str())))
+                        .map(|i| i + 1);
+                    let offset = line.map_or(0, |l| l - 1);
+                    let scan = Scan::new(v);
+                    self.check_template_text(&r.file, v, &scan, offset, line);
+                    self.check_vars(&r.file, &scan, offset, &b.vars, &cli, &ctx);
                 }
             }
         }
     }
 
-    /// Syntax, `env_var()` and `run.*` checks for one template source.
+    /// Syntax, `env_var()` and `run.*` checks for one template source and its scan.
     fn check_template_text(
         &mut self,
         file: &Path,
         src: &str,
+        scan: &Scan,
         line_offset: usize,
         fixed_line: Option<usize>,
-        _cli: &BTreeSet<&str>,
     ) {
         let f = Some(file.to_path_buf());
         if let Err((line, msg)) = preflight::check_syntax(&file.to_string_lossy(), src) {
@@ -191,8 +201,9 @@ impl Loader {
                 .error(Code::JinjaSyntax, f, line, format!("Jinja syntax error: {msg}"));
             return;
         }
-        for c in preflight::calls(src)
-            .into_iter()
+        for c in scan
+            .calls()
+            .iter()
             .filter(|c| c.func == "env_var" && !c.has_default)
         {
             if self.ctx.env().var(&c.name).is_none() {
@@ -207,7 +218,7 @@ impl Loader {
                 );
             }
         }
-        for (name, instead, line) in preflight::removed_names(src) {
+        for (name, instead, line) in scan.removed_names() {
             self.diags.error(
                 Code::RemovedTemplateName,
                 f.clone(),
@@ -215,7 +226,7 @@ impl Loader {
                 format!("`{name}` was removed in DRE 0.2: use {instead}"),
             );
         }
-        for (r, line) in preflight::unknown_run_refs(src) {
+        for (r, line) in scan.unknown_run_refs() {
             self.diags.error(
                 Code::UnknownRunAttribute,
                 f.clone(),
@@ -230,16 +241,13 @@ impl Loader {
     fn check_vars(
         &mut self,
         file: &Path,
-        src: &str,
+        scan: &Scan,
         line_offset: usize,
         vars: &JsonMap<String, Json>,
         cli: &BTreeSet<&str>,
         ctx: &str,
     ) {
-        for c in preflight::calls(src)
-            .into_iter()
-            .filter(|c| c.func == "var" && !c.has_default)
-        {
+        for c in scan.calls().iter().filter(|c| c.func == "var" && !c.has_default) {
             if !vars.contains_key(&c.name) && !cli.contains(c.name.as_str()) {
                 self.diags.error(
                     Code::UnresolvedVar,
