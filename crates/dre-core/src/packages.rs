@@ -325,7 +325,10 @@ fn git(args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
 fn install_git(root: &Path, url: &str, checkout: &str) -> Result<(String, String), String> {
     let base = root.join(DEPS_DIR).join("packages");
     std::fs::create_dir_all(&base).map_err(|e| format!("can't create {}: {e}", base.display()))?;
-    let tmp = std::env::temp_dir().join(format!("dre-package-{}-{}", std::process::id(), base_name(url)));
+    // Beside the install, not in the system's temp folder: core reads no environment variable.
+    let tmp = root
+        .join(DEPS_DIR)
+        .join(format!(".clone-{}-{}", std::process::id(), base_name(url)));
     remove_dir_force(&tmp);
     let result = (|| {
         git(&["clone", "--quiet", url, &tmp.to_string_lossy()], None)?;

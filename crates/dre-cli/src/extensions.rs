@@ -82,8 +82,8 @@ fn executable(name: &str) -> String {
     format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
-fn extensions_dir() -> PathBuf {
-    dre_core::dre_home().join("extensions")
+fn extensions_dir(ctx: &dre_core::Context) -> PathBuf {
+    ctx.env().dre_home().join("extensions")
 }
 
 /// Whether the user agrees to install: `--accept-proprietary`, else a yes at the prompt.
@@ -109,8 +109,8 @@ enum Installed {
     NotAsked,
 }
 
-fn registry() -> Result<Vec<Extension>, String> {
-    let bytes = dre_core::manager::fetch(&dre_core::manager::registry_url())?;
+fn registry(ctx: &dre_core::Context) -> Result<Vec<Extension>, String> {
+    let bytes = dre_core::manager::fetch(ctx, &dre_core::manager::registry_url(ctx.env()))?;
     let index: Index =
         serde_json::from_slice(&bytes).map_err(|e| format!("invalid extension registry: {e}"))?;
     if index.schema != 2 {
@@ -124,19 +124,24 @@ fn registry() -> Result<Vec<Extension>, String> {
 }
 
 /// Download, check and install `name` (optionally `name@version`), after asking.
-fn install(spec: &str, accepted: bool) -> Result<Installed, String> {
+fn install(ctx: &dre_core::Context, spec: &str, accepted: bool) -> Result<Installed, String> {
     let (name, requested) = spec.split_once('@').map_or((spec, None), |(n, v)| (n, Some(v)));
     if !dre_core::packages::valid_extension_name(name) {
         return Err("invalid extension name".into());
     }
-    let extension = registry()?
+    let extension = registry(ctx)?
         .into_iter()
         .find(|e| e.name == name)
         .ok_or_else(|| format!("extension `{name}` is not in this registry"))?;
-    install_from(extension, requested, accepted)
+    install_from(ctx, extension, requested, accepted)
 }
 
-fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -> Result<Installed, String> {
+fn install_from(
+    ctx: &dre_core::Context,
+    extension: Extension,
+    requested: Option<&str>,
+    accepted: bool,
+) -> Result<Installed, String> {
     let name = extension.name.as_str();
     let requested = requested
         .map(semver::Version::parse)
@@ -179,7 +184,7 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
             version.version
         ));
     }
-    let bytes = download(artifact, file_name)?;
+    let bytes = download(ctx, artifact, file_name)?;
     let digest = dre_core::checksum::sha256_hex(&bytes);
     let file = executable(name);
     let binary = if artifact.url.ends_with(".tar.gz") || artifact.url.ends_with(".tgz") {
@@ -187,7 +192,7 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
     } else {
         bytes
     };
-    let root = extensions_dir().join(name);
+    let root = extensions_dir(ctx).join(name);
     let folder = root.join(version.version.to_string());
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let destination = folder.join(&file);
@@ -215,8 +220,8 @@ fn install_from(extension: Extension, requested: Option<&str>, accepted: bool) -
 }
 
 /// The artifact's bytes, once its URL, checksum and signature check out.
-fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
-    let local_registry = !dre_core::manager::registry_url().contains("://");
+fn download(ctx: &dre_core::Context, artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
+    let local_registry = !dre_core::manager::registry_url(ctx.env()).contains("://");
     // A local registry (a development build) may point at local files; anything else needs TLS.
     if !(artifact.url.starts_with("https://") || local_registry && !artifact.url.contains("://")) {
         return Err("extension artifacts must be downloaded over https".into());
@@ -228,7 +233,7 @@ fn download(artifact: &Artifact, file_name: &str) -> Result<Vec<u8>, String> {
         .minisig
         .as_deref()
         .ok_or("the extension artifact is not signed; download refused")?;
-    let bytes = dre_core::manager::fetch(&artifact.url)?;
+    let bytes = dre_core::manager::fetch(ctx, &artifact.url)?;
     if !dre_core::checksum::sha256_hex(&bytes).eq_ignore_ascii_case(&artifact.sha256) {
         return Err("extension artifact checksum mismatch; download discarded".into());
     }
@@ -291,10 +296,15 @@ fn unpack(archive: &[u8], file: &str) -> Result<Vec<u8>, String> {
 }
 
 /// `dre deps`: install the project's declared extensions at their pinned versions.
-pub fn sync_declared(root: &Path, accepted: bool, printer: &Printer) -> Result<usize, String> {
+pub fn sync_declared(
+    ctx: &dre_core::Context,
+    root: &Path,
+    accepted: bool,
+    printer: &Printer,
+) -> Result<usize, String> {
     let mut installed = 0;
     for entry in dre_core::packages::declared_extensions(root)? {
-        let path = extensions_dir()
+        let path = extensions_dir(ctx)
             .join(&entry.name)
             .join(&entry.version)
             .join(executable(&entry.name));
@@ -302,7 +312,7 @@ pub fn sync_declared(root: &Path, accepted: bool, printer: &Printer) -> Result<u
             installed += 1;
             continue;
         }
-        match install(&format!("{}@{}", entry.name, entry.version), accepted)? {
+        match install(ctx, &format!("{}@{}", entry.name, entry.version), accepted)? {
             Installed::Done(path) => {
                 printer.line(Tone::Good, "Installed", &format!("companion {}", path.display()));
                 installed += 1;
@@ -321,9 +331,9 @@ pub fn sync_declared(root: &Path, accepted: bool, printer: &Printer) -> Result<u
     Ok(installed)
 }
 
-pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
+pub fn manage(ctx: &dre_core::Context, command: ExtensionCommand, printer: &Printer) -> ExitCode {
     let ExtensionCommand::Install(args) = command;
-    match install(&args.name, args.accept_proprietary) {
+    match install(ctx, &args.name, args.accept_proprietary) {
         Ok(Installed::Done(path)) => {
             printer.line(Tone::Good, "Installed", &format!("extension {}", path.display()));
             ExitCode::SUCCESS
@@ -342,8 +352,12 @@ pub fn manage(command: ExtensionCommand, printer: &Printer) -> ExitCode {
 
 /// The installed extension handling `dre <command>`: the declared pin's version when the
 /// project has one, else the current version.
-fn installed(command: &str, pins: &[dre_core::config::dependencies::ExtensionEntry]) -> Option<PathBuf> {
-    let mut dirs: Vec<_> = std::fs::read_dir(extensions_dir()).ok()?.flatten().collect();
+fn installed(
+    ctx: &dre_core::Context,
+    command: &str,
+    pins: &[dre_core::config::dependencies::ExtensionEntry],
+) -> Option<PathBuf> {
+    let mut dirs: Vec<_> = std::fs::read_dir(extensions_dir(ctx)).ok()?.flatten().collect();
     dirs.sort_by_key(|d| d.file_name());
     for dir in dirs {
         let name = dir.file_name().to_string_lossy().into_owned();
@@ -383,7 +397,7 @@ fn project_dir(args: &[String]) -> PathBuf {
 
 /// `dre <command> …`: run the extension that handles `command`, with `--dre-bin` set to this
 /// `dre` so it never runs a different one from the PATH. Offers to install it when missing.
-pub fn handoff(command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
+pub fn handoff(ctx: &dre_core::Context, command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
     let pins = match dre_core::packages::declared_extensions(&project_dir(&args.args)) {
         Ok(pins) => pins,
         Err(error) => {
@@ -394,9 +408,9 @@ pub fn handoff(command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
     let variable = format!("DRE_{}_BIN", command.to_ascii_uppercase());
     let binary = match std::env::var_os(&variable) {
         Some(binary) => PathBuf::from(binary),
-        None => match installed(command, &pins) {
+        None => match installed(ctx, command, &pins) {
             Some(binary) => binary,
-            None => match offer(command, &pins, args.accept_proprietary, printer) {
+            None => match offer(ctx, command, &pins, args.accept_proprietary, printer) {
                 Ok(binary) => binary,
                 Err(code) => return code,
             },
@@ -424,6 +438,7 @@ pub fn handoff(command: &str, args: McpArgs, printer: &Printer) -> ExitCode {
 
 /// Install the extension handling `command` (the project's pinned version, if any).
 fn offer(
+    ctx: &dre_core::Context,
     command: &str,
     pins: &[dre_core::config::dependencies::ExtensionEntry],
     accepted: bool,
@@ -433,14 +448,14 @@ fn offer(
         printer.error(&error);
         ExitCode::from(2)
     };
-    let extension = registry()
+    let extension = registry(ctx)
         .map_err(failed)?
         .into_iter()
         .find(|e| command_of(&e.name, e.command.as_deref()) == command)
         .ok_or_else(|| failed(format!("no extension provides `dre {command}` in this registry")))?;
     let name = extension.name.clone();
     let pin = pins.iter().find(|e| e.name == name).map(|e| e.version.clone());
-    match install_from(extension, pin.as_deref(), accepted).map_err(failed)? {
+    match install_from(ctx, extension, pin.as_deref(), accepted).map_err(failed)? {
         Installed::Done(path) => Ok(path),
         Installed::Declined => Err(ExitCode::from(1)),
         Installed::NotAsked => Err(failed(format!(

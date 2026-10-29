@@ -129,8 +129,13 @@ impl ReleaseOutcome {
 }
 
 /// Deliver run `opts.run_id`'s held deliveries.
-pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Result<ReleaseOutcome, Fail> {
-    let store = crate::engine::RunStore::new(&project.target_dir);
+pub fn release(
+    ctx: &crate::Context,
+    project: &Project,
+    opts: &ReleaseOptions,
+    events: &Events,
+) -> Result<ReleaseOutcome, Fail> {
+    let store = crate::engine::RunStore::new(&project.target_dir, ctx.secrets());
     let runs = BindingRuns::new(&store.run_dir(&opts.report, &opts.binding));
     let run_dir = runs.run_dir(&opts.run_id);
     let held_path = run_dir.join(HELD);
@@ -170,20 +175,24 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
     }
     let started = chrono::Utc::now();
     let release_id = crate::runs::new_run_id(started);
-    let _guard = runs.lock(&release_id, started).map_err(|e| {
-        let why = match e {
-            crate::runs::LockError::Held(h) => format!("{} holds its lock", h.describe()),
-            crate::runs::LockError::Unreadable(p) => format!("its lock file {} is unreadable", p.display()),
-            crate::runs::LockError::Io(e) => format!("its lock can't be taken: {e}"),
-        };
-        Fail::new(
-            Code::RunInProgress,
-            format!(
-                "{} [{}] is busy: {why}; release when it finishes",
-                opts.report, opts.binding
-            ),
-        )
-    })?;
+    let _guard = runs
+        .lock(&release_id, started, &crate::runs::host_name(ctx.env()))
+        .map_err(|e| {
+            let why = match e {
+                crate::runs::LockError::Held(h) => format!("{} holds its lock", h.describe()),
+                crate::runs::LockError::Unreadable(p) => {
+                    format!("its lock file {} is unreadable", p.display())
+                }
+                crate::runs::LockError::Io(e) => format!("its lock can't be taken: {e}"),
+            };
+            Fail::new(
+                Code::RunInProgress,
+                format!(
+                    "{} [{}] is busy: {why}; release when it finishes",
+                    opts.report, opts.binding
+                ),
+            )
+        })?;
     let release_dir = runs.run_dir(&release_id);
     std::fs::create_dir_all(&release_dir).map_err(|e| e.to_string())?;
     let mut outcome = ReleaseOutcome {
@@ -198,7 +207,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
         None => opts.only_keys.is_none(),
     };
     let log = events.plugin_log();
-    let mut plugins: HashMap<String, dre_protocol::host::PluginProcess> = HashMap::new();
+    let mut plugins: HashMap<String, Box<dyn crate::plugin_host::Plugin>> = HashMap::new();
     let pacer = crate::rate::Pacer::default();
     let mut progress = RowsLeft::new(
         held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
@@ -272,6 +281,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
         }
         let files: Vec<PathBuf> = e.files.iter().map(|f| f.path.clone()).collect();
         match deliver_row(
+            ctx,
             project,
             &log,
             &dest,
@@ -300,7 +310,7 @@ pub fn release(project: &Project, opts: &ReleaseOptions, events: &Events) -> Res
     }
     progress.finish(events);
     for (_, p) in plugins {
-        let _ = p.close();
+        p.close();
     }
     // The release's own record: who, when, what; and every entry released so far.
     write_released(&release_dir, &opts.run_id, &done)?;

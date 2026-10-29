@@ -9,6 +9,7 @@ pub mod codes;
 pub mod coltypes;
 pub mod config;
 pub mod constraints;
+pub mod context;
 pub mod dates;
 pub mod diag;
 pub mod dialect;
@@ -29,6 +30,7 @@ pub mod occurrences;
 pub mod options;
 pub mod packages;
 pub mod parse;
+pub mod plugin_host;
 pub mod plugins;
 pub mod preflight;
 pub mod profiles;
@@ -49,6 +51,7 @@ pub mod secrets;
 pub mod selector;
 pub mod settings;
 pub mod sqlsplit;
+pub mod start;
 pub mod target;
 pub mod template_file;
 pub mod values;
@@ -56,6 +59,7 @@ pub mod variables;
 pub mod yaml;
 pub mod zip_pack;
 
+pub use context::{Context, Env};
 pub use diag::{Diagnostic, Diagnostics, Severity};
 
 /// The version string `dre --version` prints. DRE has no released version yet.
@@ -64,11 +68,6 @@ pub fn version() -> &'static str {
         "0.0.0" => "unreleased",
         v => v,
     }
-}
-
-/// DRE's home directory: `~/.dre`.
-pub fn dre_home() -> std::path::PathBuf {
-    std::env::home_dir().unwrap_or_default().join(".dre")
 }
 
 /// A path with `/` separators on every platform, so messages and goldens read the same everywhere.

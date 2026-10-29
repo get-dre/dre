@@ -1,13 +1,15 @@
 //! DRE's settings and where each value came from.
 //!
 //! A setting is chosen, highest first, by its command-line flag, its `DRE_*` environment
-//! variable, its key in `dre_project.yml`, then its default. [`env`] is the one place DRE reads
-//! its own environment variables; [`Settings`] records every resolved value with its source, for
+//! variable, its key in `dre_project.yml`, then its default. Environment variables come from the
+//! command's [`Env`]; [`Settings`] records every resolved value with its source, for
 //! `dre validate --verbose` (and its JSON), `run_results.json` and the run's log.
 
 use std::fmt;
 
 use serde::Serialize;
+
+use crate::context::Env;
 
 /// The run's target: `--target`, `DRE_TARGET`.
 pub const TARGET: &str = "DRE_TARGET";
@@ -40,11 +42,6 @@ pub const THREADS: &str = "DRE_THREADS";
 /// How many rows of a per-row output render and deliver at once: `--row-concurrency`,
 /// `DRE_ROW_CONCURRENCY`, over `for_each.concurrency`.
 pub const ROW_CONCURRENCY: &str = "DRE_ROW_CONCURRENCY";
-
-/// A `DRE_*` environment variable's value; set but empty counts as unset.
-pub fn env(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
-}
 
 /// Where a setting's value came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,15 +122,15 @@ impl Settings {
 /// The settings a command line resolves before loading a project: the run's timezone
 /// (`--timezone`, `DRE_TIMEZONE`), `run.date` (`DRE_RUN_DATE`) and the scheduled instant
 /// (`DRE_RUN_AT`).
-pub fn run_settings(timezone_flag: Option<&str>) -> Settings {
+pub fn run_settings(env: &Env, timezone_flag: Option<&str>) -> Settings {
     let mut s = Settings::default();
-    let (tz, src) = match flag_or_env(timezone_flag, "--timezone", TIMEZONE) {
+    let (tz, src) = match flag_or_env(env, timezone_flag, "--timezone", TIMEZONE) {
         Some((v, src)) => (Some(v), src),
         None => (None, Source::Default),
     };
     s.set("timezone", tz, src);
     for (name, var) in [("run_date", RUN_DATE), ("scheduled_at", RUN_AT)] {
-        match env(var) {
+        match env.setting(var) {
             Some(v) => s.set(name, Some(v), Source::Env(var)),
             None => s.set(name, None, Source::Default),
         }
@@ -143,13 +140,33 @@ pub fn run_settings(timezone_flag: Option<&str>) -> Settings {
 
 /// The value of a setting given by `flag`, else the environment variable `var`, with its source.
 pub fn flag_or_env(
+    env: &Env,
     flag: Option<&str>,
     flag_name: &'static str,
     var: &'static str,
 ) -> Option<(String, Source)> {
     match flag.filter(|f| !f.is_empty()) {
         Some(f) => Some((f.to_string(), Source::Flag(flag_name))),
-        None => env(var).map(|v| (v, Source::Env(var))),
+        None => env.setting(var).map(|v| (v, Source::Env(var))),
+    }
+}
+
+/// `DRE_RUN_DATE`: `run.date`, when it's a valid date.
+pub fn run_date(env: &Env) -> Option<chrono::NaiveDate> {
+    env.setting(RUN_DATE)
+        .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+}
+
+/// `DRE_RUN_AT`: the instant a scheduled run was scheduled for (RFC 3339). Checked before any
+/// project command starts, so callers can treat an error as unset.
+pub fn run_at(env: &Env) -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
+    match env.setting(RUN_AT) {
+        Some(v) => chrono::DateTime::parse_from_rfc3339(&v)
+            .map(|t| Some(t.with_timezone(&chrono::Utc)))
+            .map_err(|_| {
+                format!("DRE_RUN_AT: `{v}` isn't an RFC 3339 date-time (e.g. 2026-09-01T06:00:00Z)")
+            }),
+        None => Ok(None),
     }
 }
 
@@ -160,11 +177,22 @@ mod tests {
     #[test]
     fn a_flag_beats_the_environment() {
         assert_eq!(
-            flag_or_env(Some("prod"), "--target", "DRE_TEST_SETTINGS_UNSET"),
+            flag_or_env(
+                &Env::default(),
+                Some("prod"),
+                "--target",
+                "DRE_TEST_SETTINGS_UNSET"
+            ),
             Some(("prod".into(), Source::Flag("--target")))
         );
-        assert_eq!(flag_or_env(None, "--target", "DRE_TEST_SETTINGS_UNSET"), None);
-        assert_eq!(flag_or_env(Some(""), "--target", "DRE_TEST_SETTINGS_UNSET"), None);
+        assert_eq!(
+            flag_or_env(&Env::default(), None, "--target", "DRE_TEST_SETTINGS_UNSET"),
+            None
+        );
+        assert_eq!(
+            flag_or_env(&Env::default(), Some(""), "--target", "DRE_TEST_SETTINGS_UNSET"),
+            None
+        );
     }
 
     #[test]

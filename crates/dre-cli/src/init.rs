@@ -7,7 +7,6 @@ use std::process::ExitCode;
 use dre_core::manager::{self, Index, IndexPackage};
 use dre_core::profiles::Role;
 use dre_core::project::{PluginId, PluginKind};
-use dre_protocol::host::PluginProcess;
 use dre_protocol::msg::ConnectionField;
 use serde_json::Value;
 
@@ -383,7 +382,11 @@ fn connection<R: BufRead>(
     Ok(m)
 }
 
-fn install_and_describe(choice: Choice, printer: &Printer) -> Result<Vec<ConnectionField>, String> {
+fn install_and_describe(
+    ctx: &dre_core::Context,
+    choice: Choice,
+    printer: &Printer,
+) -> Result<Vec<ConnectionField>, String> {
     let package = choice.package;
     let v = package.best(&semver::VersionReq::STAR).ok_or_else(|| {
         format!(
@@ -392,11 +395,11 @@ fn install_and_describe(choice: Choice, printer: &Printer) -> Result<Vec<Connect
             manager::platform()
         )
     })?;
-    let dir = dre_core::plugins::plugins_dir(None);
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), None);
     let vdir = dre_core::plugins::version_dir(&dir, &package.name, &v.version);
     // A package already installed for an earlier choice isn't downloaded again.
     if dre_core::plugins::read_manifest(&vdir).is_none() {
-        let locked = manager::install(&dir, package, v, None)?;
+        let locked = manager::install(ctx, &dir, package, v, None)?;
         printer.line(
             Tone::Good,
             "Installed",
@@ -406,12 +409,18 @@ fn install_and_describe(choice: Choice, printer: &Printer) -> Result<Vec<Connect
     let m = dre_core::plugins::read_manifest(&vdir)
         .ok_or_else(|| format!("{} has no plugin manifest after installing", vdir.display()))?;
     let path = vdir.join(&m.executable);
-    let mut proc_ =
-        PluginProcess::start_for(&path, Some(choice.plugin), std::sync::Arc::new(|_, _| {}), None)
-            .map_err(|e| e.to_string())?;
-    let fields = proc_.describe().map_err(|e| e.to_string())?;
-    let _ = proc_.close();
-    Ok(fields)
+    let plugin = dre_core::plugins::Located {
+        path,
+        plugin: choice.plugin.clone(),
+        package: package.name.clone(),
+    };
+    let mut proc_ = ctx
+        .host()
+        .start(&plugin, std::sync::Arc::new(|_, _| {}), None)
+        .map_err(|e| e.to_string())?;
+    let fields = proc_.describe().map(|d| d.connection_fields);
+    proc_.close();
+    fields.map_err(|e| e.to_string())
 }
 
 /// Add one profile to its section of profiles.yml, refusing to overwrite an existing one.
@@ -505,8 +514,8 @@ fn add_profile(
 }
 
 /// `dre init`.
-pub fn init(profiles_dir: Option<&Path>, printer: &Printer) -> ExitCode {
-    match init_inner(profiles_dir, printer, std::io::stdin().lock()) {
+pub fn init(ctx: &dre_core::Context, profiles_dir: Option<&Path>, printer: &Printer) -> ExitCode {
+    match init_inner(ctx, profiles_dir, printer, std::io::stdin().lock()) {
         Ok(()) => crate::exit::ok(),
         Err(e) => {
             printer.error(&e);
@@ -515,11 +524,16 @@ pub fn init(profiles_dir: Option<&Path>, printer: &Printer) -> ExitCode {
     }
 }
 
-fn init_inner(profiles_dir: Option<&Path>, printer: &Printer, input: impl BufRead) -> Result<(), String> {
+fn init_inner(
+    ctx: &dre_core::Context,
+    profiles_dir: Option<&Path>,
+    printer: &Printer,
+    input: impl BufRead,
+) -> Result<(), String> {
     let mut p = Prompter { input };
-    let index = Index::load()?;
+    let index = Index::load(ctx)?;
     let profiles_path =
-        dre_core::profiles::profiles_dir(profiles_dir).join(dre_core::profiles::PROFILES_FILE);
+        dre_core::profiles::profiles_dir(profiles_dir, ctx.env()).join(dre_core::profiles::PROFILES_FILE);
     eprintln!("Welcome to DRE. This sets up a connection, installs its plugin and can start a project.\n");
 
     let sources = choices(&index, PluginKind::Source);
@@ -529,7 +543,7 @@ fn init_inner(profiles_dir: Option<&Path>, printer: &Printer, input: impl BufRea
     eprintln!("Which database do you want to report from?");
     // Without `allow_none`, `pick` returns exactly one choice.
     let source = p.pick("Source (number or name)", &sources, false)?[0];
-    let fields = install_and_describe(source, printer)?;
+    let fields = install_and_describe(ctx, source, printer)?;
     let profile = p.ask("Name for this connection profile", Some("warehouse"))?;
     let target = p.ask("Target (environment) name", Some("dev"))?;
     eprintln!("\nConnection details for `{}`.", source.name());
@@ -563,7 +577,7 @@ fn init_inner(profiles_dir: Option<&Path>, printer: &Printer, input: impl BufRea
              Pick any number (e.g. 1,3), or press Enter for none."
         );
         for d in p.pick("Destinations", &dests, true)? {
-            let fields = install_and_describe(d, printer)?;
+            let fields = install_and_describe(ctx, d, printer)?;
             let name = p.ask(
                 &format!("Profile name for `{}`", d.name()),
                 Some(&format!("{}_{}", d.name(), "out")),

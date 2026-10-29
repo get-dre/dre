@@ -19,6 +19,8 @@ use clap::{Args, Parser, Subcommand};
 use dre_core::codes::Code;
 use dre_core::project::{self, LoadOptions};
 use dre_core::settings;
+use dre_core::start::{Checks, NeedPlugins, ProjectRequest};
+use dre_core::{Context, Env};
 
 #[derive(Parser)]
 #[command(name = "dre", version = dre_core::version(), about = "DRE, the Declarative Reporting Engine: SQL in, formatted files out")]
@@ -44,7 +46,7 @@ struct Cli {
 }
 
 impl Cli {
-    fn printer(&self) -> output::Printer {
+    fn printer(&self, secrets: dre_core::secrets::Secrets) -> output::Printer {
         let v = self.log_level.unwrap_or(if self.verbose {
             output::Verbosity::Debug
         } else if self.quiet {
@@ -52,7 +54,7 @@ impl Cli {
         } else {
             output::Verbosity::Info
         });
-        output::Printer::new(v, self.log_format, self.color)
+        output::Printer::new(v, self.log_format, self.color, secrets)
     }
 }
 
@@ -371,20 +373,29 @@ struct ProjectArgs {
 
 impl ProjectArgs {
     /// `--timezone`, else `DRE_TIMEZONE`.
-    fn timezone(&self) -> Option<String> {
-        settings::flag_or_env(self.timezone.as_deref(), "--timezone", settings::TIMEZONE).map(|(v, _)| v)
+    fn timezone(&self, env: &Env) -> Option<String> {
+        settings::flag_or_env(env, self.timezone.as_deref(), "--timezone", settings::TIMEZONE).map(|(v, _)| v)
     }
 
-    fn load_options(&self) -> LoadOptions {
+    fn load_options(&self, env: &Env) -> LoadOptions {
         LoadOptions {
             profiles_dir: self.profiles_dir.clone(),
             target: self.target.clone(),
             vars: self.vars.iter().cloned().collect(),
             target_path: self.target_path.clone(),
-            date: run_date(),
-            scheduled_at: run_at().ok().flatten(),
-            timezone: self.timezone(),
-            settings: settings::run_settings(self.timezone.as_deref()),
+            date: settings::run_date(env),
+            scheduled_at: settings::run_at(env).ok().flatten(),
+            timezone: self.timezone(env),
+            settings: settings::run_settings(env, self.timezone.as_deref()),
+        }
+    }
+
+    /// The project as core's commands take it.
+    fn request(&self, env: &Env) -> ProjectRequest {
+        ProjectRequest {
+            dir: self.project_dir.clone(),
+            load: self.load_options(env),
+            install: !self.no_auto_install,
         }
     }
 }
@@ -447,14 +458,17 @@ struct CompileArgs {
 fn main() -> ExitCode {
     dre_protocol::host::set_core_version(dre_core::version());
     let cli = Cli::parse();
-    let printer = cli.printer();
+    // The one place DRE reads its environment: every command gets it through `ctx`.
+    let ctx = Context::subprocess(Env::from_process());
+    let env = ctx.env();
+    let printer = cli.printer(ctx.secrets().clone());
     let project_args = match &cli.command {
         Command::Validate(a) => Some(&a.project),
         Command::Run(a) => Some(&a.project),
         Command::Compile(a) => Some(&a.project),
         _ => None,
     };
-    if let Some(t) = project_args.and_then(ProjectArgs::timezone)
+    if let Some(t) = project_args.and_then(|p| p.timezone(env))
         && let Err(e) = dre_core::dates::parse_tz(&t)
     {
         let from = if project_args.is_some_and(|p| p.timezone.is_some()) {
@@ -466,38 +480,40 @@ fn main() -> ExitCode {
         return exit::not_started();
     }
     if project_args.is_some()
-        && let Err(e) = run_at()
+        && let Err(e) = settings::run_at(env)
     {
         printer.error(&e);
         return exit::not_started();
     }
     match cli.command {
         Command::Explain(a) => explain(&a.code),
-        Command::History(a) => history::history(a),
-        Command::Unlock(a) => history::unlock(a),
-        Command::Release(a) => release(a, &printer),
-        Command::Validate(a) => validate(a, &printer),
-        Command::Run(a) => run(*a, printer),
-        Command::Compile(a) => compile(a, printer),
-        Command::Query(a) => query(a, &printer),
-        Command::Catalog(a) => catalog(a, &printer),
-        Command::Mcp(a) => extensions::handoff("mcp", a, &printer),
-        Command::Extension(a) => extensions::manage(a, &printer),
-        Command::Clean(a) => clean(a),
-        Command::Ls(a) => ls::ls(a),
-        Command::Schedule(schedule::ScheduleCommand::Ls(a)) => schedule::ls(a),
-        Command::System(system::SystemCommand::Update(a)) => system::update(a, &printer),
-        Command::Deps(a) => deps(a, &printer),
-        Command::Init(a) => init::init(a.profiles_dir.as_deref(), &printer),
+        Command::History(a) => history::history(&ctx, a),
+        Command::Unlock(a) => history::unlock(&ctx, a),
+        Command::Release(a) => release(&ctx, a, &printer),
+        Command::Validate(a) => validate(&ctx, a, &printer),
+        Command::Run(a) => run(&ctx, *a, printer),
+        Command::Compile(a) => compile(&ctx, a, printer),
+        Command::Query(a) => query(&ctx, a, &printer),
+        Command::Catalog(a) => catalog(&ctx, a, &printer),
+        Command::Mcp(a) => extensions::handoff(&ctx, "mcp", a, &printer),
+        Command::Extension(a) => extensions::manage(&ctx, a, &printer),
+        Command::Clean(a) => clean(&ctx, a),
+        Command::Ls(a) => ls::ls(&ctx, a),
+        Command::Schedule(schedule::ScheduleCommand::Ls(a)) => schedule::ls(&ctx, a),
+        Command::System(system::SystemCommand::Update(a)) => system::update(&ctx, a, &printer),
+        Command::Deps(a) => deps(&ctx, a, &printer),
+        Command::Init(a) => init::init(&ctx, a.profiles_dir.as_deref(), &printer),
         Command::New(a) => init::new(&a.dir, a.profile, a.plugin, &printer),
-        Command::Plugin(PluginCommand::List) => plugin_list(),
+        Command::Plugin(PluginCommand::List) => plugin_list(&ctx),
         Command::Plugin(PluginCommand::Install(a)) => {
-            plugins::install(&a.plugin, &a.project_dir, false, &printer)
+            plugins::install(&ctx, &a.plugin, &a.project_dir, false, &printer)
         }
         Command::Plugin(PluginCommand::Update(a)) => {
-            plugins::install(&a.plugin, &a.project_dir, true, &printer)
+            plugins::install(&ctx, &a.plugin, &a.project_dir, true, &printer)
         }
-        Command::Plugin(PluginCommand::Remove(a)) => plugins::remove(&a.plugin, &a.project_dir, &printer),
+        Command::Plugin(PluginCommand::Remove(a)) => {
+            plugins::remove(&ctx, &a.plugin, &a.project_dir, &printer)
+        }
     }
 }
 
@@ -544,12 +560,15 @@ fn explain(code: &str) -> ExitCode {
     exit::not_started()
 }
 
-fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
+fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCode {
+    let req = a.project.request(ctx.env());
     // A failed or skipped install isn't fatal here: the load reports a missing package with
     // the rest.
-    install_packages(&a.project, printer);
+    if req.install {
+        dre_core::start::install_packages(&req.dir, printer);
+    }
     let selector = selection(&a.select, &a.selector);
-    let (project, mut diags) = project::load(&a.project.project_dir, &a.project.load_options());
+    let (project, mut diags) = project::load_with(&req.dir, &req.load, ctx);
     // validate checks every report, so templates that don't render are its errors too.
     for d in project.iter().flat_map(|p| p.parse_errors.values().flatten()) {
         diags.push(d.clone());
@@ -559,23 +578,23 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
         .map(|p| dre_core::manifest::report_errors(p, &diags))
         .unwrap_or_default();
     if let Some(p) = &project {
-        dre_core::secrets::set_enabled(p.mask_secrets);
+        ctx.secrets().set_enabled(p.mask_secrets);
     }
-    if let Err(e) = write_manifest(project.as_ref(), &report_errors, &a.project) {
+    if let Err(e) = dre_core::start::write_manifest(ctx, project.as_ref(), &report_errors, &req) {
         diags.error(Code::TargetPathUnwritable, None, None, e);
     }
     if let Some(p) = &project {
         // Plugins aren't installed when the project already has errors, so a missing one is then
         // only a warning; the option checks run either way, so every problem shows in one pass.
         let offline = a.project.no_auto_install || diags.has_errors();
-        plugins::check_for_validate(p, !a.project.no_auto_install, &mut diags, printer);
-        check_plugin_uses(p, &a.project, &mut diags);
-        dre_core::options::check(p, offline, &mut diags);
+        plugins::check_for_validate(ctx, p, req.install, &mut diags, printer);
+        dre_core::start::check_plugin_uses(ctx, p, req.install, &mut diags);
+        dre_core::options::check(ctx, p, offline, &mut diags);
     }
     // Only a project that checks out gets compiled.
     let (plans, targets) = match &project {
         Some(p) if !diags.has_errors() => {
-            compile_for_validate(p, selector.as_deref(), &a.set, &a.project, &mut diags)
+            compile_for_validate(ctx, p, selector.as_deref(), &a.set, &a.project, &mut diags)
         }
         _ => (Vec::new(), None),
     };
@@ -603,7 +622,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
                 .collect()
         };
         if a.all_targets || !diags.has_errors() {
-            dre_core::options::check_connections(p, &entries, &mut diags);
+            dre_core::options::check_connections(ctx, p, &entries, &mut diags);
         }
     }
     // `--strict`: warnings count as errors.
@@ -630,7 +649,9 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
         });
         println!(
             "{}",
-            dre_core::secrets::to_json_pretty(&out).expect("a JSON value serializes")
+            ctx.secrets()
+                .to_json_pretty(&out)
+                .expect("a JSON value serializes")
         );
     } else {
         for d in diags.sorted() {
@@ -651,7 +672,11 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
             );
         }
         if let Some(p) = &project {
-            printer.line(output::Tone::Note, "Profiles", &profiles_line(&p.profiles));
+            printer.line(
+                output::Tone::Note,
+                "Profiles",
+                &dre_core::start::profiles_line(&p.profiles),
+            );
             let line = targets.as_ref().map_or_else(|| target_line(p), |t| t.line());
             printer.line(output::Tone::Note, "Target", &line);
             for s in p.settings.lines() {
@@ -676,7 +701,7 @@ fn validate(a: ValidateArgs, printer: &output::Printer) -> ExitCode {
     if a.live
         && let Some(project) = project
     {
-        return validate_live(&project, selector, a.set, &a.project, printer.clone());
+        return validate_live(ctx, &project, selector, a.set, &a.project, printer.clone());
     }
     exit::ok()
 }
@@ -708,6 +733,7 @@ impl dre_core::run::Ui for Collect {
 /// `validate` compiles the selection (every Set of every report by default); a Binding that
 /// doesn't render is an error.
 fn compile_for_validate(
+    ctx: &Context,
     project: &dre_core::project::Project,
     selector: Option<&str>,
     set: &Option<String>,
@@ -719,14 +745,14 @@ fn compile_for_validate(
         set: Some(set.clone().unwrap_or_else(|| "all".into())),
         target: p.target.clone(),
         vars: p.vars.iter().cloned().collect(),
-        date: run_date(),
-        scheduled_at: run_at().ok().flatten(),
-        timezone: p.timezone(),
+        date: settings::run_date(ctx.env()),
+        scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
+        timezone: p.timezone(ctx.env()),
         dry_run: true,
         ..Default::default()
     };
     let mut ui = Collect::default();
-    let summary = dre_core::run::run(project, &opts, &mut ui);
+    let summary = dre_core::run::run(ctx, project, &opts, &mut ui);
     if let Some(e) = summary.error {
         let code = if summary.missing_entry {
             Code::MissingTargetEntry
@@ -771,31 +797,32 @@ fn compile_for_validate(
     (ui.plans, ui.targets)
 }
 
-fn catalog(a: CatalogArgs, printer: &output::Printer) -> ExitCode {
-    json_command(&a.project, a.output, printer, |project| {
+fn catalog(ctx: &Context, a: CatalogArgs, printer: &output::Printer) -> ExitCode {
+    json_command(ctx, &a.project, a.output, printer, |project| {
         let request =
             std::fs::read_to_string(project.root.join(&a.tables_file)).map_err(|e| e.to_string())?;
         let request =
             serde_json::from_str(&request).map_err(|e| format!("invalid catalogue request: {e}"))?;
-        dre_core::catalog::build(project, &a.profile, &request)
+        dre_core::catalog::build(ctx, project, &a.profile, &request)
     })
 }
 
-fn query(a: QueryArgs, printer: &output::Printer) -> ExitCode {
-    json_command(&a.project, a.output, printer, |project| {
+fn query(ctx: &Context, a: QueryArgs, printer: &output::Printer) -> ExitCode {
+    json_command(ctx, &a.project, a.output, printer, |project| {
         let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
-        dre_core::query::execute(project, &a.profile, &sql, a.max_rows)
+        dre_core::query::execute(ctx, project, &a.profile, &sql, a.max_rows)
     })
 }
 
 /// `dre query` and `dre catalog`: load the project, build one JSON document, write it.
 fn json_command(
+    ctx: &Context,
     args: &ProjectArgs,
     output: OutputFile,
     printer: &output::Printer,
     build: impl FnOnce(&dre_core::project::Project) -> Result<serde_json::Value, String>,
 ) -> ExitCode {
-    let Some((project, _)) = load_project(args, printer) else {
+    let Some((project, _)) = dre_core::start::load_project(ctx, &args.request(ctx.env()), printer) else {
         return exit::not_started();
     };
     let file = output.output_file;
@@ -822,12 +849,13 @@ fn json_command(
 }
 
 /// `dre compile`: render the selection into target/compiled/ and list the files.
-fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
-    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
+fn compile(ctx: &Context, a: CompileArgs, mut printer: output::Printer) -> ExitCode {
+    let req = a.project.request(ctx.env());
+    let Some((project, manifest_checksum)) = dre_core::start::load_project(ctx, &req, &printer) else {
         return exit::not_started();
     };
-    if !ready_plugins(&project, &a.project, NeedPlugins::IfInstalling, &printer)
-        || !check_project(&project, &a.project, &printer, Checks::PluginUses)
+    if !dre_core::start::ready_plugins(ctx, &project, req.install, NeedPlugins::IfInstalling, &printer)
+        || !dre_core::start::check_project(ctx, &project, req.install, Checks::PluginUses, &printer)
     {
         return exit::not_started();
     }
@@ -836,9 +864,9 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
         set: a.set,
         target: a.project.target.clone(),
         vars: a.project.vars.iter().cloned().collect(),
-        date: run_date(),
-        scheduled_at: run_at().ok().flatten(),
-        timezone: a.project.timezone(),
+        date: settings::run_date(ctx.env()),
+        scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
+        timezone: a.project.timezone(ctx.env()),
         dry_run: true,
         interactive: {
             use std::io::IsTerminal;
@@ -847,7 +875,7 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
         manifest_checksum,
         ..Default::default()
     };
-    let summary = dre_core::run::run(&project, &opts, &mut printer);
+    let summary = dre_core::run::run(ctx, &project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
         return ExitCode::from(summary.exit_code());
@@ -857,6 +885,7 @@ fn compile(a: CompileArgs, mut printer: output::Printer) -> ExitCode {
 }
 
 fn validate_live(
+    ctx: &Context,
     project: &dre_core::project::Project,
     selector: Option<String>,
     set: Option<String>,
@@ -868,13 +897,13 @@ fn validate_live(
         set,
         target: p.target.clone(),
         vars: p.vars.iter().cloned().collect(),
-        date: run_date(),
-        scheduled_at: run_at().ok().flatten(),
-        timezone: p.timezone(),
+        date: settings::run_date(ctx.env()),
+        scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
+        timezone: p.timezone(ctx.env()),
         live_check: true,
         ..Default::default()
     };
-    let summary = dre_core::run::run(project, &opts, &mut printer);
+    let summary = dre_core::run::run(ctx, project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
         return ExitCode::from(summary.exit_code());
@@ -894,11 +923,11 @@ fn plural(n: usize) -> &'static str {
 }
 
 /// The project's plugin packages when run inside a project, otherwise the shared cache.
-fn plugin_list() -> ExitCode {
+fn plugin_list(ctx: &Context) -> ExitCode {
     let here = std::path::Path::new(".");
     let in_project = here.join(dre_core::project::PROJECT_FILE).is_file();
-    let dir = dre_core::plugins::plugins_dir(in_project.then_some(here));
-    let found = dre_core::plugins::discover(&dir);
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), in_project.then_some(here));
+    let found = dre_core::plugins::discover(&dir, &dre_core::plugins::Prober::default());
     if found.is_empty() {
         println!("No plugin packages installed in {}", dir.display());
         return exit::ok();
@@ -912,19 +941,31 @@ fn plugin_list() -> ExitCode {
         "PATH".into(),
     ]];
     for p in found {
-        let first = p.provides.first();
-        let (version, protocol) =
-            match dre_protocol::host::PluginProcess::start_for(&p.path, first, quiet.clone(), None) {
-                Ok(proc_) => {
-                    let info = proc_.info().clone();
-                    let _ = proc_.close();
-                    (info.version, format!("v{}", info.protocol_version))
-                }
-                Err(e) => (
-                    p.version.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
-                    format!("error: {e}"),
-                ),
-            };
+        let started = match p.provides.first() {
+            Some(first) => {
+                let plugin = dre_core::plugins::Located {
+                    path: p.path.clone(),
+                    plugin: first.clone(),
+                    package: p.name.clone(),
+                };
+                ctx.host()
+                    .start(&plugin, quiet.clone(), None)
+                    .map_err(|e| e.to_string())
+            }
+            // An executable that couldn't say what it provides doesn't start.
+            None => Err(format!("can't ask {} what it provides", p.path.display())),
+        };
+        let (version, protocol) = match started {
+            Ok(proc_) => {
+                let info = proc_.info().clone();
+                proc_.close();
+                (info.version, format!("v{}", info.protocol_version))
+            }
+            Err(e) => (
+                p.version.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
+                format!("error: {e}"),
+            ),
+        };
         let provides: Vec<String> = p.provides.iter().map(|i| i.to_string()).collect();
         rows.push([
             p.name,
@@ -938,190 +979,14 @@ fn plugin_list() -> ExitCode {
     exit::ok()
 }
 
-/// Load and validate the project; print problems. `None` when it can't run.
-/// Which profiles.yml a project uses, and why.
-fn profiles_line(p: &dre_core::profiles::Profiles) -> String {
-    let missing = if p.exists() { "" } else { ", not found" };
-    format!("{} (from {}{missing})", p.path.display(), p.found_by)
-}
-
 /// The run's target and where it came from, for when the profiles' entries aren't known.
 fn target_line(p: &dre_core::project::Project) -> String {
     format!("{} ({})", p.target_name, p.target_from)
 }
 
-/// What a project command needs of the project's plugins before it starts.
-#[derive(Clone, Copy)]
-enum NeedPlugins {
-    /// All of them: installed, or with installing off, already there (`dre run`, `dre release`).
-    All,
-    /// Installed unless installing is off; then a missing one is reported by the Binding that
-    /// needs it (`dre compile`, whose templates may not query).
-    IfInstalling,
-}
-
-/// Install the project's macro packages, unless installing is off. False after printing why.
-fn install_packages(args: &ProjectArgs, printer: &output::Printer) -> bool {
-    args.no_auto_install || plugins::sync_packages(&args.project_dir, printer)
-}
-
-/// The start of every project command but `validate` and `deps`: [`install_packages`], then
-/// [`load_for_run`].
-fn load_project(
-    args: &ProjectArgs,
-    printer: &output::Printer,
-) -> Option<(dre_core::project::Project, Option<String>)> {
-    if !install_packages(args, printer) {
-        return None;
-    }
-    load_for_run(args, printer)
-}
-
-/// Install or check the project's plugins, as `need` says. False after printing why.
-fn ready_plugins(
-    project: &dre_core::project::Project,
-    args: &ProjectArgs,
-    need: NeedPlugins,
-    printer: &output::Printer,
-) -> bool {
-    let install = !args.no_auto_install;
-    match need {
-        NeedPlugins::All => plugins::ensure(project, install, false, printer),
-        NeedPlugins::IfInstalling => !install || plugins::ensure(project, true, false, printer),
-    }
-}
-
-/// What [`check_project`] checks.
-#[derive(Clone, Copy, PartialEq)]
-enum Checks {
-    /// The project's plugins are declared (`dre compile`).
-    PluginUses,
-    /// That, then every connection's settings (`dre run`).
-    PluginUsesAndOptions,
-}
-
-/// Check the project as `checks` says. False after printing the diagnostics, when there are
-/// errors.
-fn check_project(
-    project: &dre_core::project::Project,
-    args: &ProjectArgs,
-    printer: &output::Printer,
-    checks: Checks,
-) -> bool {
-    let mut diags = dre_core::Diagnostics::default();
-    check_plugin_uses(project, args, &mut diags);
-    if checks == Checks::PluginUsesAndOptions && !diags.has_errors() {
-        dre_core::options::check(project, false, &mut diags);
-    }
-    report_diags(&diags, printer)
-}
-
-/// Load the project for `compile` and `run`, writing its manifest; `None` (after printing
-/// why) when it can't run. Also returns the SHA-256 of the manifest written.
-fn load_for_run(
-    args: &ProjectArgs,
-    printer: &output::Printer,
-) -> Option<(dre_core::project::Project, Option<String>)> {
-    let (project, diags) = project::load(&args.project_dir, &args.load_options());
-    if let Some(p) = &project {
-        dre_core::secrets::set_enabled(p.mask_secrets);
-    }
-    let errors = project
-        .as_ref()
-        .map(|p| dre_core::manifest::report_errors(p, &diags))
-        .unwrap_or_default();
-    let checksum = match write_manifest(project.as_ref(), &errors, args) {
-        Ok(c) => c,
-        Err(e) => {
-            printer.error(&e);
-            return None;
-        }
-    };
-    for d in diags.sorted() {
-        // Unmanaged reports warn again when they run.
-        if d.severity == dre_core::Severity::Warning && d.code == "unmanaged-report" {
-            continue;
-        }
-        printer.diag(d);
-    }
-    if diags.has_errors() {
-        printer.error(&format!(
-            "the project has {} error(s); fix them before running (see `dre validate`)",
-            diags.error_count()
-        ));
-        return None;
-    }
-    project.map(|p| (p, checksum))
-}
-
-/// Write the whole project's manifest into its target folder, or, when the project didn't load,
-/// remove a stale one. The error names the target path and where it was set.
-fn write_manifest(
-    project: Option<&dre_core::project::Project>,
-    errors: &dre_core::manifest::ReportErrors,
-    args: &ProjectArgs,
-) -> Result<Option<String>, String> {
-    let Some(p) = project else {
-        let root = &args.project_dir;
-        let from_file = dre_core::target::project_value(root);
-        if let Ok(t) = dre_core::target::resolve(root, args.target_path.as_deref(), from_file.as_deref()) {
-            dre_core::manifest::remove(&t.dir);
-        }
-        return Ok(None);
-    };
-    dre_core::manifest::write(p, errors)
-        .map(Some)
-        .map_err(|e| format!("{e} (target path from {})", p.target_source))
-}
-
 /// A path under the project as people read it: relative to the project when it's inside it.
 fn shown(project: &dre_core::project::Project, p: &std::path::Path) -> PathBuf {
     dre_core::slash(p.strip_prefix(&project.root).unwrap_or(p))
-}
-
-/// Check that the declared plugin packages provide every plugin the project uses, naming the
-/// package to add from DRE's registry (unless installing is off, which also means offline).
-fn check_plugin_uses(
-    project: &dre_core::project::Project,
-    p: &ProjectArgs,
-    diags: &mut dre_core::Diagnostics,
-) {
-    dre_core::plugins::check_uses(project, diags);
-    if !p.no_auto_install {
-        dre_core::manager::explain_undeclared(diags);
-    }
-}
-
-/// Print `diags`; false (after saying so) when there are errors.
-fn report_diags(diags: &dre_core::Diagnostics, printer: &output::Printer) -> bool {
-    for d in diags.sorted() {
-        printer.diag(d);
-    }
-    if diags.has_errors() {
-        printer.error(&format!(
-            "the project has {} error(s); fix them before running (see `dre validate`)",
-            diags.error_count()
-        ));
-        return false;
-    }
-    true
-}
-
-pub(crate) fn run_date() -> Option<chrono::NaiveDate> {
-    settings::env(settings::RUN_DATE).and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-}
-
-/// `DRE_RUN_AT`: the instant a scheduled run was scheduled for (RFC 3339). Checked before any
-/// project command starts, so callers can treat an error as unset.
-pub(crate) fn run_at() -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
-    match settings::env(settings::RUN_AT) {
-        Some(v) => chrono::DateTime::parse_from_rfc3339(&v)
-            .map(|t| Some(t.with_timezone(&chrono::Utc)))
-            .map_err(|_| {
-                format!("DRE_RUN_AT: `{v}` isn't an RFC 3339 date-time (e.g. 2026-09-01T06:00:00Z)")
-            }),
-        None => Ok(None),
-    }
 }
 
 /// `--rate N/unit`.
@@ -1130,16 +995,17 @@ fn parse_rate(s: &str) -> Result<dre_core::rate::Rate, String> {
 }
 
 /// `dre release`: deliver a run's held deliveries.
-fn release(a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
-    let Some((project, _)) = load_project(&a.project, printer) else {
+fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
+    let req = a.project.request(ctx.env());
+    let Some((project, _)) = dre_core::start::load_project(ctx, &req, printer) else {
         return exit::not_started();
     };
-    if !ready_plugins(&project, &a.project, NeedPlugins::All, printer) {
+    if !dre_core::start::ready_plugins(ctx, &project, req.install, NeedPlugins::All, printer) {
         return exit::not_started();
     }
     let by =
-        a.by.or_else(|| std::env::var("USER").ok())
-            .or_else(|| std::env::var("USERNAME").ok())
+        a.by.or_else(|| ctx.env().setting("USER"))
+            .or_else(|| ctx.env().setting("USERNAME"))
             .unwrap_or_else(|| "unknown".into());
     let opts = dre_core::release::ReleaseOptions {
         report: a.report.clone(),
@@ -1151,7 +1017,7 @@ fn release(a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
         rate: a.rate,
         cancel: {
             let cancel = dre_core::engine::CancelToken::new();
-            signals::watch(cancel.clone());
+            signals::watch(cancel.clone(), ctx.host().clone());
             cancel
         },
     };
@@ -1160,7 +1026,7 @@ fn release(a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
     let result = std::thread::scope(|s| {
         let worker = s.spawn(|| {
             let events = dre_core::engine::Events::new(tx);
-            dre_core::release::release(&project, &opts, &events)
+            dre_core::release::release(ctx, &project, &opts, &events)
         });
         let mut ui = printer.clone();
         for e in rx {
@@ -1210,124 +1076,50 @@ fn release(a: ReleaseArgs, printer: &output::Printer) -> ExitCode {
     }
 }
 
-fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
+fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
     use std::io::IsTerminal;
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
-    signals::watch(cancel.clone());
-    let Some((project, manifest_checksum)) = load_project(&a.project, &printer) else {
-        return exit::not_started();
-    };
-    if let Some(path) = &a.output_json {
-        let value = path.to_string_lossy();
-        if let Err(error) = dre_core::target::resolve(&project.root, Some(&value), None) {
-            printer.error(&format!("--output-json: {error}"));
-            return exit::not_started();
-        }
-    }
-    // Run logs start before the plugins are installed, so the log files record installing them.
-    printer.log_runs();
-    for s in project.settings.lines() {
-        printer.detail(output::Tone::Note, "Setting", &s);
-    }
-    if !ready_plugins(&project, &a.project, NeedPlugins::All, &printer) {
-        return exit::not_started();
-    }
-    // `--timeout`, else `DRE_RUN_TIMEOUT`, else `flags: run_timeout`.
-    let run_timeout = match dre_core::settings::flag_or_env(
-        a.timeout.as_deref(),
-        "--timeout",
-        dre_core::settings::RUN_TIMEOUT,
-    ) {
-        Some((v, from)) => match dre_protocol::delivery::parse_duration(&serde_json::Value::String(v)) {
-            Ok(d) if !d.is_zero() => Some(d),
-            _ => {
-                printer.error(&format!(
-                    "{from} must be a duration such as `2h` or `90m`, or seconds"
-                ));
-                return exit::not_started();
-            }
+    signals::watch(cancel.clone(), ctx.host().clone());
+    let req = dre_core::start::RunRequest {
+        project: a.project.request(ctx.env()),
+        timeout: a.timeout,
+        keep_runs: a.keep_runs,
+        row_concurrency: a.row_concurrency,
+        threads: a.threads,
+        options: dre_core::run::RunOptions {
+            selector: selection(&a.select, &a.selector),
+            set: a.set,
+            target: a.project.target.clone(),
+            profile: a.profile,
+            vars: a.project.vars.iter().cloned().collect(),
+            output_name: a.output_name,
+            output_path: a.output_path,
+            dry_run: a.dry_run,
+            no_deliver: a.no_deliver || a.from_results.is_some(),
+            output_json: a.output_json,
+            from_results: a.from_results,
+            hold: a.hold,
+            retry_failed: a.retry_failed,
+            only_keys: a.only_keys,
+            limit_rows: a.limit_rows,
+            unmask: a.unmask,
+            rate: a.rate,
+            preview: a.preview,
+            accept_schema_change: a.accept_schema_change,
+            interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
+            timezone: a.project.timezone(ctx.env()),
+            live_check: false,
+            schedule: a.schedule,
+            cancel,
+            ..Default::default()
         },
-        None => project.run_timeout,
     };
-    // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
-    let count = |flag: &Option<String>, name, var| {
-        count_setting(flag.as_deref(), name, var)
-            .map_err(|e| printer.error(&e))
-            .ok()
+    let (summary, run_timeout) = match dre_core::start::run(ctx, req, &mut printer) {
+        dre_core::start::Started::NotStarted => return exit::not_started(),
+        dre_core::start::Started::Cancelled(reason) => return ExitCode::from(reason.exit_code()),
+        dre_core::start::Started::Ran { summary, timeout } => (summary, timeout),
     };
-    let Some(keep_runs) = count(&a.keep_runs, "--keep-runs", dre_core::settings::KEEP_RUNS) else {
-        return exit::not_started();
-    };
-    let Some(row_concurrency) = count(
-        &a.row_concurrency,
-        "--row-concurrency",
-        dre_core::settings::ROW_CONCURRENCY,
-    ) else {
-        return exit::not_started();
-    };
-    let Some(threads) = count(&a.threads, "--threads", dre_core::settings::THREADS) else {
-        return exit::not_started();
-    };
-    if !check_project(&project, &a.project, &printer, Checks::PluginUsesAndOptions) {
-        return exit::not_started();
-    }
-    let opts = dre_core::run::RunOptions {
-        selector: selection(&a.select, &a.selector),
-        set: a.set,
-        target: a.project.target.clone(),
-        profile: a.profile,
-        vars: a.project.vars.iter().cloned().collect(),
-        output_name: a.output_name,
-        output_path: a.output_path,
-        dry_run: a.dry_run,
-        no_deliver: a.no_deliver || a.from_results.is_some(),
-        output_json: a.output_json,
-        from_results: a.from_results,
-        row_concurrency,
-        hold: a.hold,
-        retry_failed: a.retry_failed,
-        only_keys: a.only_keys,
-        limit_rows: a.limit_rows,
-        unmask: a.unmask,
-        rate: a.rate,
-        preview: a.preview,
-        accept_schema_change: a.accept_schema_change,
-        interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
-        date: run_date(),
-        scheduled_at: run_at().ok().flatten(),
-        timezone: a.project.timezone(),
-        live_check: false,
-        schedule: a.schedule,
-        manifest_checksum,
-        cancel,
-        keep_runs,
-        threads,
-    };
-    if let Some(name) = &opts.schedule
-        && !project.schedules.iter().any(|e| &e.name == name)
-    {
-        printer.error(&dre_core::run::unknown_schedule(&project, name));
-        return exit::not_started();
-    }
-    // Each Binding records its own date, in its own timezone; this line only logs the request.
-    let date = opts
-        .date
-        .or(opts.scheduled_at.map(|t| t.date_naive()))
-        .unwrap_or_else(|| chrono::Utc::now().date_naive());
-    let mut params = serde_json::to_value(opts.params(date)).unwrap_or_default();
-    params["target"] = serde_json::json!(project.target_name);
-    params["profiles"] = serde_json::json!(project.profiles.path);
-    params["target_path"] = serde_json::json!(project.target_dir);
-    printer.log_params(&params);
-    printer.detail(output::Tone::Note, "Profiles", &profiles_line(&project.profiles));
-    signals::set_timeout(run_timeout);
-    if let Some(reason) = opts.cancel.reason() {
-        // Cancelled before anything ran.
-        printer.error("the run was cancelled before it started");
-        return ExitCode::from(reason.exit_code());
-    }
-    let summary = dre_core::run::run(&project, &opts, &mut printer);
     if let Some(e) = &summary.error {
         printer.error(e);
         return ExitCode::from(summary.exit_code());
@@ -1363,10 +1155,10 @@ fn run(a: RunArgs, mut printer: output::Printer) -> ExitCode {
     ExitCode::from(summary.exit_code())
 }
 
-fn clean(a: CleanArgs) -> ExitCode {
+fn clean(ctx: &Context, a: CleanArgs) -> ExitCode {
     let root = &a.project_dir;
     let from_file = dre_core::target::project_value(root);
-    let t = match dre_core::target::resolve(root, a.target_path.as_deref(), from_file.as_deref()) {
+    let t = match dre_core::target::resolve(root, a.target_path.as_deref(), from_file.as_deref(), ctx.env()) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {e}");
@@ -1374,7 +1166,8 @@ fn clean(a: CleanArgs) -> ExitCode {
         }
     };
     if a.prune {
-        let keep = match count_setting(
+        let keep = match dre_core::start::count_setting(
+            ctx.env(),
             a.keep_runs.as_deref(),
             "--keep-runs",
             dre_core::settings::KEEP_RUNS,
@@ -1422,41 +1215,25 @@ fn clean(a: CleanArgs) -> ExitCode {
     }
 }
 
-/// A count of 1 or more from `flag_name`, else the environment variable `var`; any fallback
-/// after that is the caller's.
-fn count_setting(
-    flag: Option<&str>,
-    flag_name: &'static str,
-    var: &'static str,
-) -> Result<Option<usize>, String> {
-    match dre_core::settings::flag_or_env(flag, flag_name, var) {
-        None => Ok(None),
-        Some((v, from)) => match v.trim().parse::<usize>() {
-            Ok(n) if n > 0 => Ok(Some(n)),
-            _ => Err(format!("{from} must be a whole number of 1 or more, got `{v}`")),
-        },
-    }
-}
-
 /// `dre deps` has no `--no-auto-install`, and it doesn't use [`load_project`]: it writes no
 /// manifest, and it syncs a project that has other errors, since it only needs what's declared.
-fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
-    if !plugins::sync_packages(&a.project_dir, printer) {
+fn deps(ctx: &Context, a: DepsArgs, printer: &output::Printer) -> ExitCode {
+    if !dre_core::start::install_packages(&a.project_dir, printer) {
         return exit::failed();
     }
     let opts = LoadOptions {
         profiles_dir: a.profiles_dir,
         ..Default::default()
     };
-    let (project, diags) = project::load(&a.project_dir, &opts);
+    let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
     let Some(project) = project else {
         for d in diags.sorted() {
             printer.diag(d);
         }
         return exit::not_started();
     };
-    if plugins::ensure(&project, true, true, printer) {
-        let extensions = match extensions::sync_declared(&a.project_dir, a.accept_proprietary, printer) {
+    if dre_core::start::sync_plugins(ctx, &project, true, true, printer) {
+        let extensions = match extensions::sync_declared(ctx, &a.project_dir, a.accept_proprietary, printer) {
             Ok(count) => count,
             Err(error) => {
                 printer.error(&error);
@@ -1476,28 +1253,6 @@ fn deps(a: DepsArgs, printer: &output::Printer) -> ExitCode {
         exit::ok()
     } else {
         exit::failed()
-    }
-}
-
-#[cfg(test)]
-mod count_setting_tests {
-    use super::count_setting;
-
-    #[test]
-    fn counts_are_one_or_more() {
-        let max = usize::MAX.to_string();
-        for flag in ["--keep-runs", "--row-concurrency", "--threads"] {
-            let parse = |v: &str| count_setting(Some(v), flag, "DRE_TEST_COUNT_UNSET");
-            assert_eq!(parse("1"), Ok(Some(1)));
-            assert_eq!(parse(&max), Ok(Some(usize::MAX)));
-            assert_eq!(parse(" 4 "), Ok(Some(4)));
-            for bad in ["0", "-1", "abc"] {
-                assert_eq!(
-                    parse(bad),
-                    Err(format!("{flag} must be a whole number of 1 or more, got `{bad}`"))
-                );
-            }
-        }
     }
 }
 

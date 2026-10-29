@@ -155,8 +155,8 @@ impl Context {
 
 /// A Jinja environment with everything core's templates read: `var()`, `run.*`, `target.name`,
 /// the date functions and the number filters. Undefined values are errors. The caller adds its
-/// loader, escaping and its own filters.
-pub fn environment(ctx: &Context) -> Result<Environment<'static>, String> {
+/// loader, escaping and its own filters. Number filter errors mask `secrets`.
+pub fn environment(ctx: &Context, secrets: &crate::secrets::Secrets) -> Result<Environment<'static>, String> {
     let mut env = Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
     crate::render::add_common(
@@ -164,6 +164,7 @@ pub fn environment(ctx: &Context) -> Result<Environment<'static>, String> {
         ctx.run_context()?,
         ctx.vars.clone(),
         ctx.cli_vars.clone(),
+        secrets,
     );
     if let Some(each) = &ctx.each {
         env.add_global("each", Value::from(minijinja::value::Serde(each.clone())));
@@ -246,7 +247,7 @@ mod tests {
 
     #[test]
     fn environment_reads_what_core_templates_read() {
-        let env = environment(&ctx()).unwrap();
+        let env = environment(&ctx(), &crate::secrets::Secrets::new(&crate::Env::default())).unwrap();
         let out = env
             .render_str(
                 "{{ run.report }}|{{ run.set }}|{{ target.name }}|{{ run.date }}|{{ run.timezone }}|{{ var('client') }}|{{ var('terms') + 1 }}|{{ 1234.5 | number(2) }}|{{ var('x', 'd') }}",

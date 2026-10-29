@@ -173,12 +173,12 @@ pub fn file_body(title: &str, text: &str) -> String {
 }
 
 /// One line for the log: the title and the start of the text, as plain text.
-pub fn excerpt(title: &str, text: &str, max: usize) -> String {
+pub fn excerpt(title: &str, text: &str, max: usize, secrets: &crate::secrets::Secrets) -> String {
     // Decode Markdown first so escaped values become literal again, then protect them before
     // flattening whitespace or truncating. Mask markers must not be parsed as Markdown.
     let plain = dre_protocol::markdown::to_plain(text);
-    let plain = crate::secrets::mask(&plain).replace('\n', " · ");
-    let title = crate::secrets::mask_message_title(title);
+    let plain = secrets.mask(&plain).replace('\n', " · ");
+    let title = secrets.mask_message_title(title);
     let line = format!("{title} — {plain}");
     if line.chars().count() <= max {
         line

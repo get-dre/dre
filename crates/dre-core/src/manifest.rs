@@ -567,7 +567,12 @@ fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
         calendar,
         locale: Default::default(),
     };
-    let limited = crate::render::Limited::new(context, project.vars.clone(), inputs.cli_vars.clone());
+    let limited = crate::render::Limited::new(
+        context,
+        project.vars.clone(),
+        inputs.cli_vars.clone(),
+        &inputs.process,
+    );
     let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for r in &project.reports {
         for p in r.bindings.iter().filter_map(|b| b.parsed.as_ref()) {
@@ -807,16 +812,16 @@ pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
 
 /// The manifest's text: pretty JSON, secrets masked, newline-terminated.
 #[must_use]
-pub fn render(doc: &Json) -> String {
+pub fn render(doc: &Json, secrets: &crate::secrets::Secrets) -> String {
     let mut doc = doc.clone();
-    crate::secrets::redact_json(&mut doc);
+    secrets.redact_json(&mut doc);
     format!("{doc:#}\n")
 }
 
 /// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of
 /// the bytes written.
 pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String> {
-    let text = render(&build(project, errors));
+    let text = render(&build(project, errors), project.inputs.process.secrets());
     let dir = &project.target_dir;
     crate::target::ensure(dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let dst = dir.join(FILE);

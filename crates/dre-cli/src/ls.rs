@@ -62,27 +62,28 @@ enum ResourceType {
 }
 
 /// Diagnostics go to stderr, so stdout holds only data.
-pub fn ls(a: LsArgs) -> ExitCode {
+pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
+    let env = ctx.env();
     let opts = LoadOptions {
         profiles_dir: a.profiles_dir.clone(),
         target_path: a.target_path.clone(),
         target: a.target.clone(),
         vars: a.vars.iter().cloned().collect(),
-        date: crate::run_date(),
-        scheduled_at: crate::run_at().ok().flatten(),
-        timezone: dre_core::settings::env(dre_core::settings::TIMEZONE),
-        settings: dre_core::settings::run_settings(None),
+        date: dre_core::settings::run_date(env),
+        scheduled_at: dre_core::settings::run_at(env).ok().flatten(),
+        timezone: env.setting(dre_core::settings::TIMEZONE),
+        settings: dre_core::settings::run_settings(env, None),
     };
-    let (project, diags) = project::load(&a.project_dir, &opts);
+    let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
     let Some(project) = project else {
         for d in diags.sorted() {
             eprintln!("{d}");
         }
         return crate::exit::not_started();
     };
-    dre_core::secrets::set_enabled(project.mask_secrets);
+    ctx.secrets().set_enabled(project.mask_secrets);
     if a.resource_type == ResourceType::Source {
-        return sources(&project, &a);
+        return sources(ctx, &project, &a);
     }
     let (reports, schedules) = match select(&project, &a) {
         Ok(found) => found,
@@ -95,9 +96,9 @@ pub fn ls(a: LsArgs) -> ExitCode {
         LsOutput::Json => {
             let errors = dre_core::manifest::report_errors(&project, &diags);
             let doc = dre_core::manifest::subset(&project, reports, &schedules, &errors);
-            print!("{}", dre_core::manifest::render(&doc));
+            print!("{}", dre_core::manifest::render(&doc, ctx.secrets()));
         }
-        LsOutput::Text => print!("{}", dre_core::secrets::mask(&table(&reports))),
+        LsOutput::Text => print!("{}", ctx.secrets().mask(&table(&reports))),
     }
     crate::exit::ok()
 }
@@ -165,7 +166,7 @@ fn select<'a>(project: &'a Project, a: &LsArgs) -> Result<Selected<'a>, String> 
 
 /// `--resource-type source`: one line per source table, or the manifest's `sources` (only those
 /// a `source:` selector names, when there is one).
-fn sources(project: &Project, a: &LsArgs) -> ExitCode {
+fn sources(ctx: &dre_core::Context, project: &Project, a: &LsArgs) -> ExitCode {
     let terms: Vec<String> = a
         .select
         .iter()
@@ -217,7 +218,7 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
     match a.output {
         LsOutput::Json => {
             let doc = serde_json::json!({"sources": all});
-            print!("{}", dre_core::manifest::render(&doc));
+            print!("{}", dre_core::manifest::render(&doc, ctx.secrets()));
         }
         LsOutput::Text => {
             let mut rows = vec![[
@@ -253,7 +254,7 @@ fn sources(project: &Project, a: &LsArgs) -> ExitCode {
                     ]);
                 }
             }
-            print!("{}", dre_core::secrets::mask(&columns(rows)));
+            print!("{}", ctx.secrets().mask(&columns(rows)));
         }
     }
     crate::exit::ok()

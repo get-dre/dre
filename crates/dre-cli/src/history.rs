@@ -62,9 +62,14 @@ pub struct UnlockArgs {
 }
 
 /// `<target path>/run/<report>`.
-fn report_dir(project_dir: &Path, target_path: Option<&str>, report: &str) -> Result<PathBuf, String> {
+fn report_dir(
+    env: &dre_core::Env,
+    project_dir: &Path,
+    target_path: Option<&str>,
+    report: &str,
+) -> Result<PathBuf, String> {
     let from_file = dre_core::target::project_value(project_dir);
-    let t = dre_core::target::resolve(project_dir, target_path, from_file.as_deref())?;
+    let t = dre_core::target::resolve(project_dir, target_path, from_file.as_deref(), env)?;
     Ok(t.dir.join("run").join(report))
 }
 
@@ -73,7 +78,7 @@ fn shown(project_dir: &Path, p: &Path) -> String {
     dre_core::slash(p).display().to_string()
 }
 
-pub fn history(a: HistoryArgs) -> ExitCode {
+pub fn history(ctx: &dre_core::Context, a: HistoryArgs) -> ExitCode {
     // History works even when profiles or report sources are gone. Read only the masking
     // preference; default to protection for missing, unreadable or invalid project files.
     let mask_secrets = std::fs::read_to_string(a.project_dir.join(dre_core::project::PROJECT_FILE))
@@ -82,8 +87,8 @@ pub fn history(a: HistoryArgs) -> ExitCode {
         .and_then(|node| node.get("mask_secrets").map(|v| v.to_json()))
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
-    dre_core::secrets::set_enabled(mask_secrets);
-    let dir = match report_dir(&a.project_dir, a.target_path.as_deref(), &a.report) {
+    ctx.secrets().set_enabled(mask_secrets);
+    let dir = match report_dir(ctx.env(), &a.project_dir, a.target_path.as_deref(), &a.report) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("error: {e}");
@@ -156,7 +161,9 @@ pub fn history(a: HistoryArgs) -> ExitCode {
     } else if a.output == HistoryOutput::Json {
         println!(
             "{}",
-            dre_core::secrets::to_json_pretty(&rows).expect("a JSON value serializes")
+            ctx.secrets()
+                .to_json_pretty(&rows)
+                .expect("a JSON value serializes")
         );
     } else {
         for r in &rows {
@@ -173,15 +180,15 @@ pub fn history(a: HistoryArgs) -> ExitCode {
                 r["status"].as_str().unwrap_or_default(),
                 r["path"].as_str().unwrap_or_default()
             );
-            println!("{}", dre_core::secrets::mask(&line));
+            println!("{}", ctx.secrets().mask(&line));
         }
         println!("(* the current run)");
     }
     exit::ok()
 }
 
-pub fn unlock(a: UnlockArgs) -> ExitCode {
-    let dir = match report_dir(&a.project_dir, a.target_path.as_deref(), &a.report) {
+pub fn unlock(ctx: &dre_core::Context, a: UnlockArgs) -> ExitCode {
+    let dir = match report_dir(ctx.env(), &a.project_dir, a.target_path.as_deref(), &a.report) {
         Ok(d) => d.join(&a.binding),
         Err(e) => {
             eprintln!("error: {e}");

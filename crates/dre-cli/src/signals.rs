@@ -13,7 +13,10 @@
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
 use dre_core::engine::{CancelReason, CancelToken};
+use dre_core::plugin_host::PluginHost;
 
 /// How long plugins get to stop before they're killed.
 const PLUGIN_GRACE: Duration = Duration::from_secs(8);
@@ -48,9 +51,9 @@ pub fn set_timeout(timeout: Option<Duration>) {
 }
 
 /// Catch the signals from now on, for the rest of the process: cancel `cancel` on the first one
-/// or when the timeout set with [`set_timeout`] runs out. Call it first thing, so a signal that
-/// arrives while the project loads isn't lost.
-pub fn watch(cancel: CancelToken) {
+/// or when the timeout set with [`set_timeout`] runs out, and stop the plugins `host` runs. Call
+/// it first thing, so a signal that arrives while the project loads isn't lost.
+pub fn watch(cancel: CancelToken, host: Arc<dyn PluginHost>) {
     install();
     let started = Instant::now();
     std::thread::spawn(move || {
@@ -71,7 +74,7 @@ pub fn watch(cancel: CancelToken) {
                     "\nTimed out after {}: stopping the running plugins",
                     crate::signals::human(t)
                 );
-                dre_protocol::host::cancel_all();
+                host.cancel();
             }
             let count = COUNT.load(Ordering::SeqCst);
             if count > seen {
@@ -87,10 +90,10 @@ pub fn watch(cancel: CancelToken) {
                         eprintln!(
                             "\nCancelling: stopping the running plugins (press Ctrl-C again to stop at once)"
                         );
-                        dre_protocol::host::cancel_all();
+                        host.cancel();
                     }
                     Some((_, r)) if reason == CancelReason::Interrupt => {
-                        dre_protocol::host::kill_all();
+                        host.kill();
                         std::process::exit(i32::from(r.exit_code()));
                     }
                     Some(_) => {}
@@ -100,7 +103,7 @@ pub fn watch(cancel: CancelToken) {
                 let waited = at.elapsed();
                 if !killed && waited >= PLUGIN_GRACE {
                     killed = true;
-                    dre_protocol::host::kill_all();
+                    host.kill();
                 }
                 if waited >= PLUGIN_GRACE + CORE_GRACE {
                     std::process::exit(i32::from(reason.exit_code()));

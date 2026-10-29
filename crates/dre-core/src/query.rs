@@ -9,10 +9,17 @@ use sqlparser::dialect::{DatabricksDialect, DuckDbDialect, GenericDialect, Postg
 use sqlparser::parser::Parser;
 use std::sync::Arc;
 
+use crate::plugin_host::{Open, Plugin};
 use crate::profiles::{Entry, Role};
 use crate::project::{PluginKind, Project};
 
-pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Result<Value, String> {
+pub fn execute(
+    ctx: &crate::Context,
+    project: &Project,
+    profile: &str,
+    sql: &str,
+    max_rows: u64,
+) -> Result<Value, String> {
     if max_rows == 0 || max_rows > 100_000 {
         return Err("max_rows must be between 1 and 100000".into());
     }
@@ -108,95 +115,41 @@ pub fn execute(project: &Project, profile: &str, sql: &str, max_rows: u64) -> Re
         return Err("expected a single read-only query; nothing was run".into());
     }
     let plugin =
-        crate::run::find_plugin(project, PluginKind::Source, &target.kind).map_err(|e| e.to_string())?;
+        crate::run::find_plugin(ctx, project, PluginKind::Source, &target.kind).map_err(|e| e.to_string())?;
+    let secrets = ctx.secrets().clone();
     let log: LogSink =
-        Arc::new(|name, message| eprintln!("{name}: {}", crate::secrets::mask_source_error(message, false)));
-    let process = plugin
-        .start(log, Some(&project.root))
+        Arc::new(move |name, message| eprintln!("{name}: {}", secrets.mask_source_error(message, false)));
+    let process = ctx
+        .host()
+        .start(&plugin, log, Some(&project.root))
         .map_err(|e| e.to_string())?;
     // The session and its result live inside one inner call, so the single `close()` afterwards
     // runs on every error and return path after `start()`. A panic skips it: dropping the process
-    // then kills it without a protocol `close`.
-    run_session(process, target, sql, max_rows, profile, &project.target_name)
+    // then stops it without a protocol `close`.
+    run_session(ctx, process, target, sql, max_rows, profile, &project.target_name)
 }
 
-/// A plugin source running as a child process: what [`run_session`] needs of it, so a test can
-/// inject a fake and observe that the process is always closed.
-trait SourceProcess {
-    fn has(&self, capability: &str) -> bool;
-    fn open(
-        &mut self,
-        connection: serde_json::Map<String, Value>,
-        read_only: bool,
-    ) -> dre_protocol::host::Result<()>;
-    fn open_sandboxed(
-        &mut self,
-        connection: serde_json::Map<String, Value>,
-    ) -> dre_protocol::host::Result<()>;
-    fn execute(
-        &mut self,
-        sql: &str,
-        row_limit: Option<u64>,
-        on_batch: &mut dyn FnMut(
-            &arrow::datatypes::SchemaRef,
-            arrow::array::RecordBatch,
-        ) -> std::result::Result<(), String>,
-    ) -> dre_protocol::host::Result<Execution>;
-    fn close(self) -> dre_protocol::host::Result<()>;
-}
-
-impl SourceProcess for dre_protocol::host::PluginProcess {
-    fn has(&self, capability: &str) -> bool {
-        dre_protocol::host::PluginProcess::has(self, capability)
-    }
-    fn open(
-        &mut self,
-        connection: serde_json::Map<String, Value>,
-        read_only: bool,
-    ) -> dre_protocol::host::Result<()> {
-        dre_protocol::host::PluginProcess::open(self, connection, read_only)
-    }
-    fn open_sandboxed(
-        &mut self,
-        connection: serde_json::Map<String, Value>,
-    ) -> dre_protocol::host::Result<()> {
-        dre_protocol::host::PluginProcess::open_sandboxed(self, connection)
-    }
-    fn execute(
-        &mut self,
-        sql: &str,
-        row_limit: Option<u64>,
-        on_batch: &mut dyn FnMut(
-            &arrow::datatypes::SchemaRef,
-            arrow::array::RecordBatch,
-        ) -> std::result::Result<(), String>,
-    ) -> dre_protocol::host::Result<Execution> {
-        dre_protocol::host::PluginProcess::execute(self, sql, row_limit, on_batch)
-    }
-    fn close(self) -> dre_protocol::host::Result<()> {
-        dre_protocol::host::PluginProcess::close(self)
-    }
-}
-
-/// The steps after the plugin process has started: open a session, stream the query, build the
-/// result. The process is closed once they return, with a result or an error.
-fn run_session<P: SourceProcess>(
-    mut process: P,
+/// The steps after the plugin has started: open a session, stream the query, build the result.
+/// The plugin is closed once they return, with a result or an error.
+fn run_session(
+    ctx: &crate::Context,
+    mut process: Box<dyn Plugin>,
     target: &crate::profiles::ProfileTarget,
     sql: &str,
     max_rows: u64,
     profile: &str,
     target_name: &str,
 ) -> Result<Value, String> {
-    let outcome = session_result(&mut process, target, sql, max_rows, profile, target_name);
-    let _ = process.close();
+    let outcome = session_result(ctx, process.as_mut(), target, sql, max_rows, profile, target_name);
+    process.close();
     outcome
 }
 
-/// Every step between the running process and the result: the session steps of `run_session`,
+/// Every step between the running plugin and the result: the session steps of `run_session`,
 /// without the close.
-fn session_result<P: SourceProcess>(
-    process: &mut P,
+fn session_result(
+    ctx: &crate::Context,
+    process: &mut dyn Plugin,
     target: &crate::profiles::ProfileTarget,
     sql: &str,
     max_rows: u64,
@@ -212,13 +165,18 @@ fn session_result<P: SourceProcess>(
             target.kind
         ));
     }
-    let connection = crate::run::render_connection(target)?;
-    if session_read_only {
-        process.open_sandboxed(connection)
+    let masked = |e: dre_protocol::host::HostError| {
+        ctx.secrets()
+            .mask_source_error(&e.to_string(), false)
+            .into_owned()
+    };
+    let connection = crate::run::render_connection(target, ctx.env())?;
+    let open = if session_read_only {
+        Open::Sandboxed
     } else {
-        process.open(connection, false)
-    }
-    .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
+        Open::ReadWrite
+    };
+    process.open(connection, open).map_err(masked)?;
     let mut rows = Vec::new();
     let mut columns = Vec::new();
     let mut collect = |schema: &arrow::datatypes::SchemaRef, batch: arrow::array::RecordBatch| {
@@ -236,7 +194,7 @@ fn session_result<P: SourceProcess>(
     };
     let result = process
         .execute(sql, Some(max_rows + 1), &mut collect)
-        .map_err(|e| crate::secrets::mask_source_error(&e.to_string(), false).into_owned())?;
+        .map_err(masked)?;
     if let Execution::Result { schema, .. } = result {
         if columns.is_empty() {
             columns = crate::rows::column_types(&schema);
@@ -255,115 +213,59 @@ fn session_result<P: SourceProcess>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
+    use crate::plugin_host::PluginHost;
+    use crate::plugin_host::memory::{Call, MemoryHost, Script};
+    use dre_protocol::Kind;
 
-    /// What a fake source process does in a session.
-    #[derive(Clone, Copy)]
-    enum Scenario {
-        /// Doesn't advertise a read-only session, so the capability guard rejects it.
-        NotReadOnly,
-        FailOpen,
-        FailExecute,
-        /// `execute` returns no result set.
-        NoResult,
-        Ok,
-    }
-
-    struct FakeSource {
-        scenario: Scenario,
-        /// Set when `close()` runs, so a test can prove the process was closed.
-        closed: Rc<Cell<bool>>,
-    }
-
-    impl SourceProcess for FakeSource {
-        fn has(&self, _: &str) -> bool {
-            !matches!(self.scenario, Scenario::NotReadOnly)
-        }
-        fn open(
-            &mut self,
-            _connection: serde_json::Map<String, Value>,
-            _read_only: bool,
-        ) -> dre_protocol::host::Result<()> {
-            if let Scenario::FailOpen = self.scenario {
-                return Err(dre_protocol::host::HostError::Unexpected {
-                    plugin: "fake".into(),
-                    expected: "an open reply",
-                    got: "an error".into(),
-                });
-            }
-            Ok(())
-        }
-        fn open_sandboxed(
-            &mut self,
-            connection: serde_json::Map<String, Value>,
-        ) -> dre_protocol::host::Result<()> {
-            self.open(connection, true)
-        }
-        fn execute(
-            &mut self,
-            _sql: &str,
-            _row_limit: Option<u64>,
-            _on_batch: &mut dyn FnMut(
-                &arrow::datatypes::SchemaRef,
-                arrow::array::RecordBatch,
-            ) -> std::result::Result<(), String>,
-        ) -> dre_protocol::host::Result<Execution> {
-            match self.scenario {
-                Scenario::FailExecute => Err(dre_protocol::host::HostError::Unexpected {
-                    plugin: "fake".into(),
-                    expected: "an execute reply",
-                    got: "an error".into(),
-                }),
-                Scenario::NoResult => Ok(Execution::NoResult { rows_affected: None }),
-                _ => {
-                    let schema = std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
-                        arrow::datatypes::Field::new("n", arrow::datatypes::DataType::Int64, false),
-                    ]));
-                    Ok(Execution::Result { schema, rows: 0 })
-                }
-            }
-        }
-        fn close(self) -> dre_protocol::host::Result<()> {
-            self.closed.set(true);
-            Ok(())
-        }
-    }
-
-    /// `run_session` on a fake source in `scenario`, against a `fixture` target with no
-    /// connection fields: its result, and whether the process was closed.
-    fn run(scenario: Scenario) -> (Result<Value, String>, bool) {
-        let closed = Rc::new(Cell::new(false));
-        let fake = FakeSource {
-            scenario,
-            closed: closed.clone(),
-        };
+    /// `run_session` on a scripted `fixture` source, against a target with no connection fields:
+    /// its result, and whether the plugin was closed.
+    fn run(script: Script) -> (Result<Value, String>, bool) {
+        let host = MemoryHost::new().plugin(Kind::Source, "fixture", script);
+        let ctx = crate::Context::new(crate::Env::default(), Arc::new(host.clone()));
+        let id = dre_protocol::PluginId::new(Kind::Source, "fixture");
+        let plugin = host.locate(std::path::Path::new("."), &[], &id).unwrap();
+        let process = host.start(&plugin, Arc::new(|_, _| {}), None).unwrap();
         let target = crate::profiles::ProfileTarget {
             kind: "fixture".into(),
             fields: serde_json::Map::new(),
         };
-        let out = run_session(fake, &target, "select 1", 10, "fx", "dev");
-        (out, closed.get())
+        let out = run_session(&ctx, process, &target, "select 1", 10, "fx", "dev");
+        let closed = host.calls().iter().any(|c| c == "source/fixture Close");
+        (out, closed)
+    }
+
+    fn read_only() -> Script {
+        Script::new(&[dre_protocol::CAP_READ_ONLY])
+    }
+
+    fn one_row() -> arrow::array::RecordBatch {
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![arrow::datatypes::Field::new(
+            "n",
+            arrow::datatypes::DataType::Int64,
+            false,
+        )]));
+        arrow::array::RecordBatch::try_new(schema, vec![Arc::new(arrow::array::Int64Array::from(vec![1]))])
+            .unwrap()
     }
 
     #[test]
     fn a_failing_execute_closes_the_process_and_keeps_the_error() {
-        let (out, closed) = run(Scenario::FailExecute);
+        let (out, closed) = run(read_only().fail(Call::Execute, 1, "the warehouse is down"));
         let err = out.expect_err("the failing execute must surface as an error");
-        assert!(err.contains("an execute reply"), "unexpected error: {err}");
+        assert!(err.contains("the warehouse is down"), "unexpected error: {err}");
         assert!(closed, "the process was not closed after a failing execute");
     }
 
     #[test]
     fn a_query_with_no_result_set_closes_the_process() {
-        let (out, closed) = run(Scenario::NoResult);
+        let (out, closed) = run(read_only());
         assert_eq!(out.unwrap_err(), "the query returned no result set");
         assert!(closed, "the process was not closed after the no-result-set path");
     }
 
     #[test]
     fn a_plugin_without_read_only_is_rejected_and_still_closed() {
-        let (out, closed) = run(Scenario::NotReadOnly);
+        let (out, closed) = run(Script::new(&[]));
         assert_eq!(
             out.unwrap_err(),
             "the fixture plugin cannot guarantee a read-only connection"
@@ -373,18 +275,18 @@ mod tests {
 
     #[test]
     fn a_failed_open_is_reported_and_the_process_is_still_closed() {
-        let (out, closed) = run(Scenario::FailOpen);
+        let (out, closed) = run(read_only().fail(Call::Open, 1, "bad password"));
         let err = out.expect_err("a failed open must surface as an error");
-        assert!(err.contains("an open reply"), "unexpected error: {err}");
+        assert!(err.contains("bad password"), "unexpected error: {err}");
         assert!(closed, "the process was not closed after a failed open");
     }
 
     #[test]
     fn a_succeeding_session_builds_the_result_and_closes_the_process() {
-        let (out, closed) = run(Scenario::Ok);
+        let (out, closed) = run(read_only().rows("select 1", one_row()));
         let out = out.expect("a read-only session must succeed");
         assert_eq!(out["schema_version"], "dre/rows/v1");
-        assert_eq!(out["row_count"], 0);
+        assert_eq!(out["row_count"], 1);
         assert_eq!(out["connection"], "fx");
         assert_eq!(out["target"], "dev");
         assert_eq!(out["read_only_enforcement"], "session");

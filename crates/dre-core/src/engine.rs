@@ -286,21 +286,25 @@ pub struct RunStore {
     /// Bindings running at once: each destination path a Binding delivers to, and which Binding,
     /// so two never write the same file.
     claims: Option<std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>>,
+    /// What `run_results.json` masks.
+    secrets: crate::secrets::Secrets,
 }
 
 impl RunStore {
-    pub fn new(target: &Path) -> RunStore {
+    pub fn new(target: &Path, secrets: &crate::secrets::Secrets) -> RunStore {
         RunStore {
             target: target.to_path_buf(),
             claims: None,
+            secrets: secrets.clone(),
         }
     }
 
     /// A store for Bindings running at once, which refuses a destination path two of them use.
-    pub fn concurrent(target: &Path) -> RunStore {
+    pub fn concurrent(target: &Path, secrets: &crate::secrets::Secrets) -> RunStore {
         RunStore {
             target: target.to_path_buf(),
             claims: Some(Default::default()),
+            secrets: secrets.clone(),
         }
     }
 
@@ -345,7 +349,7 @@ impl RunStore {
         std::fs::create_dir_all(run_dir)?;
         crate::fs::write_atomic(
             &run_dir.join("run_results.json"),
-            (crate::secrets::to_json_pretty(results)? + "\n").as_bytes(),
+            (self.secrets.to_json_pretty(results)? + "\n").as_bytes(),
         )
     }
 }
@@ -369,7 +373,10 @@ mod tests {
 
     #[test]
     fn the_store_lays_out_a_bindings_folders() {
-        let s = RunStore::new(Path::new("/t"));
+        let s = RunStore::new(
+            Path::new("/t"),
+            &crate::secrets::Secrets::new(&crate::Env::default()),
+        );
         assert_eq!(s.run_dir("daily", "default"), Path::new("/t/run/daily/default"));
         assert_eq!(s.compiled_dir("daily", "eu"), Path::new("/t/compiled/daily/eu"));
         assert_eq!(s.schema_dir("daily", "eu"), Path::new("/t/schema/daily/eu"));

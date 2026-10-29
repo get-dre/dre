@@ -8,6 +8,8 @@
 use minijinja::value::Kwargs;
 use minijinja::{Environment, Error, ErrorKind, Value};
 
+use crate::secrets::Secrets;
+
 /// How numbers are written in one locale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Locale {
@@ -228,7 +230,7 @@ fn currency_symbol(code: &str) -> &str {
 }
 
 /// The number in `v`, or `None` for `none`/undefined (rendered as nothing).
-fn to_number(filter: &str, v: &Value) -> Result<Option<f64>, Error> {
+fn to_number(secrets: &Secrets, filter: &str, v: &Value) -> Result<Option<f64>, Error> {
     if v.is_none() || v.is_undefined() {
         return Ok(None);
     }
@@ -238,7 +240,7 @@ fn to_number(filter: &str, v: &Value) -> Result<Option<f64>, Error> {
                 ErrorKind::InvalidOperation,
                 format!(
                     "`{filter}` needs a number, but got the text {:?}",
-                    crate::secrets::mask(s)
+                    secrets.mask(s)
                 ),
             )
         });
@@ -265,24 +267,27 @@ fn decimals(kwargs: &Kwargs, positional: Option<u32>, default: usize) -> Result<
     Ok(d)
 }
 
-/// Add the number filters, formatting for `locale`.
-pub fn register(env: &mut Environment<'static>, locale: Locale) {
+/// Add the number filters, formatting for `locale`; their errors mask `secrets`.
+pub fn register(env: &mut Environment<'static>, locale: Locale, masks: &Secrets) {
+    let secrets = masks.clone();
     env.add_filter(
         "number",
         move |v: Value, d: Option<u32>, kwargs: Kwargs| -> Result<String, Error> {
             let d = decimals(&kwargs, d, 0)?;
             kwargs.assert_all_used()?;
-            Ok(to_number("number", &v)?.map_or_else(String::new, |x| locale.number(x, d)))
+            Ok(to_number(&secrets, "number", &v)?.map_or_else(String::new, |x| locale.number(x, d)))
         },
     );
+    let secrets = masks.clone();
     env.add_filter(
         "percent",
         move |v: Value, d: Option<u32>, kwargs: Kwargs| -> Result<String, Error> {
             let d = decimals(&kwargs, d, 1)?;
             kwargs.assert_all_used()?;
-            Ok(to_number("percent", &v)?.map_or_else(String::new, |x| locale.percent(x, d)))
+            Ok(to_number(&secrets, "percent", &v)?.map_or_else(String::new, |x| locale.percent(x, d)))
         },
     );
+    let secrets = masks.clone();
     env.add_filter(
         "currency",
         move |v: Value, code: Option<String>, d: Option<u32>, kwargs: Kwargs| -> Result<String, Error> {
@@ -306,19 +311,22 @@ pub fn register(env: &mut Environment<'static>, locale: Locale) {
                     ),
                 ));
             }
-            Ok(to_number("currency", &v)?.map_or_else(String::new, |x| locale.currency(x, &code, d)))
+            Ok(to_number(&secrets, "currency", &v)?
+                .map_or_else(String::new, |x| locale.currency(x, &code, d)))
         },
     );
+    let secrets = masks.clone();
     env.add_filter(
         "compact",
         move |v: Value, d: Option<u32>, kwargs: Kwargs| -> Result<String, Error> {
             let d = decimals(&kwargs, d, 1)?;
             kwargs.assert_all_used()?;
-            Ok(to_number("compact", &v)?.map_or_else(String::new, |x| locale.compact(x, d)))
+            Ok(to_number(&secrets, "compact", &v)?.map_or_else(String::new, |x| locale.compact(x, d)))
         },
     );
     // A number gets `+` or `−`; text another filter made (`0.04 | percent | signed`) gets `+`
     // unless it's negative or zero.
+    let secrets = masks.clone();
     env.add_filter(
         "signed",
         move |v: Value, d: Option<u32>, kwargs: Kwargs| -> Result<String, Error> {
@@ -326,7 +334,7 @@ pub fn register(env: &mut Environment<'static>, locale: Locale) {
             kwargs.assert_all_used()?;
             let text = match v.as_str() {
                 Some(s) => s.to_string(),
-                None => match to_number("signed", &v)? {
+                None => match to_number(&secrets, "signed", &v)? {
                     Some(x) => locale.number(x, d),
                     None => return Ok(String::new()),
                 },

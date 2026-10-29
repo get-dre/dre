@@ -34,14 +34,14 @@ pub fn values(batch: &RecordBatch, columns: &[String]) -> Vec<String> {
 }
 
 /// Mask the values of `columns` in the spooled result from now on.
-pub fn register(spool: &Path, columns: &[String]) -> Result<(), String> {
+pub fn register(spool: &Path, columns: &[String], secrets: &crate::secrets::Secrets) -> Result<(), String> {
     if columns.is_empty() {
         return Ok(());
     }
     let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
         .map_err(|e| e.to_string())?;
     for b in reader {
-        crate::secrets::register_values(values(&b.map_err(|e| e.to_string())?, columns));
+        secrets.register_values(values(&b.map_err(|e| e.to_string())?, columns));
     }
     Ok(())
 }
