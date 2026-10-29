@@ -6,18 +6,109 @@
 
 mod bridge;
 
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use arrow::datatypes::{DataType, Schema};
 use dre_protocol::msg::{ConnectionField, FieldKind};
 use dre_protocol::plugin::{About, Loaded, Result, ResultSet, ResultSink, Source, conn_str, serve_source};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
-use duckdb::{AccessMode, Config, Connection};
+use duckdb::{AccessMode, Config, Connection, InterruptHandle};
 use serde_json::{Map, Value};
 
-#[derive(Default)]
 struct DuckDb {
-    conn: Option<Connection>,
+    session: Option<Session>,
+    /// The SDK's `cancelled`; tests replace it.
+    cancelled: fn() -> bool,
+}
+
+impl Default for DuckDb {
+    fn default() -> Self {
+        Self {
+            session: None,
+            cancelled: dre_protocol::plugin::cancelled,
+        }
+    }
+}
+
+/// The open connection, and what stops a statement on it when core cancels.
+struct Session {
+    conn: Connection,
+    interrupter: Arc<Interrupter>,
+}
+
+/// How often a cancelled statement is interrupted again until it ends.
+const REARM: Duration = Duration::from_millis(5);
+
+/// Stops the statement running on one connection when core cancels its request.
+///
+/// DuckDB clears a pending interrupt whenever it starts a statement, so an interrupt sent just
+/// before (between the SDK's "cancelled before it started" check and DuckDB's start) is lost.
+/// While the request is cancelled, a watcher keeps interrupting until the statement ends.
+struct Interrupter {
+    handle: Arc<InterruptHandle>,
+    /// Whether core has cancelled the request running now; sticky for that request.
+    cancelled: fn() -> bool,
+    /// Whether a statement is running: the watcher interrupts only then.
+    running: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl Interrupter {
+    fn new(handle: Arc<InterruptHandle>, cancelled: fn() -> bool) -> Self {
+        Self {
+            handle,
+            cancelled,
+            running: Mutex::new(false),
+            wake: Condvar::new(),
+        }
+    }
+
+    /// Core cancelled the request: the SDK's cancel hook, run on its stdin reader thread after
+    /// it marked the request cancelled. Wakes the watcher, which interrupts the statement.
+    fn cancel(&self) {
+        let _running = self.running.lock().unwrap();
+        self.wake.notify_all();
+    }
+
+    /// Run one statement on the connection, with a watcher that interrupts it for as long as
+    /// the request is cancelled. The watcher has stopped by the time this returns, so no
+    /// interrupt reaches a later statement.
+    fn run<T>(&self, statement: impl FnOnce() -> T) -> T {
+        *self.running.lock().unwrap() = true;
+        std::thread::scope(|s| {
+            s.spawn(|| self.watch());
+            let _end = EndWatch(self);
+            statement()
+        })
+    }
+
+    /// The statement ended: stop the watcher.
+    fn end(&self) {
+        *self.running.lock().unwrap() = false;
+        self.wake.notify_all();
+    }
+
+    fn watch(&self) {
+        let mut running = self.running.lock().unwrap();
+        while *running {
+            running = if (self.cancelled)() {
+                self.handle.interrupt();
+                self.wake.wait_timeout(running, REARM).unwrap().0
+            } else {
+                self.wake.wait(running).unwrap()
+            };
+        }
+    }
+}
+
+/// Ends the watch when the statement returns or panics.
+struct EndWatch<'a>(&'a Interrupter);
+
+impl Drop for EndWatch<'_> {
+    fn drop(&mut self) {
+        self.0.end();
+    }
 }
 
 /// Leading keywords of statements that produce a result set even when it looks like a row count.
@@ -86,7 +177,10 @@ fn status_only(schema: &Schema, sql: &str) -> Option<Status> {
 
 impl DuckDb {
     fn conn(&self) -> Result<&Connection> {
-        self.conn.as_ref().ok_or_else(|| "no open session".into())
+        Ok(&self.session()?.conn)
+    }
+    fn session(&self) -> Result<&Session> {
+        self.session.as_ref().ok_or_else(|| "no open session".into())
     }
     fn open_with(&mut self, c: &Map<String, Value>, read_only: bool, sandbox: bool) -> Result<()> {
         let path = conn_str(c, "path").unwrap_or(":memory:");
@@ -111,13 +205,13 @@ impl DuckDb {
         }
         let conn = Connection::open_with_flags(path, config)
             .map_err(|e| format!("can't open DuckDB database `{path}`: {e}"))?;
-        // When core cancels a request, interrupt the running query.
-        let interrupt = conn.interrupt_handle();
-        dre_protocol::plugin::on_cancel(move || interrupt.interrupt());
+        let interrupter = Arc::new(Interrupter::new(conn.interrupt_handle(), self.cancelled));
+        let hook = Arc::clone(&interrupter);
+        dre_protocol::plugin::on_cancel(move || hook.cancel());
         if sandbox {
             conn.execute_batch("SET lock_configuration = true")?;
         }
-        self.conn = Some(conn);
+        self.session = Some(Session { conn, interrupter });
         Ok(())
     }
 }
@@ -188,47 +282,54 @@ impl Source for DuckDb {
     }
 
     fn execute(&mut self, sql: &str, _row_limit: Option<u64>, out: &mut dyn ResultSink) -> Result<()> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(sql)?;
-        let stream = stmt.stream_arrow([])?;
-        let schema = bridge::schema_from_duckdb(&stream.get_schema())?;
-        if schema.fields().is_empty() {
-            return out.no_result(None);
-        }
-        let mut stream = stream;
-        match status_only(&schema, sql) {
-            Some(Status::Count) => {
-                let n = next_batch(&mut stream)?
-                    .and_then(|b| {
-                        b.column(0)
-                            .as_any()
-                            .downcast_ref::<duckdb::arrow::array::Int64Array>()
-                            .map(|a| a.value(0))
-                    })
-                    .map(|n| n as u64);
-                return out.no_result(n);
-            }
-            Some(Status::Success) => {
-                while next_batch(&mut stream)?.is_some() {}
-                return out.no_result(None);
-            }
-            None => {}
-        }
-        out.begin(Arc::new(schema))?;
-        while let Some(b) = next_batch(&mut stream)? {
-            if !out.batch(bridge::from_duckdb(&b)?)? {
-                break;
-            }
-        }
-        Ok(())
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| execute(conn, sql, out))
     }
 
     fn check(&mut self, sql: &str) -> Result<()> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(&format!("EXPLAIN {sql}"))?;
-        stmt.execute([])?;
-        Ok(())
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| {
+            let mut stmt = conn.prepare(&format!("EXPLAIN {sql}"))?;
+            stmt.execute([])?;
+            Ok(())
+        })
     }
+}
+
+/// Run `sql` and send its result to `out`.
+fn execute(conn: &Connection, sql: &str, out: &mut dyn ResultSink) -> Result<()> {
+    let mut stmt = conn.prepare(sql)?;
+    let stream = stmt.stream_arrow([])?;
+    let schema = bridge::schema_from_duckdb(&stream.get_schema())?;
+    if schema.fields().is_empty() {
+        return out.no_result(None);
+    }
+    let mut stream = stream;
+    match status_only(&schema, sql) {
+        Some(Status::Count) => {
+            let n = next_batch(&mut stream)?
+                .and_then(|b| {
+                    b.column(0)
+                        .as_any()
+                        .downcast_ref::<duckdb::arrow::array::Int64Array>()
+                        .map(|a| a.value(0))
+                })
+                .map(|n| n as u64);
+            return out.no_result(n);
+        }
+        Some(Status::Success) => {
+            while next_batch(&mut stream)?.is_some() {}
+            return out.no_result(None);
+        }
+        None => {}
+    }
+    out.begin(Arc::new(schema))?;
+    while let Some(b) = next_batch(&mut stream)? {
+        if !out.batch(bridge::from_duckdb(&b)?)? {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// duckdb-rs panics if fetching fails mid-stream; turn that into an error.
@@ -258,7 +359,68 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+
+    struct Discard;
+
+    impl ResultSink for Discard {
+        fn no_result(&mut self, _: Option<u64>) -> Result<()> {
+            Ok(())
+        }
+        fn begin(&mut self, _: arrow::datatypes::SchemaRef) -> Result<()> {
+            Ok(())
+        }
+        fn batch(&mut self, _: arrow::array::RecordBatch) -> Result<bool> {
+            Ok(true)
+        }
+    }
+
+    const SLOW: &str = "select sum(a.range * b.range) from range(1000000) a, range(1000000) b";
+
+    /// Run `statement` on another thread; its result, or `None` if it still runs after 20 s.
+    fn finishes<T: Send + 'static>(statement: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || done.send(statement()));
+        finished.recv_timeout(Duration::from_secs(20)).ok()
+    }
+
+    fn assert_interrupted(result: Option<Result<()>>) {
+        let err = result.expect("the cancelled statement ran on").unwrap_err();
+        assert!(err.to_string().contains("Interrupted"), "{err}");
+    }
+
+    #[test]
+    fn a_cancel_that_lands_before_duckdb_starts_the_statement_still_stops_it() {
+        // The request is running and the SDK's "cancelled before it started" check has passed.
+        // Then the cancel lands and the hook runs, before DuckDB starts the statement: DuckDB
+        // clears any interrupt when it starts one.
+        static CANCELLED: AtomicBool = AtomicBool::new(false);
+        let mut db = DuckDb {
+            cancelled: || CANCELLED.load(Ordering::SeqCst),
+            ..DuckDb::default()
+        };
+        db.open(&Map::new(), false).unwrap();
+        assert_interrupted(finishes(move || {
+            let Session { conn, interrupter } = db.session().unwrap();
+            interrupter.run(|| {
+                CANCELLED.store(true, Ordering::SeqCst);
+                interrupter.cancel();
+                execute(conn, SLOW, &mut Discard)
+            })
+        }));
+    }
+
+    #[test]
+    fn a_request_cancelled_before_the_statement_runs_is_stopped() {
+        let mut db = DuckDb {
+            cancelled: || true,
+            ..DuckDb::default()
+        };
+        db.open(&Map::new(), false).unwrap();
+        assert_interrupted(finishes(move || db.execute(SLOW, None, &mut Discard)));
+    }
 
     #[test]
     fn finds_the_leading_keyword_past_comments() {
