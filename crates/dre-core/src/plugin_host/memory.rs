@@ -1,6 +1,7 @@
 //! An in-memory [`PluginHost`] for tests: scripted plugins that run in this process. A script
-//! says what each query returns, which call fails (the Nth execute, write or delivery) and how
-//! long a call takes; the host records every call and can cancel the ones in flight.
+//! says what each query returns, which call fails (the Nth execute, write or delivery, or the
+//! one with a given detail, such as a delivery's path) and how long a call takes; the host
+//! records every call and can cancel the ones in flight.
 //!
 //! A format writes a small text file per `write` (its result sets' names and row counts), so the
 //! run finds real files to zip and deliver. A destination delivers nowhere: it records the files
@@ -42,6 +43,9 @@ pub struct Script {
     /// `(call, n, message)`: the plugin's `n`th such call (from 1, counted across the host)
     /// fails with `message`.
     failures: Vec<(Call, usize, String)>,
+    /// `(call, detail, message)`: every such call with this detail (what [`MemoryHost::calls`]
+    /// shows after the call's name) fails with `message`, whatever order calls arrive in.
+    failures_on: Vec<(Call, String, String)>,
     /// How long each such call takes; a cancel ends the wait early with an error.
     delays: BTreeMap<Call, Duration>,
 }
@@ -64,6 +68,14 @@ impl Script {
     /// The `n`th `call` (from 1) fails with `message`.
     pub fn fail(mut self, call: Call, n: usize, message: &str) -> Script {
         self.failures.push((call, n, message.to_string()));
+        self
+    }
+
+    /// Every `call` whose detail is `detail` fails with `message`. Unlike [`Script::fail`] it
+    /// doesn't depend on call order, so it picks one row when rows deliver concurrently.
+    pub fn fail_on(mut self, call: Call, detail: &str, message: &str) -> Script {
+        self.failures_on
+            .push((call, detail.to_string(), message.to_string()));
         self
     }
 
@@ -237,13 +249,20 @@ impl Scripted {
                 code: Some("cancelled".into()),
             });
         }
-        match self
+        let by_count = self
             .script
             .failures
             .iter()
             .find(|(c, at, _)| *c == call && *at == n)
-        {
-            Some((_, _, message)) => Err(self.error(message)),
+            .map(|(_, _, message)| message);
+        let by_detail = self
+            .script
+            .failures_on
+            .iter()
+            .find(|(c, d, _)| *c == call && d == detail)
+            .map(|(_, _, message)| message);
+        match by_count.or(by_detail) {
+            Some(message) => Err(self.error(message)),
             None => Ok(()),
         }
     }
