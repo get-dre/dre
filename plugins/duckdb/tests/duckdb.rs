@@ -27,7 +27,15 @@ fn rows(p: &mut PluginProcess, sql: &str) -> Option<u64> {
 
 #[test]
 fn conforms_to_the_protocol() {
-    conformance::assert_conforms(bin());
+    let session = conformance::Session::new(json!({"path": ":memory:"}).as_object().unwrap().clone())
+        .statement("rows", "select * from range(10) t(n)")
+        .statement("empty", "select 1 as n where false")
+        .statement("error", "select * from dre_conformance_missing")
+        .statement(
+            "slow",
+            "select sum(a.range * b.range) from range(1000000) a, range(1000000) b",
+        );
+    conformance::assert_conforms_with(bin(), &conformance::Options::default().session(session));
 }
 
 #[test]

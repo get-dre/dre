@@ -1,0 +1,1356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DRE plugin protocol messages",
+  "description": "Every JSON frame of the DRE plugin protocol (docs/protocol.md). A frame core sends matches `$defs/Request`; a frame a plugin sends matches `$defs/Response`. Generated from dre-protocol's msg.rs; don't edit by hand.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Response"
+    }
+  ],
+  "x-dre": {
+    "protocol": {
+      "min_version": 0,
+      "max_version": 1,
+      "core_min_version": 1
+    },
+    "capabilities": [
+      "sessions",
+      "read_only",
+      "check",
+      "multi_file",
+      "message",
+      "message_only",
+      "load",
+      "validate"
+    ],
+    "error_kinds": [
+      "config",
+      "plugin",
+      "refused",
+      "connection",
+      "auth",
+      "query",
+      "delivery",
+      "internal",
+      "cancelled",
+      "timed_out"
+    ]
+  },
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "hello"
+            },
+            "min_version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "core_version": {
+              "type": "string"
+            },
+            "plugin": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PluginId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The plugin core wants served, for an executable that provides several. A package\nthat doesn't provide it replies `error`; without it, the package serves its first."
+            }
+          },
+          "required": [
+            "type",
+            "min_version",
+            "max_version",
+            "core_version"
+          ],
+          "description": "Always first. The plugin picks a version in both ranges or replies `version_mismatch`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "describe"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "description": "Describe the connection fields a profile output for this plugin takes (used by `dre init`)\nand the options a report's config block for it takes."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "validate"
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "template": {
+              "description": "Format: what the plugin needs to check the output's template too. For the html and\npdf formats, `{\"file\": <absolute path or null>, \"project_root\", \"queries\": [...]}`.\nOptional; older plugins ignore it."
+            }
+          },
+          "required": [
+            "type",
+            "options"
+          ],
+          "description": "Check one config block of options (a format's `output:` keys, a destination entry's keys)\nwithout doing anything. Replies `validated`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "validate_connection"
+            },
+            "connection": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "unresolved": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "connection"
+          ],
+          "description": "Source or destination (protocol 1): check a profile entry's connection settings without\nconnecting: the declared fields' generic checks, then the plugin's own rules. Keys in\n`unresolved` (an unset `env_var()`) arrive as `null` and count as set, unchecked. Replies\n`validated`, with `warnings` for unknown keys."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "open"
+            },
+            "connection": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "read_only": {
+              "type": "boolean"
+            },
+            "sandbox": {
+              "type": "boolean",
+              "description": "Core's `dre query`: the session must not reach files, programs or the network\nbeyond the database (protocol 1, optional; older plugins ignore it)."
+            }
+          },
+          "required": [
+            "type",
+            "connection",
+            "read_only"
+          ],
+          "description": "Source: open a session. All later `execute`/`check` requests run on it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "execute"
+            },
+            "sql": {
+              "type": "string"
+            },
+            "row_limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "sql"
+          ],
+          "description": "Source: run one statement. Replies `result` (then Arrow frames, then `result_end`) or\n`no_result`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "check"
+            },
+            "sql": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sql"
+          ],
+          "description": "Source: verify one statement without executing it. Replies `ok` or `error`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "write"
+            },
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string"
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "result_sets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ResultSetMeta"
+              }
+            },
+            "template": true
+          },
+          "required": [
+            "type",
+            "path",
+            "format",
+            "options",
+            "result_sets"
+          ],
+          "description": "Format: write result sets to `path`. Followed, per result set, by Arrow frames (at least one,\ncarrying the schema) and a `result_set_end`, then `finish`. Replies `written`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "result_set_end"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finish"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "deliver"
+            },
+            "local_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "remote_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DeliveryFile"
+              }
+            },
+            "connection": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true,
+              "default": {}
+            },
+            "message": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Message"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "connection"
+          ],
+          "description": "Destination: deliver a local file, or with `files` (only to a plugin advertising\n`multi_file`) every file of one output at once. Exactly one of `local_path`/`files` is set,\nunless `message` is: then `files` (possibly empty) holds the files to attach to it, and is\nsent only to a plugin advertising `message`. `options` are the destination entry's plugin\noptions, rendered by core. Replies `delivered`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "load"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "description": "Source: load rows into a temporary table on the session, named after `name`. Followed by\nArrow frames (at least one, carrying the schema) and a `result_set_end`. Replies `loaded`.\nOnly sent to plugins advertising `load`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "close"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "description": "End the conversation; the plugin exits 0."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancel"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "description": "Protocol 1: stop the request whose id the envelope carries. It has no reply of its own:\nthe request replies `error` with kind `cancelled`, or its usual reply if it finished\nfirst. A cancel for a request that isn't running is ignored."
+        }
+      ],
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+    },
+    "PluginId": {
+      "description": "One plugin, written `<kind>/<name>` (`destination/s3`).",
+      "type": "string",
+      "pattern": "^(source|format|destination)/[a-z0-9_]+$"
+    },
+    "ResultSetMeta": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Sheet name (xlsx) or file suffix (single-table formats)."
+        },
+        "query": {
+          "type": "string",
+          "description": "The query (`.sql` basename) that produced it."
+        },
+        "result_index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "1-based index among that query's result sets."
+        },
+        "anchor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "header": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnOptions"
+          },
+          "description": "The query entry's `columns:` map: per result column, how to show it."
+        },
+        "autofit": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "The query entry's `autofit` (xlsx): size this tab's columns from their content, over the\noutput's `autofit`."
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SheetStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The query entry's `style` (xlsx), over the output's."
+        }
+      },
+      "required": [
+        "name",
+        "query",
+        "result_index"
+      ],
+      "description": "Per result set, what a format plugin needs to lay it out."
+    },
+    "ColumnOptions": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "An Excel number format code."
+        },
+        "formula": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A row formula (`={qty}*{price}`), written in place of the column's value, which becomes\nits cached result."
+        },
+        "total": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A totals row entry under the data: `sum`, `average`, `count`, `min`, `max`, or a formula\nover whole columns (`=SUM({amount:*})/COUNT({qty:*})`)."
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColumnWidth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The column's width (xlsx), over the tab's and output's `autofit`."
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the column's data cells look (xlsx), over the tab's and output's `style`."
+        }
+      },
+      "description": "One entry of a `columns:` map."
+    },
+    "ColumnWidth": {
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/AutoWidth"
+        }
+      ],
+      "description": "A column width: sized from the content, or a number of characters."
+    },
+    "AutoWidth": {
+      "type": "string",
+      "enum": [
+        "auto"
+      ],
+      "description": "The word `auto`."
+    },
+    "CellStyle": {
+      "type": "object",
+      "properties": {
+        "bold": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "italic": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "underline": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "font": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Font"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "font_color": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "`RRGGBB`.",
+          "default": null
+        },
+        "fill": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "align": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Align"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "border": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Border"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "description": "How one cell looks; every key optional."
+    },
+    "Font": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "description": "A font's name and size (points)."
+    },
+    "Align": {
+      "type": "string",
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ]
+    },
+    "Border": {
+      "type": "string",
+      "enum": [
+        "none",
+        "thin",
+        "medium"
+      ],
+      "description": "A border's weight."
+    },
+    "SheetStyle": {
+      "type": "object",
+      "properties": {
+        "cells": {
+          "$ref": "#/$defs/CellStyle",
+          "default": {
+            "bold": null,
+            "italic": null,
+            "underline": null,
+            "font": null,
+            "font_color": null,
+            "fill": null,
+            "align": null,
+            "border": null
+          }
+        },
+        "header": {
+          "$ref": "#/$defs/CellStyle",
+          "default": {
+            "bold": null,
+            "italic": null,
+            "underline": null,
+            "font": null,
+            "font_color": null,
+            "fill": null,
+            "align": null,
+            "border": null
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/CellStyle",
+          "default": {
+            "bold": null,
+            "italic": null,
+            "underline": null,
+            "font": null,
+            "font_color": null,
+            "fill": null,
+            "align": null,
+            "border": null
+          }
+        },
+        "banded_rows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Band"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fill of every other data row, or `Off` (over an inherited banding).",
+          "default": null
+        },
+        "borders": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Border"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "description": "How a sheet looks: its data cells, the header and totals rows, banding and borders."
+    },
+    "Band": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "off"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fill": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "fill"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "`banded_rows`: a fill, or off."
+    },
+    "DeliveryFile": {
+      "type": "object",
+      "properties": {
+        "local_path": {
+          "type": "string"
+        },
+        "remote_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "local_path"
+      ],
+      "description": "One file of a multi-file `deliver`."
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "One line, plain text."
+        },
+        "text": {
+          "type": "string",
+          "description": "The portable Markdown subset ([`crate::markdown`])."
+        },
+        "html": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "An HTML body, when one was made; core leaves it out today. A plugin that can show HTML\n(email) uses it when present, else converts `text`."
+        },
+        "path": {
+          "type": "string",
+          "description": "The `.md` file core wrote: `# title`, then the text."
+        }
+      },
+      "required": [
+        "title",
+        "text",
+        "path"
+      ],
+      "description": "A rendered message, as `deliver` carries it."
+    },
+    "Response": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "hello"
+            },
+            "protocol_version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "$ref": "#/$defs/Kind"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "provides": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PluginId"
+              },
+              "description": "Every plugin the executable serves; empty for one that serves only `kind`/`name`."
+            }
+          },
+          "required": [
+            "type",
+            "protocol_version",
+            "kind",
+            "name",
+            "version"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "version_mismatch"
+            },
+            "min_version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "min_version",
+            "max_version"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "describe"
+            },
+            "connection_fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConnectionField"
+              }
+            },
+            "option_fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OptionField"
+              }
+            },
+            "identifier_quote": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Source: the character the database quotes identifiers with (`\"` for DuckDB and\nPostgres, a backtick for Databricks). Core uses it to quote names a project asks to\nquote (a source's `quoting:`). Every source sets it; other kinds leave it out."
+            },
+            "string_literal": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Source: how core spells a string holding `'` or `\\` when it writes one into SQL (an\ninlined lookup): absent or `chr` for `chr(39)`/`chr(92)`, `backslash` for `\\'`/`\\\\`\ninside the quotes (a database without `chr()`, such as ClickHouse)."
+            },
+            "message_limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "description": "Destination advertising `message`: the most characters a message may have in the\nservice, after translation. Core shows it next to a message's length in a preview."
+            }
+          },
+          "required": [
+            "type",
+            "connection_fields"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "validated"
+            },
+            "errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Problems that don't stop a run (an unknown key); `validate_connection` only."
+            }
+          },
+          "required": [
+            "type",
+            "errors"
+          ],
+          "description": "Every problem with the options, each a sentence naming the key; empty when they're fine."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "result"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "columns"
+          ],
+          "description": "A result set follows as Arrow frames, ended by `result_end`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "result_end"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "rows"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "no_result"
+            },
+            "rows_affected": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "written"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Things the person should know about the files (a value written as text, say)."
+            }
+          },
+          "required": [
+            "type",
+            "files"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "delivered"
+            },
+            "location": {
+              "type": "string"
+            },
+            "attempts": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0,
+              "description": "How many tries the delivery took, when it was more than one (protocol 1)."
+            }
+          },
+          "required": [
+            "type",
+            "location"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "loaded"
+            },
+            "relation": {
+              "type": "string"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "warning": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "relation",
+            "rows"
+          ],
+          "description": "`relation` is what SQL uses to read the loaded rows. `warning`, when set, is shown to the\nuser (e.g. the database has no bulk path, so a load this size is slow)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "error"
+            },
+            "message": {
+              "type": "string"
+            },
+            "kind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "description": "The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,\nnamespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has\nneither): without a `code`, core reports the failure under its own code for the step;\na `code` without a `kind` counts as `internal`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "log"
+            },
+            "level": {
+              "$ref": "#/$defs/LogLevel"
+            },
+            "message": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Structured context (`{\"attempt\": 2}`); never secrets."
+            }
+          },
+          "required": [
+            "type",
+            "level",
+            "message"
+          ],
+          "description": "Protocol 1: a log line, while a request runs (with its id) or between requests."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "progress"
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "done": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "description": "Protocol 1, optional: how far a long request has got. Core shows it when present."
+        }
+      ],
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+    },
+    "Kind": {
+      "type": "string",
+      "enum": [
+        "source",
+        "format",
+        "destination"
+      ]
+    },
+    "ConnectionField": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "default": ""
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "secret": {
+          "type": "boolean",
+          "description": "Offered as an `env_var()` reference by default in `dre init`.",
+          "default": false
+        },
+        "default": true,
+        "same_as_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A source type whose profile has the same field: `dre init` offers the value entered for\nthat source as this field's default (e.g. one Databricks host for source and destination)."
+        },
+        "manual": {
+          "type": "boolean",
+          "description": "Set by hand in `profiles.yml`: `dre init` doesn't ask for it. For alternatives to a\nprompted field (a key given as text instead of a file) and nested blocks (`ssh:`)."
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the value must be, checked by `validate_connection` (and `dre init` as you type)."
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The only values it may take (`dre init` offers them as a choice)."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "FieldKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "boolean"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "integer",
+          "description": "A whole number, or a string of one (`port: \"5432\"`)."
+        },
+        {
+          "type": "string",
+          "const": "path",
+          "description": "A file that must exist; a leading `~/` is the home directory."
+        },
+        {
+          "type": "string",
+          "const": "duration",
+          "description": "`30s`, `2m`, `1h`, or seconds."
+        },
+        {
+          "type": "string",
+          "const": "map",
+          "description": "A block of settings (`ssh:`), checked by the plugin's own rules."
+        }
+      ],
+      "description": "What a connection field's value must be."
+    },
+    "OptionField": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/OptionType"
+        },
+        "description": {
+          "type": "string",
+          "default": ""
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": true,
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The only values a string option may take."
+        },
+        "min": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "Bounds for `integer` and `number`, inclusive."
+        },
+        "max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "description": "One option a plugin takes."
+    },
+    "OptionType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "boolean",
+            "number",
+            "list",
+            "map"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "char",
+          "description": "A string of exactly one character (a delimiter, a pad)."
+        },
+        {
+          "type": "string",
+          "const": "integer",
+          "description": "A whole number."
+        },
+        {
+          "type": "string",
+          "const": "strings",
+          "description": "A string, or a list of strings (recipients, say)."
+        },
+        {
+          "type": "string",
+          "const": "any",
+          "description": "Anything; the plugin's `validate` checks it."
+        }
+      ],
+      "description": "What a value must be."
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn",
+        "info",
+        "debug",
+        "trace"
+      ],
+      "description": "How important a `log` message is. Core shows `info` and above to the person, and keeps\n`debug` and `trace` for `-v` and the log file."
+    }
+  }
+}

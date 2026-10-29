@@ -649,3 +649,16 @@ fn the_tunnel_warns_about_rsa_keys_and_can_refuse_them() {
         "{err}"
     );
 }
+
+/// The suite's session cases (streaming, `row_limit`, a failed statement, cancel) on a server.
+#[test]
+fn conforms_to_the_protocol_on_a_server() {
+    needs_server!();
+    let session = conformance::Session::new(conn(json!({})))
+        .statement("rows", "select n from generate_series(1, 10) as t(n)")
+        .statement("empty", "select 1 as n where false")
+        .statement("no_result", "create temporary table dre_conformance (n int)")
+        .statement("error", "select * from dre_conformance_missing")
+        .statement("slow", "select pg_sleep(30)");
+    conformance::assert_conforms_with(bin(), &conformance::Options::default().session(session));
+}

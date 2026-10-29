@@ -864,6 +864,23 @@ impl PluginProcess {
         }
     }
 
+    /// The next frame as sent, JSON or Arrow, with nothing skipped or decoded (the conformance
+    /// runner).
+    pub fn recv_frame(&mut self, timeout: Duration) -> Result<Frame> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(Ok(f)) => Ok(f),
+            Ok(Err(FrameError::Malformed(m))) => Err(HostError::Malformed {
+                plugin: self.label.clone(),
+                message: m,
+            }),
+            Err(RecvTimeoutError::Timeout) => Err(HostError::Timeout {
+                plugin: self.label.clone(),
+                waiting_for: "a message",
+            }),
+            _ => Err(self.crashed()),
+        }
+    }
+
     fn recv_any(&mut self, timeout: Option<Duration>, waiting_for: &'static str) -> Result<Incoming> {
         let got = match timeout {
             _ if self.early.is_some() => self.early.take(),
@@ -1289,6 +1306,13 @@ impl PluginProcess {
                 .is_some_and(|w| w.write_all(bytes).and_then(|_| w.flush()).is_ok())
         });
         if ok { Ok(()) } else { Err(self.write_failed()) }
+    }
+
+    /// Close the plugin's stdin: end of input, as when core goes away.
+    pub fn close_input(&mut self) {
+        if let Ok(mut stdin) = self.stdin.lock() {
+            stdin.take();
+        }
     }
 
     /// Wait up to `timeout` for the process to exit.

@@ -11,7 +11,9 @@ use crate::{Kind, PluginId};
 /// and every message streamed as part of a request (`result_set_end`, `finish`, `result`,
 /// `result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither
 /// does anything a protocol 0 peer sends.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+// In the schema, `Request` and `Response` are each message with its envelope.
+#[schemars(rename = "{T}")]
 pub struct Envelope<T> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<u64>,
@@ -26,7 +28,7 @@ impl<T> Envelope<T> {
 }
 
 /// Core → plugin.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     /// Always first. The plugin picks a version in both ranges or replies `version_mismatch`.
@@ -126,7 +128,7 @@ pub enum Request {
 }
 
 /// Plugin → core.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Hello {
@@ -259,7 +261,9 @@ pub const ERROR_KINDS: &[&str] = &[
 
 /// How important a `log` message is. Core shows `info` and above to the person, and keeps
 /// `debug` and `trace` for `-v` and the log file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Error,
@@ -270,7 +274,7 @@ pub enum LogLevel {
 }
 
 /// A rendered message, as `deliver` carries it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Message {
     /// One line, plain text.
     pub title: String,
@@ -285,7 +289,7 @@ pub struct Message {
 }
 
 /// One file of a multi-file `deliver`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeliveryFile {
     pub local_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -293,7 +297,7 @@ pub struct DeliveryFile {
 }
 
 /// Per result set, what a format plugin needs to lay it out.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ResultSetMeta {
     /// Sheet name (xlsx) or file suffix (single-table formats).
     pub name: String,
@@ -318,7 +322,7 @@ pub struct ResultSetMeta {
 }
 
 /// One entry of a `columns:` map.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ColumnOptions {
     /// An Excel number format code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -340,7 +344,7 @@ pub struct ColumnOptions {
 }
 
 /// A column width: sized from the content, or a number of characters.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ColumnWidth {
     Chars(f64),
@@ -348,13 +352,13 @@ pub enum ColumnWidth {
 }
 
 /// The word `auto`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AutoWidth {
     Auto,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConnectionField {
     pub name: String,
     #[serde(default)]
@@ -383,7 +387,7 @@ pub struct ConnectionField {
 }
 
 /// What a connection field's value must be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldKind {
     String,

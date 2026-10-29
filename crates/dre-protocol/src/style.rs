@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A border's weight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Border {
     None,
@@ -22,7 +22,7 @@ pub enum Border {
     Medium,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Align {
     Left,
@@ -31,7 +31,7 @@ pub enum Align {
 }
 
 /// A font's name and size (points).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Font {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,7 +41,7 @@ pub struct Font {
 }
 
 /// How one cell looks; every key optional.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct CellStyle {
     pub bold: Option<bool>,
@@ -56,7 +56,7 @@ pub struct CellStyle {
 }
 
 /// `banded_rows`: a fill, or off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Band {
     Off,
@@ -64,7 +64,7 @@ pub enum Band {
 }
 
 /// How a sheet looks: its data cells, the header and totals rows, banding and borders.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SheetStyle {
     pub cells: CellStyle,
