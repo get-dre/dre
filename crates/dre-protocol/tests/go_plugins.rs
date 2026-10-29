@@ -1,7 +1,9 @@
 //! First-party plugins built outside Cargo (the Go packages: `dre-plugin-databricks`, serving the
 //! `databricks` source and destination, and `dre-plugin-bigquery`, `dre-plugin-snowflake` and
 //! `dre-plugin-clickhouse`), checked through the same host code core uses. CI builds them and sets
-//! `DRE_TEST_GO_PLUGINS` to their directory; the tests skip themselves when it's unset. The
+//! `DRE_TEST_GO_PLUGINS` to their directory; without it, the tests build them whenever a Go
+//! toolchain is on the PATH. Only a machine without Go skips them, and never in CI (`CI` set):
+//! there a missing toolchain fails the test. The
 //! real-warehouse test also needs `DRE_TEST_DATABRICKS_HOST`, `_HTTP_PATH` and `_TOKEN`; the
 //! BigQuery one `DRE_TEST_BIGQUERY_EMULATOR`; the ClickHouse one `DRE_TEST_CLICKHOUSE_HTTP` (a
 //! server with user `dre`, password `dre`).
@@ -13,19 +15,56 @@ use dre_protocol::host::{Execution, LogSink, PluginProcess};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS, Kind, PluginId, conformance};
 use serde_json::json;
 
+/// The packages' directory: `DRE_TEST_GO_PLUGINS`, or the packages built here with `go build`.
+///
+/// # Panics
+///
+/// Panics in CI without a Go toolchain, and when a build fails.
+fn go_plugins_dir() -> Option<PathBuf> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(dir) = std::env::var_os("DRE_TEST_GO_PLUGINS") {
+            return Some(PathBuf::from(dir));
+        }
+        let has_go = std::process::Command::new("go")
+            .arg("version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !has_go {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "CI must run the Go plugin conformance tests: install Go or set DRE_TEST_GO_PLUGINS"
+            );
+            eprintln!("skipped: no Go toolchain on the PATH and DRE_TEST_GO_PLUGINS unset");
+            return None;
+        }
+        let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("go-plugins");
+        let go = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../go");
+        for p in ["databricks", "bigquery", "snowflake", "clickhouse"] {
+            let exe = out.join(format!("dre-plugin-{p}{}", std::env::consts::EXE_SUFFIX));
+            let status = std::process::Command::new("go")
+                .args(["build", "-o"])
+                .arg(&exe)
+                .arg(".")
+                .current_dir(go.join(p))
+                .status()
+                .expect("go build runs");
+            assert!(status.success(), "go build of go/{p} failed");
+        }
+        Some(out)
+    })
+    .clone()
+}
+
 fn go_plugin(name: &str) -> Option<PathBuf> {
-    let dir = std::env::var_os("DRE_TEST_GO_PLUGINS")?;
+    let dir = go_plugins_dir()?;
     let exe = if cfg!(windows) {
         format!("{name}.exe")
     } else {
         name.to_string()
     };
-    let p = PathBuf::from(dir).join(exe);
-    assert!(
-        p.exists(),
-        "DRE_TEST_GO_PLUGINS is set but {} doesn't exist",
-        p.display()
-    );
+    let p = dir.join(exe);
+    assert!(p.exists(), "the Go plugins' directory has no {}", p.display());
     Some(p)
 }
 
@@ -43,7 +82,6 @@ fn start_source(bin: &std::path::Path, log: LogSink) -> PluginProcess {
 #[test]
 fn the_go_databricks_package_conforms_to_the_protocol() {
     let Some(bin) = go_plugin(PACKAGE) else {
-        eprintln!("skipped: set DRE_TEST_GO_PLUGINS to the built Go plugins");
         return;
     };
     conformance::assert_conforms(&bin);
@@ -179,7 +217,6 @@ fn the_go_warehouse_packages_conform_to_the_protocol() {
         ),
     ] {
         let Some(bin) = go_plugin(package) else {
-            eprintln!("skipped: set DRE_TEST_GO_PLUGINS to the built Go plugins");
             return;
         };
         conformance::assert_conforms(&bin);

@@ -37,11 +37,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-const (
-	ProtocolMin = 0
-	ProtocolMax = 1
-)
-
 // Error is a failure with its kind (one of the protocol's error kinds: config, plugin, refused,
 // connection, auth, query, delivery, internal, cancelled, timed_out) and, optionally, a code.
 // The code is namespaced by the plugin on the way out (`bad-token` is sent as
@@ -262,11 +257,7 @@ func Progress(message string, done, total int64) {
 		fmt.Fprintf(os.Stderr, "info: %s (%d/%d)\n", message, done, total)
 		return
 	}
-	m := map[string]any{"type": "progress", "done": done, "total": total}
-	if message != "" {
-		m["message"] = message
-	}
-	s.send(m)
+	s.send(&progressMsg{envelope: newEnvelope("progress"), Message: message, Done: done, Total: total})
 }
 
 // next is the next frame core sent, read by readInput.
@@ -353,11 +344,7 @@ func (h slogHandler) Handle(_ context.Context, r slog.Record) error {
 		fmt.Fprintln(os.Stderr, prefix+r.Message)
 		return nil
 	}
-	m := map[string]any{"type": "log", "level": level, "message": r.Message}
-	if len(fields) > 0 {
-		m["fields"] = fields
-	}
-	s.send(m)
+	s.send(&logMsg{envelope: newEnvelope("log"), Level: level, Message: r.Message, Fields: fields})
 	return nil
 }
 
@@ -392,7 +379,7 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "plugin panicked: %v\n%s", p, debug.Stack())
-			s.send(map[string]any{"type": "error", "kind": "internal", "message": fmt.Sprintf("plugin panicked: %v", p)})
+			s.send(&errorReplyMsg{envelope: newEnvelope("error"), Kind: "internal", Message: fmt.Sprintf("plugin panicked: %v", p)})
 			code = 101
 		}
 	}()
@@ -431,7 +418,7 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 		}
 		if t == "close" {
 			s.closeDB()
-			s.send(map[string]any{"type": "ok"})
+			s.send(okMsg())
 			return 0
 		}
 		if Cancelled() {
@@ -446,9 +433,9 @@ func Serve(stdin io.Reader, stdout io.Writer, p Package, r Role) (code int) {
 }
 
 // send writes one message; from protocol 1 it carries the running request's id.
-func (s *server) send(v map[string]any) {
+func (s *server) send(v message) {
 	if id := s.current.Load(); id != 0 && s.version.Load() >= 1 {
-		v["id"] = id
+		v.setID(id)
 	}
 	s.outMu.Lock()
 	err := WriteJSON(s.out, v)
@@ -461,23 +448,19 @@ func (s *server) send(v map[string]any) {
 
 // errorReply is the `error` reply for a failed request: kind `cancelled` if core cancelled
 // it, else an *Error's kind and code, else the message alone.
-func (s *server) errorReply(err error) map[string]any {
+func (s *server) errorReply(err error) *errorReplyMsg {
 	m := errorReply(err)
 	var e *Error
 	switch {
 	case Cancelled():
-		m["kind"] = "cancelled"
+		m.Kind = "cancelled"
 	case errors.As(err, &e):
-		m["message"] = e.Message
-		if e.Kind != "" {
-			m["kind"] = e.Kind
-		}
+		m.Message, m.Kind = e.Message, e.Kind
 		if e.Code != "" {
-			code := e.Code
-			if !strings.Contains(code, "/") {
-				code = s.role.Name + "/" + code
+			m.Code = e.Code
+			if !strings.Contains(m.Code, "/") {
+				m.Code = s.role.Name + "/" + m.Code
 			}
-			m["code"] = code
 		}
 	}
 	return m
@@ -514,7 +497,7 @@ func (s *server) hello(req map[string]json.RawMessage) {
 	}
 	lo, hi = max(lo, ProtocolMin), min(hi, ProtocolMax)
 	if lo > hi {
-		s.send(map[string]any{"type": "version_mismatch", "min_version": ProtocolMin, "max_version": ProtocolMax})
+		s.send(&versionMismatchReply{envelope: newEnvelope("version_mismatch"), MinVersion: ProtocolMin, MaxVersion: ProtocolMax})
 		panic(exitCode(1))
 	}
 	provides := make([]string, len(s.pkg.Roles))
@@ -535,9 +518,9 @@ func (s *server) hello(req map[string]json.RawMessage) {
 	}
 	s.greeted = true
 	s.version.Store(int32(hi))
-	s.send(map[string]any{
-		"type": "hello", "protocol_version": hi, "kind": s.role.Kind, "name": s.role.Name,
-		"version": s.pkg.Version, "capabilities": s.role.Capabilities, "provides": provides,
+	s.send(&helloReply{
+		envelope: newEnvelope("hello"), ProtocolVersion: hi, Kind: s.role.Kind, Name: s.role.Name,
+		Version: s.pkg.Version, Capabilities: nonNil(s.role.Capabilities), Provides: provides,
 	})
 }
 
@@ -632,7 +615,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 			return fmt.Errorf("unsupported request `validate_connection`")
 		}
 		errs, warns := CheckConnection(s.role, r.Connection, r.Unresolved)
-		s.send(map[string]any{"type": "validated", "errors": errs, "warnings": warns})
+		s.send(&validatedReply{envelope: newEnvelope("validated"), Errors: nonNil(errs), Warnings: warns})
 		return nil
 	}
 	// The same checks before connecting: errors stop it, warnings are logged.
@@ -655,7 +638,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		if json.Unmarshal(mustObject(req), &r) != nil {
 			return fmt.Errorf("unsupported request `validate`")
 		}
-		s.send(map[string]any{"type": "validated", "errors": s.optionErrors(r.Options)})
+		s.send(&validatedReply{envelope: newEnvelope("validated"), Errors: s.optionErrors(r.Options)})
 		return nil
 	}
 	if s.role.Kind == "destination" {
@@ -663,11 +646,10 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 	}
 	switch t {
 	case "describe":
-		d := map[string]any{"type": "describe", "connection_fields": fields(s.role), "identifier_quote": s.role.IdentifierQuote}
-		if s.role.StringLiteral != "" {
-			d["string_literal"] = s.role.StringLiteral
-		}
-		s.send(d)
+		s.send(&describeReply{
+			envelope: newEnvelope("describe"), ConnectionFields: nonNil(s.role.Fields),
+			IdentifierQuote: s.role.IdentifierQuote, StringLiteral: s.role.StringLiteral,
+		})
 		return nil
 	case "open":
 		var conn map[string]any
@@ -692,7 +674,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		s.dbMu.Lock()
 		s.db = db
 		s.dbMu.Unlock()
-		s.send(map[string]any{"type": "ok"})
+		s.send(okMsg())
 		return nil
 	case "execute":
 		var r struct {
@@ -720,7 +702,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		if note != "" {
 			slog.Debug(note)
 		}
-		s.send(map[string]any{"type": "ok"})
+		s.send(okMsg())
 		return nil
 	case "load":
 		var name string
@@ -735,21 +717,10 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 	}
 }
 
-func fields(r Role) []Field {
-	if r.Fields == nil {
-		return []Field{}
-	}
-	return r.Fields
-}
-
 func (s *server) handleDestination(t string, req map[string]json.RawMessage) error {
 	switch t {
 	case "describe":
-		d := map[string]any{"type": "describe", "connection_fields": fields(s.role)}
-		if len(s.role.Options) > 0 {
-			d["option_fields"] = s.role.Options
-		}
-		s.send(d)
+		s.send(&describeReply{envelope: newEnvelope("describe"), ConnectionFields: nonNil(s.role.Fields), OptionFields: s.role.Options})
 		return nil
 	case "deliver":
 		var r struct {
@@ -793,9 +764,9 @@ func (s *server) handleDestination(t string, req map[string]json.RawMessage) err
 		if err != nil {
 			return err
 		}
-		reply := map[string]any{"type": "delivered", "location": loc}
+		reply := &deliveredReply{envelope: newEnvelope("delivered"), Location: loc}
 		if n := takeAttempts(); n > 1 {
-			reply["attempts"] = n
+			reply.Attempts = n
 		}
 		s.send(reply)
 		return nil
@@ -813,7 +784,7 @@ func (s *server) execute(sql string, rowLimit *int64) error {
 	}
 	return s.db.Run(sql, func(res Result) error {
 		if res == nil {
-			s.send(map[string]any{"type": "no_result"})
+			s.send(&noResultReply{newEnvelope("no_result")})
 			return nil
 		}
 		return s.stream(res, rowLimit)
@@ -831,7 +802,7 @@ func (s *server) stream(res Result, rowLimit *int64) error {
 	for i, f := range schema.Fields() {
 		cols[i] = f.Name
 	}
-	s.send(map[string]any{"type": "result", "columns": cols})
+	s.send(&resultReply{envelope: newEnvelope("result"), Columns: cols})
 	var rows int64
 	sent := false
 	for res.HasNext() {
@@ -881,7 +852,7 @@ func (s *server) stream(res Result, rowLimit *int64) error {
 			return err
 		}
 	}
-	s.send(map[string]any{"type": "result_end", "rows": rows})
+	s.send(&resultEndReply{envelope: newEnvelope("result_end"), Rows: rows})
 	return nil
 }
 
@@ -933,11 +904,7 @@ func (s *server) load(name string) error {
 	if err != nil {
 		return err
 	}
-	reply := map[string]any{"type": "loaded", "relation": l.Relation, "rows": l.Rows}
-	if l.Warning != "" {
-		reply["warning"] = l.Warning
-	}
-	s.send(reply)
+	s.send(&loadedReply{envelope: newEnvelope("loaded"), Relation: l.Relation, Rows: l.Rows, Warning: l.Warning})
 	return nil
 }
 
@@ -954,9 +921,11 @@ func ValidName(name string) bool {
 	return true
 }
 
-func errorMsg(m string) map[string]any { return map[string]any{"type": "error", "message": m} }
+func errorMsg(m string) *errorReplyMsg {
+	return &errorReplyMsg{envelope: newEnvelope("error"), Message: m}
+}
 
-func errorReply(err error) map[string]any { return errorMsg(err.Error()) }
+func errorReply(err error) *errorReplyMsg { return errorMsg(err.Error()) }
 
 func str(raw json.RawMessage) string {
 	var s string

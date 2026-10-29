@@ -2481,11 +2481,12 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "arrow 59.3.0",
  "libc",
  "log",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",

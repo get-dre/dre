@@ -366,8 +366,9 @@ type Delivered struct {
 	Attempts int
 }
 
-// Deliver delivers local to remote under rules. A file already at the path with `if_exists:
-// error` fails with an *Error of kind delivery and code file-exists.
+// Deliver delivers local to remote under rules. It fails with an *Error: of kind delivery (with
+// code file-exists for a file already at the path with `if_exists: error`), unless the store
+// returned an *Error of its own.
 func Deliver(s Store, local, remote string, r Rules) (Delivered, error) {
 	return deliverWith(s, local, remote, r, time.Sleep)
 }
@@ -389,13 +390,18 @@ func deliverWith(s Store, local, remote string, r Rules, sleep func(time.Duratio
 			sleep(wait)
 			continue
 		}
+		var e *Error
 		switch {
 		case errors.Is(err, ErrExists):
 			return Delivered{}, &Error{Kind: "delivery", Code: "file-exists", Message: fmt.Sprintf("%s already exists (`if_exists: error`)", remote)}
 		case attempt > 1:
 			return Delivered{}, &Error{Kind: "delivery", Message: fmt.Sprintf("%v (after %d tries)", err, attempt)}
+		case errors.As(err, &e):
+			// The store said what kind of failure it was (refused credentials, say).
+			return Delivered{}, err
 		}
-		return Delivered{}, err
+		// As the Rust SDK: any other failed delivery is of kind delivery.
+		return Delivered{}, &Error{Kind: "delivery", Message: err.Error()}
 	}
 }
 

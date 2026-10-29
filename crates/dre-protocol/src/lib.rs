@@ -10,7 +10,9 @@
 //! - [`host`]: the core side: spawning a plugin, the handshake, requests.
 //! - [`plugin`]: the SDK plugin authors use to serve requests.
 //! - [`options`]: the options a plugin declares, and how they're checked.
-//! - [`conformance`]: checks any plugin binary against the protocol.
+//! - [`conformance`]: checks any plugin binary against the protocol, from the language-neutral
+//!   fixture cases in `conformance/`.
+//! - [`schema`]: the JSON Schema of every message, published as `conformance/schema.json`.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
 //! - [`markdown`]: the portable Markdown subset of messages, and its translations.
 //! - [`delivery`]: the delivery and network rules every file destination shares.
@@ -33,6 +35,7 @@ pub mod markdown;
 pub mod msg;
 pub mod options;
 pub mod plugin;
+pub mod schema;
 pub mod sessions;
 pub mod style;
 pub mod util;
@@ -63,7 +66,31 @@ pub const CAP_LOAD: &str = "load";
 /// Answers `validate` (checks a config block of options). The Rust SDK always advertises it.
 pub const CAP_VALIDATE: &str = "validate";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+/// Every capability a plugin may advertise, as the published schema lists them.
+pub const CAPABILITIES: &[&str] = &[
+    CAP_SESSIONS,
+    CAP_READ_ONLY,
+    CAP_CHECK,
+    CAP_MULTI_FILE,
+    CAP_MESSAGE,
+    CAP_MESSAGE_ONLY,
+    CAP_LOAD,
+    CAP_VALIDATE,
+];
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Source,
@@ -134,6 +161,20 @@ impl std::str::FromStr for PluginId {
 impl serde::Serialize for PluginId {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.collect_str(self)
+    }
+}
+
+impl schemars::JsonSchema for PluginId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PluginId".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "One plugin, written `<kind>/<name>` (`destination/s3`).",
+            "type": "string",
+            "pattern": "^(source|format|destination)/[a-z0-9_]+$"
+        })
     }
 }
 

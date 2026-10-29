@@ -41,9 +41,64 @@ fn collect(p: &mut PluginProcess, sql: &str, limit: Option<u64>) -> (Execution, 
     (e, values)
 }
 
+/// The statements the fixture source understands, for the suite's session cases.
+fn fixture_session() -> conformance::Session {
+    conformance::Session::new(Map::new())
+        .statement("rows", "rows 10")
+        .statement("empty", "rows 0")
+        .statement("no_result", "none")
+        .statement("error", "fail")
+        .statement("slow", "sleep 30")
+}
+
 #[test]
 fn the_fixture_plugin_passes_the_conformance_suite() {
     conformance::assert_conforms(fixture());
+    conformance::assert_conforms_with(
+        fixture(),
+        &conformance::Options::default().session(fixture_session()),
+    );
+}
+
+#[test]
+fn the_suite_runs_its_session_cases_only_with_a_session() {
+    let without = conformance::run(fixture());
+    let with = conformance::run_with(
+        fixture(),
+        &conformance::Options::default().session(fixture_session()),
+    );
+    let ran = |checks: &[conformance::Check], name: &str| {
+        checks
+            .iter()
+            .any(|c| c.name.contains(name) && c.skipped.is_none())
+    };
+    for name in ["streams a result set", "cancel stops"] {
+        assert!(!ran(&without, name), "{name} ran without a session");
+        assert!(ran(&with, name), "{name} didn't run with a session: {with:#?}");
+    }
+    assert!(
+        without.iter().any(|c| c.skipped.is_some()),
+        "inapplicable cases are listed as skipped"
+    );
+}
+
+#[test]
+fn a_plugin_that_breaks_a_rule_fails_that_case() {
+    // `close_probe` answers only hello, describe, open, execute and close.
+    let checks = conformance::run_with(
+        fixture(),
+        &conformance::Options::default().env(&[("DRE_FIXTURE_MODE", "close_probe")]),
+    );
+    let failed: Vec<&str> = checks
+        .iter()
+        .filter(|c| !c.passed)
+        .map(|c| c.name.as_str())
+        .collect();
+    assert!(failed.iter().any(|n| n.contains("validate")), "{failed:?}");
+    assert!(
+        !failed.iter().any(|n| n.contains("describe is answered")),
+        "{failed:?}"
+    );
 }
 
 #[test]
@@ -313,4 +368,32 @@ fn describe_lists_connection_fields() {
             ("token_text", true, true)
         ]
     );
+}
+
+#[test]
+fn the_conformance_command_checks_any_plugin_executable() {
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_dre-conformance"))
+            .args(args)
+            .env("DRE_FIXTURE_MODE", "close_probe")
+            .output()
+            .unwrap()
+    };
+    let session = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        session.path(),
+        r#"{"connection": {}, "statements": {"rows": "rows 4"}}"#,
+    )
+    .unwrap();
+    let out = run(&[
+        fixture().to_str().unwrap(),
+        "--session",
+        session.path().to_str().unwrap(),
+    ]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    // close_probe can't validate, so the command fails and says which case.
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("✗ source/fixture: validate"), "{text}");
+    assert!(text.contains("✓ source/fixture: describe is answered"), "{text}");
+    assert!(!run(&[]).status.success());
 }

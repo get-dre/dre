@@ -1,0 +1,227 @@
+{
+  "description": "The delivery rules every file destination shares (if_exists, atomic temporary names, temp_dir, retries and backoff, numbered names), as cases both SDKs run against their delivery code with an in-memory store. The format is described in docs/protocol.md (Conformance).",
+  "cases": [
+    {
+      "name": "legacy rules write straight to the final name",
+      "base": "legacy",
+      "remote": "out/r.xlsx",
+      "expect": {"path": "out/r.xlsx", "attempts": 1, "ops": ["write out/r.xlsx"], "files": {"out/r.xlsx": "new"}}
+    },
+    {
+      "name": "atomic uploads under a temporary name, then renames over the old file",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"out/r.xlsx": "old"},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r.xlsx",
+        "attempts": 1,
+        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx replace"],
+        "files": {"out/r.xlsx": "new"}
+      }
+    },
+    {
+      "name": "a dropped rename leaves no file at the final name or the temporary one",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "faults": {"break_rename": true},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "error": {"kind": "delivery", "contains": "connection dropped"},
+        "attempts": 1,
+        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx replace", "delete out/.r.xlsx.dre-part"],
+        "files": {}
+      }
+    },
+    {
+      "name": "a relative temp_dir holds the temporary file, from the final file's folder",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "options": {"temp_dir": "../staging"},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r.xlsx",
+        "ops": ["write out/../staging/.r.xlsx.dre-part", "rename out/../staging/.r.xlsx.dre-part out/r.xlsx replace"]
+      }
+    },
+    {
+      "name": "an absolute temp_dir holds the temporary file",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "options": {"temp_dir": "/tmp/"},
+      "remote": "out/r.xlsx",
+      "expect": {"path": "out/r.xlsx", "ops": ["write /tmp/.r.xlsx.dre-part", "rename /tmp/.r.xlsx.dre-part out/r.xlsx replace"]}
+    },
+    {
+      "name": "if_exists error fails when the file exists",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"out/r.xlsx": "old"},
+      "options": {"if_exists": "error", "atomic": false},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "error": {"kind": "delivery", "code": "file-exists", "contains": "already exists"},
+        "attempts": 1,
+        "ops": ["write out/r.xlsx exclusive"],
+        "files": {"out/r.xlsx": "old"}
+      }
+    },
+    {
+      "name": "if_exists error with atomic fails when the file exists and removes the temporary file",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"out/r.xlsx": "old"},
+      "options": {"if_exists": "error"},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "error": {"kind": "delivery", "code": "file-exists", "contains": "already exists"},
+        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx", "delete out/.r.xlsx.dre-part"],
+        "files": {"out/r.xlsx": "old"}
+      }
+    },
+    {
+      "name": "without single-step checks, if_exists error looks first",
+      "existing": {"out/r.xlsx": "old"},
+      "options": {"if_exists": "error", "atomic": false},
+      "remote": "out/r.xlsx",
+      "expect": {"error": {"kind": "delivery", "code": "file-exists"}, "ops": ["exists out/r.xlsx"], "files": {"out/r.xlsx": "old"}}
+    },
+    {
+      "name": "if_exists number keeps both files (exclusive writes)",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2"},
+      "options": {"if_exists": "number", "atomic": false},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r_3.xlsx",
+        "ops": ["write out/r.xlsx exclusive", "write out/r_2.xlsx exclusive", "write out/r_3.xlsx exclusive"],
+        "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
+      }
+    },
+    {
+      "name": "if_exists number keeps both files (atomic, renames that refuse to replace)",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2"},
+      "options": {"if_exists": "number"},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r_3.xlsx",
+        "ops": [
+          "write out/.r.xlsx.dre-part",
+          "rename out/.r.xlsx.dre-part out/r.xlsx",
+          "rename out/.r.xlsx.dre-part out/r_2.xlsx",
+          "rename out/.r.xlsx.dre-part out/r_3.xlsx"
+        ],
+        "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
+      }
+    },
+    {
+      "name": "if_exists number keeps both files (a store that must look first)",
+      "existing": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2"},
+      "options": {"if_exists": "number", "atomic": false},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r_3.xlsx",
+        "ops": ["exists out/r.xlsx", "exists out/r_2.xlsx", "exists out/r_3.xlsx", "write out/r_3.xlsx"],
+        "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
+      }
+    },
+    {
+      "name": "if_exists number keeps both files (atomic, a store that must look first)",
+      "existing": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2"},
+      "options": {"if_exists": "number"},
+      "remote": "out/r.xlsx",
+      "expect": {
+        "path": "out/r_3.xlsx",
+        "ops": [
+          "write out/.r.xlsx.dre-part",
+          "exists out/r.xlsx",
+          "exists out/r_2.xlsx",
+          "exists out/r_3.xlsx",
+          "rename out/.r.xlsx.dre-part out/r_3.xlsx"
+        ],
+        "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
+      }
+    },
+    {
+      "name": "numbered names go before the last extension, and a name without one gets a suffix",
+      "store": {"create_exclusive": true, "rename_no_replace": true},
+      "existing": {"x.tar.gz": "old", "r": "old", "a.b/.env": "old"},
+      "options": {"if_exists": "number", "atomic": false},
+      "deliveries": [
+        {"remote": "x.tar.gz", "path": "x.tar_2.gz"},
+        {"remote": "r", "path": "r_2"},
+        {"remote": "a.b/.env", "path": "a.b/.env_2"}
+      ]
+    },
+    {
+      "name": "object stores need no temporary name",
+      "store": {"create_exclusive": true, "visible_when_complete": true},
+      "options": {"if_exists": "error"},
+      "remote": "out/r.xlsx",
+      "expect": {"path": "out/r.xlsx", "ops": ["write out/r.xlsx exclusive"], "files": {"out/r.xlsx": "new"}}
+    },
+    {
+      "name": "temporary errors are tried again, waiting retry_wait doubled each try",
+      "faults": {"temporary": 2},
+      "options": {"retry_wait": "1s"},
+      "remote": "r.csv",
+      "expect": {
+        "path": "r.csv",
+        "attempts": 3,
+        "waits": [1, 2],
+        "ops": [
+          "write .r.csv.dre-part",
+          "delete .r.csv.dre-part",
+          "write .r.csv.dre-part",
+          "delete .r.csv.dre-part",
+          "write .r.csv.dre-part",
+          "rename .r.csv.dre-part r.csv replace"
+        ],
+        "files": {"r.csv": "new"}
+      }
+    },
+    {
+      "name": "the wait between tries is never more than max_retry_wait",
+      "faults": {"temporary": 3},
+      "options": {"retry_wait": "1s", "max_retry_wait": "3s", "atomic": false},
+      "remote": "r.csv",
+      "expect": {"path": "r.csv", "attempts": 4, "waits": [1, 2, 3]}
+    },
+    {
+      "name": "a server's Retry-After wins over retry_wait",
+      "faults": {"temporary": 1, "retry_after": 7},
+      "options": {"retry_wait": "1s", "atomic": false},
+      "remote": "r.csv",
+      "expect": {"path": "r.csv", "attempts": 2, "waits": [7]}
+    },
+    {
+      "name": "the default backoff grows from about a second",
+      "faults": {"temporary": 2},
+      "options": {"atomic": false},
+      "remote": "r.csv",
+      "expect": {"path": "r.csv", "attempts": 3, "waits_between": [[0.75, 1.25], [3.0, 5.0]]}
+    },
+    {
+      "name": "a delivery gives up after its retries, saying how many tries it took",
+      "faults": {"temporary": 9},
+      "options": {"retry_wait": "1s", "atomic": false},
+      "remote": "r.csv",
+      "expect": {"error": {"kind": "delivery", "contains": "after 4 tries"}, "attempts": 4, "files": {}}
+    },
+    {
+      "name": "retries 0 never tries again",
+      "faults": {"temporary": 1},
+      "connection": {"retries": 0},
+      "options": {"atomic": false},
+      "remote": "r.csv",
+      "expect": {"error": {"kind": "delivery", "contains": "connection reset"}, "attempts": 1, "waits": []}
+    },
+    {
+      "name": "an unknown if_exists is refused",
+      "options": {"if_exists": "keep"},
+      "remote": "r.csv",
+      "expect": {"settings_error": "if_exists"}
+    },
+    {
+      "name": "retries must be a whole number",
+      "connection": {"retries": "many"},
+      "remote": "r.csv",
+      "expect": {"settings_error": "retries"}
+    }
+  ]
+}

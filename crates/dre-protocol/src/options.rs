@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use crate::Kind;
 
 /// What a value must be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionType {
     String,
@@ -30,7 +30,7 @@ pub enum OptionType {
 }
 
 /// One option a plugin takes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OptionField {
     pub name: String,
     #[serde(rename = "type")]

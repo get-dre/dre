@@ -39,13 +39,20 @@ func temporary(err error, status int, retryAfter string) error {
 	return err
 }
 
-// failed words a delivery failure; a coded *plugin.Error (`if_exists: error`) passes as it is.
+// failed words a delivery failure, keeping its kind (delivery when it has none); a coded
+// *plugin.Error (`if_exists: error`) passes as it is.
 func failed(what, path string, err error) error {
+	kind := "delivery"
 	var pe *plugin.Error
 	if errors.As(err, &pe) {
-		return err
+		if pe.Code != "" {
+			return err
+		}
+		if pe.Kind != "" {
+			kind = pe.Kind
+		}
 	}
-	return fmt.Errorf("%s %s failed: %v; the output is still in target/", what, path, err)
+	return &plugin.Error{Kind: kind, Message: fmt.Sprintf("%s %s failed: %v; the output is still in target/", what, path, err)}
 }
 
 // mountStore writes to /Volumes or /Workspace where Databricks compute mounts them; root stands
