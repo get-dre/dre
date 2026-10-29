@@ -245,7 +245,7 @@ impl<'a> Deliverer<'a> {
     }
 
     /// The running plugin for destination type `kind`, started on first use.
-    fn plugin(&mut self, kind: &str) -> Result<&mut Box<dyn Plugin>, Fail> {
+    fn plugin(&mut self, kind: &str) -> Result<&mut dyn Plugin, Fail> {
         if !self.plugins.contains_key(kind) {
             let located = find_plugin(&self.ctx, self.project, PluginKind::Destination, kind)
                 .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
@@ -256,7 +256,7 @@ impl<'a> Deliverer<'a> {
                 .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
             self.plugins.insert(kind.to_string(), p);
         }
-        Ok(self.plugins.get_mut(kind).expect("started above"))
+        Ok(self.plugins.get_mut(kind).expect("started above").as_mut())
     }
 }
 
@@ -270,7 +270,7 @@ impl Drop for Deliverer<'_> {
 
 /// Hand the files (or the message) to a destination plugin.
 fn send_through(
-    p: &mut Box<dyn Plugin>,
+    p: &mut dyn Plugin,
     kind: &str,
     r: &Request<'_>,
     targets: &[DeliveryFile],

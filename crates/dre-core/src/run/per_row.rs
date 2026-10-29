@@ -325,7 +325,7 @@ impl BindingRun<'_> {
                 }
             })
             .collect();
-        let single = files.splits(data_ps.len());
+        let splits = files.splits(data_ps.len());
         let template_base = if files.format.is_document() {
             Some(self.document_payload(o.template.as_ref())?)
         } else if let Some(t) = &o.template {
@@ -426,7 +426,7 @@ impl BindingRun<'_> {
                     name,
                     each,
                     &folder,
-                    single,
+                    splits,
                     droppable,
                     template_base.as_ref(),
                     &attached,
@@ -869,7 +869,7 @@ impl BindingRun<'_> {
         name: &str,
         each: &(JsonMap<String, Json>, minijinja::Value),
         folder: &Path,
-        single: bool,
+        splits: bool,
         droppable: bool,
         template_base: Option<&Json>,
         attached: &[Attached],
@@ -952,7 +952,7 @@ impl BindingRun<'_> {
             .filter(|&q| !decision.drop.contains(&pop.data[q].0.name))
             .collect();
         let path = folder.join(name);
-        job.files = if single {
+        job.files = if splits {
             let tabs: Vec<&str> = kept.iter().map(|&q| pop.data[q].0.name.as_str()).collect();
             Files::split_names(name, &tabs)?
                 .into_iter()
@@ -1218,7 +1218,7 @@ fn worker(
     results: mpsc::Sender<(usize, Job, RowRecord)>,
 ) {
     let mut format: Option<Box<dyn Plugin>> = None;
-    let mut dests = Deliverer::new(&shared.ctx, shared.project, shared.log.clone());
+    let mut deliverer = Deliverer::new(&shared.ctx, shared.project, shared.log.clone());
     loop {
         if shared.cancel.is_cancelled() {
             break;
@@ -1227,7 +1227,7 @@ fn worker(
             break;
         };
         // A row the run stopped part-way isn't recorded: it never finished, so a retry makes it.
-        let Some(record) = run_job(shared, &job, &mut format, &mut dests) else {
+        let Some(record) = run_job(shared, &job, &mut format, &mut deliverer) else {
             break;
         };
         if record.status != "rendered" {
@@ -1279,7 +1279,7 @@ fn run_job(
     shared: &Shared<'_>,
     job: &Job,
     format: &mut Option<Box<dyn Plugin>>,
-    dests: &mut Deliverer<'_>,
+    deliverer: &mut Deliverer<'_>,
 ) -> Option<RowRecord> {
     if let Some(pre) = &job.pre {
         return Some(pre.clone());
@@ -1373,7 +1373,7 @@ fn run_job(
         let request = Request::new(&d.profile, d.path.as_deref(), &d.options, &local)
             .message(job.message.as_ref(), &d.attach)
             .format(&shared.format);
-        let (status, location, error) = match dests.deliver(request) {
+        let (status, location, error) = match deliverer.deliver(request) {
             Ok(Some(sent)) => ("delivered", Some(job.mask.apply(&sent.location)), None),
             Ok(None) => ("not_delivered", None, None),
             Err(e) => {
