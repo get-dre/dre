@@ -18,6 +18,7 @@ type Mapping = JsonMap<String, Json>;
 use crate::codes::Code;
 use crate::dates::{WeekNumbering, WeekStart};
 use crate::diag::Diagnostics;
+use crate::formats::{Files, Format};
 use crate::lookups::{self, DEFAULT_INLINE_MAX_ROWS, LOOKUPS_DIR, Lookup};
 use crate::packages::{self, DispatchOrder, Package};
 
@@ -453,9 +454,20 @@ impl Binding {
         self.set.as_deref().unwrap_or("default")
     }
 
-    /// Every output's destinations, in order: the order of [`crate::parse::ParsedBinding::destinations`].
+    /// Every output's destinations, in order.
     pub fn destinations(&self) -> impl Iterator<Item = &Destination> {
         self.outputs.iter().flat_map(|o| o.destinations.iter())
+    }
+
+    /// Every output's destinations, each with its key: how the parse pass's rendered profiles
+    /// ([`crate::parse::ParsedBinding::destination`]) are found again.
+    pub fn keyed_destinations(&self) -> impl Iterator<Item = (DestinationKey, &Destination)> {
+        self.outputs.iter().enumerate().flat_map(|(output, o)| {
+            o.destinations
+                .iter()
+                .enumerate()
+                .map(move |(entry, d)| (DestinationKey { output, entry }, d))
+        })
     }
 
     /// The output named `name`.
@@ -479,12 +491,6 @@ fn output_feeds(queries: Option<&Loose<Vec<String>>>, query: &str) -> bool {
         _ => true,
     }
 }
-
-/// The formats that take `output.template`.
-pub const TEMPLATE_FORMATS: &[&str] = &["xlsx", "html", "pdf"];
-
-/// The built-in format that renders query results into a short headline.
-pub const MESSAGE_FORMAT: &str = "message";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Output {
@@ -577,13 +583,21 @@ impl Output {
     }
 
     pub fn is_message(&self) -> bool {
-        self.format == MESSAGE_FORMAT
+        Format::new(&self.format).is_message()
     }
 
     /// How messages name it: "output `x`", or "output 2" when unnamed.
     pub fn label(&self, index: usize) -> String {
         output_label(self.name.as_deref(), index)
     }
+}
+
+/// A destination entry's place in its Binding: its output's index, and its own among that
+/// output's destinations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DestinationKey {
+    pub output: usize,
+    pub entry: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -2653,7 +2667,7 @@ impl Loader {
                     used.connection(c, file.clone(), None);
                 }
             }
-            for d in parsed.destinations.iter().flatten() {
+            for d in parsed.destinations.values().flatten() {
                 used.destination(d, file.clone(), None);
             }
             project.reports[ri].bindings[bi].parsed = Some(std::sync::Arc::new(parsed));
@@ -3950,8 +3964,7 @@ impl Loader {
         // Two unnamed outputs of one format would write the same default file.
         let mut exts = BTreeSet::new();
         for o in outputs.iter().filter(|o| o.name.is_none()) {
-            let ext = o.extension.clone().unwrap_or_else(|| o.format.clone());
-            if !exts.insert(ext) {
+            if !exts.insert(Files::of(o).extension()) {
                 self.diags.error(
                     Code::DuplicateOutput,
                     at.clone(),
@@ -3964,12 +3977,12 @@ impl Loader {
             }
         }
         for q in queries.iter().filter(|q| !q.columns.is_empty()) {
-            let formats: Vec<&str> = outputs
+            let formats: Vec<Format<'_>> = outputs
                 .iter()
                 .filter(|o| o.feeds(&q.query))
-                .map(|o| o.format.as_str())
+                .map(|o| Format::new(&o.format))
                 .collect();
-            if !formats.is_empty() && !formats.contains(&"xlsx") {
+            if !formats.is_empty() && !formats.iter().any(|f| f.is_workbook()) {
                 self.diags.error(
                     Code::InvalidField,
                     at.clone(),
@@ -4062,9 +4075,6 @@ impl Loader {
         outputs
     }
 
-    /// A message output's options, and the templates of any output (`text`, `file`, `title`,
-    /// `when`): they compile, `results.<x>` names one of the output's queries and `outputs.<x>`
-    /// another output. Only attribute access is checked; dynamic access isn't seen.
     /// A zipping entry's zip is flat: two of its files with one name are an error. The names
     /// are known here for outputs that aren't per row (theirs render per row).
     fn check_zip_names(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
@@ -4072,50 +4082,32 @@ impl Loader {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // The names `run` gives the output's files, from the same catalog.
         let files_of = |o: &Output| -> Option<Vec<String>> {
             if o.for_each.is_some() || o.is_message() {
                 return None;
             }
-            let ext = o.extension.clone().unwrap_or_else(|| {
-                match o.format.as_str() {
-                    "delimited" | "fixed_width" => "txt",
-                    f => f,
-                }
-                .to_string()
-            });
-            let literal = o
+            let path = o
                 .destinations
                 .iter()
                 .filter(|d| d.zip.is_none())
-                .find_map(|d| d.path.as_deref())
+                .find_map(|d| d.path.as_deref());
+            if path
                 .and_then(|p| p.rsplit(['/', '\\']).next())
-                .filter(|n| !n.is_empty());
-            let base = match literal {
-                Some(n) if crate::preflight::is_templated(n) => return None,
-                Some(n) => n.to_string(),
-                None => {
-                    let stem = o.name.clone().unwrap_or_else(|| report.clone());
-                    if ext.is_empty() {
-                        stem
-                    } else {
-                        format!("{stem}.{ext}")
-                    }
-                }
-            };
-            let single_table = matches!(o.format.as_str(), "csv" | "delimited" | "fixed_width" | "parquet");
-            let tabs: Vec<String> = queries
+                .is_some_and(crate::preflight::is_templated)
+            {
+                return None;
+            }
+            let stem = o.name.as_deref().unwrap_or(&report);
+            let files = Files::of(o);
+            let base = files.base_name(stem, None, path);
+            let tabs: Vec<&str> = queries
                 .iter()
                 .filter(|q| q.tab && o.feeds(&q.query))
-                .map(|q| q.tab_name.clone().unwrap_or_else(|| q.query.clone()))
+                .map(|q| q.tab_name.as_deref().unwrap_or(&q.query))
                 .collect();
-            if !single_table || o.template.is_some() || tabs.len() <= 1 {
-                return Some(vec![base]);
-            }
-            let (stem, ext) = match base.rfind('.') {
-                Some(i) if i > 0 => (&base[..i], &base[i..]),
-                _ => (base.as_str(), ""),
-            };
-            Some(tabs.iter().map(|t| format!("{stem}_{t}{ext}")).collect())
+            let plan = files.plan(&base, &tabs).ok()?;
+            Some(plan.into_iter().map(|(name, _)| name).collect())
         };
         for (i, o) in outputs.iter().enumerate() {
             for d in o.destinations.iter().filter(|d| d.zip.is_some()) {
@@ -4134,21 +4126,17 @@ impl Loader {
                 if !known {
                     continue;
                 }
-                let mut seen = std::collections::BTreeSet::new();
-                for n in &names {
-                    if !seen.insert(n.as_str()) {
-                        self.diags.error(
-                            Code::InvalidDestinationOption,
-                            Some(file.to_path_buf()),
-                            None,
-                            format!(
-                                "{ctx}, {}: destination `{}`: two files named `{n}` would go into the zip (it's flat, and nothing is renamed); give the outputs different `name:`s",
-                                o.label(i),
-                                d.profile
-                            ),
-                        );
-                        break;
-                    }
+                if let Some(n) = crate::formats::first_clash(names.iter().map(String::as_str)) {
+                    self.diags.error(
+                        Code::InvalidDestinationOption,
+                        Some(file.to_path_buf()),
+                        None,
+                        format!(
+                            "{ctx}, {}: destination `{}`: two files named `{n}` would go into the zip (it's flat, and nothing is renamed); give the outputs different `name:`s",
+                            o.label(i),
+                            d.profile
+                        ),
+                    );
                 }
             }
         }
@@ -4480,9 +4468,9 @@ impl Loader {
             .as_ref()
             .and_then(Loose::ok)
             .cloned()
-            .unwrap_or_else(|| "csv".to_string());
+            .unwrap_or_else(|| crate::formats::DEFAULT.to_string());
         // `message` is built in; every other format is a plugin.
-        if format != MESSAGE_FORMAT {
+        if !Format::new(&format).is_message() {
             used.format(&format, ctx, &file_path);
         }
         let mut opts: JsonMap<String, Json> = o.options.0.into_iter().map(|(k, v)| (k.value, v)).collect();
@@ -4539,7 +4527,7 @@ impl Loader {
         let template = match o.template {
             None => None,
             Some(t) => {
-                if !TEMPLATE_FORMATS.contains(&format.as_str()) {
+                if !Format::new(&format).takes_template() {
                     self.diags.error(
                         Code::InvalidOutputOption,
                         file.clone(),
@@ -4548,7 +4536,7 @@ impl Loader {
                     );
                 }
                 let t = self.typed_template(t, ctx, file.as_deref(), queries);
-                if format != "xlsx" && t.as_ref().is_some_and(|t| !t.bindings.is_empty()) {
+                if !Format::new(&format).is_workbook() && t.as_ref().is_some_and(|t| !t.bindings.is_empty()) {
                     self.diags.error(
                         Code::InvalidTemplate,
                         file.clone(),
@@ -4620,7 +4608,7 @@ impl Loader {
             Some(Loose::Ok(_)) => Some(queries.iter().map(|q| q.query.clone()).collect()),
             _ => None,
         };
-        if extension.is_some() && format == "xlsx" {
+        if extension.is_some() && Format::new(&format).is_workbook() {
             self.diags.error(
                 Code::InvalidOutputOption,
                 file.clone(),
@@ -4645,7 +4633,7 @@ impl Loader {
             }
         };
         // A document or message template decides its sections: a query can't drop one.
-        if format == MESSAGE_FORMAT || crate::document::FORMATS.contains(&format.as_str()) {
+        if Format::new(&format).template_decides_sections() {
             for q in entries.iter().filter(|q| {
                 q.on_empty == Some(crate::no_data::OnEmpty::Skip)
                     && output_feeds(o.queries.as_ref(), &q.query)
@@ -6188,7 +6176,7 @@ impl Loader {
             }
         }
         for (fmt, (ctx, file)) in &used.formats {
-            let note = if fmt == "csv" {
+            let note = if fmt == crate::formats::DEFAULT {
                 " (csv is the built-in default output)"
             } else {
                 ""
@@ -6414,7 +6402,7 @@ impl Loader {
                         continue;
                     }
                 };
-                if format != "xlsx" {
+                if !Format::new(format).is_workbook() {
                     continue;
                 }
                 match template_sheets(&path) {
@@ -6544,7 +6532,7 @@ impl Usage {
 
 fn builtin_output() -> Mapping {
     let mut m = Mapping::new();
-    m.insert("format".into(), Value::String("csv".into()));
+    m.insert("format".into(), Value::String(crate::formats::DEFAULT.into()));
     m
 }
 

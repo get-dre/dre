@@ -17,15 +17,17 @@ use arrow::ipc::reader::FileReader;
 use arrow::ipc::writer::FileWriter;
 use chrono::NaiveDate;
 use dre_protocol::host::{Execution, HostError, LogSink};
-use dre_protocol::msg::{ColumnOptions, DeliveryFile, ResultSetMeta};
-use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE, CAP_READ_ONLY, CAP_SESSIONS};
+use dre_protocol::msg::{ColumnOptions, ResultSetMeta};
+use dre_protocol::{CAP_LOAD, CAP_MESSAGE, CAP_READ_ONLY, CAP_SESSIONS};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as Json, json};
 
 use crate::codes::{Code, ErrorCode};
 use crate::context::Context;
 use crate::dates::Calendar;
+use crate::delivery::{Deliverer, Request, Sent};
 use crate::engine::{CancelToken, Events, RunEvent, RunStore};
+use crate::formats::{self, Files, Format};
 use crate::lookups::Table;
 use crate::message::QueryResult;
 use crate::parse::ParsedBinding;
@@ -817,7 +819,7 @@ pub fn run_targets(
             .chain(
                 parsed
                     .destinations
-                    .iter()
+                    .values()
                     .flatten()
                     .filter(|_| !opts.no_deliver)
                     .filter(|d| !profiles.is_builtin_local(d))
@@ -1092,8 +1094,8 @@ struct BindingRun<'a> {
     /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
     /// (`oi`) reads both.
     outs: Vec<OutputRun>,
-    /// How many tries the delivery being made took (a plugin retrying a temporary error).
-    attempts: u32,
+    /// Delivers the Binding's outputs, reusing a destination process per type.
+    deliverer: Option<Deliverer<'a>>,
     drift: Vec<String>,
     /// The current schema with stable identities and any protection carried from the baseline.
     protected_snapshot: Option<Json>,
@@ -1271,7 +1273,7 @@ impl<'a> BindingRun<'a> {
             started_at,
             produced: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
-            attempts: 1,
+            deliverer: None,
             drift: Vec::new(),
             protected_snapshot: None,
             retry: None,
@@ -1985,9 +1987,7 @@ impl<'a> BindingRun<'a> {
                     .and_then(|q| q.on_empty),
             })
             .collect();
-        let droppable = !(o.is_message()
-            || crate::document::FORMATS.contains(&o.format.as_str())
-            || o.for_each.is_some());
+        let droppable = !(Format::new(&o.format).template_decides_sections() || o.for_each.is_some());
         let d = crate::no_data::decide(o.on_empty, &queries, droppable);
         self.outs[oi].no_data = d.empty.clone();
         for w in &d.warnings {
@@ -2536,27 +2536,16 @@ impl<'a> BindingRun<'a> {
         }
         let renderer = self.renderer(None)?;
         let connections = self.pool.as_ref().expect("pool").connections.clone();
-        // Destinations are numbered across every output, as the parse pass renders them.
-        let numbered: Vec<(usize, usize, &crate::project::Destination)> = self
-            .b
-            .outputs
-            .iter()
-            .enumerate()
-            .flat_map(|(oi, o)| o.destinations.iter().map(move |d| (oi, d)))
-            .enumerate()
-            .map(|(i, (oi, d))| (i, oi, d))
-            .collect();
-        for (i, oi, d) in numbered {
+        for (key, d) in self.b.keyed_destinations() {
+            let oi = key.output;
             // A per-row output's destinations are rendered for each row, with its `each`.
             if self.b.outputs[oi].for_each.is_some() {
                 continue;
             }
             let profile = self
                 .parsed
-                .destinations
-                .get(i)
-                .cloned()
-                .flatten()
+                .destination(key)
+                .map(str::to_string)
                 .ok_or_else(|| format!("destination `{}` has no profile", d.profile))?;
             // Nothing is delivered, so there's no path or options to render.
             if matches!(
@@ -2636,17 +2625,14 @@ impl<'a> BindingRun<'a> {
             p.autofit = q.autofit;
             p.style = q.style.clone();
         }
-        for o in self.b.outputs.iter().filter(|o| o.format == "xlsx") {
-            let mut seen: BTreeMap<String, String> = BTreeMap::new();
-            for p in self.produced.iter().filter(|p| o.feeds(&p.query)) {
-                check_sheet_name(&p.name)?;
-                if let Some(prev) = seen.insert(p.name.to_lowercase(), p.query.clone()) {
-                    return Err(format!(
-                        "sheet name `{}` is used twice (by `{prev}` and `{}`); Excel sheet names must be unique",
-                        p.name, p.query
-                    ).into());
-                }
-            }
+        for o in self
+            .b
+            .outputs
+            .iter()
+            .filter(|o| Format::new(&o.format).is_workbook())
+        {
+            let sheets = self.produced.iter().filter(|p| o.feeds(&p.query));
+            formats::check_sheets(sheets.map(|p| (p.name.as_str(), p.query.as_str())))?;
         }
         Ok(())
     }
@@ -2744,24 +2730,14 @@ impl<'a> BindingRun<'a> {
             }
         }
         let o = &self.b.outputs[oi];
-        let ext = match &o.extension {
-            Some(e) => e.as_str(),
-            None => extension(&o.format),
-        };
-        let stem = o.name.clone().unwrap_or_else(|| self.report.name.clone());
+        let stem = o.name.as_deref().unwrap_or(&self.report.name);
         // A zipping entry's path names the zip, not the files in it.
-        let from_remote = self.outs[oi]
+        let paths = self.outs[oi]
             .dests
             .iter()
             .filter(|d| d.zip.is_none())
-            .find_map(|d| d.path.as_deref())
-            .and_then(|r| r.rsplit(['/', '\\']).next())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        output_name.or(from_remote).unwrap_or_else(|| match ext {
-            "" => stem,
-            ext => format!("{stem}.{ext}"),
-        })
+            .filter_map(|d| d.path.as_deref());
+        Files::of(o).base_name(stem, output_name.as_deref(), paths)
     }
 
     /// Write output `oi`'s files from the result sets of its queries.
@@ -2784,21 +2760,12 @@ impl<'a> BindingRun<'a> {
             self.ui.warn(&format!("  {what}; no output file was written"));
             return Ok(());
         }
-        let multi = out.format == "xlsx" || out.template.is_some() || !is_single_table(&out.format);
-        let groups: Vec<(String, Vec<usize>)> = if multi || mine.len() == 1 {
-            vec![(filename.to_string(), mine)]
-        } else {
-            let (stem, ext) = split_ext(filename);
-            let mut g = Vec::new();
-            for i in mine {
-                let r = &self.produced[i];
-                if r.name.contains(['/', '\\']) {
-                    return Err(format!("`{}` can't be used in a file name", r.name).into());
-                }
-                g.push((format!("{stem}_{}{ext}", r.name), vec![i]));
-            }
-            g
-        };
+        let tabs: Vec<&str> = mine.iter().map(|&i| self.produced[i].name.as_str()).collect();
+        let groups: Vec<(String, Vec<usize>)> = Files::of(out)
+            .plan(filename, &tabs)?
+            .into_iter()
+            .map(|(name, of)| (name, of.into_iter().map(|t| mine[t]).collect()))
+            .collect();
         // Two outputs writing one file would overwrite each other.
         for (name, _) in &groups {
             let path = self.run_dir.join(name);
@@ -2819,7 +2786,7 @@ impl<'a> BindingRun<'a> {
             .start(&plugin, self.ui.plugin_log(), Some(&self.project.root))
             .map_err(|e| e.to_string())?;
         let template = match &out.template {
-            _ if crate::document::FORMATS.contains(&out.format.as_str()) => {
+            _ if Format::new(&out.format).is_document() => {
                 Some(self.document_payload(out.template.as_ref())?)
             }
             Some(t) => Some(self.template_payload(t)?),
@@ -2874,21 +2841,15 @@ impl<'a> BindingRun<'a> {
                 let r = &self.produced[i];
                 let reader = FileReader::try_new(File::open(&r.spool).map_err(|e| e.to_string())?, None)
                     .map_err(|e| e.to_string())?;
-                let schema = r.schema.clone();
-                // Stream batch by batch so memory stays flat.
-                let mut any = false;
-                for b in reader {
-                    let b = b.map_err(|e| e.to_string())?;
-                    any = true;
-                    p.write_batch(&b)
-                        .map_err(|e| format!("{} format: {e}", out.format))?;
-                }
-                if !any {
-                    p.write_batch(&RecordBatch::new_empty(schema))
-                        .map_err(|e| format!("{} format: {e}", out.format))?;
-                }
-                p.end_result_set()
+                // Streamed batch by batch so memory stays flat; a spool that can't be read
+                // ends the stream, and fails the output.
+                let mut unreadable = None;
+                let batches = reader.map_while(|b| b.map_err(|e| unreadable = Some(e.to_string())).ok());
+                crate::plugin_host::write_result_set(p.as_mut(), &r.schema, batches)
                     .map_err(|e| format!("{} format: {e}", out.format))?;
+                if let Some(e) = unreadable {
+                    return Err(e.into());
+                }
             }
             let crate::plugin_host::Written { files, warnings } = p
                 .finish()
@@ -2993,6 +2954,9 @@ impl<'a> BindingRun<'a> {
         }
         let mut failures = Vec::new();
         let mut nowhere = Vec::new();
+        let mut deliverer = self.deliverer.take().unwrap_or_else(|| {
+            Deliverer::new(&self.ctx, self.project, self.ui.plugin_log()).with_steps(self.ui.clone())
+        });
         for d in &dests {
             let profiles = &self.project.profiles;
             let target = profiles.target_of(Role::Destination, &d.profile);
@@ -3000,7 +2964,6 @@ impl<'a> BindingRun<'a> {
             let kind = profiles
                 .target(Role::Destination, &d.profile)
                 .map(|o| o.kind.clone());
-            self.attempts = 1;
             if d.hold || self.opts.hold {
                 self.hold(oi, d);
                 self.outs[oi].deliveries.push(Delivery {
@@ -3015,30 +2978,31 @@ impl<'a> BindingRun<'a> {
                 });
                 continue;
             }
-            let (status, location, error) =
-                match self.deliver_one(oi, d).map_err(|e| e.or(Code::DeliveryFailed)) {
-                    Ok(Some(loc)) => ("delivered", Some(loc), None),
-                    Ok(None) => {
-                        nowhere.push(nowhere_note(&d.profile, &target));
-                        ("not_delivered", None, None)
-                    }
-                    Err(e) => {
-                        failures.push(e.clone());
-                        ("failed", None, Some(e))
-                    }
-                };
+            let (status, location, attempts, error) = match self.deliver_one(&mut deliverer, oi, d) {
+                Ok(Some(sent)) => ("delivered", Some(sent.location), sent.attempts, None),
+                Ok(None) => {
+                    nowhere.push(crate::delivery::nowhere_note(&d.profile, &target));
+                    ("not_delivered", None, 1, None)
+                }
+                Err(e) => {
+                    let e = e.or(Code::DeliveryFailed);
+                    failures.push(e.clone());
+                    ("failed", None, 1, Some(e))
+                }
+            };
             let record = Delivery {
                 profile: d.profile.clone(),
                 kind,
                 target,
                 status,
                 location,
-                attempts: Some(self.attempts).filter(|n| *n > 1),
+                attempts: Some(attempts).filter(|n| *n > 1),
                 error_code: error.as_ref().map(|e| e.code.clone()),
                 error: error.map(|e| e.message),
             };
             self.outs[oi].deliveries.push(record);
         }
+        self.deliverer = Some(deliverer);
         let o = &mut self.outs[oi];
         o.dests = dests;
         if !o.deliveries.iter().any(|d| d.status == "delivered") && !nowhere.is_empty() {
@@ -3182,234 +3146,66 @@ impl<'a> BindingRun<'a> {
         );
     }
 
-    /// Deliver every file to one destination. `Ok(None)`: its entry for this run is
-    /// `deliver: false`, so nothing was sent.
-    fn deliver_one(&mut self, oi: usize, d: &RenderedDest) -> Result<Option<String>, Fail> {
+    /// Deliver output `oi`'s files (or its message, or the entry's zip) to one destination.
+    /// `Ok(None)`: its entry for this run is `deliver: false`, so nothing was sent.
+    fn deliver_one(
+        &mut self,
+        deliverer: &mut Deliverer<'a>,
+        oi: usize,
+        d: &RenderedDest,
+    ) -> Result<Option<Sent>, Fail> {
         // An output is never delivered once the run is cancelled.
         self.not_cancelled()?;
-        let profiles = &self.project.profiles;
-        let out = match profiles.entry(Role::Destination, &d.profile) {
-            Entry::Use(o) => o,
-            Entry::Nowhere => {
-                let note = nowhere_note(&d.profile, &profiles.target_of(Role::Destination, &d.profile));
-                self.ui.step(Level::Info, "Kept", &note, None);
-                return Ok(None);
-            }
-            // Both are checked before the run starts.
-            Entry::Missing => {
-                return Err(Fail::new(
-                    Code::MissingTargetEntry,
-                    profiles.missing_entry(Role::Destination, &d.profile),
-                ));
-            }
-            Entry::Unknown => {
-                return Err(format!("destination profile `{}` isn't in profiles.yml", d.profile).into());
-            }
+        let files: Vec<PathBuf> = match &d.zip_file {
+            Some(z) => vec![z.clone()],
+            None => self.outs[oi].files.iter().map(|(f, _)| f.clone()).collect(),
         };
-        let kind = out.kind.clone();
-        let connection = render_connection(out, self.ctx.env())?;
-        let zipped: Vec<(PathBuf, Option<String>)> = d.zip_file.iter().map(|z| (z.clone(), None)).collect();
-        let files = if d.zip_file.is_some() {
-            &zipped
+        let o = &self.b.outputs[oi];
+        let message = if o.is_message() {
+            self.outs[oi].message.clone()
         } else {
-            &self.outs[oi].files
+            None
         };
-        let targets: Vec<DeliveryFile> = files
+        let attach: Vec<PathBuf> = d
+            .attach
             .iter()
-            .map(|(f, _)| {
-                let name = f
-                    .file_name()
-                    .expect("the path ends in a file name")
-                    .to_string_lossy()
-                    .to_string();
-                let r = d.path.as_deref().map(|r| {
-                    if files.len() == 1 {
-                        r.to_string()
-                    } else {
-                        match r.rfind(['/', '\\']) {
-                            Some(i) => format!("{}{name}", &r[..=i]),
-                            None => name.clone(),
-                        }
-                    }
-                });
-                DeliveryFile {
-                    local_path: f.to_string_lossy().to_string(),
-                    remote_path: r,
-                }
+            .filter_map(|name| {
+                self.b
+                    .outputs
+                    .iter()
+                    .position(|o| o.name.as_deref() == Some(name))
             })
+            .flat_map(|j| self.outs[j].files.iter().map(|(f, _)| f.clone()))
             .collect();
+        let (store, label) = (self.store, self.label());
         // Bindings running at once never deliver to the same file.
-        for t in &targets {
-            if let Some(r) = &t.remote_path
-                && let Some(other) = self.store.claim(&d.profile, r, &self.label())
-            {
-                return Err(Fail::new(
-                    Code::DeliveryFailed,
-                    format!(
-                        "`{other}` delivers to `{r}` on destination `{}` in this run too; Bindings running at once (`threads:`) need different paths (put the Set or a var in the path)",
-                        d.profile
-                    ),
-                ));
-            }
-        }
-        let mut locations = Vec::new();
-        if kind == LOCAL_TYPE {
-            let errors = crate::options::local_option_errors(&d.options);
-            if !errors.is_empty() {
-                return Err(format!("destination `{}`: {}", d.profile, errors.join("; ")).into());
-            }
-            // `if_exists`, `atomic` (default true: written as `.<name>.dre-part`, then renamed)
-            // and `temp_dir`.
-            let (rules, _) = dre_protocol::delivery::Rules::from_settings(
-                dre_protocol::delivery::Rules {
-                    retries: 0,
-                    ..Default::default()
-                },
-                &JsonMap::new(),
-                &d.options,
-                &[],
-            )?;
-            for (i, f) in targets.iter().enumerate() {
-                let t = Instant::now();
-                let r = f
-                    .remote_path
-                    .as_ref()
-                    .ok_or("the local destination needs `output.destination.path`")?;
-                let dst = self.project.root.join(r).to_string_lossy().to_string();
-                let delivered = dre_protocol::delivery::deliver(
-                    &mut dre_protocol::delivery::LocalStore,
-                    Path::new(&f.local_path),
-                    &dst,
-                    &rules,
-                )
-                .map_err(|e| {
-                    let message = format!("delivery to {dst} failed: {e}; the output is still in target/");
-                    if e.exists {
-                        // `if_exists: error`, coded as a plugin's would be.
-                        let code = crate::codes::ErrorCode::Plugin {
-                            code: "local/file-exists".into(),
-                            kind: crate::codes::Kind::Delivery,
-                        };
-                        Fail::new(code, message)
-                    } else {
-                        Fail::new(Code::DeliveryFailed, message)
-                    }
-                })?;
-                let loc = delivered.path;
-                self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-                if d.zip_file.is_none()
-                    && let Some((_, at)) = self.outs[oi].files.get_mut(i)
-                {
-                    at.get_or_insert_with(|| loc.clone());
-                }
-                locations.push(loc);
-            }
-            return Ok(Some(locations.join(", ")));
-        }
-        let failed = |e: dre_protocol::host::HostError| {
-            Fail::from_plugin(
-                &e,
-                format!("delivery through `{kind}` failed: {e}; the output is still in target/"),
-            )
+        let claim = |remote: &str| match store.claim(&d.profile, remote, &label) {
+            Some(other) => Err(Fail::new(
+                Code::DeliveryFailed,
+                format!(
+                    "`{other}` delivers to `{remote}` on destination `{}` in this run too; Bindings running at once (`threads:`) need different paths (put the Set or a var in the path)",
+                    d.profile
+                ),
+            )),
+            None => Ok(()),
         };
-        let plugin = find_plugin(&self.ctx, self.project, PluginKind::Destination, &kind)
-            .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-        let mut p = self
-            .ctx
-            .host()
-            .start(&plugin, self.ui.plugin_log(), Some(&self.project.root))
-            .map_err(|e| e.to_string())?;
-        let is_message = self.b.outputs[oi].is_message();
-        // A message goes to a destination that takes messages as a message; to any other, as
-        // its `.md` file.
-        if is_message
-            && p.has(CAP_MESSAGE)
-            && let Some((title, text)) = self.outs[oi].message.clone()
+        let request = Request::new(&d.profile, d.path.as_deref(), &d.options, &files)
+            .message(message.as_ref(), &attach)
+            .format(&o.format)
+            .claim(&claim);
+        let sent = deliverer.deliver(request)?;
+        // With `zip:` the one file sent is the zip: the files in it keep no location of their
+        // own, and the entry's delivery records the zip's.
+        if let Some(sent) = &sent
+            && d.zip_file.is_none()
         {
-            let t = Instant::now();
-            let path = targets
-                .first()
-                .map(|f| f.local_path.clone())
-                .ok_or("the message has no file to deliver")?;
-            let message = dre_protocol::msg::Message {
-                title,
-                text,
-                html: None,
-                path,
-            };
-            let attach: Vec<DeliveryFile> = d
-                .attach
-                .iter()
-                .filter_map(|name| {
-                    self.b
-                        .outputs
-                        .iter()
-                        .position(|o| o.name.as_deref() == Some(name))
-                })
-                .flat_map(|j| self.outs[j].files.iter())
-                .map(|(f, _)| DeliveryFile {
-                    local_path: f.to_string_lossy().to_string(),
-                    remote_path: None,
-                })
-                .collect();
-            let delivered = p
-                .deliver(crate::plugin_host::Delivery {
-                    files: attach,
-                    message: Some(message),
-                    connection,
-                    options: d.options.clone(),
-                })
-                .map_err(failed)?;
-            self.attempts = delivered.attempts;
-            let loc = delivered.location;
-            self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-            if d.zip_file.is_none()
-                && let Some((_, at)) = self.outs[oi].files.first_mut()
-            {
-                at.get_or_insert_with(|| loc.clone());
-            }
-            p.close();
-            return Ok(Some(loc));
-        }
-        if !is_message && p.has(CAP_MESSAGE_ONLY) {
-            p.close();
-            return Err(format!(
-                "`{kind}` only takes messages, but this output is `{}`; deliver the file elsewhere and link it from a message",
-                self.b.outputs[oi].format
-            ).into());
-        }
-        let batches: Vec<Vec<usize>> = if targets.len() > 1 && p.has(CAP_MULTI_FILE) {
-            vec![(0..targets.len()).collect()]
-        } else {
-            (0..targets.len()).map(|i| vec![i]).collect()
-        };
-        for batch in batches {
-            let t = Instant::now();
-            let files: Vec<DeliveryFile> = batch.iter().map(|&i| targets[i].clone()).collect();
-            let delivered = p
-                .deliver(crate::plugin_host::Delivery {
-                    files,
-                    message: None,
-                    connection: connection.clone(),
-                    options: d.options.clone(),
-                })
-                .map_err(failed)?;
-            self.attempts = self.attempts.max(delivered.attempts);
-            let loc = delivered.location;
-            self.ui.step(Level::Debug, "Delivered", &loc, Some(t.elapsed()));
-            // With `zip:` the one target is the zip: the files in it keep no location of their
-            // own, as with a local destination, and the entry's delivery records the zip's.
-            if d.zip_file.is_none() {
-                for i in batch {
-                    if let Some((_, at)) = self.outs[oi].files.get_mut(i) {
-                        at.get_or_insert_with(|| loc.clone());
-                    }
+            for (at, (_, first)) in sent.files.iter().zip(self.outs[oi].files.iter_mut()) {
+                if let Some(at) = at {
+                    first.get_or_insert_with(|| at.clone());
                 }
             }
-            locations.push(loc);
         }
-        p.close();
-        Ok(Some(locations.join(", ")))
+        Ok(sent)
     }
 
     fn snapshot(&self) -> Json {
@@ -3885,13 +3681,6 @@ impl Drop for OpaqueLogScope {
     }
 }
 
-/// What a run logs, and records, for a destination whose entry is `deliver: false`.
-fn nowhere_note(profile: &str, target: &str) -> String {
-    format!(
-        "destination `{profile}`: `{target}` delivers nowhere (`deliver: false`); output stays in target/"
-    )
-}
-
 /// The Binding's connections: each one's session, opened when a query first needs it and held
 /// until the report ends.
 struct Pool {
@@ -4301,43 +4090,6 @@ impl Connections for ProfileConnections {
         Ok(self
             .described(Role::Connection, kind)
             .and_then(|d| d.string_literal))
-    }
-}
-
-fn check_sheet_name(n: &str) -> Result<(), String> {
-    if n.is_empty() || n.chars().count() > 31 {
-        return Err(format!("sheet name `{n}` must be 1 to 31 characters long"));
-    }
-    if let Some(c) = n.chars().find(|c| "[]:*?/\\".contains(*c)) {
-        return Err(format!(
-            "sheet name `{n}` contains `{c}`, which Excel doesn't allow in sheet names"
-        ));
-    }
-    if n.starts_with('\'') || n.ends_with('\'') {
-        return Err(format!("sheet name `{n}` can't start or end with an apostrophe"));
-    }
-    if n.eq_ignore_ascii_case("history") {
-        return Err("`History` is reserved by Excel and can't be a sheet name".into());
-    }
-    Ok(())
-}
-
-fn is_single_table(format: &str) -> bool {
-    matches!(format, "csv" | "delimited" | "fixed_width" | "parquet")
-}
-
-fn extension(format: &str) -> &str {
-    match format {
-        "delimited" | "fixed_width" => "txt",
-        crate::project::MESSAGE_FORMAT => "md",
-        f => f,
-    }
-}
-
-fn split_ext(name: &str) -> (&str, &str) {
-    match name.rfind('.') {
-        Some(i) if i > 0 => (&name[..i], &name[i..]),
-        _ => (name, ""),
     }
 }
 

@@ -34,7 +34,8 @@ impl Ui for Recorder {
 }
 
 const PROFILES: &str = "connections:\n  warehouse:\n    targets:\n      dev: {type: mem}\n\
-destinations:\n  outbox:\n    targets:\n      dev: {type: drop}\n";
+destinations:\n  outbox:\n    targets:\n      dev: {type: drop}\n\
+\x20 archive:\n    targets:\n      dev: {type: shelf}\n";
 
 /// `select 'acme' as client, 12 as total`.
 fn summary() -> RecordBatch {
@@ -80,6 +81,7 @@ fn host(destination: Script) -> MemoryHost {
         )
         .plugin(Kind::Format, "csv", Script::new(&[]))
         .plugin(Kind::Destination, "drop", destination)
+        .plugin(Kind::Destination, "shelf", Script::new(&[]))
 }
 
 /// A project with one report, `pack`, whose YAML is `report`.
@@ -316,5 +318,41 @@ fn two_runs_in_one_process_share_no_cancellation_or_secrets() {
     assert_eq!(
         quick_ctx.secrets().mask("only-in-the-slow-run"),
         "only-in-the-slow-run"
+    );
+}
+
+#[test]
+fn each_destination_gets_its_own_rendered_profile_when_some_render_per_row() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    // The per-row output's destination renders per row, so the run renders only the others:
+    // each must still find its own profile.
+    let (_dir, project) = project(
+        "queries: [members, summary]\noutput:\n\
+         \x20 - name: letter\n    format: csv\n    queries: [members]\n\
+         \x20   for_each: {query: members, key: member_id}\n\
+         \x20   destination: {profile: outbox, path: \"letters/{{ each.member_id }}.csv\"}\n\
+         \x20 - name: detail\n    format: csv\n    queries: [summary]\n\
+         \x20   destination:\n\
+         \x20     - {profile: \"{{ 'archive' }}\", path: shelf/detail.csv}\n\
+         \x20     - {profile: outbox, path: out/detail.csv}\n",
+        &ctx,
+    );
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    let mut deliveries: Vec<String> = host
+        .calls()
+        .into_iter()
+        .filter(|c| c.contains(" Deliver "))
+        .collect();
+    deliveries.sort();
+    assert_eq!(
+        deliveries,
+        [
+            "destination/drop Deliver letters/101.csv",
+            "destination/drop Deliver letters/102.csv",
+            "destination/drop Deliver out/detail.csv",
+            "destination/shelf Deliver shelf/detail.csv",
+        ]
     );
 }

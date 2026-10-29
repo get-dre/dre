@@ -20,7 +20,7 @@ use serde_json::{Map as JsonMap, Value as Json};
 
 use crate::codes::Code;
 use crate::dates::Calendar;
-use crate::project::{Binding, Project, Report};
+use crate::project::{Binding, DestinationKey, Project, Report};
 use crate::render::{Limited, Mode, Renderer, RendererConfig, ResolvedSource, RunContext, SourceResolver};
 
 /// The code of a template the parse pass couldn't render.
@@ -90,8 +90,9 @@ pub struct ParsedBinding {
     /// The inherited connection, rendered.
     pub inherited: Option<String>,
     pub queries: Vec<ParsedQuery>,
-    /// Each `output.destination` entry's `profile`, rendered (`None` where that failed).
-    pub destinations: Vec<Option<String>>,
+    /// Each `output.destination` entry's `profile`, rendered (`None` where that failed and an
+    /// error says why), by the entry's key.
+    pub destinations: BTreeMap<DestinationKey, Option<String>>,
     /// Every source the queries use, resolved, by `source.table`.
     pub sources: BTreeMap<String, ResolvedSource>,
     pub errors: Vec<Problem>,
@@ -101,6 +102,12 @@ pub struct ParsedBinding {
 impl ParsedBinding {
     pub fn query(&self, name: &str) -> Option<&ParsedQuery> {
         self.queries.iter().find(|q| q.query == name)
+    }
+
+    /// The rendered `profile` of the destination entry `key`; `None` when it failed to render
+    /// (the parse pass recorded an error) or the Binding has no such entry.
+    pub fn destination(&self, key: DestinationKey) -> Option<&str> {
+        self.destinations.get(&key).and_then(Option::as_deref)
     }
 
     /// Every connection the queries use, in order of first use.
@@ -466,7 +473,7 @@ pub fn binding(
         }
         out.queries.push(pq);
     }
-    for d in b.destinations() {
+    for (key, d) in b.keyed_destinations() {
         let p = render_profile(
             &mut out,
             "destination `profile`",
@@ -474,7 +481,7 @@ pub fn binding(
             (&report.file, None),
             Some(&ctx_name),
         );
-        out.destinations.push(p);
+        out.destinations.insert(key, p);
     }
     setup_warnings(report, b, &mut out);
     out
