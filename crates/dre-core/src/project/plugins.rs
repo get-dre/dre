@@ -127,7 +127,12 @@ impl Loader {
 
     /// The `plugins:` declarations, merged across files; and every plugin the project uses, for
     /// [`crate::plugins::check_uses`] to check against what the declared packages provide.
-    pub(super) fn check_plugins(&mut self, decls: &[(Rc<YamlFile>, Mapping)], project: &mut Project, used: &Usage) {
+    pub(super) fn check_plugins(
+        &mut self,
+        decls: &[(Rc<YamlFile>, Mapping)],
+        project: &mut Project,
+        used: &Usage,
+    ) {
         struct Decl {
             req: semver::VersionReq,
             raw: String,

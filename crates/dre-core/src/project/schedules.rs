@@ -17,7 +17,10 @@ impl Loader {
 
     /// timings.yml: named timings. Returns the valid ones, and the names of those with errors
     /// (schedules using them aren't reported again).
-    pub(super) fn parse_timings(&mut self, files: &[Rc<YamlFile>]) -> (BTreeMap<String, Timing>, BTreeSet<String>) {
+    pub(super) fn parse_timings(
+        &mut self,
+        files: &[Rc<YamlFile>],
+    ) -> (BTreeMap<String, Timing>, BTreeSet<String>) {
         let mut out = BTreeMap::new();
         let mut broken = BTreeSet::new();
         let mut seen: BTreeMap<String, String> = BTreeMap::new();
@@ -435,7 +438,8 @@ impl Loader {
                     vars.extend(e.vars.clone());
                     let Ok(r) = crate::render::Renderer::new(crate::render::RendererConfig {
                         root: &project.root,
-                        macros: &project.macros,
+                        project_name: &project.name,
+                        templates: &project.templates,
                         context: crate::render::RunContext {
                             report: report.name.clone(),
                             set: b.set.clone(),
@@ -455,13 +459,6 @@ impl Loader {
                         connection: None,
                         source_type: String::new(),
                         sources: None,
-                        run_query_max_rows: project.run_query_max_rows,
-                        sql: project.sql.clone(),
-                        lookups: project.lookups.clone(),
-                        lookup_inline_max_rows: project.lookup_inline_max_rows,
-                        packages: project.packages.clone(),
-                        project_name: project.name.clone(),
-                        dispatch: project.dispatch.clone(),
                         process: self.ctx.clone(),
                     }) else {
                         continue;

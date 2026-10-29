@@ -570,7 +570,7 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
     let selector = selection(&a.select, &a.selector);
     let (project, mut diags) = project::load_with(&req.dir, &req.load, ctx);
     // validate checks every report, so templates that don't render are its errors too.
-    for d in project.iter().flat_map(|p| p.parse_errors.values().flatten()) {
+    for d in project.iter().flat_map(|p| p.all_parse_errors()) {
         diags.push(d.clone());
     }
     let report_errors = project
@@ -578,7 +578,7 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         .map(|p| dre_core::manifest::report_errors(p, &diags))
         .unwrap_or_default();
     if let Some(p) = &project {
-        ctx.secrets().set_enabled(p.mask_secrets);
+        ctx.secrets().set_enabled(p.mask_secrets());
     }
     if let Err(e) = dre_core::start::write_manifest(ctx, project.as_ref(), &report_errors, &req) {
         diags.error(Code::TargetPathUnwritable, None, None, e);
@@ -631,16 +631,16 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         let out = serde_json::json!({
             "ok": ok,
             "profiles": project.as_ref().map(|p| serde_json::json!({
-                "path": p.profiles.path,
-                "exists": p.profiles.exists(),
-                "found_by": p.profiles.found_by,
+                "path": p.profiles().path,
+                "exists": p.profiles().exists(),
+                "found_by": p.profiles().found_by,
             })),
             "target": project.as_ref().map(|p| serde_json::json!({
-                "name": p.target_name,
-                "from": p.target_from.to_string(),
+                "name": p.target_name(),
+                "from": p.run_target().from.to_string(),
                 "profiles": targets.as_ref().map(|t| t.profiles.clone()).unwrap_or_default(),
             })),
-            "settings": project.as_ref().map(|p| &p.settings),
+            "settings": project.as_ref().map(|p| p.settings()),
             "errors": diags.error_count(),
             "warnings": diags.warning_count(),
             "diagnostics": diags.sorted(),
@@ -668,18 +668,18 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
                 "Compiled {} Binding{} into {}/",
                 plans.len(),
                 plural(plans.len()),
-                shown(p, &p.target_dir.join("compiled")).display()
+                shown(p, &p.target_dir().join("compiled")).display()
             );
         }
         if let Some(p) = &project {
             printer.line(
                 output::Tone::Note,
                 "Profiles",
-                &dre_core::start::profiles_line(&p.profiles),
+                &dre_core::start::profiles_line(p.profiles()),
             );
             let line = targets.as_ref().map_or_else(|| target_line(p), |t| t.line());
             printer.line(output::Tone::Note, "Target", &line);
-            for s in p.settings.lines() {
+            for s in p.settings().lines() {
                 printer.detail(output::Tone::Note, "Setting", &s);
             }
         }
@@ -800,7 +800,7 @@ fn compile_for_validate(
 fn catalog(ctx: &Context, a: CatalogArgs, printer: &output::Printer) -> ExitCode {
     json_command(ctx, &a.project, a.output, printer, |project| {
         let request =
-            std::fs::read_to_string(project.root.join(&a.tables_file)).map_err(|e| e.to_string())?;
+            std::fs::read_to_string(project.root().join(&a.tables_file)).map_err(|e| e.to_string())?;
         let request =
             serde_json::from_str(&request).map_err(|e| format!("invalid catalogue request: {e}"))?;
         dre_core::catalog::build(ctx, project, &a.profile, &request)
@@ -809,7 +809,7 @@ fn catalog(ctx: &Context, a: CatalogArgs, printer: &output::Printer) -> ExitCode
 
 fn query(ctx: &Context, a: QueryArgs, printer: &output::Printer) -> ExitCode {
     json_command(ctx, &a.project, a.output, printer, |project| {
-        let sql = std::fs::read_to_string(project.root.join(&a.sql_file)).map_err(|e| e.to_string())?;
+        let sql = std::fs::read_to_string(project.root().join(&a.sql_file)).map_err(|e| e.to_string())?;
         dre_core::query::execute(ctx, project, &a.profile, &sql, a.max_rows)
     })
 }
@@ -827,7 +827,7 @@ fn json_command(
     };
     let file = output.output_file;
     let result = build(&project).and_then(|value| {
-        let path = project.root.join(&file);
+        let path = project.root().join(&file);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -981,12 +981,12 @@ fn plugin_list(ctx: &Context) -> ExitCode {
 
 /// The run's target and where it came from, for when the profiles' entries aren't known.
 fn target_line(p: &dre_core::project::Project) -> String {
-    format!("{} ({})", p.target_name, p.target_from)
+    format!("{} ({})", p.target_name(), p.run_target().from)
 }
 
 /// A path under the project as people read it: relative to the project when it's inside it.
 fn shown(project: &dre_core::project::Project, p: &std::path::Path) -> PathBuf {
-    dre_core::slash(p.strip_prefix(&project.root).unwrap_or(p))
+    dre_core::slash(p.strip_prefix(project.root()).unwrap_or(p))
 }
 
 /// `--rate N/unit`.
@@ -1245,8 +1245,8 @@ fn deps(ctx: &Context, a: DepsArgs, printer: &output::Printer) -> ExitCode {
             "Synced",
             &format!(
                 "{} plugin(s), {} package(s) and {} companion(s); plugin/package dre.lock is up to date",
-                project.plugins.len(),
-                project.packages.len(),
+                project.plugins().len(),
+                project.packages().len(),
                 extensions
             ),
         );

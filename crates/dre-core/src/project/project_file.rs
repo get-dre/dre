@@ -201,7 +201,6 @@ impl Loader {
             default_profile,
             default_set,
             vars,
-            run_query_max_rows,
             keep_runs,
             run_timeout,
             reports: Vec::new(),
@@ -211,18 +210,18 @@ impl Loader {
             plugins_incomplete: false,
             schedules: Vec::new(),
             timings: BTreeMap::new(),
-            macros: Vec::new(),
-            packages: Vec::new(),
+            templates: crate::render::ProjectTemplates {
+                run_query_max_rows,
+                lookup_inline_max_rows,
+                dispatch,
+                ..Default::default()
+            },
             mask_secrets,
             mask_row_values,
             timezone,
             locale,
             week_start,
             week_numbering,
-            dispatch,
-            sql: BTreeMap::new(),
-            lookups: BTreeMap::new(),
-            lookup_inline_max_rows,
             format_options: self
                 .format_options
                 .iter()
@@ -514,12 +513,13 @@ impl Loader {
     /// project's own macros, or DRE's functions.
     pub(super) fn check_macro_namespaces(&mut self, project: &Project) {
         let own: BTreeSet<String> = project
+            .templates
             .macros
             .iter()
             .filter_map(|m| std::fs::read_to_string(self.root.join(m)).ok())
             .flat_map(|src| preflight::macro_defs(&src).into_iter().map(|d| d.name))
             .collect();
-        for p in &project.packages {
+        for p in &project.templates.packages {
             let clash = if RESERVED_NAMES.contains(&p.name.as_str()) {
                 Some("a DRE function or variable".to_string())
             } else if own.contains(&p.name) {
@@ -541,9 +541,9 @@ impl Loader {
                 );
             }
         }
-        for (ns, order) in &project.dispatch {
+        for (ns, order) in &project.templates.dispatch {
             for n in order {
-                if n != &project.name && !project.packages.iter().any(|p| &p.name == n) {
+                if n != &project.name && !project.templates.packages.iter().any(|p| &p.name == n) {
                     self.diags.error(
                         Code::InvalidField,
                         Some(PathBuf::from(PROJECT_FILE)),

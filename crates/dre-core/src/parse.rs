@@ -142,18 +142,9 @@ pub fn calendar(
     schedule: Option<&str>,
 ) -> Calendar {
     let schedule_tz = schedule
-        .and_then(|n| project.schedules.iter().find(|e| e.name == n))
+        .and_then(|n| project.schedule(n))
         .and_then(|e| e.timezone.as_deref());
-    let tz = timezone
-        .or(schedule_tz)
-        .or(report.timezone.as_deref())
-        .and_then(|t| crate::dates::parse_tz(t).ok())
-        .unwrap_or(chrono_tz::Tz::UTC);
-    Calendar {
-        tz,
-        week_start: project.week_start,
-        numbering: project.week_numbering,
-    }
+    project.calendar(timezone.or(schedule_tz).or(report.timezone.as_deref()))
 }
 
 /// `run.date`: `DRE_RUN_DATE`, else `DRE_RUN_AT`'s date in the run's timezone, else today there.
@@ -199,10 +190,10 @@ type Resolved = BTreeMap<(String, String), Result<ResolvedSource, String>>;
 
 /// Resolves `source()` for one Binding: fields rendered with `limited`, once each.
 pub fn resolver(project: &Project, limited: Arc<Limited>) -> Option<SourceResolver> {
-    if project.sources.is_empty() {
+    if project.sources().is_empty() {
         return None;
     }
-    let sources = project.sources.clone();
+    let sources = project.sources().clone();
     let cache: Arc<Mutex<Resolved>> = Arc::default();
     Some(Arc::new(move |source: &str, table: &str| {
         let key = (source.to_string(), table.to_string());
@@ -328,8 +319,9 @@ pub fn binding(
     let inherited_failed = b.profile.is_some() && out.inherited.is_none();
     let sources = resolver(project, limited.clone());
     let renderer = Renderer::new(RendererConfig {
-        root: &project.root,
-        macros: &project.macros,
+        root: project.root(),
+        project_name: project.name(),
+        templates: project.templates(),
         context,
         vars: vars.clone(),
         cli_vars: inputs.cli_vars.clone(),
@@ -339,13 +331,6 @@ pub fn binding(
         connection: None,
         source_type: String::new(),
         sources: sources.clone(),
-        run_query_max_rows: project.run_query_max_rows,
-        sql: project.sql.clone(),
-        lookups: project.lookups.clone(),
-        lookup_inline_max_rows: project.lookup_inline_max_rows,
-        packages: project.packages.clone(),
-        project_name: project.name.clone(),
-        dispatch: project.dispatch.clone(),
         process: inputs.process.clone(),
     });
     let renderer = match renderer {
@@ -381,7 +366,7 @@ pub fn binding(
             out.queries.push(pq);
             continue;
         };
-        let src = match std::fs::read_to_string(project.root.join(&q.path)) {
+        let src = match std::fs::read_to_string(project.root().join(&q.path)) {
             Ok(s) => s,
             Err(e) => {
                 error(

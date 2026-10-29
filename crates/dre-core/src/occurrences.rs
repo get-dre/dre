@@ -78,8 +78,8 @@ pub use crate::run::rfc3339;
 /// A report's timezone and the run-time overrides never move a firing.
 pub fn firing_tz(project: &Project, e: &ScheduleEntry) -> Tz {
     e.timezone
-        .as_ref()
-        .or(project.timezone.as_ref())
+        .as_deref()
+        .or(project.timezone())
         .and_then(|t| crate::dates::parse_tz(t).ok())
         .unwrap_or(Tz::UTC)
 }
@@ -87,14 +87,9 @@ pub fn firing_tz(project: &Project, e: &ScheduleEntry) -> Tz {
 /// The Bindings a schedule runs, as `(report, set)`, in the project's report order.
 pub fn bindings<'a>(project: &'a Project, name: &str) -> Vec<(&'a str, Option<&'a str>)> {
     project
-        .reports
-        .iter()
-        .flat_map(|r| {
-            r.bindings
-                .iter()
-                .filter(|b| b.schedules.iter().any(|s| s == name))
-                .map(|b| (r.name.as_str(), b.set.as_deref()))
-        })
+        .scheduled_bindings(name)
+        .into_iter()
+        .map(|(r, b)| (r.name.as_str(), b.set.as_deref()))
         .collect()
 }
 
@@ -295,7 +290,7 @@ pub fn definition_hash(project: &Project, e: &ScheduleEntry) -> String {
 /// that nothing changed.
 pub fn project_hash(project: &Project) -> String {
     let all: BTreeMap<&str, String> = project
-        .schedules
+        .schedules()
         .iter()
         .map(|e| (e.name.as_str(), definition_hash(project, e)))
         .collect();
@@ -305,20 +300,20 @@ pub fn project_hash(project: &Project) -> String {
 /// Which schedules a request covers, in schedules.yml order.
 fn chosen<'a>(project: &'a Project, req: &Request) -> Result<Vec<&'a ScheduleEntry>, String> {
     for n in &req.schedules {
-        if !project.schedules.iter().any(|e| &e.name == n) {
+        if !project.schedule(n).is_some() {
             return Err(crate::run::unknown_schedule(project, n));
         }
     }
     let reports: Option<BTreeSet<&str>> = match &req.select {
         None => None,
-        Some(s) => match crate::selector::resolve(project, s) {
+        Some(s) => match project.select(s) {
             Ok(r) if r.is_empty() => return Err(format!("selector `{s}` matches no report")),
             Ok(r) => Some(r.into_iter().map(|r| r.name.as_str()).collect()),
             Err(e) => return Err(e.to_string()),
         },
     };
     Ok(project
-        .schedules
+        .schedules()
         .iter()
         .filter(|e| req.schedules.is_empty() || req.schedules.contains(&e.name))
         .filter(|e| match &reports {
@@ -436,7 +431,7 @@ pub fn document(project: &Project, req: &Request) -> Result<Json, String> {
     Ok(json!({
         "dre_schedule_version": FORMAT_VERSION,
         "dre_version": crate::version(),
-        "project": project.name,
+        "project": project.name(),
         "window": {"from": rfc3339(req.window.from), "to": rfc3339(req.window.to)},
         "split": req.split,
         "complete": req.schedules.is_empty() && req.select.is_none(),

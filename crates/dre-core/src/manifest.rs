@@ -36,20 +36,20 @@ pub type ReportErrors = BTreeMap<String, Vec<String>>;
 
 /// Where the manifest goes for `project`.
 pub fn path(project: &Project) -> PathBuf {
-    project.target_dir.join(FILE)
+    project.target_dir().join(FILE)
 }
 
 /// The whole project's manifest.
 pub fn build(project: &Project, errors: &ReportErrors) -> Json {
     let schedules = project
-        .schedules
+        .schedules()
         .iter()
         .map(|e| (e.name.clone(), schedule(project, &e.name)))
         .collect();
     document(
         project,
         project
-            .reports
+            .reports()
             .iter()
             .map(|r| (r, r.bindings.iter().collect()))
             .collect(),
@@ -392,7 +392,7 @@ fn document(
         })
         .collect();
     let plugins = project
-        .plugins
+        .plugins()
         .iter()
         .map(|p| {
             let (kind, location) = match &p.source {
@@ -412,17 +412,17 @@ fn document(
         schema_version: SCHEMA_VERSION,
         version: crate::version().to_string(),
         project: ManifestProject {
-            name: project.name.clone(),
-            target: project.target_name.clone(),
-            default_profile: project.default_profile.clone(),
-            timezone: project.timezone.clone(),
+            name: project.name().to_string(),
+            target: project.target_name().to_string(),
+            default_profile: project.default_profile().map(str::to_string),
+            timezone: project.timezone().map(str::to_string),
             checksum: project_checksum(project),
         },
         reports,
         schedules,
         sources: sources(project),
         plugins,
-        extensions: crate::packages::declared_extensions(&project.root).unwrap_or_default(),
+        extensions: crate::packages::declared_extensions(project.root()).unwrap_or_default(),
     };
     sorted(serde_json::to_value(doc).expect("a manifest serializes"))
 }
@@ -542,24 +542,15 @@ fn binding(b: &Binding) -> ManifestBinding {
 /// `DRE_RUN_AT` sets it, so the bytes don't change by the second). A field that doesn't render
 /// is left as written, with the problem under `errors`.
 fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
-    if project.sources.is_empty() {
+    if project.sources().is_empty() {
         return BTreeMap::new();
     }
-    let inputs = &project.inputs;
-    let calendar = crate::dates::Calendar {
-        tz: inputs
-            .timezone
-            .as_deref()
-            .or(project.timezone.as_deref())
-            .and_then(|t| crate::dates::parse_tz(t).ok())
-            .unwrap_or(chrono_tz::Tz::UTC),
-        week_start: project.week_start,
-        numbering: project.week_numbering,
-    };
+    let inputs = project.inputs();
+    let calendar = project.calendar(inputs.timezone.as_deref().or(project.timezone()));
     let context = crate::render::RunContext {
         report: String::new(),
         set: None,
-        target: project.target_name.clone(),
+        target: project.target_name().to_string(),
         schedule: None,
         date: crate::parse::run_date(&calendar, inputs.date, inputs.scheduled_at),
         now: inputs
@@ -571,12 +562,12 @@ fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
     };
     let limited = crate::render::Limited::new(
         context,
-        project.vars.clone(),
+        project.vars().clone(),
         inputs.cli_vars.clone(),
         &inputs.process,
     );
     let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for r in &project.reports {
+    for r in project.reports() {
         for p in r.bindings.iter().filter_map(|b| b.parsed.as_ref()) {
             for k in p.source_keys() {
                 used.entry(k.to_string()).or_default().insert(r.name.clone());
@@ -584,7 +575,7 @@ fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
         }
     }
     let mut out = BTreeMap::new();
-    for (name, s) in &project.sources {
+    for (name, s) in project.sources() {
         let mut errors: Vec<String> = Vec::new();
         let mut render = |key: &str, v: &str| match limited.render(&format!("`{key}`"), v) {
             Ok(r) => r,
@@ -634,18 +625,13 @@ fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
 }
 
 fn schedule(project: &Project, name: &str) -> Option<ManifestSchedule> {
-    let e = project.schedules.iter().find(|e| e.name == name)?;
+    let e = project.schedule(name)?;
     let bindings = project
-        .reports
-        .iter()
-        .flat_map(|r| {
-            r.bindings
-                .iter()
-                .filter(|b| b.schedules.iter().any(|s| s == name))
-                .map(|b| ScheduledBinding {
-                    report: r.name.clone(),
-                    set: b.set.clone(),
-                })
+        .scheduled_bindings(name)
+        .into_iter()
+        .map(|(r, b)| ScheduledBinding {
+            report: r.name.clone(),
+            set: b.set.clone(),
         })
         .collect();
     Some(ManifestSchedule {
@@ -719,7 +705,7 @@ fn report_files(project: &Project, r: &Report) -> BTreeSet<String> {
     }
     for o in r.bindings.iter().flat_map(|b| b.outputs.iter()) {
         if let Some(t) = &o.template {
-            files.insert(template_file(&project.root, &t.file));
+            files.insert(template_file(project.root(), &t.file));
         }
         // A message's text template counts like an xlsx template.
         if let Some(f) = o
@@ -728,7 +714,7 @@ fn report_files(project: &Project, r: &Report) -> BTreeSet<String> {
             .and_then(Json::as_str)
             .filter(|_| o.is_message())
         {
-            files.insert(template_file(&project.root, f));
+            files.insert(template_file(project.root(), f));
         }
     }
     files
@@ -746,7 +732,7 @@ fn template_file(root: &Path, file: &str) -> String {
 }
 
 fn report_checksum(project: &Project, r: &Report) -> String {
-    checksum(&project.root, &report_files(project, r))
+    checksum(project.root(), &report_files(project, r))
 }
 
 /// The shared inputs: `dre_project.yml`, folder config, `schedules.yml`, `dependencies.yml` and
@@ -755,7 +741,7 @@ fn report_checksum(project: &Project, r: &Report) -> String {
 fn project_checksum(project: &Project) -> String {
     // An unmanaged report's `.sql` stays in: it's a `ref()` target like any other.
     let owned: BTreeSet<String> = project
-        .reports
+        .reports()
         .iter()
         .flat_map(|r| {
             let mut files = report_files(project, r);
@@ -766,7 +752,7 @@ fn project_checksum(project: &Project) -> String {
         })
         .collect();
     let files: BTreeSet<String> = project
-        .files
+        .files()
         .iter()
         .map(|p| slash(p))
         .filter(|p| !owned.contains(p))
@@ -778,7 +764,7 @@ fn project_checksum(project: &Project) -> String {
                 || (p.starts_with(REPORTS_DIR) && p.extension().is_some_and(|e| e == "sql"))
         })
         .collect();
-    checksum(&project.root, &files)
+    checksum(project.root(), &files)
 }
 
 // -- errors -----------------------------------------------------------------------------------
@@ -786,7 +772,7 @@ fn project_checksum(project: &Project) -> String {
 /// The error diagnostics that belong to a report: those in one of its own files.
 pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
     let mut out = ReportErrors::new();
-    for r in &project.reports {
+    for r in project.reports() {
         let files = report_files(project, r);
         let msgs: Vec<String> = diags
             .sorted()
@@ -794,14 +780,7 @@ pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
             .filter(|d| d.severity == Severity::Error)
             .filter(|d| d.file.as_ref().is_some_and(|f| files.contains(&slash(f))))
             .map(|d| d.to_string())
-            .chain(
-                project
-                    .parse_errors
-                    .get(&r.name)
-                    .into_iter()
-                    .flatten()
-                    .map(|d| d.to_string()),
-            )
+            .chain(project.parse_errors(&r.name).iter().map(|d| d.to_string()))
             .collect();
         if !msgs.is_empty() {
             out.insert(r.name.clone(), msgs);
@@ -823,8 +802,8 @@ pub fn render(doc: &Json, secrets: &crate::secrets::Secrets) -> String {
 /// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of
 /// the bytes written.
 pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String> {
-    let text = render(&build(project, errors), project.inputs.process.secrets());
-    let dir = &project.target_dir;
+    let text = render(&build(project, errors), project.inputs().process.secrets());
+    let dir = &project.target_dir();
     crate::target::ensure(dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let dst = dir.join(FILE);
     crate::fs::write_atomic(&dst, text.as_bytes())
@@ -868,7 +847,7 @@ mod tests {
         let (project, diags) = crate::project::load_with(dir.path(), &Default::default(), &ctx);
         assert!(!diags.has_errors(), "{:?}", diags.sorted());
         let project = project.unwrap();
-        let b = project.reports.iter().find(|r| r.name == "r").unwrap().bindings[0].clone();
+        let b = project.reports().iter().find(|r| r.name == "r").unwrap().bindings[0].clone();
         (dir, b)
     }
 

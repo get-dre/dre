@@ -680,7 +680,7 @@ impl BindingRun<'_> {
             let files: Vec<String> = job
                 .files
                 .iter()
-                .map(|(f, _)| rel(&self.project.root, f).display().to_string())
+                .map(|(f, _)| rel(self.project.root(), f).display().to_string())
                 .collect();
             let dests: Vec<String> = job
                 .dests
@@ -882,7 +882,7 @@ impl BindingRun<'_> {
             .for_each
             .as_ref()
             .and_then(|f| f.mask_row_values)
-            .unwrap_or(self.project.mask_row_values)
+            .unwrap_or(self.project.mask_row_values())
         {
             RowMask::new(&each.0, key_cols)
         } else {
@@ -984,7 +984,7 @@ impl BindingRun<'_> {
                         .schema()
                         .fields()
                         .iter()
-                        .map(|f| f.name().clone())
+                        .map(|f| f.name().to_string())
                         .collect();
                     (
                         t.name.clone(),
@@ -1003,11 +1003,11 @@ impl BindingRun<'_> {
             let text = match (opt("text"), opt("file")) {
                 (Some(t), _) => renderer.render_with(&self.report.file, &t, ctx.clone(), true),
                 (None, Some(f)) => {
-                    let path = crate::project::find_template(&self.project.root, &f)
+                    let path = crate::project::find_template(self.project.root(), &f)
                         .ok_or_else(|| format!("message file `{f}` doesn't exist"))?;
                     let src =
                         std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                    renderer.render_with(&rel(&self.project.root, &path), &src, ctx.clone(), true)
+                    renderer.render_with(&rel(self.project.root(), &path), &src, ctx.clone(), true)
                 }
                 (None, None) => Ok(crate::message::default_text(&results, self.locale())),
             }
@@ -1157,7 +1157,12 @@ impl BindingRun<'_> {
 /// stay DRE dates).
 fn each_of(pop: &Population, i: usize, cal: Calendar) -> (JsonMap<String, Json>, minijinja::Value) {
     let row = pop.driver_row(i);
-    let names: Vec<String> = row.schema().fields().iter().map(|f| f.name().clone()).collect();
+    let names: Vec<String> = row
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
     let typed = crate::values::typed_rows(&row, cal).pop().unwrap_or_default();
     let json: JsonMap<String, Json> = names
         .iter()
@@ -1434,7 +1439,7 @@ fn make_files(shared: &Shared<'_>, job: &Job, format: &mut Option<Box<dyn Plugin
             shared
                 .ctx
                 .host()
-                .start(&plugin, shared.log.clone(), Some(&shared.project.root))
+                .start(&plugin, shared.log.clone(), Some(shared.project.root()))
                 .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?,
         );
     }

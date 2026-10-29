@@ -43,7 +43,7 @@ impl QueryResult {
                 .schema()
                 .fields()
                 .iter()
-                .map(|f| f.name().clone())
+                .map(|f| f.name().to_string())
                 .collect(),
         );
         let mut rows = Vec::new();

@@ -55,12 +55,14 @@ use crate::profiles::{LOCAL_TYPE, Profiles, Role};
 use crate::yaml::YamlFile;
 use crate::{constraints, options, preflight, schedule, selector, sqlsplit};
 
-pub use outputs::{find_template, layer_outputs, merge_output, output_label, resolve_template, template_sheets};
+use outputs::{builtin_output, project_default_output};
+pub use outputs::{
+    find_template, layer_outputs, merge_output, output_label, resolve_template, template_sheets,
+};
 use plugins::Usage;
 use reports::BindingBase;
 use schedules::is_timing_registry;
 use sets::is_set_registry;
-use outputs::{builtin_output, project_default_output};
 
 mod discover;
 mod outputs;
@@ -210,119 +212,102 @@ pub const PLUGIN_ENTRY_KEYS: &[&str] = &["name", "version", "github", "local", "
 // The resolved project: the stable contract every later consumer uses.
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+/// A loaded project. Its data is private: commands ask it questions ([`Project::select`],
+/// [`Project::bindings`], [`Project::schedule`], [`Project::parse_errors`], ...), so the loader
+/// can change how it builds them without touching every command.
+#[derive(Debug, Clone)]
 pub struct Project {
-    pub name: String,
-    #[serde(skip_serializing_if = "JsonMap::is_empty")]
-    pub meta: JsonMap<String, Json>,
-    #[serde(skip)]
-    pub root: PathBuf,
+    name: String,
+    meta: JsonMap<String, Json>,
+    root: PathBuf,
     /// The folder DRE writes its generated files to (compiled SQL, run outputs, schema
     /// snapshots, `run_results.json`, the manifest): `target/` in the root by default.
-    #[serde(skip)]
-    pub target_dir: PathBuf,
+    target_dir: PathBuf,
     /// Where the target path was set, for messages.
-    #[serde(skip)]
-    pub target_source: crate::target::Source,
+    target_source: crate::target::Source,
     /// The run's target (environment): `--target`, `DRE_TARGET`, else `dev`; `target.name` in
     /// templates. Each profile's entry is [`crate::profiles::Profiles::target_of`].
-    #[serde(skip)]
-    pub target_name: String,
+    target_name: String,
     /// Where `target_name` came from.
-    #[serde(skip)]
-    pub target_from: crate::profiles::TargetSource,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_profile: Option<String>,
+    target_from: crate::profiles::TargetSource,
+    default_profile: Option<String>,
     /// Its line in dre_project.yml, for messages.
-    #[serde(skip)]
-    pub default_profile_line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_set: Option<String>,
-    pub vars: JsonMap<String, Json>,
-    pub run_query_max_rows: u64,
+    default_profile_line: Option<usize>,
+    default_set: Option<String>,
+    vars: JsonMap<String, Json>,
     /// How many runs of each Binding to keep in `target/run/` (the current one always stays).
-    #[serde(skip)]
-    pub keep_runs: usize,
+    keep_runs: usize,
     /// `flags: run_timeout`: how long a run may take (off when unset).
-    #[serde(skip)]
-    pub run_timeout: Option<std::time::Duration>,
+    run_timeout: Option<std::time::Duration>,
     /// `format_options:`: per format, defaults under every output of that format.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub format_options: BTreeMap<String, JsonMap<String, Json>>,
-    pub reports: Vec<Report>,
-    pub sets: BTreeMap<String, SetDef>,
+    format_options: BTreeMap<String, JsonMap<String, Json>>,
+    /// Sorted by name.
+    reports: Vec<Report>,
+    sets: BTreeMap<String, SetDef>,
     /// The declared plugin packages.
-    pub plugins: Vec<PluginRequirement>,
+    plugins: Vec<PluginRequirement>,
     /// Every plugin the project uses, checked against the declared packages once they're
     /// installed ([`crate::plugins::check_uses`]).
-    #[serde(skip)]
-    pub plugin_uses: Vec<PluginUse>,
+    plugin_uses: Vec<PluginUse>,
     /// Some package's declarations conflict, so it's missing from `plugins`.
-    #[serde(skip)]
-    pub plugins_incomplete: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub schedules: Vec<ScheduleEntry>,
+    plugins_incomplete: bool,
+    schedules: Vec<ScheduleEntry>,
     /// Named timings from timings.yml, which schedules use with `timing:`.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub timings: BTreeMap<String, Timing>,
-    /// Macro files under `macros/`, relative to the root.
-    pub macros: Vec<PathBuf>,
-    /// Macro packages, each called through its name (`{{ dre_utils.x() }}`).
-    pub packages: Vec<Package>,
+    timings: BTreeMap<String, Timing>,
+    /// What every renderer reads: macros, `ref()` targets, packages, `dispatch:`, limits.
+    templates: crate::render::ProjectTemplates,
     /// Mask `DRE_SECRET_*` values in logs and records (default true).
-    pub mask_secrets: bool,
+    mask_secrets: bool,
     /// Mask per-row destination values from `each.*` in logs and records (default true).
-    pub mask_row_values: bool,
+    mask_row_values: bool,
     /// The project's default `timezone:` (IANA name); runs default to UTC without one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timezone: Option<String>,
+    timezone: Option<String>,
     /// The project's `locale:` for the number filters; `en` without one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locale: Option<String>,
+    locale: Option<String>,
     /// `week_start:` and `week_numbering:`, for the calendar functions.
-    #[serde(skip)]
-    pub week_start: WeekStart,
-    #[serde(skip)]
-    pub week_numbering: WeekNumbering,
-    /// `dispatch:` search orders, by macro namespace.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub dispatch: DispatchOrder,
-    /// Every uniquely named `.sql` file under `reports/`, by basename: what `ref()` resolves.
-    #[serde(skip)]
-    pub sql: BTreeMap<String, PathBuf>,
-    /// Lookups under `lookups/`, which `ref()` also resolves.
-    #[serde(skip)]
-    pub lookups: BTreeMap<String, Lookup>,
-    /// A lookup with more rows than this is loaded into a temp table rather than inlined.
-    pub lookup_inline_max_rows: u64,
+    week_start: WeekStart,
+    week_numbering: WeekNumbering,
     /// Every folder under `reports/`, as path segments.
-    #[serde(skip)]
-    pub folders: Vec<Vec<String>>,
+    folders: Vec<Vec<String>>,
     /// The project's own files, relative to the root with forward slashes, sorted: every YAML
     /// file (not a root `profiles.yml`) and everything under `reports/`, `macros/` and
     /// `lookups/`.
-    #[serde(skip)]
-    pub files: Vec<PathBuf>,
+    files: Vec<PathBuf>,
     /// Templates the load's parse pass couldn't render, by report: they make the report invalid
     /// in the manifest. Its own run, compile or validate reports them.
-    #[serde(skip)]
-    pub parse_errors: BTreeMap<String, Vec<crate::Diagnostic>>,
+    parse_errors: BTreeMap<String, Vec<crate::Diagnostic>>,
     /// What the load's parse pass rendered with: the target, `--var`, the run date and timezone.
-    #[serde(skip)]
-    pub inputs: crate::parse::Inputs,
+    inputs: crate::parse::Inputs,
     /// Declared sources (dbt's `sources:`), by name.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub sources: BTreeMap<String, SourceDef>,
-    #[serde(skip)]
-    pub profiles: Profiles,
+    sources: BTreeMap<String, SourceDef>,
+    profiles: Profiles,
     /// Every setting and where its value came from.
-    #[serde(skip)]
-    pub settings: crate::settings::Settings,
+    settings: crate::settings::Settings,
 }
 
+/// The project as a whole: its name, folders and settings.
 impl Project {
-    pub fn report(&self, name: &str) -> Option<&Report> {
-        self.reports.iter().find(|r| r.name == name)
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// `meta:` in dre_project.yml.
+    pub fn meta(&self) -> &JsonMap<String, Json> {
+        &self.meta
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The folder DRE writes its generated files to: `target/` in the root by default.
+    pub fn target_dir(&self) -> &Path {
+        &self.target_dir
+    }
+
+    /// Where the target path was set, for messages.
+    pub fn target_source(&self) -> crate::target::Source {
+        self.target_source
     }
 
     /// The run's target and where it came from.
@@ -331,6 +316,191 @@ impl Project {
             name: self.target_name.clone(),
             from: self.target_from,
         }
+    }
+
+    /// The run's target name: `target.name` in templates.
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    pub fn default_profile(&self) -> Option<&str> {
+        self.default_profile.as_deref()
+    }
+
+    pub fn default_set(&self) -> Option<&str> {
+        self.default_set.as_deref()
+    }
+
+    /// The project's `vars:`.
+    pub fn vars(&self) -> &JsonMap<String, Json> {
+        &self.vars
+    }
+
+    /// The project's `timezone:`.
+    pub fn timezone(&self) -> Option<&str> {
+        self.timezone.as_deref()
+    }
+
+    /// The project's calendar (`week_start:`, `week_numbering:`) in `timezone`, else UTC.
+    pub fn calendar(&self, timezone: Option<&str>) -> crate::dates::Calendar {
+        crate::dates::Calendar {
+            tz: timezone
+                .and_then(|t| crate::dates::parse_tz(t).ok())
+                .unwrap_or(chrono_tz::Tz::UTC),
+            week_start: self.week_start,
+            numbering: self.week_numbering,
+        }
+    }
+
+    /// How many runs of each Binding to keep in the target folder.
+    pub fn keep_runs(&self) -> usize {
+        self.keep_runs
+    }
+
+    /// `flags: run_timeout`.
+    pub fn run_timeout(&self) -> Option<std::time::Duration> {
+        self.run_timeout
+    }
+
+    pub fn mask_secrets(&self) -> bool {
+        self.mask_secrets
+    }
+
+    pub fn mask_row_values(&self) -> bool {
+        self.mask_row_values
+    }
+
+    /// `format_options:`, by format.
+    pub fn format_options(&self) -> &BTreeMap<String, JsonMap<String, Json>> {
+        &self.format_options
+    }
+
+    /// Every setting and where its value came from.
+    pub fn settings(&self) -> &crate::settings::Settings {
+        &self.settings
+    }
+
+    /// What the load's parse pass rendered with.
+    pub fn inputs(&self) -> &crate::parse::Inputs {
+        &self.inputs
+    }
+
+    /// The project's own files, relative to the root, sorted.
+    pub fn files(&self) -> &[PathBuf] {
+        &self.files
+    }
+
+    /// Every folder under `reports/`, as path segments.
+    pub fn folders(&self) -> &[Vec<String>] {
+        &self.folders
+    }
+
+    pub fn profiles(&self) -> &Profiles {
+        &self.profiles
+    }
+
+    /// What every renderer of this project reads.
+    pub fn templates(&self) -> &crate::render::ProjectTemplates {
+        &self.templates
+    }
+
+    /// The project's macro packages.
+    pub fn packages(&self) -> &[Package] {
+        &self.templates.packages
+    }
+}
+
+/// Reports, Sets and Bindings.
+impl Project {
+    /// Every report, sorted by name.
+    pub fn reports(&self) -> &[Report] {
+        &self.reports
+    }
+
+    pub fn report(&self, name: &str) -> Option<&Report> {
+        self.reports.iter().find(|r| r.name == name)
+    }
+
+    /// The reports a selection picks (`daily tag:regulatory`, `finance.monthly`,
+    /// `source:erp`), in project order, each once.
+    pub fn select(&self, selection: &str) -> Result<Vec<&Report>, selector::SelectorError> {
+        selector::resolve(self, selection)
+    }
+
+    /// Every declared Binding of the reports a selection picks, in project order.
+    pub fn bindings(&self, selection: &str) -> Result<Vec<(&Report, &Binding)>, selector::SelectorError> {
+        Ok(self
+            .select(selection)?
+            .into_iter()
+            .flat_map(|r| r.bindings.iter().map(move |b| (r, b)))
+            .collect())
+    }
+
+    /// The `sets.yml` entry named `name`.
+    pub fn set(&self, name: &str) -> Option<&SetDef> {
+        self.sets.get(name)
+    }
+
+    /// Declared sources (dbt's `sources:`), by name.
+    pub fn sources(&self) -> &BTreeMap<String, SourceDef> {
+        &self.sources
+    }
+
+    pub fn source(&self, name: &str) -> Option<&SourceDef> {
+        self.sources.get(name)
+    }
+}
+
+/// Schedules.
+impl Project {
+    /// Every `schedules.yml` entry, in declared order.
+    pub fn schedules(&self) -> &[ScheduleEntry] {
+        &self.schedules
+    }
+
+    pub fn schedule(&self, name: &str) -> Option<&ScheduleEntry> {
+        self.schedules.iter().find(|e| e.name == name)
+    }
+
+    /// Every Binding the schedule `name` runs, in project order.
+    pub fn scheduled_bindings(&self, name: &str) -> Vec<(&Report, &Binding)> {
+        self.reports
+            .iter()
+            .flat_map(|r| {
+                r.bindings
+                    .iter()
+                    .filter(|b| b.schedules.iter().any(|s| s == name))
+                    .map(move |b| (r, b))
+            })
+            .collect()
+    }
+}
+
+/// Plugins and diagnostics.
+impl Project {
+    /// The declared plugin packages.
+    pub fn plugins(&self) -> &[PluginRequirement] {
+        &self.plugins
+    }
+
+    /// Every plugin the project uses, with where.
+    pub fn plugin_uses(&self) -> &[PluginUse] {
+        &self.plugin_uses
+    }
+
+    /// Whether some package's declarations conflict, so it's missing from [`Project::plugins`].
+    pub fn plugins_incomplete(&self) -> bool {
+        self.plugins_incomplete
+    }
+
+    /// The templates the load's parse pass couldn't render for `report`.
+    pub fn parse_errors(&self, report: &str) -> &[crate::Diagnostic] {
+        self.parse_errors.get(report).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every report's parse errors, by report name.
+    pub fn all_parse_errors(&self) -> impl Iterator<Item = &crate::Diagnostic> {
+        self.parse_errors.values().flatten()
     }
 }
 
@@ -1118,10 +1288,10 @@ impl Loader {
 
         let found = self.discover();
         project.folders = found.folders.clone();
-        project.macros = found.macros.clone();
+        project.templates.macros = found.macros.clone();
         project.files = found.sources.clone();
         let declared = packages::declared(&self.root, &mut self.diags);
-        project.packages = packages::resolve(&self.root, &declared, &mut self.diags);
+        project.templates.packages = packages::resolve(&self.root, &declared, &mut self.diags);
         self.check_macro_namespaces(&project);
 
         let (profiles_dir, found_by) = crate::profiles::locate(
@@ -1178,7 +1348,7 @@ impl Loader {
         project.sources = self.parse_sources(&source_decls);
         project.sets = self.parse_sets(&set_files);
         let sql_index = self.index_sql(&found.sql);
-        project.sql = sql_index
+        project.templates.sql = sql_index
             .iter()
             .filter_map(|(name, paths)| match paths.as_slice() {
                 [path] => Some((name.clone(), path.clone())),
@@ -1192,8 +1362,8 @@ impl Loader {
             .flatten()
             .filter_map(entry_name)
             .collect();
-        project.lookups = lookups::discover(&self.root, &found.lookups, &mut self.diags);
-        for (name, l) in &project.lookups {
+        project.templates.lookups = lookups::discover(&self.root, &found.lookups, &mut self.diags);
+        for (name, l) in &project.templates.lookups {
             if let Some(sql) = sql_index.get(name) {
                 self.diags.error(
                     Code::DuplicateRefName,
@@ -1211,7 +1381,7 @@ impl Loader {
             }
         }
         // A file used through `ref()` is shared SQL, not an unmanaged report.
-        referenced.extend(self.check_refs(&found.sql, &found.macros, &sql_index, &project.lookups));
+        referenced.extend(self.check_refs(&found.sql, &found.macros, &sql_index, &project.templates.lookups));
         let mut reports = self.merge_reports(fragments);
 
         let mut built = Vec::new();

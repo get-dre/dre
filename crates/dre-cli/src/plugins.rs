@@ -93,7 +93,7 @@ pub fn install(
     // A package the project declares installs from wherever it's declared to come from.
     let declared = project
         .iter()
-        .flat_map(|p| &p.plugins)
+        .flat_map(|p| p.plugins())
         .find(|r| r.name == name)
         .cloned();
     let source = declared.as_ref().map(|r| r.source.clone()).unwrap_or_default();
@@ -121,7 +121,7 @@ pub fn install(
     };
     let source_key = source.lock_key();
     let declared_req = declared.as_ref().map(|r| r.req());
-    let mut lock = project.as_ref().map(|p| Lock::load(&p.root).unwrap_or_default());
+    let mut lock = project.as_ref().map(|p| Lock::load(p.root()).unwrap_or_default());
     // The declared constraint always applies; a CLI constraint narrows it further.
     let req = match (&declared_req, &cli_req) {
         (Some(d), Some(c)) => {
@@ -152,7 +152,7 @@ pub fn install(
         ));
         return crate::exit::failed();
     };
-    let dir = dre_core::plugins::plugins_dir(ctx.env(), project.as_ref().map(|p| p.root.as_path()));
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), project.as_ref().map(|p| p.root()));
     let installed = if source.is_default() {
         manager::install_linked(ctx, &dir, package, version, None)
     } else {
@@ -175,7 +175,7 @@ pub fn install(
                 && declared.is_some()
             {
                 l.plugins.insert(name.clone(), locked);
-                if let Err(e) = l.save(&p.root) {
+                if let Err(e) = l.save(p.root()) {
                     printer.error(&e);
                     return crate::exit::failed();
                 }
@@ -235,7 +235,7 @@ pub fn remove(ctx: &dre_core::Context, spec: &str, project_dir: &Path, printer: 
     }
     // Drop the lock pin if the pinned version is gone.
     if let Some(p) = project_at(ctx, project_dir)
-        && let Ok(mut lock) = Lock::load(&p.root)
+        && let Ok(mut lock) = Lock::load(p.root())
     {
         let gone = lock.get(name).is_some_and(|l| {
             targets
@@ -244,7 +244,7 @@ pub fn remove(ctx: &dre_core::Context, spec: &str, project_dir: &Path, printer: 
         });
         if gone {
             lock.plugins.remove(name);
-            if let Err(e) = lock.save(&p.root) {
+            if let Err(e) = lock.save(p.root()) {
                 printer.error(&e);
                 return crate::exit::failed();
             }

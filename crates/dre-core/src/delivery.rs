@@ -144,7 +144,7 @@ impl<'a> Deliverer<'a> {
     }
 
     fn send(&mut self, r: Request<'_>) -> Result<Option<Sent>, Fail> {
-        let profiles = &self.project.profiles;
+        let profiles = self.project.profiles();
         let entry = match profiles.entry(Role::Destination, r.profile) {
             Entry::Use(o) => o,
             Entry::Nowhere => {
@@ -212,7 +212,7 @@ impl<'a> Deliverer<'a> {
                 .remote_path
                 .as_ref()
                 .ok_or("the local destination needs `output.destination.path`")?;
-            let dst = self.project.root.join(remote).to_string_lossy().to_string();
+            let dst = self.project.root().join(remote).to_string_lossy().to_string();
             let delivered = dre_protocol::delivery::deliver(
                 &mut dre_protocol::delivery::LocalStore,
                 Path::new(&f.local_path),
@@ -252,7 +252,7 @@ impl<'a> Deliverer<'a> {
             let p = self
                 .ctx
                 .host()
-                .start(&located, self.log.clone(), Some(&self.project.root))
+                .start(&located, self.log.clone(), Some(self.project.root()))
                 .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
             self.plugins.insert(kind.to_string(), p);
         }

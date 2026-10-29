@@ -85,7 +85,7 @@ pub fn build(
     profile: &str,
     request: &Request,
 ) -> Result<Value, String> {
-    let Entry::Use(target) = project.profiles.entry(Role::Connection, profile) else {
+    let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` is unavailable"));
     };
     let unsupported = || {
@@ -240,7 +240,7 @@ pub fn build(
         }
     }
     Ok(
-        json!({"schema_version":"dre/catalog/v1","connection":profile,"target":project.target_name,
+        json!({"schema_version":"dre/catalog/v1","connection":profile,"target":project.target_name(),
         "source_type":target.kind,"identifier_quote":dialect.identifier_quote.to_string(),"dialect":dialect.describe(),
         "current_catalog":catalog,"current_schema":schema,"tables":out}),
     )

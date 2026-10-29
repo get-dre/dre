@@ -96,7 +96,7 @@ impl Loader {
         let root = self.root.clone();
         // Macros: syntax, env_var, run.*; their definitions, for var() checks per Binding.
         let mut defs: BTreeMap<String, (PathBuf, preflight::MacroDef)> = BTreeMap::new();
-        for m in &project.macros {
+        for m in &project.templates.macros {
             if let Some(src) = read(&root, m) {
                 self.check_template_text(m, &src, 0, None, &cli);
                 checked.insert(m.clone());
@@ -130,7 +130,7 @@ impl Loader {
                 // SQL this Binding pulls in through ref(), checked in the Binding's context.
                 let mut seen_refs = BTreeSet::new();
                 while let Some(name) = refs.pop() {
-                    let Some(path) = project.sql.get(&name) else {
+                    let Some(path) = project.templates.sql.get(&name) else {
                         continue;
                     };
                     if !seen_refs.insert(name) {

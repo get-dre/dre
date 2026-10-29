@@ -118,7 +118,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
             return crate::exit::not_started();
         }
     };
-    ctx.secrets().set_enabled(project.mask_secrets);
+    ctx.secrets().set_enabled(project.mask_secrets());
     let text = a.output == Output::Text;
     let req = Request {
         window,
@@ -154,7 +154,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
 /// need.
 fn about_profiles(d: &dre_core::Diagnostic, project: Option<&project::Project>) -> bool {
     const CODES: &[Code] = &[Code::UnknownProfile, Code::ProfilesMissing];
-    CODES.contains(&d.code) || project.is_some_and(|p| d.file.as_deref() == Some(p.profiles.path.as_path()))
+    CODES.contains(&d.code) || project.is_some_and(|p| d.file.as_deref() == Some(p.profiles().path.as_path()))
 }
 
 /// One firing per line in time order: local time, schedule, reports; then paused schedules.

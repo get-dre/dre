@@ -74,7 +74,7 @@ pub fn load_for_run(
 ) -> Option<(Project, Option<String>)> {
     let (project, diags) = crate::project::load_with(&req.dir, &req.load, ctx);
     if let Some(p) = &project {
-        ctx.secrets().set_enabled(p.mask_secrets);
+        ctx.secrets().set_enabled(p.mask_secrets());
     }
     let errors = project
         .as_ref()
@@ -124,7 +124,7 @@ pub fn write_manifest(
     };
     crate::manifest::write(p, errors)
         .map(Some)
-        .map_err(|e| format!("{e} (target path from {})", p.target_source))
+        .map_err(|e| format!("{e} (target path from {})", p.target_source()))
 }
 
 /// Which plugins a command needs before it starts.
@@ -276,14 +276,14 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
     let mut opts = req.options;
     if let Some(path) = &opts.output_json {
         let value = path.to_string_lossy();
-        if let Err(error) = crate::target::resolve(&project.root, Some(&value), None, ctx.env()) {
+        if let Err(error) = crate::target::resolve(project.root(), Some(&value), None, ctx.env()) {
             console.error(&format!("--output-json: {error}"));
             return Started::NotStarted;
         }
     }
     // Run logs start before the plugins are installed, so the log files record installing them.
     console.start_logs();
-    for s in project.settings.lines() {
+    for s in project.settings().lines() {
         console.note("Setting", &s);
     }
     if !ready_plugins(ctx, &project, req.project.install, NeedPlugins::All, console) {
@@ -306,7 +306,7 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
                 return Started::NotStarted;
             }
         },
-        None => project.run_timeout,
+        None => project.run_timeout(),
     };
     // Each flag, else its environment variable; `keep_runs` falls back to `flags: keep_runs`.
     let count = |flag: Option<&str>, name, var| {
@@ -347,7 +347,7 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
     opts.scheduled_at = crate::settings::run_at(env).ok().flatten();
     opts.manifest_checksum = manifest_checksum;
     if let Some(name) = &opts.schedule
-        && !project.schedules.iter().any(|e| &e.name == name)
+        && !project.schedule(name).is_some()
     {
         console.error(&crate::run::unknown_schedule(&project, name));
         return Started::NotStarted;
@@ -358,11 +358,11 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
         .or(opts.scheduled_at.map(|t| t.date_naive()))
         .unwrap_or_else(|| chrono::Utc::now().date_naive());
     let mut params = serde_json::to_value(opts.params(date)).unwrap_or_default();
-    params["target"] = serde_json::json!(project.target_name);
-    params["profiles"] = serde_json::json!(project.profiles.path);
-    params["target_path"] = serde_json::json!(project.target_dir);
+    params["target"] = serde_json::json!(project.target_name());
+    params["profiles"] = serde_json::json!(project.profiles().path);
+    params["target_path"] = serde_json::json!(project.target_dir());
     console.params(&params);
-    console.note("Profiles", &profiles_line(&project.profiles));
+    console.note("Profiles", &profiles_line(project.profiles()));
     console.timeout(run_timeout);
     if let Some(reason) = opts.cancel.reason() {
         console.error("the run was cancelled before it started");

@@ -343,12 +343,12 @@ pub fn locate_in(
 /// install error, so plugins it might provide aren't reported again.
 pub fn check_uses(project: &crate::project::Project, env: &Env, diags: &mut crate::Diagnostics) {
     let prober = Prober::default();
-    let lock = crate::lock::Lock::load(&project.root).unwrap_or_default();
+    let lock = crate::lock::Lock::load(project.root()).unwrap_or_default();
     let mut known: Vec<PluginId> = Vec::new();
     // A package whose declarations conflict is already an error.
-    let mut unknown = project.plugins_incomplete;
-    for req in &project.plugins {
-        let found = installed(&project.root, &lock, req, env, &prober).unwrap_or_default();
+    let mut unknown = project.plugins_incomplete();
+    for req in project.plugins() {
+        let found = installed(project.root(), &lock, req, env, &prober).unwrap_or_default();
         let from_lock = lock
             .get(&req.name)
             .filter(|l| l.from == req.source.lock_key())
@@ -360,7 +360,7 @@ pub fn check_uses(project: &crate::project::Project, env: &Env, diags: &mut crat
         known.extend(found.into_iter().flat_map(|p| p.provides));
         known.extend(from_lock);
     }
-    for u in &project.plugin_uses {
+    for u in project.plugin_uses() {
         if known.contains(&u.plugin) || unknown {
             continue;
         }
