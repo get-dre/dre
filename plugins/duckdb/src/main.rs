@@ -17,20 +17,24 @@ use duckdb::{AccessMode, Config, Connection, InterruptHandle};
 use serde_json::{Map, Value};
 
 struct DuckDb {
-    conn: Option<Connection>,
-    interrupter: Option<Arc<Interrupter>>,
-    /// Whether core has cancelled the request running now.
+    session: Option<Session>,
+    /// The SDK's `cancelled`; tests replace it.
     cancelled: fn() -> bool,
 }
 
 impl Default for DuckDb {
     fn default() -> Self {
         Self {
-            conn: None,
-            interrupter: None,
+            session: None,
             cancelled: dre_protocol::plugin::cancelled,
         }
     }
+}
+
+/// The open connection, and what stops a statement on it when core cancels.
+struct Session {
+    conn: Connection,
+    interrupter: Arc<Interrupter>,
 }
 
 /// How often a cancelled statement is interrupted again until it ends.
@@ -70,13 +74,19 @@ impl Interrupter {
     /// Run one statement on the connection, with a watcher that interrupts it for as long as
     /// the request is cancelled. The watcher has stopped by the time this returns, so no
     /// interrupt reaches a later statement.
-    fn during<T>(&self, statement: impl FnOnce() -> T) -> T {
+    fn run<T>(&self, statement: impl FnOnce() -> T) -> T {
         *self.running.lock().unwrap() = true;
         std::thread::scope(|s| {
             s.spawn(|| self.watch());
-            let _stop = Stop(self);
+            let _end = EndWatch(self);
             statement()
         })
+    }
+
+    /// The statement ended: stop the watcher.
+    fn end(&self) {
+        *self.running.lock().unwrap() = false;
+        self.wake.notify_all();
     }
 
     fn watch(&self) {
@@ -93,12 +103,11 @@ impl Interrupter {
 }
 
 /// Ends the watch when the statement returns or panics.
-struct Stop<'a>(&'a Interrupter);
+struct EndWatch<'a>(&'a Interrupter);
 
-impl Drop for Stop<'_> {
+impl Drop for EndWatch<'_> {
     fn drop(&mut self) {
-        *self.0.running.lock().unwrap() = false;
-        self.0.wake.notify_all();
+        self.0.end();
     }
 }
 
@@ -168,12 +177,10 @@ fn status_only(schema: &Schema, sql: &str) -> Option<Status> {
 
 impl DuckDb {
     fn conn(&self) -> Result<&Connection> {
-        self.conn.as_ref().ok_or_else(|| "no open session".into())
+        Ok(&self.session()?.conn)
     }
-    fn interrupter(&self) -> Result<&Interrupter> {
-        self.interrupter
-            .as_deref()
-            .ok_or_else(|| "no open session".into())
+    fn session(&self) -> Result<&Session> {
+        self.session.as_ref().ok_or_else(|| "no open session".into())
     }
     fn open_with(&mut self, c: &Map<String, Value>, read_only: bool, sandbox: bool) -> Result<()> {
         let path = conn_str(c, "path").unwrap_or(":memory:");
@@ -204,8 +211,7 @@ impl DuckDb {
         if sandbox {
             conn.execute_batch("SET lock_configuration = true")?;
         }
-        self.conn = Some(conn);
-        self.interrupter = Some(interrupter);
+        self.session = Some(Session { conn, interrupter });
         Ok(())
     }
 }
@@ -276,13 +282,13 @@ impl Source for DuckDb {
     }
 
     fn execute(&mut self, sql: &str, _row_limit: Option<u64>, out: &mut dyn ResultSink) -> Result<()> {
-        let conn = self.conn()?;
-        self.interrupter()?.during(|| execute(conn, sql, out))
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| execute(conn, sql, out))
     }
 
     fn check(&mut self, sql: &str) -> Result<()> {
-        let conn = self.conn()?;
-        self.interrupter()?.during(|| {
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| {
             let mut stmt = conn.prepare(&format!("EXPLAIN {sql}"))?;
             stmt.execute([])?;
             Ok(())
@@ -353,6 +359,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
 
     struct Discard;
@@ -369,25 +377,49 @@ mod tests {
         }
     }
 
+    const SLOW: &str = "select sum(a.range * b.range) from range(1000000) a, range(1000000) b";
+
+    /// Run `statement` on another thread; its result, or `None` if it still runs after 20 s.
+    fn finishes<T: Send + 'static>(statement: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || done.send(statement()));
+        finished.recv_timeout(Duration::from_secs(20)).ok()
+    }
+
+    fn assert_interrupted(result: Option<Result<()>>) {
+        let err = result.expect("the cancelled statement ran on").unwrap_err();
+        assert!(err.to_string().contains("Interrupted"), "{err}");
+    }
+
     #[test]
     fn a_cancel_that_lands_before_duckdb_starts_the_statement_still_stops_it() {
-        // Core cancelled the request and the SDK ran the cancel hook, but DuckDB hasn't started
-        // the statement yet: DuckDB clears any interrupt when a statement starts.
+        // The request is running and the SDK's "cancelled before it started" check has passed.
+        // Then the cancel lands and the hook runs, before DuckDB starts the statement: DuckDB
+        // clears any interrupt when it starts one.
+        static CANCELLED: AtomicBool = AtomicBool::new(false);
+        let mut db = DuckDb {
+            cancelled: || CANCELLED.load(Ordering::SeqCst),
+            ..DuckDb::default()
+        };
+        db.open(&Map::new(), false).unwrap();
+        assert_interrupted(finishes(move || {
+            let Session { conn, interrupter } = db.session().unwrap();
+            interrupter.run(|| {
+                CANCELLED.store(true, Ordering::SeqCst);
+                interrupter.cancel();
+                execute(conn, SLOW, &mut Discard)
+            })
+        }));
+    }
+
+    #[test]
+    fn a_request_cancelled_before_the_statement_runs_is_stopped() {
         let mut db = DuckDb {
             cancelled: || true,
             ..DuckDb::default()
         };
         db.open(&Map::new(), false).unwrap();
-        db.interrupter().unwrap().cancel();
-        let (done, finished) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let sql = "select sum(a.range * b.range) from range(1000000) a, range(1000000) b";
-            let _ = done.send(db.execute(sql, None, &mut Discard).is_err());
-        });
-        let failed = finished
-            .recv_timeout(Duration::from_secs(20))
-            .expect("the cancelled statement ran on");
-        assert!(failed, "the cancelled statement succeeded");
+        assert_interrupted(finishes(move || db.execute(SLOW, None, &mut Discard)));
     }
 
     #[test]
