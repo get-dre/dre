@@ -10,6 +10,7 @@ use std::io::Write;
 use std::sync::mpsc;
 
 use super::*;
+use crate::delivery::{Deliverer, Request};
 use crate::for_each::{Population, RowMask, Table as RowTable, collision, safe_name};
 use crate::project::{OrphanRows, RowErrors};
 use crate::run_results::{FailedKey, ForEachResult, RowDelivery, RowFile, RowRecord};
@@ -28,10 +29,9 @@ fn finished(r: &RowRecord) -> bool {
         && r.reason.as_deref() != Some("attachment_failed")
 }
 
-/// A destination entry of one row, rendered with its `each` (or a held delivery's, for
-/// `dre release`).
+/// A destination entry of one row, rendered with its `each`.
 #[derive(Clone)]
-pub(crate) struct RowDest {
+struct RowDest {
     /// Its place in the output's destinations (for pacing).
     pub idx: usize,
     pub profile: String,
@@ -270,10 +270,7 @@ impl BindingRun<'_> {
 
         // File names, by row: checked for collisions before anything renders.
         let folder = self.run_dir.join(safe_name(&self.output_stem(oi)));
-        let ext = match &o.extension {
-            Some(e) => e.clone(),
-            None => extension(&o.format).to_string(),
-        };
+        let files = Files::of(&o);
         let renderer = self.renderer(None)?;
         let cal = self.calendar;
         let mut eaches = Vec::with_capacity(rows.len());
@@ -296,10 +293,7 @@ impl BindingRun<'_> {
                     }
                     n
                 }
-                None => match ext.as_str() {
-                    "" => safe_name(&pop.keys[i]),
-                    e => format!("{}.{e}", safe_name(&pop.keys[i])),
-                },
+                None => files.name(&safe_name(&pop.keys[i])),
             };
             names.push(name);
             eaches.push((each_json, each_value));
@@ -331,9 +325,8 @@ impl BindingRun<'_> {
                 }
             })
             .collect();
-        let single =
-            !(o.format == "xlsx" || o.template.is_some() || !is_single_table(&o.format)) && data_ps.len() > 1;
-        let template_base = if crate::document::FORMATS.contains(&o.format.as_str()) {
+        let single = files.splits(data_ps.len());
+        let template_base = if files.format.is_document() {
             Some(self.document_payload(o.template.as_ref())?)
         } else if let Some(t) = &o.template {
             Some(self.template_payload(t)?)
@@ -341,7 +334,7 @@ impl BindingRun<'_> {
             None
         };
         let is_message = o.is_message();
-        let droppable = !(is_message || crate::document::FORMATS.contains(&o.format.as_str()));
+        let droppable = !files.format.template_decides_sections();
 
         // Attached outputs, for a message: a per-row output's row files by key, else shared files.
         let attached: Vec<Attached> = o
@@ -960,21 +953,18 @@ impl BindingRun<'_> {
             .collect();
         let path = folder.join(name);
         job.files = if single {
-            let (stem, ext) = split_ext(name);
-            kept.iter()
-                .map(|&q| {
-                    (
-                        folder.join(format!("{stem}_{}{ext}", pop.data[q].0.name)),
-                        vec![q],
-                    )
-                })
+            let tabs: Vec<&str> = kept.iter().map(|&q| pop.data[q].0.name.as_str()).collect();
+            Files::split_names(name, &tabs)?
+                .into_iter()
+                .zip(&kept)
+                .map(|(n, &q)| (folder.join(n), vec![q]))
                 .collect()
         } else {
             vec![(path, kept.clone())]
         };
         if let Some(Json::Object(base)) = template_base {
             let mut t = base.clone();
-            if crate::document::FORMATS.contains(&o.format.as_str()) {
+            if Format::new(&o.format).is_document() {
                 t.insert("each".into(), Json::Object(each.0.clone()));
             }
             job.template = Some(Json::Object(t));
@@ -1030,8 +1020,9 @@ impl BindingRun<'_> {
             };
             let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
             job.message = Some((title, text.trim().to_string()));
-            let (stem, _) = split_ext(name);
-            job.files = vec![(folder.join(format!("{stem}.md")), Vec::new())];
+            let (stem, _) = formats::split_ext(name);
+            let md = Format::new(formats::MESSAGE).extension();
+            job.files = vec![(folder.join(format!("{stem}.{md}")), Vec::new())];
         }
         let ctx = minijinja::Value::from(ctx_map);
         if !o.is_message() && o.options.values().any(has_template) {
@@ -1227,7 +1218,7 @@ fn worker(
     results: mpsc::Sender<(usize, Job, RowRecord)>,
 ) {
     let mut format: Option<Box<dyn Plugin>> = None;
-    let mut dests: HashMap<String, Box<dyn Plugin>> = HashMap::new();
+    let mut dests = Deliverer::new(&shared.ctx, shared.project, shared.log.clone());
     loop {
         if shared.cancel.is_cancelled() {
             break;
@@ -1261,9 +1252,6 @@ fn worker(
     if let Some(p) = format {
         p.close();
     }
-    for (_, p) in dests {
-        p.close();
-    }
 }
 
 fn row_failed(
@@ -1291,7 +1279,7 @@ fn run_job(
     shared: &Shared<'_>,
     job: &Job,
     format: &mut Option<Box<dyn Plugin>>,
-    dests: &mut HashMap<String, Box<dyn Plugin>>,
+    dests: &mut Deliverer<'_>,
 ) -> Option<RowRecord> {
     if let Some(pre) = &job.pre {
         return Some(pre.clone());
@@ -1382,17 +1370,11 @@ fn run_job(
             Some(z) => vec![z.clone()],
             None => job.files.iter().map(|(f, _)| f.clone()).collect(),
         };
-        let r = deliver_row(
-            &shared.ctx,
-            shared.project,
-            &shared.log,
-            d,
-            &local,
-            job.message.as_ref(),
-            dests,
-        );
-        let (status, location, error) = match r {
-            Ok(Some(loc)) => ("delivered", Some(job.mask.apply(&loc)), None),
+        let request = Request::new(&d.profile, d.path.as_deref(), &d.options, &local)
+            .message(job.message.as_ref(), &d.attach)
+            .format(&shared.format);
+        let (status, location, error) = match dests.deliver(request) {
+            Ok(Some(sent)) => ("delivered", Some(job.mask.apply(&sent.location)), None),
             Ok(None) => ("not_delivered", None, None),
             Err(e) => {
                 let msg = job.mask.apply(&e.message);
@@ -1503,164 +1485,4 @@ fn make_zips(job: &Job) -> Result<(), String> {
         built.push(to);
     }
     Ok(())
-}
-
-/// Deliver a row's files (or its message) to one destination. `Ok(None)`: the entry delivers
-/// nowhere (`deliver: false`).
-pub(crate) fn deliver_row(
-    ctx: &Context,
-    project: &Project,
-    log: &LogSink,
-    d: &RowDest,
-    files: &[PathBuf],
-    message: Option<&(String, String)>,
-    plugins: &mut HashMap<String, Box<dyn Plugin>>,
-) -> Result<Option<String>, Fail> {
-    let root = &project.root;
-    let profiles = &project.profiles;
-    let out = match profiles.entry(Role::Destination, &d.profile) {
-        Entry::Use(o) => o,
-        Entry::Nowhere => return Ok(None),
-        Entry::Missing => {
-            return Err(Fail::new(
-                Code::MissingTargetEntry,
-                profiles.missing_entry(Role::Destination, &d.profile),
-            ));
-        }
-        Entry::Unknown => {
-            return Err(format!("destination profile `{}` isn't in profiles.yml", d.profile).into());
-        }
-    };
-    let kind = out.kind.clone();
-    let connection = render_connection(out, ctx.env())?;
-    let targets: Vec<DeliveryFile> = files
-        .iter()
-        .map(|f| {
-            let name = f
-                .file_name()
-                .expect("the path ends in a file name")
-                .to_string_lossy()
-                .to_string();
-            let r = d.path.as_deref().map(|r| {
-                if files.len() == 1 {
-                    r.to_string()
-                } else {
-                    match r.rfind(['/', '\\']) {
-                        Some(i) => format!("{}{name}", &r[..=i]),
-                        None => name.clone(),
-                    }
-                }
-            });
-            DeliveryFile {
-                local_path: f.to_string_lossy().to_string(),
-                remote_path: r,
-            }
-        })
-        .collect();
-    if kind == LOCAL_TYPE {
-        let errors = crate::options::local_option_errors(&d.options);
-        if !errors.is_empty() {
-            return Err(format!("destination `{}`: {}", d.profile, errors.join("; ")).into());
-        }
-        let (rules, _) = dre_protocol::delivery::Rules::from_settings(
-            dre_protocol::delivery::Rules {
-                retries: 0,
-                ..Default::default()
-            },
-            &JsonMap::new(),
-            &d.options,
-            &[],
-        )?;
-        let mut locations = Vec::new();
-        for f in &targets {
-            let r = f
-                .remote_path
-                .as_ref()
-                .ok_or("the local destination needs `output.destination.path`")?;
-            let dst = root.join(r).to_string_lossy().to_string();
-            let delivered = dre_protocol::delivery::deliver(
-                &mut dre_protocol::delivery::LocalStore,
-                Path::new(&f.local_path),
-                &dst,
-                &rules,
-            )
-            .map_err(|e| Fail::new(Code::DeliveryFailed, format!("delivery to {dst} failed: {e}")))?;
-            locations.push(delivered.path);
-        }
-        return Ok(Some(locations.join(", ")));
-    }
-    let failed = |e: HostError| Fail::from_plugin(&e, format!("delivery through `{kind}` failed: {e}"));
-    if !plugins.contains_key(&kind) {
-        let plugin = find_plugin(ctx, project, PluginKind::Destination, &kind)
-            .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-        let p = ctx
-            .host()
-            .start(&plugin, log.clone(), Some(&project.root))
-            .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-        plugins.insert(kind.clone(), p);
-    }
-    let p = plugins.get_mut(&kind).expect("started");
-    let result = (|| {
-        if let Some((title, text)) = message
-            && p.has(CAP_MESSAGE)
-        {
-            let path = targets
-                .first()
-                .map(|f| f.local_path.clone())
-                .ok_or("the message has no file to deliver")?;
-            let m = dre_protocol::msg::Message {
-                title: title.clone(),
-                text: text.clone(),
-                html: None,
-                path,
-            };
-            let attach: Vec<DeliveryFile> = d
-                .attach
-                .iter()
-                .map(|f| DeliveryFile {
-                    local_path: f.to_string_lossy().to_string(),
-                    remote_path: None,
-                })
-                .collect();
-            return p
-                .deliver(crate::plugin_host::Delivery {
-                    files: attach,
-                    message: Some(m),
-                    connection: connection.clone(),
-                    options: d.options.clone(),
-                })
-                .map(|r| r.location)
-                .map_err(failed);
-        }
-        if message.is_none() && p.has(CAP_MESSAGE_ONLY) {
-            return Err(Fail::from(format!("`{kind}` only takes messages")));
-        }
-        let mut locations = Vec::new();
-        let batches: Vec<Vec<usize>> = if targets.len() > 1 && p.has(CAP_MULTI_FILE) {
-            vec![(0..targets.len()).collect()]
-        } else {
-            (0..targets.len()).map(|i| vec![i]).collect()
-        };
-        for batch in batches {
-            let files: Vec<DeliveryFile> = batch.iter().map(|&i| targets[i].clone()).collect();
-            locations.push(
-                p.deliver(crate::plugin_host::Delivery {
-                    files,
-                    message: None,
-                    connection: connection.clone(),
-                    options: d.options.clone(),
-                })
-                .map_err(failed)?
-                .location,
-            );
-        }
-        Ok(locations.join(", "))
-    })();
-    if result.is_err() {
-        // A destination plugin that failed may be broken: the next row starts a fresh one.
-        if let Some(p) = plugins.remove(&kind) {
-            p.close();
-        }
-    }
-    result.map(Some)
 }

@@ -20,9 +20,6 @@ use crate::message::QueryResult;
 use crate::numbers::Locale;
 use crate::render::RunContext;
 
-/// The formats rendered from a document template, which get a [`Context`] in every `write`.
-pub const FORMATS: &[&str] = &["html", "pdf"];
-
 /// A format `write` request's `template` for the html and pdf formats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Context {

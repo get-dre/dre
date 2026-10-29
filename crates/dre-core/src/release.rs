@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as Json};
 
 use crate::codes::Code;
+use crate::delivery::{Deliverer, Request};
 use crate::engine::Events;
 use crate::error::Error as Fail;
 use crate::project::Project;
-use crate::run::per_row::{RowDest, deliver_row};
 use crate::run_results::Released;
 use crate::runs::BindingRuns;
 
@@ -207,7 +207,7 @@ pub fn release(
         None => opts.only_keys.is_none(),
     };
     let log = events.plugin_log();
-    let mut plugins: HashMap<String, Box<dyn crate::plugin_host::Plugin>> = HashMap::new();
+    let mut deliverer = Deliverer::new(ctx, project, log);
     let pacer = crate::rate::Pacer::default();
     let mut progress = RowsLeft::new(
         held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
@@ -257,19 +257,6 @@ pub fn release(
             progress.entry_done(e, true, events);
             continue;
         }
-        let dest = RowDest {
-            idx: 0,
-            profile: e.profile.clone(),
-            path: e.path.clone(),
-            options: e.options.clone(),
-            hold: false,
-            rate: None,
-            attach: e.attach.iter().map(|f| f.path.clone()).collect(),
-            attach_missing: false,
-            // A held zip is already one of the entry's files: sent as it is.
-            zip: None,
-            zip_file: None,
-        };
         // Paced per destination profile, at the recorded rate or `--rate`.
         if let Some(rate) = opts.rate.or(e.rate)
             && !pacer.wait(&e.profile, &rate, &opts.cancel)
@@ -280,18 +267,14 @@ pub fn release(
             break;
         }
         let files: Vec<PathBuf> = e.files.iter().map(|f| f.path.clone()).collect();
-        match deliver_row(
-            ctx,
-            project,
-            &log,
-            &dest,
-            &files,
-            e.message.as_ref(),
-            &mut plugins,
-        ) {
-            Ok(Some(loc)) => {
+        let attach: Vec<PathBuf> = e.attach.iter().map(|f| f.path.clone()).collect();
+        // A held zip is already one of the entry's files: sent as it is.
+        let request = Request::new(&e.profile, e.path.as_deref(), &e.options, &files)
+            .message(e.message.as_ref(), &attach);
+        match deliverer.deliver(request) {
+            Ok(Some(sent)) => {
                 r.status = "delivered".into();
-                r.location = Some(mask.apply(&loc));
+                r.location = Some(mask.apply(&sent.location));
                 done.insert(e.id.clone());
                 // Recorded at once: a release stopped part-way never sends this one again.
                 write_released(&release_dir, &opts.run_id, &done)?;
@@ -308,9 +291,7 @@ pub fn release(
         outcome.released.push(r);
     }
     progress.finish(events);
-    for (_, p) in plugins {
-        p.close();
-    }
+    drop(deliverer);
     // The release's own record: who, when, what; and every entry released so far.
     write_released(&release_dir, &opts.run_id, &done)?;
     let mut record: Json = std::fs::read_to_string(run_dir.join("run_results.json"))

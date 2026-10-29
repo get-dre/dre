@@ -85,7 +85,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
                 profile: profile.map(str::to_string),
             };
             for o in b.outputs.iter().filter(|o| !o.is_message()) {
-                let template = crate::document::FORMATS.contains(&o.format.as_str()).then(|| {
+                let template = crate::formats::Format::new(&o.format).is_document().then(|| {
                     // A file that can't be resolved is reported by the template checks.
                     let file = o
                         .template
@@ -117,17 +117,11 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
                 }
                 add(PluginKind::Format, &o.format, &o.options, template, at(None));
             }
-            let with_output = b
-                .outputs
-                .iter()
-                .flat_map(|o| o.destinations.iter().map(move |d| (o, d)));
-            for (i, (output, d)) in with_output.enumerate() {
+            for (key, d) in b.keyed_destinations() {
+                let output = &b.outputs[key.output];
                 // The profile as the parse pass rendered it (a Jinja `profile:`).
-                let rendered = b
-                    .parsed
-                    .as_ref()
-                    .and_then(|p| p.destinations.get(i).cloned().flatten());
-                let profile = rendered.as_deref().unwrap_or(&d.profile);
+                let rendered = b.parsed.as_ref().and_then(|p| p.destination(key));
+                let profile = rendered.unwrap_or(&d.profile);
                 let kind = if project.profiles.is_builtin_local(profile) {
                     LOCAL_TYPE
                 } else {
@@ -218,7 +212,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
         };
         if kind == PluginKind::Destination {
             for r in routes.get(&name).into_iter().flatten() {
-                let message = r.format == crate::project::MESSAGE_FORMAT;
+                let message = crate::formats::Format::new(&r.format).is_message();
                 let problem = if p.has(dre_protocol::CAP_MESSAGE_ONLY) && !message {
                     Some(format!(
                         "`{name}` only takes messages, but this output is `{}`; deliver the file to a file destination (s3, sftp, a Databricks Volume...) and link it from a message output with `outputs.<name>.location`",

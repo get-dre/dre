@@ -22,7 +22,9 @@ use sha2::{Digest, Sha256};
 
 use crate::diag::{Diagnostics, Severity};
 use crate::lookups::LOOKUPS_DIR;
-use crate::project::{Binding, MACROS_DIR, PluginSource, Project, QueryEntry, REPORTS_DIR, Report};
+use crate::project::{
+    Binding, DestinationKey, MACROS_DIR, PluginSource, Project, QueryEntry, REPORTS_DIR, Report,
+};
 
 /// The manifest format's version.
 pub const SCHEMA_VERSION: &str = "dre/manifest/v3";
@@ -477,20 +479,20 @@ fn query(q: &QueryEntry, parsed: Option<&crate::parse::ParsedQuery>) -> Manifest
 
 fn binding(b: &Binding) -> ManifestBinding {
     let parsed = b.parsed.as_deref();
-    // Destinations are numbered across every output, as the parse pass renders them.
-    let mut next = 0;
     let outputs: Vec<ManifestOutput> = b
         .outputs
         .iter()
-        .map(|o| {
+        .enumerate()
+        .map(|(output, o)| {
             let destinations = o
                 .destinations
                 .iter()
-                .map(|d| {
-                    let rendered = parsed.and_then(|p| p.destinations.get(next).cloned().flatten());
-                    next += 1;
+                .enumerate()
+                .map(|(entry, d)| {
+                    // As written when it didn't render: the parse pass reported why.
+                    let rendered = parsed.and_then(|p| p.destination(DestinationKey { output, entry }));
                     ManifestDestination {
-                        profile: rendered.unwrap_or_else(|| d.profile.clone()),
+                        profile: rendered.unwrap_or(&d.profile).to_string(),
                         path: d.path.clone(),
                         attach: (!d.attach.is_empty()).then(|| d.attach.clone()),
                     }
@@ -833,4 +835,64 @@ pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String>
 /// Remove a stale manifest from `target_dir` (the project didn't load).
 pub fn remove(target_dir: &Path) {
     let _ = std::fs::remove_file(target_dir.join(FILE));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::project::DestinationKey;
+
+    /// A Binding with outputs `a` (destinations `one`, `two`) and `b` (destination `three`).
+    fn loaded() -> (tempfile::TempDir, Binding) {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = "connections:\n  w:\n    targets:\n      dev: {type: mem}\ndestinations:\n\
+            \x20 one: {targets: {dev: {deliver: false}}}\n\
+            \x20 two: {targets: {dev: {deliver: false}}}\n\
+            \x20 three: {targets: {dev: {deliver: false}}}\n";
+        let report = "queries: [q]\noutput:\n\
+            \x20 - {name: a, destination: [{profile: one}, {profile: two}]}\n\
+            \x20 - {name: b, destination: {profile: three}}\n";
+        for (path, text) in [
+            ("dre_project.yml", "name: m\ndefault_profile: w\n"),
+            ("profiles.yml", profiles),
+            ("reports/r/r.yml", report),
+            ("reports/r/q.sql", "select 1"),
+        ] {
+            let p = dir.path().join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        let ctx = crate::Context::empty();
+        let (project, diags) = crate::project::load_with(dir.path(), &Default::default(), &ctx);
+        assert!(!diags.has_errors(), "{:?}", diags.sorted());
+        let project = project.unwrap();
+        let b = project.reports.iter().find(|r| r.name == "r").unwrap().bindings[0].clone();
+        (dir, b)
+    }
+
+    fn profiles(b: &ManifestBinding) -> Vec<&str> {
+        b.destinations.iter().map(|d| d.profile.as_str()).collect()
+    }
+
+    #[test]
+    fn destinations_take_their_rendered_profile_by_key() {
+        let (_dir, mut b) = loaded();
+        let key = |output, entry| DestinationKey { output, entry };
+        let mut parsed = (**b.parsed.as_ref().unwrap()).clone();
+        parsed.destinations.clear();
+        // Rendered in another order, and `two`'s failed to render: the others still match.
+        parsed
+            .destinations
+            .insert(key(1, 0), Some("three-rendered".into()));
+        parsed.destinations.insert(key(0, 0), Some("one-rendered".into()));
+        parsed.destinations.insert(key(0, 1), None);
+        b.parsed = Some(Arc::new(parsed.clone()));
+        assert_eq!(profiles(&binding(&b)), ["one-rendered", "two", "three-rendered"]);
+        // An entry the parse pass never saw keeps its declared profile too.
+        parsed.destinations.remove(&key(0, 0));
+        b.parsed = Some(Arc::new(parsed));
+        assert_eq!(profiles(&binding(&b)), ["one", "two", "three-rendered"]);
+    }
 }
