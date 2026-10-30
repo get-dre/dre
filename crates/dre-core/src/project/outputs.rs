@@ -1,13 +1,14 @@
 //! Outputs: layering `output:` config, reading it as typed config, and checking it.
 
 use super::*;
+use crate::config::report::{Destination as DestinationConfig, OutputLayer};
 
 impl Loader {
     /// Every merged output, typed, plus the checks across them: unique names, `queries:` naming
     /// the Binding's queries, xlsx-only `columns`, and queries that feed no output.
     pub(super) fn typed_outputs(
         &mut self,
-        maps: &[Mapping],
+        maps: &[OutputConfig],
         ctx: &str,
         file: &Path,
         queries: &[QueryEntry],
@@ -20,15 +21,15 @@ impl Loader {
             let octx = if several {
                 format!(
                     "{ctx}, {}",
-                    output_label(m.get("name").and_then(Value::as_str), i)
+                    output_label(m.name.as_ref().and_then(Loose::ok).map(String::as_str), i)
                 )
             } else {
                 ctx.to_string()
             };
-            let subset: Vec<QueryEntry> = match m.get("queries") {
-                None | Some(Value::Null) => queries.to_vec(),
+            let subset: Vec<QueryEntry> = match &m.queries {
+                None => queries.to_vec(),
                 Some(v) => {
-                    match string_list(v) {
+                    match v.ok() {
                         Some(names) => {
                             for n in names.iter().filter(|n| !queries.iter().any(|q| &&q.query == n)) {
                                 self.diags.error(
@@ -56,7 +57,7 @@ impl Loader {
                     }
                 }
             };
-            outputs.push(self.typed_output(m, &octx, file, &subset, used));
+            outputs.push(self.typed_output(m.clone(), &octx, file, &subset, used));
         }
         let mut seen = BTreeSet::new();
         for o in &outputs {
@@ -551,7 +552,7 @@ impl Loader {
     /// Convert a merged output map into a typed `Output`, validating options and references.
     fn typed_output(
         &mut self,
-        m: &Mapping,
+        o: OutputConfig,
         ctx: &str,
         file: &Path,
         queries: &[QueryEntry],
@@ -559,12 +560,6 @@ impl Loader {
     ) -> Output {
         let file_path = file.to_path_buf();
         let file = Some(file_path.clone());
-        let node = crate::yaml::to_node(&Value::Object(m.clone()));
-        let o: OutputConfig = match de::from_node(&node) {
-            Ok(o) => o,
-            // Every key is `Loose`, so a map always reads.
-            Err(e) => unreachable!("an output map reads as an output: {e}"),
-        };
         let format = o
             .format
             .as_ref()
@@ -1349,19 +1344,12 @@ impl Loader {
     }
 }
 
-pub(super) fn builtin_output() -> Mapping {
-    let mut m = Mapping::new();
-    m.insert("format".into(), Value::String(crate::formats::DEFAULT.into()));
-    m
-}
-
-pub(super) fn project_default_output(p: &Project) -> Option<Mapping> {
-    let yf = YamlFile::parse(
-        std::fs::read_to_string(p.root.join(PROJECT_FILE)).ok()?,
-        PathBuf::from(PROJECT_FILE),
-        &mut Diagnostics::default(),
-    )?;
-    yf.value.get("default_output").and_then(Value::as_object).cloned()
+/// The built-in output every report starts from: `format: csv`.
+pub(super) fn builtin_output() -> OutputConfig {
+    OutputConfig {
+        format: Some(Loose::Ok(crate::formats::DEFAULT.to_string())),
+        ..OutputConfig::default()
+    }
 }
 
 /// Apply one report or Set `output:` layer over the inherited outputs; returns the problems.
@@ -1370,33 +1358,33 @@ pub(super) fn project_default_output(p: &Project) -> Option<Mapping> {
 /// - A map merges ([`merge_output`]) into the single inherited output, or into the one its
 ///   `name:` names. With several inherited outputs and no `name:`, it's unclear which one to
 ///   change: the layer is ignored and the problem says why.
-pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
+pub fn layer_outputs(base: &mut Vec<OutputConfig>, over: &OutputLayer) -> Vec<String> {
     let mut problems = Vec::new();
     match over {
-        Value::Array(list) if list.is_empty() => problems.push(
+        Loose::Ok(de::OneOf::B(list)) if list.is_empty() => problems.push(
             "`output` is an empty list; give at least one output, or remove it to use the inherited one"
                 .into(),
         ),
-        Value::Array(list) => {
+        Loose::Ok(de::OneOf::B(list)) => {
             let mut outs = Vec::new();
             for (i, entry) in list.iter().enumerate() {
-                match entry.as_object() {
-                    Some(m) => {
+                match entry {
+                    Loose::Ok(m) => {
                         let mut o = builtin_output();
                         problems.extend(merge_output(&mut o, m));
                         outs.push(o);
                     }
-                    None => problems.push(format!("`output` entry {} must be a map", i + 1)),
+                    Loose::Bad(_) => problems.push(format!("`output` entry {} must be a map", i + 1)),
                 }
             }
             if problems.is_empty() {
                 *base = outs;
             }
         }
-        Value::Object(m) => {
-            let name_of = |o: &Mapping| o.get("name").and_then(Value::as_str).map(str::to_string);
-            let target = match m.get("name").and_then(Value::as_str) {
-                Some(n) => match base.iter().position(|o| name_of(o).as_deref() == Some(n)) {
+        Loose::Ok(de::OneOf::A(m)) => {
+            let name_of = |o: &OutputConfig| o.name.as_ref().and_then(Loose::ok).cloned();
+            let target = match m.name.as_ref().and_then(Loose::ok) {
+                Some(n) => match base.iter().position(|o| name_of(o).as_ref() == Some(n)) {
                     Some(i) => Some(i),
                     None if base.len() == 1 && name_of(&base[0]).is_none() => Some(0),
                     None => {
@@ -1429,13 +1417,14 @@ pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
                 problems.extend(merge_output(&mut base[i], m));
             }
         }
-        _ => problems.push("`output` must be a map or a list of maps".into()),
+        Loose::Bad(_) => problems.push("`output` must be a map or a list of maps".into()),
     }
     problems
 }
 
-/// Merge an output layer over `base`. Changing `format` drops the lower layers' format options,
-/// since they belong to a different format.
+/// Merge an output layer over `base`: each key the layer sets replaces the inherited one, and
+/// format options merge key by key. Changing `format` drops the lower layers' format options
+/// (and `extension`), since they belong to a different format.
 ///
 /// `destination` (a map or a list of maps):
 /// - a list replaces whatever was inherited;
@@ -1444,47 +1433,115 @@ pub fn layer_outputs(base: &mut Vec<Mapping>, over: &Value) -> Vec<String> {
 /// - a map without `profile` (or with the same one) merges key by key into the inherited single
 ///   destination, so a Binding can override just `path`. With several inherited destinations
 ///   that's ambiguous: the layer's destination is ignored and the returned message says why.
-pub fn merge_output(base: &mut Mapping, over: &Mapping) -> Option<String> {
-    if let Some(f) = over.get("format")
-        && base.get("format") != Some(f)
+pub fn merge_output(base: &mut OutputConfig, over: &OutputConfig) -> Option<String> {
+    if let Some(f) = &over.format
+        && !same(base.format.as_ref(), Some(f))
     {
-        base.retain(|k, _| is_one_of(k, FORMAT_INDEPENDENT_KEYS));
+        base.extension = de::Maybe::Absent;
+        base.options = de::Map::default();
     }
     let mut problem = None;
-    for (k, v) in over {
-        if k.as_str() == "destination"
-            && let Value::Object(o) = v
-        {
-            let profile = |m: &Mapping| m.get("profile").cloned();
-            match base.get_mut(k) {
-                Some(Value::Array(list)) if o.get("profile").is_none() && list.len() > 1 => {
+    let OutputConfig {
+        name,
+        format,
+        queries,
+        when,
+        destination,
+        template,
+        for_each,
+        file_name,
+        on_empty,
+        extension,
+        options,
+    } = over;
+    replace(&mut base.name, name);
+    replace(&mut base.format, format);
+    replace(&mut base.queries, queries);
+    replace(&mut base.when, when);
+    replace(&mut base.template, template);
+    replace(&mut base.for_each, for_each);
+    replace(&mut base.file_name, file_name);
+    replace(&mut base.on_empty, on_empty);
+    if let de::Maybe::Given(e) = extension {
+        base.extension = de::Maybe::Given(e.clone());
+    }
+    merge_options(&mut base.options, options);
+    match destination {
+        Some(Loose::Ok(de::OneOf::A(o))) => {
+            let fits = |b: &DestinationConfig| o.profile.is_none() || same(b.profile.as_ref(), o.profile.as_ref());
+            match &mut base.destination {
+                Some(Loose::Ok(de::OneOf::B(list))) if o.profile.is_none() && list.len() > 1 => {
                     problem = Some(format!(
                         "this overrides `destination` with no `profile:`, but it inherits {} destinations, so it's unclear which one to change; override the full list instead",
                         list.len()
                     ));
-                    continue;
                 }
-                Some(Value::Array(list))
-                    if list.len() == 1
-                        && list[0]
-                            .as_object()
-                            .is_some_and(|b| o.get("profile").is_none() || profile(b) == profile(o)) =>
+                Some(Loose::Ok(de::OneOf::B(list)))
+                    if list.len() == 1 && matches!(&list[0], Loose::Ok(b) if fits(b)) =>
                 {
-                    let mut b = list[0].as_object().cloned().unwrap_or_default();
-                    b.extend(o.clone());
-                    base.insert(k.clone(), Value::Object(b));
-                    continue;
+                    let Some(Loose::Ok(mut b)) = list.pop() else {
+                        unreachable!("the guard checked the one entry is a map");
+                    };
+                    merge_destination(&mut b, o);
+                    base.destination = Some(Loose::Ok(de::OneOf::A(b)));
                 }
-                Some(Value::Object(b)) if o.get("profile").is_none() || profile(b) == profile(o) => {
-                    b.extend(o.clone());
-                    continue;
-                }
-                _ => {}
+                Some(Loose::Ok(de::OneOf::A(b))) if fits(b) => merge_destination(b, o),
+                _ => base.destination = destination.clone(),
             }
         }
-        base.insert(k.clone(), v.clone());
+        Some(d) => base.destination = Some(d.clone()),
+        None => {}
     }
     problem
+}
+
+/// A destination map over an inherited one: each key it sets replaces the inherited one.
+fn merge_destination(base: &mut DestinationConfig, over: &DestinationConfig) {
+    let DestinationConfig {
+        profile,
+        path,
+        attach,
+        hold,
+        rate,
+        burst,
+        zip,
+        options,
+    } = over;
+    replace(&mut base.profile, profile);
+    replace(&mut base.path, path);
+    replace(&mut base.attach, attach);
+    replace(&mut base.hold, hold);
+    replace(&mut base.rate, rate);
+    replace(&mut base.burst, burst);
+    replace(&mut base.zip, zip);
+    merge_options(&mut base.options, options);
+}
+
+/// A key a layer sets replaces the inherited value; one it leaves out (or sets to null) keeps it.
+fn replace<T: Clone>(base: &mut Option<T>, over: &Option<T>) {
+    if over.is_some() {
+        base.clone_from(over);
+    }
+}
+
+/// The layer's plugin options over the inherited ones, key by key, in the order first written.
+fn merge_options(base: &mut de::Map<Json>, over: &de::Map<Json>) {
+    for (k, v) in over.iter() {
+        match base.0.iter_mut().find(|(b, _)| b.value == k.value) {
+            Some(slot) => slot.1 = v.clone(),
+            None => base.0.push((k.clone(), v.clone())),
+        }
+    }
+}
+
+/// Whether two layers give the same value: a value of the wrong shape is never the same as
+/// another.
+fn same<T: PartialEq>(a: Option<&Loose<T>>, b: Option<&Loose<T>>) -> bool {
+    match (a, b) {
+        (Some(Loose::Ok(a)), Some(Loose::Ok(b))) => a == b,
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 /// Resolve an output's `template.file`, looked up from the folder of `yaml` (the report's file)
@@ -1537,4 +1594,129 @@ fn result_column(p: &preflight::Path) -> Option<(&str, Option<&str>)> {
         _ => 1,
     };
     Some((query, p.attr(rest)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output(yaml: &str) -> OutputConfig {
+        let node = crate::config::node::parse(yaml).expect("the test YAML parses");
+        de::from_node(&node).expect("an output map reads")
+    }
+
+    fn layer(yaml: &str) -> OutputLayer {
+        let node = crate::config::node::parse(yaml).expect("the test YAML parses");
+        de::from_node(&node).expect("an output layer reads")
+    }
+
+    /// Each destination as `profile path key=value...`.
+    fn dest(o: &OutputConfig) -> Vec<String> {
+        let one = |d: &DestinationConfig| {
+            let s = |v: &Option<Loose<String>>| v.as_ref().and_then(Loose::ok).cloned().unwrap_or_default();
+            let mut out = format!("{} {}", s(&d.profile), s(&d.path));
+            for (k, v) in d.options.iter() {
+                out.push_str(&format!(" {}={v}", k.value));
+            }
+            out.trim().to_string()
+        };
+        match &o.destination {
+            None => Vec::new(),
+            Some(Loose::Ok(de::OneOf::A(d))) => vec![one(d)],
+            Some(Loose::Ok(de::OneOf::B(list))) => list.iter().filter_map(Loose::ok).map(one).collect(),
+            Some(Loose::Bad(_)) => vec!["bad".into()],
+        }
+    }
+
+    fn options(o: &OutputConfig) -> Vec<String> {
+        o.options.iter().map(|(k, v)| format!("{}={v}", k.value)).collect()
+    }
+
+    #[test]
+    fn a_path_only_override_keeps_the_inherited_profile() {
+        let mut base = output("destination: {profile: s3, path: a.csv}");
+        assert_eq!(merge_output(&mut base, &output("destination: {path: b.csv}")), None);
+        assert_eq!(dest(&base), vec!["s3 b.csv"]);
+    }
+
+    #[test]
+    fn a_different_profile_replaces_the_destination_instead_of_merging_options() {
+        let mut base = output("destination: {profile: mail, to: a@example.com, subject: Hi}");
+        merge_output(&mut base, &output("destination: {profile: slack, channel: C1}"));
+        assert_eq!(dest(&base), vec![r#"slack  channel="C1""#]);
+    }
+
+    #[test]
+    fn a_list_replaces_whatever_was_inherited() {
+        let mut base = output("destination: {profile: s3, path: a.csv}");
+        merge_output(
+            &mut base,
+            &output("destination: [{profile: s3, path: b.csv}, {profile: mail, to: x@example.com}]"),
+        );
+        assert_eq!(dest(&base).len(), 2);
+    }
+
+    #[test]
+    fn a_path_only_override_of_a_one_entry_list_merges_into_that_entry() {
+        let mut base = output("destination: [{profile: s3, path: a.csv}]");
+        assert_eq!(merge_output(&mut base, &output("destination: {path: b.csv}")), None);
+        assert_eq!(dest(&base), vec!["s3 b.csv"]);
+    }
+
+    #[test]
+    fn a_path_only_override_of_several_destinations_is_refused() {
+        let mut base = output("destination: [{profile: s3, path: a.csv}, {profile: mail, to: x@example.com}]");
+        let before = dest(&base);
+        let err = merge_output(&mut base, &output("destination: {path: b.csv}")).unwrap();
+        assert!(err.contains("2 destinations"), "{err}");
+        assert!(err.contains("full list"), "{err}");
+        assert_eq!(dest(&base), before);
+    }
+
+    #[test]
+    fn format_options_merge_key_by_key_in_first_written_order() {
+        let mut base = output("format: delimited\ndelimiter: ';'\nquote: always");
+        merge_output(&mut base, &output("header: false\ndelimiter: '|'"));
+        assert_eq!(options(&base), vec![r#"delimiter="|""#, r#"quote="always""#, "header=false"]);
+    }
+
+    #[test]
+    fn changing_format_drops_the_old_formats_options_and_extension() {
+        let mut base = output("format: delimited\ndelimiter: ';'\nextension: txt\nname: out");
+        merge_output(&mut base, &output("format: parquet"));
+        assert!(options(&base).is_empty());
+        assert_eq!(base.extension, de::Maybe::Absent);
+        assert_eq!(base.name.as_ref().and_then(Loose::ok).map(String::as_str), Some("out"));
+    }
+
+    #[test]
+    fn a_list_layer_starts_each_entry_from_the_built_in_output() {
+        let mut outs = vec![output("format: xlsx\nname: a")];
+        assert!(layer_outputs(&mut outs, &layer("[{name: x}, {name: y, format: parquet}]")).is_empty());
+        let formats: Vec<&str> = outs
+            .iter()
+            .filter_map(|o| o.format.as_ref().and_then(Loose::ok).map(String::as_str))
+            .collect();
+        assert_eq!(formats, vec!["csv", "parquet"]);
+    }
+
+    #[test]
+    fn a_map_layer_changes_the_output_its_name_names() {
+        let mut outs = vec![output("name: a\nformat: csv"), output("name: b\nformat: xlsx")];
+        assert!(layer_outputs(&mut outs, &layer("{name: b, when: 'false'}")).is_empty());
+        assert!(outs[0].when.is_none());
+        assert!(outs[1].when.is_some());
+        let problems = layer_outputs(&mut outs, &layer("{when: 'true'}"));
+        assert!(problems[0].contains("inherits 2 outputs"), "{problems:?}");
+        let problems = layer_outputs(&mut outs, &layer("{name: c}"));
+        assert!(problems[0].contains("(they're `a`, `b`)"), "{problems:?}");
+    }
+
+    #[test]
+    fn a_layer_of_the_wrong_shape_is_a_problem() {
+        let mut outs = vec![builtin_output()];
+        assert_eq!(layer_outputs(&mut outs, &layer("csv")), vec!["`output` must be a map or a list of maps"]);
+        assert_eq!(layer_outputs(&mut outs, &layer("[]")).len(), 1);
+        assert_eq!(layer_outputs(&mut outs, &layer("[csv]")), vec!["`output` entry 1 must be a map"]);
+    }
 }

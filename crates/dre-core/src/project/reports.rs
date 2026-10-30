@@ -42,11 +42,11 @@ impl Loader {
                 }
                 continue;
             };
-            let mut keys: BTreeMap<String, Located<Value>> = BTreeMap::new();
+            let mut keys: BTreeMap<String, Rc<YamlFile>> = BTreeMap::new();
             let mut owner: BTreeMap<String, usize> = BTreeMap::new();
             let mut lines: BTreeMap<String, Option<usize>> = BTreeMap::new();
             for (i, f) in frags.iter().enumerate() {
-                for (k, v) in &f.map {
+                for k in f.map.keys() {
                     let k = k.as_str();
                     if k == "name" || !REPORT_KEYS.contains(&k) {
                         continue;
@@ -58,19 +58,13 @@ impl Loader {
                             key_line(&f.file, k),
                             format!(
                                 "`{k}` for report `{name}` is declared in both {} and {}",
-                                prev.file.display.display(),
+                                prev.display.display(),
                                 f.file.display.display()
                             ),
                         );
                         continue;
                     }
-                    keys.insert(
-                        k.to_string(),
-                        Located {
-                            value: v.clone(),
-                            file: f.file.clone(),
-                        },
-                    );
+                    keys.insert(k.to_string(), f.file.clone());
                     owner.insert(k.to_string(), i);
                     lines.insert(k.to_string(), key_line(&f.file, k));
                 }
@@ -84,7 +78,7 @@ impl Loader {
                     name: _,
                     description,
                     meta,
-                    output: _,
+                    output,
                     plugins: _,
                     sources: _,
                     tags,
@@ -135,6 +129,9 @@ impl Loader {
                 if owns("schedule") {
                     typed.schedule = schedule;
                 }
+                if owns("output") {
+                    typed.output = output;
+                }
             }
             out.push(RawReport {
                 name,
@@ -160,7 +157,7 @@ impl Loader {
         let file = r
             .keys
             .get("queries")
-            .map_or_else(|| r.file.display.clone(), |k| k.file.display.clone());
+            .map_or_else(|| r.file.display.clone(), |f| f.display.clone());
         let Loose::Ok(items) = &q.value else {
             self.diags.error(
                 Code::InvalidField,
@@ -419,7 +416,7 @@ impl Loader {
         let located = |k: &str| {
             r.keys
                 .get(k)
-                .map(|l| (l.file.display.clone(), r.lines.get(k).copied().flatten()))
+                .map(|f| (f.display.clone(), r.lines.get(k).copied().flatten()))
         };
         let typed = &r.typed;
         let var_schema = match &typed.var_schema {
@@ -593,8 +590,8 @@ impl Loader {
             }
         }
         let mut merge_problems = Vec::new();
-        if let Some(o) = project_default_output(project) {
-            merge_problems.extend(merge_output(&mut output, &o));
+        if let Some(o) = &self.default_output {
+            merge_problems.extend(merge_output(&mut output, o));
         }
         for l in &layers {
             if let Some(o) = &l.output {
@@ -610,8 +607,8 @@ impl Loader {
             );
         }
         let mut outputs = vec![output];
-        if let Some(o) = key("output") {
-            for p in layer_outputs(&mut outputs, &o.value) {
+        if let Some(o) = &typed.output {
+            for p in layer_outputs(&mut outputs, o) {
                 let (f, l) = located("output").expect("the key is present: its value was read");
                 self.diags
                     .error(Code::InvalidField, Some(f), l, format!("report `{name}`: {p}"));
@@ -636,7 +633,7 @@ impl Loader {
         let report_base = self.silent_binding(&name, &base, &queries, &r.file.display);
         let mut bindings = Vec::new();
         if let (Some(s), Some(at)) = (&typed.sets, key("sets")) {
-            bindings = self.resolve_sets(&name, s, &at.file.display, &queries, &base, project, used);
+            bindings = self.resolve_sets(&name, s, &at.display, &queries, &base, project, used);
             let declared: Vec<&str> = bindings.iter().filter_map(|b| b.set.as_deref()).collect();
             if let Some(d) = &default_set
                 && !declared.contains(&d.as_str())
@@ -761,8 +758,8 @@ impl Loader {
         }
         let mut output = builtin_output();
         let mut merge_problems = Vec::new();
-        if let Some(o) = project_default_output(project) {
-            merge_problems.extend(merge_output(&mut output, &o));
+        if let Some(o) = &self.default_output {
+            merge_problems.extend(merge_output(&mut output, o));
         }
         for l in &layers {
             if let Some(o) = &l.output {
@@ -869,8 +866,8 @@ pub(super) struct RawReport {
     name: String,
     file: Rc<YamlFile>,
     folder: Vec<String>,
-    /// Each key's value and the fragment it's in, for the keys not yet read as typed config.
-    keys: BTreeMap<String, Located<Value>>,
+    /// The fragment each key is declared in.
+    keys: BTreeMap<String, Rc<YamlFile>>,
     /// The line of each key, in its fragment.
     lines: BTreeMap<String, Option<usize>>,
     /// The typed keys, each from the fragment that declares it.
@@ -882,6 +879,6 @@ pub(super) struct BindingBase {
     pub(super) profile_at: Option<ProfileAt>,
     pub(super) vars: JsonMap<String, Json>,
     /// The merged outputs, in order: one unless a layer gave a list.
-    pub(super) outputs: Vec<Mapping>,
+    pub(super) outputs: Vec<OutputConfig>,
     pub(super) locale: Option<String>,
 }

@@ -35,7 +35,7 @@ pub struct ReportFile {
     /// One output, or a list of outputs formatted from the same run of the queries (file outputs are delivered before messages). A list replaces the inherited output; a map changes it.
     #[serde(default)]
     #[schemars(schema_with = "output_or_list")]
-    pub output: Option<IgnoredAny>,
+    pub output: Option<OutputLayer>,
     /// The connection (in `profiles.yml`) the queries run on, unless a query's own `profile:` or a source's says otherwise. Default: the folder's `+profile`, then `default_profile`. Can't be combined with `sets`. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`.
     pub profile: Option<Located<Loose<String>>>,
     /// The Sets the report can run as, by name (declared in `sets.yml`) or declared here.
@@ -175,7 +175,7 @@ pub struct SetEntry {
     /// Output settings for this Set: a map changes the inherited output (with several, the one its `name:` names); a list replaces them all.
     #[serde(default)]
     #[schemars(schema_with = "output_or_list")]
-    pub output: Option<serde_json::Value>,
+    pub output: Option<OutputLayer>,
     /// The locale for this Set's number filters (`fr-FR`), above the report's.
     pub locale: Option<Loose<String>>,
     /// Removed: schedules live in schedules.yml. Read only to say so.
@@ -185,6 +185,10 @@ pub struct SetEntry {
     #[schemars(skip)]
     pub unknown: UnknownKeys,
 }
+
+/// An `output:` layer: a map changes the inherited output (with several, the one its `name:`
+/// names); a list replaces them all.
+pub type OutputLayer = Loose<OneOf<Output, Vec<Loose<Output>>>>;
 
 /// One item of a Set's `queries:`: a query's name, or a query with settings.
 pub type SetQueryItem = Loose<OneOf<String, SetQuery>>;
@@ -242,7 +246,7 @@ fn set_queries(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 /// How a report's result is written and where it goes. Besides the keys below, each format takes its own options (for example `delimiter` for `delimited`, `columns` for `fixed_width`, `text` for `message`); they are documented with the formats.
 // Outputs are layered (the built-in default, `default_output`, each folder's `+output`, the
 // report's and a Set's `output`) and read once merged.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Default, Deserialize, JsonSchema)]
 #[schemars(rename = "output", extend("additionalProperties" = true))]
 pub struct Output {
     /// Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report.
@@ -281,7 +285,7 @@ pub struct Output {
 }
 
 /// Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). The built-in profile `local` copies the file to a local path.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[schemars(rename = "destination", extend("additionalProperties" = true))]
 pub struct Destination {
     /// The destination profile in `profiles.yml` (under `destinations:`) to deliver with. `local` is built in. It uses its entry for the run (`--target`, `DRE_TARGET`, else the profile's own `target:`, else `dev`); a missing entry is an error, and an entry `{deliver: false}` delivers nowhere. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`.
@@ -312,7 +316,7 @@ pub struct Destination {
 }
 
 /// `zip:` with settings.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct ZipConfig {
     pub password: Option<Loose<String>>,
     pub encryption: Option<Loose<crate::zip_pack::Encryption>>,
@@ -338,7 +342,7 @@ fn zip_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 }
 
 /// One copy of the output per row of a driver query (a per-row output): each copy gets only its row's slice of the results, and the driver row as `each.<column>` in every template of the output. `false` turns an inherited `for_each` off.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[schemars(rename = "for_each", deny_unknown_fields)]
 pub struct ForEach {
     /// The driver: a query of the report, one row per copy of the output. It isn't a tab or section of the output itself.
@@ -380,7 +384,7 @@ fn for_each_or_false(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
 }
 
 /// The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin).
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[schemars(rename = "template", deny_unknown_fields)]
 pub struct Template {
     /// The template file (`.xlsx` for xlsx, `.html` for html and pdf): a bare file name, found next to the report's YAML, then in each parent folder, then anywhere in the project (it must be unique); or a path with `/`, relative to the project root.
@@ -391,7 +395,7 @@ pub struct Template {
 }
 
 /// One block of data in an xlsx template: a table of a query's result, or a single cell.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, inline)]
 pub struct TemplateBinding {
     /// The template sheet to write into.

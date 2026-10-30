@@ -55,7 +55,7 @@ use crate::profiles::{LOCAL_TYPE, Profiles, Role};
 use crate::yaml::YamlFile;
 use crate::{constraints, options, preflight, schedule, selector, sqlsplit};
 
-use outputs::{builtin_output, project_default_output};
+use outputs::builtin_output;
 pub use outputs::{
     find_template, layer_outputs, merge_output, output_label, resolve_template, template_sheets,
 };
@@ -167,17 +167,6 @@ pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "style",
     "on_empty",
     "secret_columns",
-];
-/// The shared output keys that don't belong to one format: they survive a layer changing `format`.
-const FORMAT_INDEPENDENT_KEYS: &[&str] = &[
-    "name",
-    "queries",
-    "when",
-    "destination",
-    "template",
-    "on_empty",
-    "for_each",
-    "file_name",
 ];
 /// The keys of a destination entry core reads; every other key is the plugin's.
 pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst", "zip"];
@@ -1116,6 +1105,7 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
         opts: opts.clone(),
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
+        default_output: None,
     };
     let project = l.run();
     (project, l.diags)
@@ -1133,6 +1123,9 @@ struct Loader {
     diags: Diagnostics,
     /// `format_options:` from the project file: per format, defaults under every output of it.
     format_options: Mapping,
+    /// `default_output:` from the project file: the output every report starts from, over the
+    /// built-in one.
+    default_output: Option<OutputConfig>,
 }
 
 /// One report YAML fragment, before merging.
@@ -1156,7 +1149,7 @@ fn key_line(yf: &YamlFile, key: &str) -> Option<usize> {
 struct FolderCfg {
     meta: Option<MetaLayer>,
     tags: Vec<String>,
-    output: Option<Mapping>,
+    output: Option<OutputConfig>,
     profile: Option<(String, Option<usize>)>,
     vars: Option<Mapping>,
     timezone: Option<String>,
@@ -1173,12 +1166,6 @@ struct Discovered {
     folders: Vec<Vec<String>>,
     /// Every project source file, relative: see [`Project::sources`].
     sources: Vec<PathBuf>,
-}
-
-/// Where a report-level value came from, for error messages.
-struct Located<T> {
-    value: T,
-    file: Rc<YamlFile>,
 }
 
 impl Loader {
@@ -1280,6 +1267,11 @@ impl Loader {
             }
         }
         let folders_cfg = pfile_typed.reports.take();
+        // A `default_output` that isn't a map is left out, as if it weren't there.
+        self.default_output = match pfile_typed.default_output.take() {
+            Some(Loose::Ok(o)) => Some(o),
+            _ => None,
+        };
         let default_profile_line = pfile_typed.default_profile.as_ref().and_then(de::Located::line);
         let mut project = self.parse_project_file(&pyaml, pfile_typed)?;
 
@@ -1509,13 +1501,6 @@ fn json_strings(v: &Json) -> Vec<String> {
 
 fn is_one_of(k: &str, keys: &[&str]) -> bool {
     keys.contains(&k)
-}
-
-fn string_list(v: &Value) -> Option<Vec<String>> {
-    v.as_array()?
-        .iter()
-        .map(|i| i.as_str().map(str::to_string))
-        .collect()
 }
 
 /// The query a `queries:` item names, if it names one.
