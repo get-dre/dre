@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anstyle::{AnsiColor, Effects, Style};
-use dre_core::run::{BindingOutcome, Level, Status, Ui};
-use dre_protocol::host::LogSink;
+use dre_core::engine::RunEvent;
+use dre_core::run::{BindingOutcome, Level, Status};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use crate::progress::{RowMeter, describe, short_name};
@@ -566,8 +566,44 @@ impl dre_core::start::Console for Printer {
     }
 }
 
-impl Ui for Printer {
-    fn targets(&mut self, t: &dre_core::run::RunTargets) {
+impl dre_core::engine::EventSink for Printer {
+    fn event(&mut self, e: RunEvent) {
+        match e {
+            RunEvent::Targets(t) => self.on_targets(&t),
+            RunEvent::Plan(n) => self.on_plan(n),
+            RunEvent::BindingStart { report, set } => self.on_binding_start(&report, set.as_deref()),
+            RunEvent::BindingLog(path) => self.on_binding_log(&path),
+            RunEvent::BindingVars {
+                schedule,
+                schedule_vars,
+                vars,
+            } => self.on_binding_vars(schedule.as_deref(), schedule_vars.as_ref(), &vars),
+            RunEvent::Step {
+                level,
+                verb,
+                detail,
+                elapsed,
+            } => self.on_step(level, &verb, &detail, elapsed),
+            RunEvent::Warn(msg) => self.on_warn(&msg),
+            RunEvent::BindingEnd(o) => self.on_binding_end(&o),
+            RunEvent::Compiled(p) => self.on_compiled(&p),
+            RunEvent::Message(m) => self.on_message(&m),
+            RunEvent::PluginLog(plugin, line) => self.on_plugin_log(&plugin, &line),
+            RunEvent::Sql(label, sql) => self.on_sql(&label, &sql),
+            RunEvent::Running { label, running } => self.on_running(&label, running),
+            RunEvent::Rows(p) => self.on_rows(&p),
+            RunEvent::Block(events) => {
+                for e in events {
+                    self.event(e);
+                }
+            }
+        }
+    }
+}
+
+/// How each run event shows: on the terminal, as a JSON line, and in the run's log file.
+impl Printer {
+    fn on_targets(&mut self, t: &dre_core::run::RunTargets) {
         self.with(|i| {
             if i.format == LogFormat::Json {
                 i.file_log("INFO", &format!("Target {}", t.line()));
@@ -577,11 +613,11 @@ impl Ui for Printer {
             }
         });
         if let Some(w) = t.mismatch() {
-            self.warn(&w);
+            self.on_warn(&w);
         }
     }
 
-    fn plan(&mut self, bindings: usize) {
+    fn on_plan(&mut self, bindings: usize) {
         self.with(|i| {
             i.started = Instant::now();
             let text = format!("{bindings} Binding{}", if bindings == 1 { "" } else { "s" });
@@ -608,7 +644,7 @@ impl Ui for Printer {
         })
     }
 
-    fn running(&mut self, label: &str, running: bool) {
+    fn on_running(&mut self, label: &str, running: bool) {
         self.with(|i| {
             if running {
                 i.running.push(label.to_string());
@@ -621,7 +657,7 @@ impl Ui for Printer {
         })
     }
 
-    fn binding_start(&mut self, report: &str, set: Option<&str>) {
+    fn on_binding_start(&mut self, report: &str, set: Option<&str>) {
         self.with(|i| {
             i.seen_binding = true;
             i.in_binding = true;
@@ -640,7 +676,7 @@ impl Ui for Printer {
         })
     }
 
-    fn step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
+    fn on_step(&mut self, level: Level, verb: &str, detail: &str, elapsed: Option<Duration>) {
         self.with(|i| {
             // The bar shows the latest step, cut to one line: a wrapped line can't be redrawn.
             if level == Level::Info
@@ -664,7 +700,7 @@ impl Ui for Printer {
         })
     }
 
-    fn warn(&mut self, msg: &str) {
+    fn on_warn(&mut self, msg: &str) {
         self.with(|i| {
             i.file_log("WARN", msg);
             if i.format == LogFormat::Json {
@@ -675,7 +711,7 @@ impl Ui for Printer {
         })
     }
 
-    fn binding_log(&mut self, path: &Path) {
+    fn on_binding_log(&mut self, path: &Path) {
         self.with(|i| {
             if !i.run_logs {
                 return;
@@ -690,7 +726,7 @@ impl Ui for Printer {
         })
     }
 
-    fn binding_vars(
+    fn on_binding_vars(
         &mut self,
         schedule: Option<&str>,
         schedule_vars: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -715,7 +751,7 @@ impl Ui for Printer {
         })
     }
 
-    fn compiled(&mut self, p: &dre_core::run::BindingPlan) {
+    fn on_compiled(&mut self, p: &dre_core::run::BindingPlan) {
         self.with(|i| {
             for f in &p.compiled {
                 i.file_log("INFO", &format!("Compiled {}", f.display()));
@@ -730,7 +766,7 @@ impl Ui for Printer {
         })
     }
 
-    fn message(&mut self, m: &dre_core::run::ShownMessage) {
+    fn on_message(&mut self, m: &dre_core::run::ShownMessage) {
         self.with(|i| {
             i.file_log("INFO", &format!("Message {}\n{}", m.title, m.text));
             if i.format == LogFormat::Json {
@@ -750,7 +786,7 @@ impl Ui for Printer {
         })
     }
 
-    fn binding_end(&mut self, o: &BindingOutcome) {
+    fn on_binding_end(&mut self, o: &BindingOutcome) {
         self.with(|i| {
             let name = label(&o.report, o.set.as_deref());
             let (tone, verb) = match o.status {
@@ -801,7 +837,7 @@ impl Ui for Printer {
         })
     }
 
-    fn choose_set(&mut self, report: &str, sets: &[String]) -> Result<Option<String>, String> {
+    pub fn choose_set(&self, report: &str, sets: &[String]) -> Result<Option<String>, String> {
         let (multi, bar) = self.with(|i| (i.multi.clone(), i.bar.clone()));
         let ask = || -> Result<Option<String>, String> {
             eprintln!("Report `{report}` has several Sets:");
@@ -839,49 +875,43 @@ impl Ui for Printer {
         }
     }
 
-    fn sql_log(&self) -> LogSink {
-        let p = self.clone();
-        Arc::new(move |label, sql| {
-            let body: String = sql.trim_end().lines().map(|l| format!("\n    {l}")).collect();
-            p.with(|i| i.file_log("DEBUG", &format!("SQL {label}:{body}")));
-        })
+    fn on_sql(&mut self, label: &str, sql: &str) {
+        let body: String = sql.trim_end().lines().map(|l| format!("\n    {l}")).collect();
+        self.with(|i| i.file_log("DEBUG", &format!("SQL {label}:{body}")));
     }
 
-    fn rows(&mut self, progress: &dre_core::run::RowProgress) {
+    pub fn on_rows(&mut self, progress: &dre_core::run::RowProgress) {
         self.with(|i| i.rows(progress));
     }
 
-    fn plugin_log(&self) -> LogSink {
-        let p = self.clone();
-        Arc::new(move |plugin, line| {
-            p.with(|i| {
-                // `info: ...` lines are for the person (e.g. waiting for a warehouse to start).
-                if let Some(msg) = line.strip_prefix("info: ") {
-                    i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
-                    return;
-                }
-                // `warning: ...` lines are too (a message cut short to fit the service).
-                if let Some(msg) = line.strip_prefix("warning: ") {
-                    i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
-                    return;
-                }
-                // `debug: ...` is a plugin's `log` message at debug; anything else is a raw stderr line
-                // (a panic, a native driver), kept in the log file at WARN.
-                let (level, line) = match line.strip_prefix("debug: ") {
-                    Some(rest) => ("DEBUG", rest),
-                    None => ("WARN", line),
-                };
-                i.file_log(level, &format!("[{plugin}] {line}"));
-                if !i.shows(Level::Debug) {
-                    return;
-                }
-                if i.format == LogFormat::Json {
-                    i.json(json!({"event": "plugin_log", "plugin": plugin, "message": line}));
-                } else {
-                    let text = i.paint(DIM, &format!("[{plugin}] {line}"));
-                    i.print(Tone::Note, "Plugin", &text);
-                }
-            })
+    fn on_plugin_log(&mut self, plugin: &str, line: &str) {
+        self.with(|i| {
+            // `info: ...` lines are for the person (e.g. waiting for a warehouse to start).
+            if let Some(msg) = line.strip_prefix("info: ") {
+                i.line(Tone::Note, "Waiting", &format!("[{plugin}] {msg}"), Level::Info);
+                return;
+            }
+            // `warning: ...` lines are too (a message cut short to fit the service).
+            if let Some(msg) = line.strip_prefix("warning: ") {
+                i.line(Tone::Warn, "Warning", &format!("[{plugin}] {msg}"), Level::Info);
+                return;
+            }
+            // `debug: ...` is a plugin's `log` message at debug; anything else is a raw stderr line
+            // (a panic, a native driver), kept in the log file at WARN.
+            let (level, line) = match line.strip_prefix("debug: ") {
+                Some(rest) => ("DEBUG", rest),
+                None => ("WARN", line),
+            };
+            i.file_log(level, &format!("[{plugin}] {line}"));
+            if !i.shows(Level::Debug) {
+                return;
+            }
+            if i.format == LogFormat::Json {
+                i.json(json!({"event": "plugin_log", "plugin": plugin, "message": line}));
+            } else {
+                let text = i.paint(DIM, &format!("[{plugin}] {line}"));
+                i.print(Tone::Note, "Plugin", &text);
+            }
         })
     }
 }

@@ -221,6 +221,14 @@ impl Source for DuckDb {
         Some("\"")
     }
 
+    /// Only one process can write a database file, so Bindings on one take turns.
+    fn single_writer(&self) -> Option<dre_protocol::msg::SingleWriter> {
+        Some(dre_protocol::msg::SingleWriter {
+            field: "path".into(),
+            except: vec![":memory:".into()],
+        })
+    }
+
     fn connection_fields(&self) -> Vec<ConnectionField> {
         vec![
             ConnectionField::new(

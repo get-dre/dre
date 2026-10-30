@@ -20,11 +20,13 @@ use serde_json::{Map as JsonMap, Value as Json};
 use crate::codes::{Code, ErrorCode, Kind};
 use crate::context::Context;
 use crate::engine::Events;
+use crate::engine::Level;
 use crate::error::Error as Fail;
 use crate::plugin_host::Plugin;
+use crate::plugin_host::find_plugin;
+use crate::profiles::render_connection;
 use crate::profiles::{Entry, LOCAL_TYPE, Role};
 use crate::project::{PluginKind, Project};
-use crate::run::{Level, find_plugin, render_connection};
 
 /// Checks a remote path before anything is sent, refusing it with an error.
 pub type Claim<'r> = &'r dyn Fn(&str) -> Result<(), Fail>;

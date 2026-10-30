@@ -2,9 +2,9 @@
 //!
 //! - the **plan**: which Bindings run, with every profile's entry checked ([`crate::run::plan`]);
 //! - the **executor**: runs a plan on a worker thread, cancellable through a [`CancelToken`],
-//!   reporting what happens as [`RunEvent`]s on a channel. The terminal UI, `--log-format json`,
-//!   the log file and `run_results.json` are consumers; whoever drives the run decides how
-//!   events look ([`dispatch`] replays them into a [`Ui`]);
+//!   reporting what happens as [`RunEvent`]s on a channel. Hosts consume the events through an
+//!   [`EventSink`]: the terminal UI, `--log-format json` and the log files are the CLI's; whoever
+//!   drives the run decides how events look;
 //! - the **[`RunStore`]**: where a run's files go in the target path.
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,26 @@ use std::time::Duration;
 use dre_protocol::host::LogSink;
 use serde_json::{Map as JsonMap, Value as Json};
 
-use crate::run::{BindingOutcome, BindingPlan, Level, RunTargets, ShownMessage, Ui};
+use crate::run::{BindingOutcome, BindingPlan, RunTargets, ShownMessage};
+
+/// How much a message matters: `Info` is shown by default, `Debug` with `-v`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    Debug,
+    Info,
+}
+
+/// What consumes a run's events: the CLI's printer and log files, a test's recorder. Events
+/// arrive in order on the thread that drives the run.
+pub trait EventSink {
+    fn event(&mut self, event: RunEvent);
+}
+
+impl<F: FnMut(RunEvent)> EventSink for F {
+    fn event(&mut self, event: RunEvent) {
+        self(event);
+    }
+}
 
 /// Something that happened during a run.
 #[derive(Debug, Clone)]
@@ -174,41 +193,6 @@ impl Events {
     pub fn sql_log(&self) -> LogSink {
         let events = self.clone();
         Arc::new(move |label: &str, sql: &str| events.emit(RunEvent::Sql(label.into(), sql.into())))
-    }
-}
-
-/// Replay an event into a [`Ui`]. `plugin_log` and `sql_log` are the UI's own sinks, taken once
-/// before the run.
-pub fn dispatch(ui: &mut dyn Ui, e: RunEvent, plugin_log: &LogSink, sql_log: &LogSink) {
-    match e {
-        RunEvent::Targets(t) => ui.targets(&t),
-        RunEvent::Plan(n) => ui.plan(n),
-        RunEvent::BindingStart { report, set } => ui.binding_start(&report, set.as_deref()),
-        RunEvent::BindingLog(path) => ui.binding_log(&path),
-        RunEvent::BindingVars {
-            schedule,
-            schedule_vars,
-            vars,
-        } => ui.binding_vars(schedule.as_deref(), schedule_vars.as_ref(), &vars),
-        RunEvent::Step {
-            level,
-            verb,
-            detail,
-            elapsed,
-        } => ui.step(level, &verb, &detail, elapsed),
-        RunEvent::Warn(msg) => ui.warn(&msg),
-        RunEvent::BindingEnd(o) => ui.binding_end(&o),
-        RunEvent::Compiled(p) => ui.compiled(&p),
-        RunEvent::Message(m) => ui.message(&m),
-        RunEvent::PluginLog(plugin, line) => plugin_log(&plugin, &line),
-        RunEvent::Sql(label, sql) => sql_log(&label, &sql),
-        RunEvent::Running { label, running } => ui.running(&label, running),
-        RunEvent::Rows(p) => ui.rows(&p),
-        RunEvent::Block(events) => {
-            for e in events {
-                dispatch(ui, e, plugin_log, sql_log);
-            }
-        }
     }
 }
 

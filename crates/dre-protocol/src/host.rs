@@ -175,6 +175,8 @@ pub struct Description {
     pub string_literal: Option<String>,
     /// A message destination's length limit, in characters.
     pub message_limit: Option<u64>,
+    /// A source's field naming a file only one process may write at a time.
+    pub single_writer: Option<crate::msg::SingleWriter>,
 }
 
 #[derive(Debug)]
@@ -924,12 +926,14 @@ impl PluginProcess {
                 identifier_quote,
                 string_literal,
                 message_limit,
+                single_writer,
             } => Ok(Description {
                 connection_fields,
                 option_fields,
                 identifier_quote,
                 string_literal,
                 message_limit,
+                single_writer,
             }),
             other => Err(self.unexpected("a describe reply", &Incoming::Json(other))),
         }

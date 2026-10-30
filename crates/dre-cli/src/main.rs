@@ -379,6 +379,7 @@ impl ProjectArgs {
 
     fn load_options(&self, env: &Env) -> LoadOptions {
         LoadOptions {
+            select: None,
             profiles_dir: self.profiles_dir.clone(),
             target: self.target.clone(),
             vars: self.vars.iter().cloned().collect(),
@@ -387,7 +388,6 @@ impl ProjectArgs {
             scheduled_at: settings::run_at(env).ok().flatten(),
             timezone: self.timezone(env),
             settings: settings::run_settings(env, self.timezone.as_deref()),
-            select: None,
         }
     }
 
@@ -608,19 +608,7 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         let entries = if a.all_targets {
             dre_core::options::all_entries(p)
         } else {
-            targets
-                .iter()
-                .flat_map(|t| &t.profiles)
-                .filter(|u| u.deliver)
-                .map(|u| {
-                    let role = if u.role == "connection" {
-                        dre_core::profiles::Role::Connection
-                    } else {
-                        dre_core::profiles::Role::Destination
-                    };
-                    (role, u.profile.clone(), u.target.clone())
-                })
-                .collect()
+            used_entries(targets.as_ref())
         };
         if a.all_targets || !diags.has_errors() {
             dre_core::options::check_connections(ctx, p, &entries, &mut diags);
@@ -628,69 +616,18 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
     }
     // `--strict`: warnings count as errors.
     let ok = !diags.has_errors() && !(a.strict && diags.warning_count() > 0);
+    let report = Validation {
+        ok,
+        project: project.as_ref(),
+        diags: &diags,
+        targets: targets.as_ref(),
+        plans: &plans,
+        report_errors: &report_errors,
+    };
     if a.json {
-        let out = serde_json::json!({
-            "ok": ok,
-            "profiles": project.as_ref().map(|p| serde_json::json!({
-                "path": p.profiles().path,
-                "exists": p.profiles().exists(),
-                "found_by": p.profiles().found_by,
-            })),
-            "target": project.as_ref().map(|p| serde_json::json!({
-                "name": p.target_name(),
-                "from": p.run_target().from.to_string(),
-                "profiles": targets.as_ref().map(|t| t.profiles.clone()).unwrap_or_default(),
-            })),
-            "settings": project.as_ref().map(|p| p.settings()),
-            "errors": diags.error_count(),
-            "warnings": diags.warning_count(),
-            "diagnostics": diags.sorted(),
-            "compiled": plans,
-            "project": project.as_ref().map(|p| dre_core::manifest::build(p, &report_errors)),
-        });
-        println!(
-            "{}",
-            ctx.secrets()
-                .to_json_pretty(&out)
-                .expect("a JSON value serializes")
-        );
+        report.print_json(ctx);
     } else {
-        for d in diags.sorted() {
-            printer.diag(d);
-        }
-        if selector.is_some() {
-            for p in &plans {
-                printer.plan(p);
-            }
-        } else if !plans.is_empty()
-            && let Some(p) = &project
-        {
-            println!(
-                "Compiled {} Binding{} into {}/",
-                plans.len(),
-                plural(plans.len()),
-                shown(p, &p.target_dir().join("compiled")).display()
-            );
-        }
-        if let Some(p) = &project {
-            printer.line(
-                output::Tone::Note,
-                "Profiles",
-                &dre_core::start::profiles_line(p.profiles()),
-            );
-            let line = targets.as_ref().map_or_else(|| target_line(p), |t| t.line());
-            printer.line(output::Tone::Note, "Target", &line);
-            for s in p.settings().lines() {
-                printer.detail(output::Tone::Note, "Setting", &s);
-            }
-        }
-        let (e, w) = (diags.error_count(), diags.warning_count());
-        let verdict = if ok { "passed" } else { "failed" };
-        println!(
-            "Validation {verdict}: {e} error{}, {w} warning{}",
-            plural(e),
-            plural(w)
-        );
+        report.print(printer, selector.is_some());
     }
     if project.is_none() {
         // No project to check: missing or unreadable dre_project.yml.
@@ -707,6 +644,105 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
     exit::ok()
 }
 
+/// The profile entries a run would use, which `validate` checks by their plugins.
+fn used_entries(targets: Option<&dre_core::run::RunTargets>) -> Vec<dre_core::options::EntryRef> {
+    targets
+        .iter()
+        .flat_map(|t| &t.profiles)
+        .filter(|u| u.deliver)
+        .map(|u| {
+            let role = if u.role == "connection" {
+                dre_core::profiles::Role::Connection
+            } else {
+                dre_core::profiles::Role::Destination
+            };
+            (role, u.profile.clone(), u.target.clone())
+        })
+        .collect()
+}
+
+/// What `dre validate` found, to print.
+struct Validation<'v> {
+    ok: bool,
+    project: Option<&'v dre_core::project::Project>,
+    diags: &'v dre_core::Diagnostics,
+    targets: Option<&'v dre_core::run::RunTargets>,
+    plans: &'v [dre_core::run::BindingPlan],
+    report_errors: &'v dre_core::manifest::ReportErrors,
+}
+
+impl Validation<'_> {
+    /// `--json`: one document, secrets masked.
+    fn print_json(&self, ctx: &Context) {
+        let (project, diags, targets) = (self.project, self.diags, self.targets);
+        let out = serde_json::json!({
+            "ok": self.ok,
+            "profiles": project.map(|p| serde_json::json!({
+                "path": p.profiles().path,
+                "exists": p.profiles().exists(),
+                "found_by": p.profiles().found_by,
+            })),
+            "target": project.map(|p| serde_json::json!({
+                "name": p.target_name(),
+                "from": p.run_target().from.to_string(),
+                "profiles": targets.map(|t| t.profiles.clone()).unwrap_or_default(),
+            })),
+            "settings": project.map(|p| p.settings()),
+            "errors": diags.error_count(),
+            "warnings": diags.warning_count(),
+            "diagnostics": diags.sorted(),
+            "compiled": self.plans,
+            "project": project.map(|p| dre_core::manifest::build(p, self.report_errors)),
+        });
+        println!(
+            "{}",
+            ctx.secrets()
+                .to_json_pretty(&out)
+                .expect("a JSON value serializes")
+        );
+    }
+
+    /// The diagnostics, what compiled, the profiles and target, and the verdict.
+    fn print(&self, printer: &output::Printer, selected: bool) {
+        for d in self.diags.sorted() {
+            printer.diag(d);
+        }
+        if selected {
+            for p in self.plans {
+                printer.plan(p);
+            }
+        } else if !self.plans.is_empty()
+            && let Some(p) = self.project
+        {
+            println!(
+                "Compiled {} Binding{} into {}/",
+                self.plans.len(),
+                plural(self.plans.len()),
+                shown(p, &p.target_dir().join("compiled")).display()
+            );
+        }
+        if let Some(p) = self.project {
+            printer.line(
+                output::Tone::Note,
+                "Profiles",
+                &dre_core::start::profiles_line(p.profiles()),
+            );
+            let line = self.targets.map_or_else(|| target_line(p), |t| t.line());
+            printer.line(output::Tone::Note, "Target", &line);
+            for s in p.settings().lines() {
+                printer.detail(output::Tone::Note, "Setting", &s);
+            }
+        }
+        let (e, w) = (self.diags.error_count(), self.diags.warning_count());
+        let verdict = if self.ok { "passed" } else { "failed" };
+        println!(
+            "Validation {verdict}: {e} error{}, {w} warning{}",
+            plural(e),
+            plural(w)
+        );
+    }
+}
+
 /// Compiles quietly, collecting what each Binding would do.
 #[derive(Default)]
 struct Collect {
@@ -714,20 +750,19 @@ struct Collect {
     targets: Option<dre_core::run::RunTargets>,
 }
 
-impl dre_core::run::Ui for Collect {
-    fn step(&mut self, _: dre_core::run::Level, _: &str, _: &str, _: Option<std::time::Duration>) {}
-    fn warn(&mut self, _: &str) {}
-    fn targets(&mut self, t: &dre_core::run::RunTargets) {
-        self.targets = Some(t.clone());
-    }
-    fn compiled(&mut self, plan: &dre_core::run::BindingPlan) {
-        self.plans.push(plan.clone());
-    }
-    fn choose_set(&mut self, _: &str, _: &[String]) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-    fn plugin_log(&self) -> dre_protocol::host::LogSink {
-        std::sync::Arc::new(|_, _| {})
+impl dre_core::engine::EventSink for Collect {
+    fn event(&mut self, e: dre_core::engine::RunEvent) {
+        use dre_core::engine::RunEvent;
+        match e {
+            RunEvent::Targets(t) => self.targets = Some(t),
+            RunEvent::Compiled(plan) => self.plans.push(plan),
+            RunEvent::Block(events) => {
+                for e in events {
+                    self.event(e);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -749,18 +784,13 @@ fn compile_for_validate(
         date: settings::run_date(ctx.env()),
         scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
         timezone: p.timezone(ctx.env()),
-        dry_run: true,
+        mode: dre_core::run::Mode::compile(),
         ..Default::default()
     };
     let mut ui = Collect::default();
     let summary = dre_core::run::run(ctx, project, &opts, &mut ui);
     if let Some(e) = summary.error {
-        let code = if summary.missing_entry {
-            Code::MissingTargetEntry
-        } else {
-            Code::InvalidSelector
-        };
-        diags.error(code, None, None, e);
+        diags.error(core_code(&e.code), None, None, e.message);
     }
     for o in summary
         .outcomes
@@ -771,8 +801,7 @@ fn compile_for_validate(
         let err = o.error.clone().unwrap_or_default();
         // A template that queries what an earlier query makes (a temp table) can't render
         // without running that query; validate runs nothing, so that's for `dre run` to check.
-        if err.contains("run_query() failed:") || (err.contains("`columns('") && err.contains("')` failed:"))
-        {
+        if o.error_code == Some(Code::CompileNeedsRun.into()) {
             diags.warning(
                 Code::CompileNeedsRun,
                 None,
@@ -868,17 +897,14 @@ fn compile(ctx: &Context, a: CompileArgs, mut printer: output::Printer) -> ExitC
         date: settings::run_date(ctx.env()),
         scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
         timezone: a.project.timezone(ctx.env()),
-        dry_run: true,
-        interactive: {
-            use std::io::IsTerminal;
-            std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
-        },
+        mode: dre_core::run::Mode::compile(),
+        choose_set: set_chooser(&printer),
         manifest_checksum,
         ..Default::default()
     };
     let summary = dre_core::run::run(ctx, &project, &opts, &mut printer);
     if let Some(e) = &summary.error {
-        printer.error(e);
+        printer.error(&e.message);
         return ExitCode::from(summary.exit_code());
     }
     printer.finish("compile");
@@ -901,12 +927,12 @@ fn validate_live(
         date: settings::run_date(ctx.env()),
         scheduled_at: settings::run_at(ctx.env()).ok().flatten(),
         timezone: p.timezone(ctx.env()),
-        live_check: true,
+        mode: dre_core::run::Mode::check(),
         ..Default::default()
     };
     let summary = dre_core::run::run(ctx, project, &opts, &mut printer);
     if let Some(e) = &summary.error {
-        printer.error(e);
+        printer.error(&e.message);
         return ExitCode::from(summary.exit_code());
     }
     printer.finish("validate --live");
@@ -1033,7 +1059,7 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
         for e in rx {
             match e {
                 dre_core::engine::RunEvent::Warn(m) => printer.line(output::Tone::Warn, "Warning", m.trim()),
-                dre_core::engine::RunEvent::Rows(p) => dre_core::run::Ui::rows(&mut ui, &p),
+                dre_core::engine::RunEvent::Rows(p) => ui.on_rows(&p),
                 _ => {}
             }
         }
@@ -1078,7 +1104,6 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
 }
 
 fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
-    use std::io::IsTerminal;
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone(), ctx.host().clone());
@@ -1096,21 +1121,25 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
             vars: a.project.vars.iter().cloned().collect(),
             output_name: a.output_name,
             output_path: a.output_path,
-            dry_run: a.dry_run,
-            no_deliver: a.no_deliver || a.from_results.is_some(),
+            mode: run_mode(
+                a.dry_run,
+                a.from_results,
+                a.retry_failed,
+                a.hold,
+                a.no_deliver,
+                a.preview,
+            ),
             output_json: a.output_json,
-            from_results: a.from_results,
-            hold: a.hold,
-            retry_failed: a.retry_failed,
-            only_keys: a.only_keys,
-            limit_rows: a.limit_rows,
-            unmask: a.unmask,
+            rows: dre_core::run::RowOptions {
+                only_keys: a.only_keys,
+                limit: a.limit_rows,
+                unmask: a.unmask,
+                ..Default::default()
+            },
             rate: a.rate,
-            preview: a.preview,
             accept_schema_change: a.accept_schema_change,
-            interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
+            choose_set: set_chooser(&printer),
             timezone: a.project.timezone(ctx.env()),
-            live_check: false,
             schedule: a.schedule,
             cancel,
             ..Default::default()
@@ -1122,7 +1151,7 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
         dre_core::start::Started::Ran { summary, timeout } => (summary, timeout),
     };
     if let Some(e) = &summary.error {
-        printer.error(e);
+        printer.error(&e.message);
         return ExitCode::from(summary.exit_code());
     }
     if let Some(reason) = summary.cancelled {
@@ -1154,6 +1183,57 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
     }
     printer.finish("run");
     ExitCode::from(summary.exit_code())
+}
+
+/// `dre run`'s mode from its flags (clap keeps the conflicting ones apart).
+fn run_mode(
+    dry_run: bool,
+    from_results: Option<PathBuf>,
+    retry_failed: Option<String>,
+    hold: bool,
+    no_deliver: bool,
+    preview: Option<u64>,
+) -> dre_core::run::Mode {
+    use dre_core::run::{DeliveryMode, Mode, Results};
+    let results = match (dry_run, from_results, retry_failed) {
+        (true, _, _) => Results::Compile,
+        (_, Some(dir), _) => Results::Replay(dir),
+        (_, _, Some(id)) => Results::Retry(id),
+        _ => Results::Query,
+    };
+    // `--from-results` delivers nothing: it replays results to look at them.
+    let delivery = if no_deliver || matches!(results, Results::Replay(_)) {
+        DeliveryMode::Keep
+    } else if hold {
+        DeliveryMode::Hold
+    } else {
+        DeliveryMode::Send
+    };
+    Mode {
+        results,
+        delivery,
+        preview,
+    }
+}
+
+/// Asks which Set to run, when a person is at the terminal to answer.
+fn set_chooser(printer: &output::Printer) -> Option<dre_core::run::SetChooser> {
+    use std::io::IsTerminal;
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        return None;
+    }
+    let printer = printer.clone();
+    Some(dre_core::run::SetChooser::new(move |report, sets| {
+        printer.choose_set(report, sets)
+    }))
+}
+
+/// The core code of an error `dre_core` raised itself.
+fn core_code(code: &dre_core::codes::ErrorCode) -> Code {
+    match code {
+        dre_core::codes::ErrorCode::Core(c) => *c,
+        dre_core::codes::ErrorCode::Plugin { .. } => Code::RunFailed,
+    }
 }
 
 fn clean(ctx: &Context, a: CleanArgs) -> ExitCode {
@@ -1254,6 +1334,72 @@ fn deps(ctx: &Context, a: DepsArgs, printer: &output::Printer) -> ExitCode {
         exit::ok()
     } else {
         exit::failed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dre_core::run::{DeliveryMode, Results, RunTargets, UsedProfile};
+
+    use super::*;
+
+    #[test]
+    fn run_flags_pick_the_mode() {
+        let m = run_mode(false, None, None, false, false, None);
+        assert_eq!((m.results, m.delivery), (Results::Query, DeliveryMode::Send));
+        assert_eq!(
+            run_mode(true, None, None, false, false, None).results,
+            Results::Compile
+        );
+        // A replay delivers nothing.
+        let m = run_mode(false, Some("saved".into()), None, false, false, None);
+        assert_eq!(
+            (m.results, m.delivery),
+            (Results::Replay("saved".into()), DeliveryMode::Keep)
+        );
+        let m = run_mode(false, None, Some("r1".into()), true, false, Some(5));
+        assert_eq!(m.results, Results::Retry("r1".into()));
+        assert_eq!((m.delivery, m.preview), (DeliveryMode::Hold, Some(5)));
+        assert_eq!(
+            run_mode(false, None, None, false, true, None).delivery,
+            DeliveryMode::Keep
+        );
+    }
+
+    #[test]
+    fn validate_checks_the_entries_a_run_would_deliver_through() {
+        let used = |role, profile: &str, deliver| UsedProfile {
+            role,
+            profile: profile.into(),
+            target: "prod".into(),
+            deliver,
+        };
+        let targets = RunTargets {
+            name: "prod".into(),
+            from: "--target".into(),
+            profiles: vec![
+                used("connection", "warehouse", true),
+                used("destination", "outbox", true),
+                used("destination", "nowhere", false),
+            ],
+        };
+        let entries = used_entries(Some(&targets));
+        assert_eq!(
+            entries,
+            [
+                (
+                    dre_core::profiles::Role::Connection,
+                    "warehouse".into(),
+                    "prod".into()
+                ),
+                (
+                    dre_core::profiles::Role::Destination,
+                    "outbox".into(),
+                    "prod".into()
+                ),
+            ]
+        );
+        assert!(used_entries(None).is_empty());
     }
 }
 

@@ -8,12 +8,14 @@ use std::time::Duration;
 
 use crate::context::Context;
 use crate::engine::CancelReason;
+use crate::engine::EventSink;
 use crate::project::{LoadOptions, Project};
-use crate::run::{RunOptions, RunSummary, Ui};
+use crate::run::{RunOptions, RunSummary};
 use crate::{Diagnostic, Diagnostics, Env, Severity};
 
-/// Where a command shows what happens before and around a run, besides the run's own events.
-pub trait Console: Ui {
+/// Where a command shows what happens before and around a run, besides the run's own events,
+/// which it consumes as their [`EventSink`].
+pub trait Console: EventSink {
     /// A package or plugin was installed: `what` names it and its version.
     fn installed(&self, what: &str);
     /// Something stopped the command.
@@ -341,7 +343,7 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
         return Started::NotStarted;
     }
     opts.keep_runs = keep_runs;
-    opts.row_concurrency = row_concurrency;
+    opts.rows.concurrency = row_concurrency;
     opts.threads = threads;
     opts.date = crate::settings::run_date(env);
     opts.scheduled_at = crate::settings::run_at(env).ok().flatten();
@@ -368,10 +370,19 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
         console.error("the run was cancelled before it started");
         return Started::Cancelled(reason);
     }
-    let summary = crate::run::run(ctx, &project, &opts, console);
+    let summary = crate::run::run(ctx, &project, &opts, &mut ConsoleSink(console));
     Started::Ran {
         summary,
         timeout: run_timeout,
+    }
+}
+
+/// A console as the run's event sink.
+struct ConsoleSink<'c>(&'c mut dyn Console);
+
+impl EventSink for ConsoleSink<'_> {
+    fn event(&mut self, event: crate::engine::RunEvent) {
+        self.0.event(event);
     }
 }
 

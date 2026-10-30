@@ -14,22 +14,22 @@ use crate::Env;
 use crate::context::Context;
 use crate::plugin_host::memory::{Call, MemoryHost, Script};
 
-/// Records what a run reports.
+/// Every event a run sends, blocks unpacked.
 #[derive(Default)]
 struct Recorder {
-    warnings: Vec<String>,
+    events: Vec<RunEvent>,
 }
 
-impl Ui for Recorder {
-    fn step(&mut self, _level: Level, _verb: &str, _detail: &str, _elapsed: Option<Duration>) {}
-    fn warn(&mut self, msg: &str) {
-        self.warnings.push(msg.to_string());
-    }
-    fn choose_set(&mut self, _report: &str, _sets: &[String]) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-    fn plugin_log(&self) -> LogSink {
-        Arc::new(|_, _| {})
+impl EventSink for Recorder {
+    fn event(&mut self, event: RunEvent) {
+        match event {
+            RunEvent::Block(events) => {
+                for e in events {
+                    self.event(e);
+                }
+            }
+            e => self.events.push(e),
+        }
     }
 }
 
@@ -186,7 +186,10 @@ fn a_retry_delivers_only_the_rows_whose_destination_failed() {
     let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
     let run_id = runs.list().into_iter().last().unwrap();
     let retry = RunOptions {
-        retry_failed: Some(run_id),
+        mode: Mode {
+            results: Results::Retry(run_id),
+            ..Mode::default()
+        },
         ..options()
     };
     // The mailbox has room again.
@@ -361,4 +364,417 @@ fn each_destination_gets_its_own_rendered_profile_when_some_render_per_row() {
             "destination/shelf Deliver shelf/detail.csv",
         ]
     );
+}
+
+/// A run and every event it sent.
+fn run_recorded(ctx: &Context, project: &Project, opts: &RunOptions) -> (RunSummary, Vec<RunEvent>) {
+    let mut recorder = Recorder::default();
+    let summary = run(ctx, project, opts, &mut recorder);
+    (summary, recorder.events)
+}
+
+/// The calls of one kind, `"<plugin> <call>"` without details, sorted.
+fn calls_of(host: &MemoryHost, call: &str) -> Vec<String> {
+    let mut calls: Vec<String> = host
+        .calls()
+        .into_iter()
+        .filter(|c| c.split_whitespace().nth(1) == Some(call))
+        .collect();
+    calls.sort();
+    calls
+}
+
+fn with_mode(mode: Mode) -> RunOptions {
+    RunOptions { mode, ..options() }
+}
+
+fn results_json(dir: &TempDir) -> serde_json::Value {
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let id = runs.list().into_iter().last().expect("a run folder");
+    let text = std::fs::read_to_string(runs.run_dir(&id).join("run_results.json")).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn events_tell_the_run_in_order() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(ONE_FILE, &ctx);
+    let (summary, events) = run_recorded(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    let names: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::Targets(_) => Some("targets"),
+            RunEvent::Plan(1) => Some("plan"),
+            RunEvent::BindingStart { .. } => Some("start"),
+            RunEvent::BindingEnd(_) => Some("end"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, ["targets", "plan", "start", "end"]);
+}
+
+#[test]
+fn compiling_renders_the_sql_and_runs_nothing() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(ONE_FILE, &ctx);
+    let (summary, events) = run_recorded(&ctx, &project, &with_mode(Mode::compile()));
+    assert_eq!(
+        summary.outcomes[0].status,
+        Status::DryRun,
+        "{:?}",
+        summary.outcomes
+    );
+    assert!(calls_of(&host, "Execute").is_empty() && calls_of(&host, "Deliver").is_empty());
+    let compiled = dir.path().join("target/compiled/pack/default/summary.sql");
+    assert_eq!(
+        std::fs::read_to_string(compiled).unwrap(),
+        "select 'acme' as client, 12 as total"
+    );
+    let plan = events.iter().find_map(|e| match e {
+        RunEvent::Compiled(p) => Some(p),
+        _ => None,
+    });
+    assert_eq!(
+        plan.unwrap().destinations[0].path.as_deref(),
+        Some("out/detail.csv")
+    );
+    // A compile makes no run folder.
+    assert!(!dir.path().join("target/run/pack/default/runs").exists());
+}
+
+#[test]
+fn a_compile_whose_template_needs_the_database_says_only_a_run_can_check_it() {
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS]).fail(Call::Execute, 1, "no such table: staging"),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(ONE_FILE, &ctx);
+    std::fs::write(
+        dir.path().join("reports/pack/summary.sql"),
+        "{% set n = run_query('select count(*) from staging') %}select 1",
+    )
+    .unwrap();
+    let summary = run_once(&ctx, &project, &with_mode(Mode::compile()));
+    let o = &summary.outcomes[0];
+    assert_eq!(o.status, Status::Error);
+    assert_eq!(o.error_code, Some(Code::CompileNeedsRun.into()), "{:?}", o.error);
+}
+
+#[test]
+fn checking_runs_no_statement_and_delivers_nothing() {
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS, dre_protocol::CAP_CHECK]),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(ONE_FILE, &ctx);
+    let summary = run_once(&ctx, &project, &with_mode(Mode::check()));
+    assert_eq!(
+        summary.outcomes[0].status,
+        Status::Checked,
+        "{:?}",
+        summary.outcomes
+    );
+    assert!(calls_of(&host, "Execute").is_empty() && calls_of(&host, "Write").is_empty());
+}
+
+#[test]
+fn a_preview_formats_but_delivers_nothing_and_records_the_preview() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(ONE_FILE, &ctx);
+    let summary = run_once(
+        &ctx,
+        &project,
+        &with_mode(Mode {
+            preview: Some(10),
+            ..Mode::default()
+        }),
+    );
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Write").len(), 1);
+    assert!(calls_of(&host, "Deliver").is_empty());
+    let r = results_json(&dir);
+    assert_eq!(
+        (r["preview"].as_bool(), r["row_limit"].as_u64()),
+        (Some(true), Some(10))
+    );
+    assert_eq!(r["delivery"], "preview: not delivered");
+    // A preview leaves the schema snapshot alone.
+    assert!(
+        !dir.path()
+            .join("target/schema/pack/default/last_success.json")
+            .exists()
+    );
+}
+
+#[test]
+fn no_deliver_keeps_the_output_and_needs_no_destination_entry() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, _) = project(ONE_FILE, &ctx);
+    // The destination has no entry for this target: `--no-deliver` doesn't need one.
+    std::fs::write(
+        dir.path().join("profiles.yml"),
+        PROFILES.replace("dev: {type: drop}", "prod: {type: drop}"),
+    )
+    .unwrap();
+    let (_, project) = (
+        0,
+        crate::project::load_with(dir.path(), &Default::default(), &ctx)
+            .0
+            .unwrap(),
+    );
+    let summary = run_once(
+        &ctx,
+        &project,
+        &with_mode(Mode {
+            delivery: DeliveryMode::Keep,
+            ..Mode::default()
+        }),
+    );
+    assert!(!summary.failed(), "{:?} {:?}", summary.error, summary.outcomes);
+    assert!(calls_of(&host, "Deliver").is_empty());
+    assert_eq!(
+        results_json(&dir)["delivery"],
+        "--no-deliver: output kept locally"
+    );
+    // Delivering needs the entry: nothing runs.
+    let refused = run_once(&ctx, &project, &options());
+    assert_eq!(
+        refused.error.map(|e| e.code),
+        Some(Code::MissingTargetEntry.into())
+    );
+}
+
+#[test]
+fn a_replay_uses_the_saved_results_and_runs_no_query() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(ONE_FILE, &ctx);
+    let save = RunOptions {
+        output_json: Some("saved".into()),
+        mode: Mode {
+            delivery: DeliveryMode::Keep,
+            ..Mode::default()
+        },
+        ..options()
+    };
+    assert!(!run_once(&ctx, &project, &save).failed());
+    let replay_host = self::host(Script::new(&[]));
+    let replay = with_mode(Mode {
+        results: Results::Replay("saved".into()),
+        delivery: DeliveryMode::Keep,
+        ..Mode::default()
+    });
+    let summary = run_once(&context(&replay_host), &project, &replay);
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert!(calls_of(&replay_host, "Execute").is_empty());
+    assert_eq!(calls_of(&replay_host, "Write").len(), 1);
+}
+
+#[test]
+fn hold_holds_every_destination_of_the_run() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(ONE_FILE, &ctx);
+    let summary = run_once(
+        &ctx,
+        &project,
+        &with_mode(Mode {
+            delivery: DeliveryMode::Hold,
+            ..Mode::default()
+        }),
+    );
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert!(calls_of(&host, "Deliver").is_empty());
+    assert_eq!(results_json(&dir)["deliveries"][0]["status"], "held");
+}
+
+#[test]
+fn an_output_whose_when_is_false_is_skipped_unformatted() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(
+        "queries: [summary]\noutput:\n  name: detail\n  format: csv\n  when: \"results.summary.row_count > 5\"\n\
+         \x20 destination: {profile: outbox, path: out/detail.csv}\n",
+        &ctx,
+    );
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert!(calls_of(&host, "Write").is_empty() && calls_of(&host, "Deliver").is_empty());
+    let r = results_json(&dir);
+    assert_eq!(r["output_results"][0]["status"], "skipped");
+    assert_eq!(r["output_results"][0]["when"], false);
+}
+
+#[test]
+fn a_failed_delivery_is_recorded_with_its_code() {
+    let host = host(Script::new(&[]).fail(Call::Deliver, 1, "the mailbox is full"));
+    let ctx = context(&host);
+    let (dir, project) = project(ONE_FILE, &ctx);
+    let summary = run_once(&ctx, &project, &options());
+    let o = &summary.outcomes[0];
+    assert_eq!(o.status, Status::Error);
+    assert_eq!(o.error_code, Some(Code::DeliveryFailed.into()));
+    let r = results_json(&dir);
+    assert_eq!(r["status"], "error");
+    assert_eq!(r["output_results"][0]["status"], "failed");
+    assert_eq!(r["deliveries"][0]["error_code"], "delivery-failed");
+}
+
+#[test]
+fn an_unmanaged_report_that_writes_runs_nothing() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, _) = project(ONE_FILE, &ctx);
+    std::fs::create_dir_all(dir.path().join("reports/loose")).unwrap();
+    std::fs::write(
+        dir.path().join("reports/loose/loose.sql"),
+        "select 1;\ndelete from members",
+    )
+    .unwrap();
+    let project = crate::project::load_with(dir.path(), &Default::default(), &ctx)
+        .0
+        .unwrap();
+    let opts = RunOptions {
+        selector: Some("loose".into()),
+        ..options()
+    };
+    let summary = run_once(&ctx, &project, &opts);
+    let o = &summary.outcomes[0];
+    assert_eq!(o.status, Status::Error);
+    assert!(
+        o.error.as_deref().unwrap_or("").contains("unmanaged report"),
+        "{:?}",
+        o.error
+    );
+    // Everything renders before anything runs, so the first SELECT never ran either.
+    assert!(calls_of(&host, "Execute").is_empty());
+}
+
+#[test]
+fn a_selector_that_matches_nothing_is_a_typed_error() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(ONE_FILE, &ctx);
+    let summary = run_once(
+        &ctx,
+        &project,
+        &RunOptions {
+            selector: Some("nothing-like-this".into()),
+            ..options()
+        },
+    );
+    let e = summary.error.clone().expect("nothing ran");
+    assert_eq!(e.code, Code::InvalidSelector);
+    assert_eq!(summary.exit_code(), 2);
+}
+
+/// Three reports on one connection whose entry allows three Bindings at once.
+fn three_reports(single_writer: bool) -> (MemoryHost, Context, TempDir, Project) {
+    let description = dre_protocol::host::Description {
+        single_writer: single_writer.then(|| dre_protocol::msg::SingleWriter {
+            field: "path".into(),
+            except: vec![":memory:".into()],
+        }),
+        ..Default::default()
+    };
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS])
+                .rows("select 'acme' as client, 12 as total", summary())
+                .description(description),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, _) = project(ONE_FILE, &ctx);
+    std::fs::write(
+        dir.path().join("profiles.yml"),
+        PROFILES.replace("dev: {type: mem}", "dev: {type: mem, path: shop.db, threads: 3}"),
+    )
+    .unwrap();
+    for r in ["a", "b"] {
+        let d = dir.path().join(format!("reports/{r}"));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join(format!("{r}.yml")),
+            format!("queries: [summary_{r}]\noutput:\n  format: csv\n  destination: {{profile: outbox, path: out/{r}.csv}}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(format!("summary_{r}.sql")),
+            "select 'acme' as client, 12 as total",
+        )
+        .unwrap();
+    }
+    let project = crate::project::load_with(dir.path(), &Default::default(), &ctx)
+        .0
+        .unwrap();
+    (host, ctx, dir, project)
+}
+
+fn planned_workers(ctx: &Context, project: &Project) -> usize {
+    let opts = RunOptions {
+        selector: Some("pack a b".into()),
+        ..options()
+    };
+    let p = plan(ctx, project, &opts, &mut Recorder::default(), &mut Vec::new()).unwrap();
+    assert_eq!(p.bindings.len(), 3);
+    p.scheduler.workers()
+}
+
+#[test]
+fn a_connection_runs_bindings_at_once_up_to_its_threads() {
+    let (_host, ctx, _dir, project) = three_reports(false);
+    assert_eq!(planned_workers(&ctx, &project), 3);
+}
+
+#[test]
+fn a_file_only_one_process_may_write_runs_one_binding_at_a_time() {
+    // The source's `describe` says `path` names such a file, whatever `threads:` says.
+    let (_host, ctx, _dir, project) = three_reports(true);
+    assert_eq!(planned_workers(&ctx, &project), 1);
+}
+
+#[test]
+fn bindings_at_once_all_run_and_report_in_declaration_order() {
+    for _ in 0..3 {
+        let (host, ctx, _dir, project) = three_reports(false);
+        let opts = RunOptions {
+            selector: Some("pack a b".into()),
+            ..options()
+        };
+        let planned: Vec<String> = plan(&ctx, &project, &opts, &mut Recorder::default(), &mut Vec::new())
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|p| p.report.name.clone())
+            .collect();
+        let (summary, events) = run_recorded(&ctx, &project, &opts);
+        assert!(!summary.failed(), "{:?}", summary.outcomes);
+        let reports: Vec<String> = summary.outcomes.iter().map(|o| o.report.clone()).collect();
+        assert_eq!(reports, planned);
+        assert_eq!(calls_of(&host, "Deliver").len(), 3);
+        let starts = events
+            .iter()
+            .filter(|e| matches!(e, RunEvent::BindingStart { .. }))
+            .count();
+        assert_eq!(starts, 3);
+    }
 }

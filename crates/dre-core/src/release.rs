@@ -138,6 +138,62 @@ pub fn release(
     let store = crate::engine::RunStore::new(project.target_dir(), ctx.secrets());
     let runs = BindingRuns::new(&store.run_dir(&opts.report, &opts.binding));
     let run_dir = runs.run_dir(&opts.run_id);
+    let held = read_held(&run_dir, opts)?;
+    let mut done = released_before(&runs, &opts.run_id);
+    let started = chrono::Utc::now();
+    let release_id = crate::runs::new_run_id(started);
+    let _guard = lock(ctx, &runs, &release_id, started, opts)?;
+    let release_dir = runs.run_dir(&release_id);
+    std::fs::create_dir_all(&release_dir).map_err(|e| e.to_string())?;
+    let mut outcome = ReleaseOutcome {
+        release_id: release_id.clone(),
+        ..ReleaseOutcome::default()
+    };
+    let chosen = |e: &HeldEntry| match &e.key {
+        Some(k) => {
+            opts.only_keys.as_ref().is_none_or(|ks| ks.contains(k))
+                && opts.exclude_keys.as_ref().is_none_or(|ks| !ks.contains(k))
+        }
+        None => opts.only_keys.is_none(),
+    };
+    let mut sender = Sender {
+        deliverer: Deliverer::new(ctx, project, events.plugin_log()),
+        pacer: crate::rate::Pacer::default(),
+        mask_rows: project.mask_row_values(),
+        opts,
+        events,
+    };
+    let mut progress = RowsLeft::new(
+        held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
+        opts.rate,
+    );
+    progress.start(events);
+    for e in held.entries.iter().filter(|e| chosen(e)) {
+        if done.contains(&e.id) {
+            outcome.already += 1;
+            continue;
+        }
+        let Some(r) = sender.send(e) else {
+            break;
+        };
+        if r.status == "delivered" {
+            done.insert(e.id.clone());
+            // Recorded at once: a release stopped part-way never sends this one again.
+            write_released(&release_dir, &opts.run_id, &done)?;
+        }
+        progress.entry_done(e, matches!(r.status.as_str(), "failed" | "refused"), events);
+        outcome.released.push(r);
+    }
+    progress.finish(events);
+    drop(sender);
+    // The release's own record: who, when, what; and every entry released so far.
+    write_released(&release_dir, &opts.run_id, &done)?;
+    write_record(&run_dir, &release_dir, &release_id, started, opts, &outcome)?;
+    Ok(outcome)
+}
+
+/// The run's `held.json`; an error when the run or its held deliveries are gone.
+fn read_held(run_dir: &Path, opts: &ReleaseOptions) -> Result<Held, Fail> {
     let held_path = run_dir.join(HELD);
     if !run_dir.is_dir() {
         return Err(Fail::new(
@@ -148,35 +204,44 @@ pub fn release(
             ),
         ));
     }
-    let held: Held = match std::fs::read_to_string(&held_path) {
+    match std::fs::read_to_string(&held_path) {
         Ok(t) => {
-            serde_json::from_str(&t).map_err(|e| format!("{} is malformed: {e}", held_path.display()))?
+            Ok(serde_json::from_str(&t).map_err(|e| format!("{} is malformed: {e}", held_path.display()))?)
         }
-        Err(_) => {
-            return Err(Fail::new(
-                Code::ReleaseFailed,
-                format!(
-                    "run `{}` has no held deliveries (no {HELD} in its folder)",
-                    opts.run_id
-                ),
-            ));
-        }
-    };
-    // Entries an earlier release delivered: the newest release's cumulative list.
-    let mut done: BTreeSet<String> = BTreeSet::new();
-    // Each release keeps every entry released so far (written as each one goes out).
+        Err(_) => Err(Fail::new(
+            Code::ReleaseFailed,
+            format!(
+                "run `{}` has no held deliveries (no {HELD} in its folder)",
+                opts.run_id
+            ),
+        )),
+    }
+}
+
+/// The entries earlier releases of run `run_id` delivered: each release keeps every entry
+/// released so far, written as each one goes out.
+fn released_before(runs: &BindingRuns, run_id: &str) -> BTreeSet<String> {
+    let mut done = BTreeSet::new();
     for id in runs.list() {
         if let Ok(t) = std::fs::read_to_string(runs.run_dir(&id).join(RELEASED))
             && let Ok(r) = serde_json::from_str::<ReleasedFile>(&t)
-            && r.release_of == opts.run_id
+            && r.release_of == run_id
         {
             done.extend(r.released);
         }
     }
-    let started = chrono::Utc::now();
-    let release_id = crate::runs::new_run_id(started);
-    let _guard = runs
-        .lock(&release_id, started, &crate::runs::host_name(ctx.env()))
+    done
+}
+
+/// Take the Binding's lock for the release.
+fn lock(
+    ctx: &crate::Context,
+    runs: &BindingRuns,
+    release_id: &str,
+    started: chrono::DateTime<chrono::Utc>,
+    opts: &ReleaseOptions,
+) -> Result<crate::runs::Guard, Fail> {
+    runs.lock(release_id, started, &crate::runs::host_name(ctx.env()))
         .map_err(|e| {
             let why = match e {
                 crate::runs::LockError::Held(h) => format!("{} holds its lock", h.describe()),
@@ -192,35 +257,24 @@ pub fn release(
                     opts.report, opts.binding
                 ),
             )
-        })?;
-    let release_dir = runs.run_dir(&release_id);
-    std::fs::create_dir_all(&release_dir).map_err(|e| e.to_string())?;
-    let mut outcome = ReleaseOutcome {
-        release_id: release_id.clone(),
-        ..ReleaseOutcome::default()
-    };
-    let chosen = |e: &HeldEntry| match &e.key {
-        Some(k) => {
-            opts.only_keys.as_ref().is_none_or(|ks| ks.contains(k))
-                && opts.exclude_keys.as_ref().is_none_or(|ks| !ks.contains(k))
-        }
-        None => opts.only_keys.is_none(),
-    };
-    let log = events.plugin_log();
-    let mut deliverer = Deliverer::new(ctx, project, log);
-    let pacer = crate::rate::Pacer::default();
-    let mut progress = RowsLeft::new(
-        held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
-        opts.rate,
-    );
-    progress.start(events);
-    for e in held.entries.iter().filter(|e| chosen(e)) {
-        if done.contains(&e.id) {
-            outcome.already += 1;
-            continue;
-        }
-        // Addresses and paths in messages are masked, as for a per-row run.
-        let mask = if project.mask_row_values() {
+        })
+}
+
+/// Sends held entries: one destination process per type, paced per profile.
+struct Sender<'a> {
+    deliverer: Deliverer<'a>,
+    pacer: crate::rate::Pacer,
+    /// Mask addresses and paths in messages, as for a per-row run.
+    mask_rows: bool,
+    opts: &'a ReleaseOptions,
+    events: &'a Events,
+}
+
+impl Sender<'_> {
+    /// Send entry `e` byte for byte as it was reviewed: a changed or missing file is refused.
+    /// `None` when the release was cancelled before it went.
+    fn send(&mut self, e: &HeldEntry) -> Option<Released> {
+        let mask = if self.mask_rows {
             let mut values: JsonMap<String, Json> = e.options.clone();
             if let Some(p) = &e.path {
                 values.insert("$path".into(), Json::from(p.clone()));
@@ -238,7 +292,6 @@ pub fn release(
             location: None,
             error: None,
         };
-        // Byte for byte what was reviewed: a changed or missing file is refused.
         let changed: Vec<String> = e
             .files
             .iter()
@@ -252,48 +305,50 @@ pub fn release(
                 "refused: {} changed (or is gone) since the run rendered it; re-run the report to render it again",
                 changed.join(", ")
             ));
-            events.warn(&format!("  {}: {}", e.id, r.error.as_deref().unwrap_or_default()));
-            outcome.released.push(r);
-            progress.entry_done(e, true, events);
-            continue;
+            self.events
+                .warn(&format!("  {}: {}", e.id, r.error.as_deref().unwrap_or_default()));
+            return Some(r);
         }
         // Paced per destination profile, at the recorded rate or `--rate`.
-        if let Some(rate) = opts.rate.or(e.rate)
-            && !pacer.wait(&e.profile, &rate, &opts.cancel)
+        if let Some(rate) = self.opts.rate.or(e.rate)
+            && !self.pacer.wait(&e.profile, &rate, &self.opts.cancel)
         {
-            break;
+            return None;
         }
-        if opts.cancel.is_cancelled() {
-            break;
+        if self.opts.cancel.is_cancelled() {
+            return None;
         }
         let files: Vec<PathBuf> = e.files.iter().map(|f| f.path.clone()).collect();
         let attach: Vec<PathBuf> = e.attach.iter().map(|f| f.path.clone()).collect();
         // A held zip is already one of the entry's files: sent as it is.
         let request = Request::new(&e.profile, e.path.as_deref(), &e.options, &files)
             .message(e.message.as_ref(), &attach);
-        match deliverer.deliver(request) {
+        match self.deliverer.deliver(request) {
             Ok(Some(sent)) => {
                 r.status = "delivered".into();
                 r.location = Some(mask.apply(&sent.location));
-                done.insert(e.id.clone());
-                // Recorded at once: a release stopped part-way never sends this one again.
-                write_released(&release_dir, &opts.run_id, &done)?;
             }
             Ok(None) => r.status = "not_delivered".into(),
             Err(err) => {
                 let msg = mask.apply(&err.message);
                 r.status = "failed".into();
                 r.error = Some(msg.clone());
-                events.warn(&format!("  {}: {msg}", e.id));
+                self.events.warn(&format!("  {}: {msg}", e.id));
             }
         }
-        progress.entry_done(e, r.status == "failed", events);
-        outcome.released.push(r);
+        Some(r)
     }
-    progress.finish(events);
-    drop(deliverer);
-    // The release's own record: who, when, what; and every entry released so far.
-    write_released(&release_dir, &opts.run_id, &done)?;
+}
+
+/// The release's `run_results.json`: the run's, as this release, who released it and what.
+fn write_record(
+    run_dir: &Path,
+    release_dir: &Path,
+    release_id: &str,
+    started: chrono::DateTime<chrono::Utc>,
+    opts: &ReleaseOptions,
+    outcome: &ReleaseOutcome,
+) -> Result<(), Fail> {
     let mut record: Json = std::fs::read_to_string(run_dir.join("run_results.json"))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -338,7 +393,7 @@ pub fn release(
             .as_bytes(),
     )
     .map_err(|e| e.to_string())?;
-    Ok(outcome)
+    Ok(())
 }
 
 /// Every entry released so far, this release's included, in the release's folder.
@@ -497,5 +552,45 @@ mod tests {
                 (2, 1, 2, true)
             ]
         );
+    }
+
+    #[test]
+    fn a_missing_run_or_held_file_is_a_release_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let opts = ReleaseOptions {
+            report: "pack".into(),
+            binding: "default".into(),
+            run_id: "r1".into(),
+            ..ReleaseOptions::default()
+        };
+        let gone = read_held(&dir.path().join("r1"), &opts).unwrap_err();
+        assert_eq!(gone.code, Code::ReleaseFailed);
+        assert!(gone.message.contains("has no run `r1`"), "{}", gone.message);
+        let none = read_held(dir.path(), &opts).unwrap_err();
+        assert!(none.message.contains("no held deliveries"), "{}", none.message);
+        std::fs::write(dir.path().join(HELD), "{").unwrap();
+        assert!(
+            read_held(dir.path(), &opts)
+                .unwrap_err()
+                .message
+                .contains("malformed")
+        );
+    }
+
+    #[test]
+    fn earlier_releases_of_the_same_run_count_as_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let runs = BindingRuns::new(dir.path());
+        for (release, of, ids) in [
+            ("x1", "r1", vec!["a"]),
+            ("x2", "r1", vec!["a", "b"]),
+            ("x3", "r2", vec!["c"]),
+        ] {
+            let d = runs.run_dir(release);
+            std::fs::create_dir_all(&d).unwrap();
+            write_released(&d, of, &ids.into_iter().map(String::from).collect()).unwrap();
+        }
+        let done: Vec<String> = released_before(&runs, "r1").into_iter().collect();
+        assert_eq!(done, ["a", "b"]);
     }
 }

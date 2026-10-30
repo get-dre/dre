@@ -137,6 +137,10 @@ Licences always fail.
   and lints; the API rules bind for `dre-protocol` and `dre-core`. The full list of DRE's
   overrides, and an audit command, is in
   [`.agents/skills/rust-style/SKILL.md`](.agents/skills/rust-style/SKILL.md).
+- **Errors:** in `dre-core`, a function whose caller decides anything by the kind of failure
+  returns `dre_core::error::Error` (a registered code and the message), not `String`. Callers
+  branch on the code, never on the message's text. A new kind of failure gets a code in
+  `crates/dre-core/src/codes.rs`.
 - **Docs:** update `README.md` or `docs/` when you change behaviour users can see. Practices
   and opinions go in [`docs/practices.md`](docs/practices.md). A new page names its `section` and
   `position` in its front matter (the sections are in [`docs/sections.json`](docs/sections.json));

@@ -1,5 +1,8 @@
 //! DRE's error type at module boundaries: a registered [`Code`] (whose [`Kind`] decides the exit
-//! code and whether trying again can help), the message, and an optional hint at the fix.
+//! code and whether trying again can help) and the message, which says what to do about it.
+//! New code returns it from any function whose caller decides by the kind of failure; the run
+//! (`crate::run`) and the start of every command (`crate::start`) do. Callers branch on the code,
+//! never on the message's text.
 
 use crate::codes::{Code, ErrorCode, Kind};
 
@@ -9,8 +12,6 @@ use crate::codes::{Code, ErrorCode, Kind};
 pub struct Error {
     pub code: ErrorCode,
     pub message: String,
-    /// What to do about it, when the message doesn't already say.
-    pub hint: Option<String>,
 }
 
 impl Error {
@@ -18,14 +19,7 @@ impl Error {
         Error {
             code: code.into(),
             message: message.into(),
-            hint: None,
         }
-    }
-
-    #[must_use]
-    pub fn with_hint(mut self, hint: impl Into<String>) -> Error {
-        self.hint = Some(hint.into());
-        self
     }
 
     pub fn kind(&self) -> Kind {
@@ -59,7 +53,6 @@ impl Error {
         Error {
             code,
             message: message.into(),
-            hint: None,
         }
     }
 }

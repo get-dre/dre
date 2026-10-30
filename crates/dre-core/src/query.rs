@@ -114,8 +114,8 @@ pub fn execute(
     if !safe {
         return Err("expected a single read-only query; nothing was run".into());
     }
-    let plugin =
-        crate::run::find_plugin(ctx, project, PluginKind::Source, &target.kind).map_err(|e| e.to_string())?;
+    let plugin = crate::plugin_host::find_plugin(ctx, project, PluginKind::Source, &target.kind)
+        .map_err(|e| e.to_string())?;
     let secrets = ctx.secrets().clone();
     let log: LogSink =
         Arc::new(move |name, message| eprintln!("{name}: {}", secrets.mask_source_error(message, false)));
@@ -178,7 +178,7 @@ fn session_result(
             .mask_source_error(&e.to_string(), false)
             .into_owned()
     };
-    let connection = crate::run::render_connection(target, ctx.env())?;
+    let connection = crate::profiles::render_connection(target, ctx.env())?;
     let open = if session_read_only {
         Open::Sandboxed
     } else {
