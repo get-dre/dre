@@ -565,3 +565,330 @@ fn an_empty_or_unrendered_password_fails_and_html_takes_none() {
     assert!(errors.is_empty(), "{errors:?}");
     let _ = p.close();
 }
+
+#[test]
+fn japanese_pdf_requests_fallback_fonts_before_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("letter.html");
+    std::fs::write(
+        &template,
+        "<html lang=\"ja\"><body>こんにちは, <b>東京</b></body></html>",
+    )
+    .unwrap();
+    let out = dir.path().join("letter.pdf");
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        "pdf",
+        Default::default(),
+        vec![],
+        Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let mut requested = false;
+    let (_, warnings) = p
+        .write_finish_with_fonts(&mut |font| {
+            assert_eq!(font.name, "noto_sans_jp");
+            assert_eq!(font.version, "2.4.0");
+            requested = true;
+            Err("test registry unavailable".into())
+        })
+        .unwrap();
+    p.close().unwrap();
+    assert!(requested, "Japanese PDF must request its fallback before layout");
+    assert!(warnings.iter().any(|w| w.contains("test registry unavailable")));
+}
+
+fn japanese_font_paths() -> Vec<String> {
+    if let Some(dir) = std::env::var_os("DRE_TEST_FONT_DIR") {
+        return ["NotoSansCJKjp-Regular-2.004.otf", "NotoSansCJKjp-Bold-2.004.otf"]
+            .iter()
+            .map(|name| Path::new(&dir).join(name).to_string_lossy().into_owned())
+            .collect();
+    }
+    static CACHE: std::sync::LazyLock<tempfile::TempDir> =
+        std::sync::LazyLock::new(|| tempfile::tempdir().unwrap());
+    let env = dre_core::context::Env::from_process().with_home(CACHE.path().to_path_buf());
+    dre_core::fonts::resolve(
+        &dre_core::context::Context::subprocess(env),
+        &dre_protocol::msg::FontRequest {
+            name: "noto_sans_jp".into(),
+            version: "2.4.0".into(),
+        },
+    )
+    .expect("the pinned Japanese font test assets must be available in the registry or DRE_TEST_FONT_DIR")
+}
+
+fn write_japanese(format: &str, root: &Path, html: &str) -> (Vec<u8>, usize) {
+    let template = root.join("letter.html");
+    std::fs::write(&template, html).unwrap();
+    let out = root.join(format!("letter.{format}"));
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, format)),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        format,
+        Default::default(),
+        vec![],
+        Some(serde_json::to_value(ctx(root, Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let mut requests = 0;
+    let (_, warnings) = p
+        .write_finish_with_fonts(&mut |font| {
+            assert_eq!(font.name, "noto_sans_jp");
+            assert_eq!(font.version, "2.4.0");
+            requests += 1;
+            Ok(japanese_font_paths())
+        })
+        .unwrap();
+    p.close().unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    (std::fs::read(out).unwrap(), requests)
+}
+
+fn assert_real_japanese_glyphs(pdf: &[u8]) {
+    let doc = lopdf::Document::load_mem(pdf).unwrap();
+    let page_numbers: Vec<u32> = doc.get_pages().keys().copied().collect();
+    let extracted = doc.extract_text(&page_numbers).unwrap();
+    assert!(extracted.contains("こんにちは"), "{extracted:?}");
+    assert!(extracted.contains("東京"), "{extracted:?}");
+    let mut glyphs = Vec::new();
+    for page in doc.get_pages().values() {
+        let content = lopdf::content::Content::decode(&doc.get_page_content(*page)).unwrap();
+        for op in content.operations {
+            if op.operator == "Tj" || op.operator == "TJ" {
+                fn collect(object: &lopdf::Object, glyphs: &mut Vec<u16>) {
+                    match object {
+                        lopdf::Object::String(bytes, _) => {
+                            let (chunks, remainder) = bytes.as_chunks::<2>();
+                            assert!(remainder.is_empty());
+                            glyphs.extend(chunks.iter().map(|b| u16::from_be_bytes(*b)));
+                        }
+                        lopdf::Object::Array(items) => {
+                            for item in items {
+                                collect(item, glyphs);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for operand in &op.operands {
+                    collect(operand, &mut glyphs);
+                }
+            }
+        }
+    }
+    assert!(glyphs.len() >= 7, "expected Japanese text, got {glyphs:?}");
+    assert!(
+        glyphs.iter().all(|gid| *gid != 0),
+        "PDF used .notdef glyph: {glyphs:?}"
+    );
+    let text = String::from_utf8_lossy(pdf);
+    assert!(
+        text.contains("NotoSansCJKjp-Regular"),
+        "regular Japanese font not embedded"
+    );
+    assert!(
+        text.contains("NotoSansCJKjp-Bold"),
+        "bold Japanese font not embedded"
+    );
+}
+
+#[test]
+fn japanese_pdf_embeds_regular_and_bold_without_missing_glyphs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html lang=\"ja\"><body>こんにちは, <b>東京</b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn project_japanese_font_prevents_fetch_and_html_never_fetches() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = japanese_font_paths();
+    for (source, target) in paths.iter().zip(["brand.otf", "brand-bold.otf"]) {
+        std::fs::copy(source, dir.path().join(target)).unwrap();
+    }
+    let html = "<html lang=\"ja\"><head><style>@font-face {font-family: Brand; src: url(brand.otf);} @font-face {font-family: Brand; src: url(brand-bold.otf);font-weight:bold;} body {font-family:Brand;}</style></head><body>こんにちは, <b>東京</b></body></html>";
+    let (pdf, requests) = write_japanese("pdf", dir.path(), html);
+    assert_eq!(requests, 0);
+    assert_real_japanese_glyphs(&pdf);
+    let (html, requests) = write_japanese("html", dir.path(), "<p>こんにちは, 東京</p>");
+    assert_eq!(requests, 0);
+    assert_eq!(html, "<p>こんにちは, 東京</p>".as_bytes());
+}
+
+#[test]
+fn older_core_keeps_rendering_japanese_without_the_new_exchange() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("legacy.html");
+    std::fs::write(&template, "<p>こんにちは, 東京</p>").unwrap();
+    let (pdf, _) = write("pdf", dir.path(), Some(template), json!({}), 1).unwrap();
+    assert!(pdf.starts_with(b"%PDF-"));
+}
+
+#[test]
+fn fallback_preserves_the_projects_latin_font() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("brand.ttf"),
+        include_bytes!("../fonts/IBMPlexMono-Regular.ttf"),
+    )
+    .unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html><head><style>@font-face {font-family: Brand; src:url(brand.ttf);} body {font-family:Brand;}</style></head><body>Brand Latin こんにちは <b>東京</b></body></html>",
+    );
+    assert_eq!(requests, 1);
+    assert_real_japanese_glyphs(&pdf);
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("IBMPlexMono"),
+        "project font lost its priority"
+    );
+}
+
+#[test]
+fn generated_japanese_content_requests_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html><head><style>p::before {content:'こんにちは, ';} b::before {content:'東京';}</style></head><body><p></p><b></b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn escaped_generated_japanese_content_requests_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        r"<html><head><style>p::before {content:'\3053 \3093 \306B \3061 \306F , ';} b::before {content:'\6771 \4EAC ';}</style></head><body><p></p><b></b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn uppercase_numeric_japanese_entities_request_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html><body>&#X3053;&#X3093;&#X306B;&#X3061;&#X306F;, <b>&#X6771;&#X4EAC;</b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn declared_japanese_fonts_are_actual_fallbacks_outside_their_selected_elements() {
+    let dir = tempfile::tempdir().unwrap();
+    for (source, target) in japanese_font_paths().iter().zip(["brand.otf", "brand-bold.otf"]) {
+        std::fs::copy(source, dir.path().join(target)).unwrap();
+    }
+    for rule in ["", "span {font-family:Brand;}"] {
+        let html = format!(
+            "<html><head><style>@font-face {{font-family:Brand;src:url(brand.otf);}} @font-face {{font-family:Brand;src:url(brand-bold.otf);font-weight:bold;}} {rule}</style></head><body><span>Brand</span>こんにちは, <b>東京</b></body></html>"
+        );
+        let (pdf, requests) = write_japanese("pdf", dir.path(), &html);
+        assert_real_japanese_glyphs(&pdf);
+        assert_eq!(requests, 0);
+    }
+}
+
+#[test]
+fn font_downloads_keep_the_runs_project_http_timeout() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/packages.json", listener.local_addr().unwrap());
+    // Each request gets a complete response after two seconds. A one-second project timeout
+    // must fail first; the default timeout would instead reach the HTTP 404 response.
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = stop.clone();
+    let server = std::thread::spawn(move || {
+        while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut socket, _)) => {
+                    std::thread::spawn(move || {
+                        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                        let mut request = [0; 2048];
+                        let _ = socket.read(&mut request);
+                        std::thread::sleep(Duration::from_secs(2));
+                        let _ = socket.write_all(
+                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                Err(e) => panic!("{e}"),
+            }
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("timeout.html");
+    std::fs::write(&template, "<p>こんにちは, 東京</p>").unwrap();
+    let env =
+        dre_core::context::Env::from_vars([("DRE_REGISTRY_URL", url)]).with_home(dir.path().join("home"));
+    let run = dre_core::context::Context::subprocess(env);
+    let mut plugin = run
+        .host()
+        .start(
+            &dre_core::plugins::Located {
+                path: bin().to_path_buf(),
+                plugin: PluginId::new(Kind::Format, "pdf"),
+                package: "document".into(),
+            },
+            Arc::new(|_, _| {}),
+            None,
+        )
+        .unwrap();
+    // Cover processes started before the project's flags finished loading.
+    run.set_project_http_timeout(1);
+    run.set_project_http_timeout(50);
+    plugin
+        .write(dre_core::plugin_host::WriteRequest {
+            path: dir.path().join("timeout.pdf").to_string_lossy().into_owned(),
+            format: "pdf".into(),
+            options: Default::default(),
+            result_sets: vec![],
+            template: Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        })
+        .unwrap();
+    let written = plugin.finish().unwrap();
+    plugin.close();
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    server.join().unwrap();
+    assert!(
+        written.warnings.iter().any(|w| w.contains("no answer for 1s")),
+        "{:?}",
+        written.warnings
+    );
+}

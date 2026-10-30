@@ -114,6 +114,32 @@ An index in the earlier schema 1 still works: each entry there is one plugin, wi
 `name` in place of `provides`, and reads as a package of that one plugin, named after it. Its
 artifacts hold `dre-<kind>-<name>`.
 
+## Font packages
+
+The optional top-level `fonts` array carries platform-independent fonts. Older DRE index
+readers ignore this sibling and continue reading `plugins`. A font entry has `name`, `scripts`,
+`license`, and `versions`. Each immutable version has `version` (semver), plus `regular`,
+`bold`, and `license` artifacts, each with `url` and a required `sha256`. Fonts are raw `.otf`
+or `.ttf` files, not plugin executables; the licence artifact is its complete text.
+
+The first package is `noto_sans_jp` 2.4.0, from Noto Sans CJK JP upstream 2.004 (`Sans2.004`,
+commit `523d033d6cb47f4a80c58a35753646f5c3608a78`), under SIL OFL 1.1. It supplies Japanese
+regular and bold; see [document fonts](plugin-document.md#images-stylesheets-and-fonts).
+
+| Asset on the `registry` release | SHA-256 |
+| --- | --- |
+| `NotoSansCJKjp-Regular-2.004.otf` | `68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5` |
+| `NotoSansCJKjp-Bold-2.004.otf` | `e53dcb0dcb2922e45d01aae1ebd2f382bb81d4229b18b6b883bd170678af1f76` |
+| `NotoSansCJKjp-2.004-OFL.txt` | `6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2` |
+
+To publish a font version, upload these immutable, versioned assets to the existing `registry`
+release without replacing older assets, then add its version to `packages.json` and upload the
+updated index. Preserve its existing plugin, extension and font entries. No new component
+release or tag is needed. Registry rebuilds preserve the `fonts` array. Mirrors can copy the
+index and artifacts and replace their URLs with mirror locations, as for plugins. Downloads use
+core's existing registry transport and SHA-256 verification; verified font files and their OFL
+text are cached under `~/.dre/fonts/<name>/<version>/`.
+
 ## Publishing a release
 
 Each first-party package has its own version, independent of DRE's: `plugins/<package>/Cargo.toml`,

@@ -17,6 +17,7 @@ pub mod dialect;
 pub mod document;
 pub mod engine;
 pub mod error;
+pub mod fonts;
 pub mod for_each;
 pub mod formats;
 pub mod fs;

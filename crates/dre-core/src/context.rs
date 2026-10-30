@@ -162,7 +162,9 @@ impl Context {
 
     /// `flags: http_timeout` from the project being run (set once, when it loads).
     pub fn set_project_http_timeout(&self, secs: u64) {
-        let _ = self.0.http_timeout.set(secs);
+        if self.0.http_timeout.set(secs).is_ok() {
+            self.0.host.set_project_http_timeout(secs);
+        }
     }
 
     /// How long a download may receive nothing: `DRE_HTTP_TIMEOUT`, else the project's

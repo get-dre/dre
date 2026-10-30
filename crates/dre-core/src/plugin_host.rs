@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
@@ -42,6 +42,9 @@ pub trait PluginHost: Send + Sync {
     /// Start `plugin` with `cwd` as its working directory (the project's), its log lines going to
     /// `log`, and complete the handshake.
     fn start(&self, plugin: &Located, log: LogSink, cwd: Option<&Path>) -> HostResult<Box<dyn Plugin>>;
+
+    /// Share the project's once-set transport timeout with running and future plugins.
+    fn set_project_http_timeout(&self, _secs: u64) {}
 
     /// Ask every plugin this host started to stop its running request. Returns how many had one.
     fn cancel(&self) -> usize;
@@ -201,6 +204,7 @@ pub(crate) struct Described {
 pub struct SubprocessHost {
     /// Where plugins are installed (`DRE_PLUGINS_DIR`, `~/.dre`).
     env: Env,
+    project_http_timeout: Arc<OnceLock<u64>>,
     running: Arc<Running>,
     prober: Prober,
 }
@@ -274,6 +278,7 @@ impl SubprocessHost {
         let running: Arc<Running> = Arc::default();
         SubprocessHost {
             env: env.clone(),
+            project_http_timeout: Arc::default(),
             prober: Prober {
                 asked: Mutex::default(),
                 host: Some((env.clone(), running.clone())),
@@ -313,8 +318,14 @@ impl PluginHost for SubprocessHost {
         )?;
         Ok(Box::new(Subprocess {
             process: Some(process),
+            font_context: crate::context::Context::subprocess(self.env.clone()),
+            project_http_timeout: self.project_http_timeout.clone(),
             _registration: registration,
         }))
+    }
+
+    fn set_project_http_timeout(&self, secs: u64) {
+        let _ = self.project_http_timeout.set(secs);
     }
 
     fn cancel(&self) -> usize {
@@ -333,6 +344,8 @@ impl PluginHost for SubprocessHost {
 struct Subprocess {
     /// `None` only while closing.
     process: Option<PluginProcess>,
+    font_context: crate::context::Context,
+    project_http_timeout: Arc<OnceLock<u64>>,
     _registration: Registration,
 }
 
@@ -397,8 +410,14 @@ impl Plugin for Subprocess {
     }
 
     fn write(&mut self, r: WriteRequest) -> HostResult<()> {
-        self.process()
-            .write_begin(&r.path, &r.format, r.options, r.result_sets, r.template)
+        self.process().write_begin_with_font_requests(
+            &r.path,
+            &r.format,
+            r.options,
+            r.result_sets,
+            r.template,
+            true,
+        )
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> HostResult<()> {
@@ -410,7 +429,13 @@ impl Plugin for Subprocess {
     }
 
     fn finish(&mut self) -> HostResult<Written> {
-        let (files, warnings) = self.process().write_finish_with_warnings()?;
+        if let Some(secs) = self.project_http_timeout.get() {
+            self.font_context.set_project_http_timeout(*secs);
+        }
+        let ctx = self.font_context.clone();
+        let (files, warnings) = self
+            .process()
+            .write_finish_with_fonts(&mut |font| crate::fonts::resolve(&ctx, font))?;
         Ok(Written { files, warnings })
     }
 

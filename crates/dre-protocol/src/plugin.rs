@@ -455,6 +455,7 @@ pub struct WriteRequest {
     pub options: Map<String, Value>,
     pub result_sets: Vec<ResultSetMeta>,
     pub template: Option<Value>,
+    pub font_requests: bool,
 }
 
 /// Hands a format plugin its result sets one at a time, in order.
@@ -462,12 +463,39 @@ pub struct ResultSets<'a> {
     metas: std::vec::IntoIter<ResultSetMeta>,
     input: &'a mut Input,
     warnings: Vec<String>,
+    finished: bool,
 }
 
 impl ResultSets<'_> {
     /// Tell the person something about the output, shown as a warning by core.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.warnings.push(message.into());
+    }
+
+    /// Ask core for an immutable registry font after consuming all result sets.
+    /// Only call when `WriteRequest::font_requests` is true.
+    pub fn request_fonts(&mut self, font: crate::msg::FontRequest) -> Result<Vec<String>> {
+        if self.metas.len() != 0 {
+            return Err("read all result sets before requesting fonts".into());
+        }
+        if !self.finished {
+            match self.input.read()? {
+                Frame::Json(v) if v.get("type").and_then(Value::as_str) == Some("finish") => {}
+                other => return Err(format!("expected finish before font request, got {other:?}").into()),
+            }
+            self.finished = true;
+        }
+        send(&Response::NeedFonts { font });
+        match self.input.read()? {
+            Frame::Json(v) => match serde_json::from_value::<crate::msg::Envelope<Request>>(v)?.body {
+                Request::Fonts { paths, error: None } => Ok(paths),
+                Request::Fonts {
+                    error: Some(error), ..
+                } => Err(error.into()),
+                other => Err(format!("expected font paths, got {other:?}").into()),
+            },
+            other => Err(format!("expected font paths, got {other:?}").into()),
+        }
     }
 
     /// The next result set, or `None` after the last. Each must be read (or is drained) before
@@ -1114,6 +1142,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 options,
                 result_sets,
                 template,
+                font_requests,
             },
         ) => {
             let req = WriteRequest {
@@ -1122,11 +1151,13 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
                 options,
                 result_sets: result_sets.clone(),
                 template,
+                font_requests,
             };
             let mut sets = ResultSets {
                 metas: result_sets.into_iter(),
                 input,
                 warnings: Vec::new(),
+                finished: false,
             };
             let written = checked.and_then(|()| f.write(&req, &mut sets));
             // A failed write is reported at once, so core can stop streaming; this is the
@@ -1136,7 +1167,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             }
             // Consume whatever the format didn't read (after an error, possibly the rest of a
             // result set), so the stream stays in sync.
-            loop {
+            while !sets.finished {
                 match sets.input.read()? {
                     Frame::Json(v) if v.get("type").and_then(Value::as_str) == Some("finish") => break,
                     Frame::Json(v) if v.get("type").and_then(Value::as_str) == Some("result_set_end") => {}

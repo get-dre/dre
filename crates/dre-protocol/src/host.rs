@@ -716,7 +716,7 @@ impl PluginProcess {
         let id = match req {
             _ if self.version() == 0 => None,
             Request::Hello { .. } => None,
-            Request::ResultSetEnd {} | Request::Finish {} | Request::Cancel {} => {
+            Request::ResultSetEnd {} | Request::Finish {} | Request::Cancel {} | Request::Fonts { .. } => {
                 Some(self.current.load(Ordering::SeqCst)).filter(|id| *id != 0)
             }
             _ => {
@@ -1074,7 +1074,21 @@ impl PluginProcess {
         result_sets: Vec<ResultSetMeta>,
         template: Option<Value>,
     ) -> Result<()> {
+        self.write_begin_with_font_requests(path, format, options, result_sets, template, false)
+    }
+
+    /// Start a write, advertising whether the caller handles nested font requests.
+    pub fn write_begin_with_font_requests(
+        &mut self,
+        path: &str,
+        format: &str,
+        options: Map<String, Value>,
+        result_sets: Vec<ResultSetMeta>,
+        template: Option<Value>,
+        font_requests: bool,
+    ) -> Result<()> {
         self.send(&Request::Write {
+            font_requests,
             path: path.to_string(),
             format: format.to_string(),
             options,
@@ -1126,10 +1140,27 @@ impl PluginProcess {
 
     /// `write_finish`, also returning the format's warnings.
     pub fn write_finish_with_warnings(&mut self) -> Result<(Vec<String>, Vec<String>)> {
+        self.write_finish_with_fonts(&mut |_| Err("this host cannot fetch fonts".into()))
+    }
+
+    /// Complete a write, resolving nested font requests through the caller's registry.
+    pub fn write_finish_with_fonts(
+        &mut self,
+        resolve: &mut dyn FnMut(&crate::msg::FontRequest) -> std::result::Result<Vec<String>, String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
         self.send(&Request::Finish {})?;
-        match self.recv_json("a written reply")? {
-            Response::Written { files, warnings } => Ok((files, warnings)),
-            other => Err(self.unexpected("a written reply", &Incoming::Json(other))),
+        loop {
+            match self.recv_json("a written reply")? {
+                Response::NeedFonts { font } => {
+                    let (paths, error) = match resolve(&font) {
+                        Ok(paths) => (paths, None),
+                        Err(error) => (Vec::new(), Some(error)),
+                    };
+                    self.send(&Request::Fonts { paths, error })?;
+                }
+                Response::Written { files, warnings } => return Ok((files, warnings)),
+                other => return Err(self.unexpected("a written reply", &Incoming::Json(other))),
+            }
         }
     }
 
