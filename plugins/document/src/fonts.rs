@@ -4,8 +4,9 @@
 //!
 //! The PDF engine knows a font by the family name inside the file and has no `@font-face`, so
 //! this module reads each `@font-face`, registers its file, and rewrites the `font-family` lists
-//! that use the declared name. Every list gets the bundled family last, so text is never set in a
-//! missing font; a family that's neither bundled nor declared is warned about by name.
+//! that use the declared name. Every list gets the bundled family followed by other declared
+//! project families as fallbacks; a family that's neither bundled nor declared is warned about
+//! by name. Downloaded Noto follows those project and bundled families.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -116,10 +117,21 @@ pub fn prepare(
     }
     // The default for text with no `font-family` at all.
     let base = format!("<style>html {{ font-family: \"{SANS}\"; }}</style>");
-    let html = match HEAD.find(&html) {
+    let mut html = match HEAD.find(&html) {
         Some(m) => format!("{}{base}{}", &html[..m.end()], &html[m.end()..]),
         None => format!("{base}{html}"),
     };
+    // Coverage checks count every declared project face. Make those faces available as actual
+    // fallbacks too, including outside elements that explicitly select their declared alias.
+    let families: BTreeSet<&String> = aliases.values().collect();
+    for family in families {
+        if ![SANS, MONO]
+            .iter()
+            .any(|bundled| family.eq_ignore_ascii_case(bundled))
+        {
+            html = append_fallback(&html, family);
+        }
+    }
     Ok((html, fonts))
 }
 
@@ -228,11 +240,37 @@ pub fn needs_japanese(html: &str, project: &[Font]) -> bool {
             .expect("the pattern is a valid regex")
     });
     static ENTITY: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").expect("the pattern is a valid regex"));
-    let text = NON_TEXT.replace_all(html, "");
+        LazyLock::new(|| Regex::new(r"&#([xX][0-9a-fA-F]+|[0-9]+);").expect("the pattern is a valid regex"));
+    let mut text = NON_TEXT.replace_all(html, "").into_owned();
+    // Generated content participates in shaping even though it lives in CSS, not text nodes.
+    static CONTENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?is)\bcontent\s*:\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^;}'"])+)"#)
+            .expect("the pattern is a valid regex")
+    });
+    static CSS_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\r\n\x0c])?").expect("the pattern is a valid regex")
+    });
+    let mut add_content = |css: &str| {
+        for content in CONTENT.captures_iter(css) {
+            let decoded = CSS_ESCAPE.replace_all(&content[1], |c: &Captures| {
+                u32::from_str_radix(&c[1], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .map(|c| c.to_string())
+                    .unwrap_or_default()
+            });
+            text.push_str(&decoded);
+        }
+    };
+    for style in STYLE_BLOCK.captures_iter(html) {
+        add_content(&style[2]);
+    }
+    for style in STYLE_ATTR.captures_iter(html) {
+        add_content(style.get(2).or(style.get(3)).map_or("", |m| m.as_str()));
+    }
     let text = ENTITY.replace_all(&text, |c: &Captures| {
         let number = c[1]
-            .strip_prefix('x')
+            .strip_prefix(['x', 'X'])
             .map(|n| u32::from_str_radix(n, 16))
             .unwrap_or_else(|| c[1].parse());
         number
@@ -251,7 +289,7 @@ pub fn needs_japanese(html: &str, project: &[Font]) -> bool {
         && !faces.iter().any(|f| f.glyph_index(c).is_some_and(|id| id.0 != 0)))
 }
 
-/// Append the downloaded family after each project's declared family and Plex.
+/// Append a fallback family after explicitly selected families and Plex.
 pub fn append_fallback(html: &str, family: &str) -> String {
     let fix = |css: &str| {
         FAMILY_DECL
@@ -262,7 +300,15 @@ pub fn append_fallback(html: &str, family: &str) -> String {
                 } else {
                     (value, "")
                 };
-                format!("{}{value}, \"{family}\"{important}", &c[1])
+                if value.split(',').any(|name| {
+                    name.trim()
+                        .trim_matches(['\"', '\''])
+                        .eq_ignore_ascii_case(family)
+                }) {
+                    c[0].to_string()
+                } else {
+                    format!("{}{value}, \"{family}\"{important}", &c[1])
+                }
             })
             .into_owned()
     };

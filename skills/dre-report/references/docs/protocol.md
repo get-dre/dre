@@ -420,6 +420,27 @@ result set, core sends `{"type":"finish"}`. The plugin writes the file(s) and re
 
 `warnings` (optional) are shown to the person, e.g. a value the format had to write as text.
 
+A core that can resolve registry fonts sends `"font_requests": true` in `write`. Otherwise this
+optional field is absent or false. A format must not request fonts without that opt-in, so a
+new format still works with older cores; older formats ignore the extra field.
+After consuming all result sets and `finish`, the format can reply before layout:
+
+```json
+{"type":"need_fonts","id":1,"font":{"name":"noto_sans_jp","version":"2.4.0"}}
+```
+
+Core downloads the exact font package through its registry, verifies its checksums, and replies
+with absolute local font paths, or an error. The reply retains the write request's id:
+
+```json
+{"type":"fonts","id":1,"paths":["/…/.dre/fonts/noto_sans_jp/2.4.0/regular.otf","/…/.dre/fonts/noto_sans_jp/2.4.0/bold.otf"],"error":null}
+```
+
+The format then sends its usual `written` reply. `fonts` continues the existing write; it does
+not start a new request. The wire protocol version remains 1: the exchange is additive and
+only used when core advertises support. `dre-protocol` 0.10.0 adds the SDK helpers.
+
+
 If the write fails part-way, the plugin replies `{"type": "error", ...}` at once, without waiting
 for `finish`, and then reads (and discards) the rest of the stream up to `finish`, sending
 nothing more. Core stops sending data when it sees the error, so a large result isn't streamed

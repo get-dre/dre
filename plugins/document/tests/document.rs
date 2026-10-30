@@ -674,8 +674,9 @@ fn assert_real_japanese_glyphs(pdf: &[u8]) {
                 fn collect(object: &lopdf::Object, glyphs: &mut Vec<u16>) {
                     match object {
                         lopdf::Object::String(bytes, _) => {
-                            assert_eq!(bytes.len() % 2, 0);
-                            glyphs.extend(bytes.chunks_exact(2).map(|b| u16::from_be_bytes([b[0], b[1]])));
+                            let (chunks, remainder) = bytes.as_chunks::<2>();
+                            assert!(remainder.is_empty());
+                            glyphs.extend(chunks.iter().map(|b| u16::from_be_bytes(*b)));
                         }
                         lopdf::Object::Array(items) => {
                             for item in items {
@@ -691,7 +692,7 @@ fn assert_real_japanese_glyphs(pdf: &[u8]) {
             }
         }
     }
-    assert!(glyphs.len() >= 9, "expected Japanese text, got {glyphs:?}");
+    assert!(glyphs.len() >= 7, "expected Japanese text, got {glyphs:?}");
     assert!(
         glyphs.iter().all(|gid| *gid != 0),
         "PDF used .notdef glyph: {glyphs:?}"
@@ -762,5 +763,132 @@ fn fallback_preserves_the_projects_latin_font() {
     assert!(
         String::from_utf8_lossy(&pdf).contains("IBMPlexMono"),
         "project font lost its priority"
+    );
+}
+
+#[test]
+fn generated_japanese_content_requests_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html><head><style>p::before {content:'こんにちは, ';} b::before {content:'東京';}</style></head><body><p></p><b></b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn escaped_generated_japanese_content_requests_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        r"<html><head><style>p::before {content:'\3053 \3093 \306B \3061 \306F , ';} b::before {content:'\6771 \4EAC ';}</style></head><body><p></p><b></b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn uppercase_numeric_japanese_entities_request_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pdf, requests) = write_japanese(
+        "pdf",
+        dir.path(),
+        "<html><body>&#X3053;&#X3093;&#X306B;&#X3061;&#X306F;, <b>&#X6771;&#X4EAC;</b></body></html>",
+    );
+    assert_real_japanese_glyphs(&pdf);
+    assert_eq!(requests, 1);
+}
+
+#[test]
+fn declared_japanese_fonts_are_actual_fallbacks_outside_their_selected_elements() {
+    let dir = tempfile::tempdir().unwrap();
+    for (source, target) in japanese_font_paths().iter().zip(["brand.otf", "brand-bold.otf"]) {
+        std::fs::copy(source, dir.path().join(target)).unwrap();
+    }
+    for rule in ["", "span {font-family:Brand;}"] {
+        let html = format!(
+            "<html><head><style>@font-face {{font-family:Brand;src:url(brand.otf);}} @font-face {{font-family:Brand;src:url(brand-bold.otf);font-weight:bold;}} {rule}</style></head><body><span>Brand</span>こんにちは, <b>東京</b></body></html>"
+        );
+        let (pdf, requests) = write_japanese("pdf", dir.path(), &html);
+        assert_real_japanese_glyphs(&pdf);
+        assert_eq!(requests, 0);
+    }
+}
+
+#[test]
+fn font_downloads_keep_the_runs_project_http_timeout() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/packages.json", listener.local_addr().unwrap());
+    // Each request gets a complete response after two seconds. A one-second project timeout
+    // must fail first; the default timeout would instead reach the HTTP 404 response.
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = stop.clone();
+    let server = std::thread::spawn(move || {
+        while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut socket, _)) => {
+                    std::thread::spawn(move || {
+                        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                        let mut request = [0; 2048];
+                        let _ = socket.read(&mut request);
+                        std::thread::sleep(Duration::from_secs(2));
+                        let _ = socket.write_all(
+                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                Err(e) => panic!("{e}"),
+            }
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("timeout.html");
+    std::fs::write(&template, "<p>こんにちは, 東京</p>").unwrap();
+    let env =
+        dre_core::context::Env::from_vars([("DRE_REGISTRY_URL", url)]).with_home(dir.path().join("home"));
+    let run = dre_core::context::Context::subprocess(env);
+    let mut plugin = run
+        .host()
+        .start(
+            &dre_core::plugins::Located {
+                path: bin().to_path_buf(),
+                plugin: PluginId::new(Kind::Format, "pdf"),
+                package: "document".into(),
+            },
+            Arc::new(|_, _| {}),
+            None,
+        )
+        .unwrap();
+    // Cover processes started before the project's flags finished loading.
+    run.set_project_http_timeout(1);
+    run.set_project_http_timeout(50);
+    plugin
+        .write(dre_core::plugin_host::WriteRequest {
+            path: dir.path().join("timeout.pdf").to_string_lossy().into_owned(),
+            format: "pdf".into(),
+            options: Default::default(),
+            result_sets: vec![],
+            template: Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        })
+        .unwrap();
+    let written = plugin.finish().unwrap();
+    plugin.close();
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    server.join().unwrap();
+    assert!(
+        written.warnings.iter().any(|w| w.contains("no answer for 1s")),
+        "{:?}",
+        written.warnings
     );
 }

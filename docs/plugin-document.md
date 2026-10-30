@@ -180,7 +180,8 @@ From `document` 1.2.0, Japanese text such as `こんにちは, 東京` needs no 
 used with a core that supports font requests. Before laying out the PDF, the plugin checks
 characters against Plex and the project's `@font-face` fonts. Core fetches **Noto Sans CJK JP**
 regular and bold only when those fonts leave Japanese characters uncovered. Project fonts stay
-first in each font-family list; Noto is the final fallback. HTML behavior stays the same: the
+first when explicitly selected. Other declared project families are available as fallbacks after
+Plex, including outside elements that select them; Noto is the final fallback. HTML behavior stays the same: the
 reader's browser supplies missing fonts, and DRE never downloads Noto for HTML.
 
 The registry pins `noto_sans_jp` at **2.4.0** (upstream Noto **2.004**, tag `Sans2.004`), with a
