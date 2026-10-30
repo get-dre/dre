@@ -892,3 +892,315 @@ fn font_downloads_keep_the_runs_project_http_timeout() {
         written.warnings
     );
 }
+
+/// A pinned Noto package from the registry (`DRE_REGISTRY_URL` points tests at a mirror), cached
+/// once per test binary.
+fn noto_paths(name: &str, version: &str) -> Vec<String> {
+    static CACHE: std::sync::LazyLock<tempfile::TempDir> =
+        std::sync::LazyLock::new(|| tempfile::tempdir().unwrap());
+    let env = dre_core::context::Env::from_process().with_home(CACHE.path().to_path_buf());
+    dre_core::fonts::resolve(
+        &dre_core::context::Context::subprocess(env),
+        &dre_protocol::msg::FontRequest {
+            name: name.into(),
+            version: version.into(),
+        },
+    )
+    .unwrap_or_else(|e| panic!("the pinned {name} {version} test assets must be in the registry: {e}"))
+}
+
+/// Write a PDF whose font requests core answers from the registry. Returns the PDF, the
+/// requested packages in order, and the warnings.
+fn write_with_noto(html: &str) -> (Vec<u8>, Vec<String>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("multi.html");
+    std::fs::write(&template, html).unwrap();
+    let out = dir.path().join("multi.pdf");
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        "pdf",
+        Default::default(),
+        vec![],
+        Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let mut requested = Vec::new();
+    let (_, warnings) = p
+        .write_finish_with_fonts(&mut |font| {
+            requested.push(font.name.clone());
+            Ok(noto_paths(&font.name, &font.version))
+        })
+        .unwrap();
+    p.close().unwrap();
+    (std::fs::read(out).unwrap(), requested, warnings)
+}
+
+/// Every glyph the PDF draws, in content-stream order: its font's `BaseFont` (without the
+/// subset tag and encoding), its glyph code, and the text its `ToUnicode` map gives that code.
+fn drawn_glyphs(pdf: &[u8]) -> Vec<(String, u16, String)> {
+    use std::collections::HashMap;
+
+    fn to_unicode(doc: &lopdf::Document, font: &lopdf::Dictionary) -> HashMap<u16, String> {
+        let mut map = HashMap::new();
+        let Ok(stream) = font
+            .get(b"ToUnicode")
+            .and_then(|o| o.as_reference())
+            .and_then(|id| doc.get_object(id))
+            .and_then(|o| o.as_stream())
+        else {
+            return map;
+        };
+        let text = String::from_utf8_lossy(&stream.decompressed_content().unwrap()).into_owned();
+        let hex = regex::Regex::new(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>").unwrap();
+        for section in text.split("beginbfchar").skip(1) {
+            let section = section.split("endbfchar").next().unwrap();
+            for c in hex.captures_iter(section) {
+                let code = u16::from_str_radix(&c[1], 16).unwrap();
+                let units: Vec<u16> = c[2]
+                    .as_bytes()
+                    .chunks(4)
+                    .map(|u| u16::from_str_radix(std::str::from_utf8(u).unwrap(), 16).unwrap())
+                    .collect();
+                map.insert(code, String::from_utf16_lossy(&units));
+            }
+        }
+        map
+    }
+
+    let doc = lopdf::Document::load_mem(pdf).unwrap();
+    let mut glyphs = Vec::new();
+    for page in doc.get_pages().values() {
+        let fonts = doc.get_page_fonts(*page).unwrap();
+        let maps: HashMap<Vec<u8>, (String, HashMap<u16, String>)> = fonts
+            .iter()
+            .map(|(name, font)| {
+                let base =
+                    String::from_utf8_lossy(font.get(b"BaseFont").unwrap().as_name().unwrap()).into_owned();
+                let base = base.split_once('+').map_or(base.as_str(), |(_, b)| b);
+                let base = base.trim_end_matches("-Identity-H").to_string();
+                (name.clone(), (base, to_unicode(&doc, font)))
+            })
+            .collect();
+        let content = lopdf::content::Content::decode(&doc.get_page_content(*page)).unwrap();
+        let mut current: Option<&(String, HashMap<u16, String>)> = None;
+        for op in content.operations {
+            if op.operator == "Tf" {
+                current = op.operands[0].as_name().ok().and_then(|n| maps.get(n));
+            }
+            if op.operator != "Tj" && op.operator != "TJ" {
+                continue;
+            }
+            let (base, map) = current.expect("text is drawn with a font selected");
+            let mut strings = Vec::new();
+            for operand in &op.operands {
+                match operand {
+                    lopdf::Object::String(bytes, _) => strings.push(bytes.clone()),
+                    lopdf::Object::Array(items) => strings.extend(items.iter().filter_map(|i| match i {
+                        lopdf::Object::String(bytes, _) => Some(bytes.clone()),
+                        _ => None,
+                    })),
+                    _ => {}
+                }
+            }
+            for bytes in strings {
+                for pair in bytes.chunks(2) {
+                    let code = u16::from_be_bytes([pair[0], pair[1]]);
+                    glyphs.push((base.clone(), code, map.get(&code).cloned().unwrap_or_default()));
+                }
+            }
+        }
+    }
+    glyphs
+}
+
+/// The fonts that draw `text`'s characters.
+fn fonts_drawing(glyphs: &[(String, u16, String)], text: &str) -> std::collections::BTreeSet<String> {
+    glyphs
+        .iter()
+        .filter(|(_, _, t)| !t.is_empty() && t.chars().all(|c| text.contains(c)))
+        .map(|(base, _, _)| base.clone())
+        .collect()
+}
+
+#[test]
+fn a_mixed_japanese_and_chinese_document_draws_each_with_its_lang_font() {
+    // The same Han character in both: only the `lang` attribute decides which font draws it.
+    let (pdf, requested, warnings) = write_with_noto(
+        r#"<html lang="ja"><body><p>直す</p><table><tr><td lang="zh-Hans">直</td><td lang="zh-TW"><b>直</b></td></tr></table></body></html>"#,
+    );
+    assert_eq!(requested, ["noto_sans_jp", "noto_sans_sc", "noto_sans_tc"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    assert!(glyphs.iter().all(|(_, code, _)| *code != 0), "{glyphs:?}");
+    assert_eq!(
+        fonts_drawing(&glyphs, "直"),
+        [
+            "NotoSansCJKjp-Regular",
+            "NotoSansCJKsc-Regular",
+            "NotoSansCJKtc-Bold"
+        ]
+        .map(String::from)
+        .into(),
+        "{glyphs:?}"
+    );
+}
+
+#[test]
+fn han_without_lang_is_simplified_chinese_with_a_note() {
+    let (pdf, requested, warnings) = write_with_noto("<p>北京</p>");
+    assert_eq!(requested, ["noto_sans_sc"]);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("`lang`"), "{warnings:?}");
+    assert_eq!(
+        fonts_drawing(&drawn_glyphs(&pdf), "北京"),
+        ["NotoSansCJKsc-Regular".to_string()].into()
+    );
+}
+
+#[test]
+fn arabic_joins_right_to_left() {
+    // Three meems: initial, medial and final forms are three different glyphs. Isolated
+    // (unshaped) letters would repeat one glyph.
+    let (pdf, requested, warnings) = write_with_noto("<p>ممم بحر</p>");
+    assert_eq!(requested, ["noto_sans_arabic"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    let arabic: Vec<_> = glyphs
+        .iter()
+        .filter(|(base, ..)| base.starts_with("NotoSansArabic"))
+        .collect();
+    assert!(arabic.iter().all(|(_, code, _)| *code != 0), "{glyphs:?}");
+    let meems: std::collections::BTreeSet<u16> = arabic
+        .iter()
+        .filter(|(.., t)| t == "م")
+        .map(|(_, code, _)| *code)
+        .collect();
+    assert_eq!(meems.len(), 3, "meem should take three joined forms: {glyphs:?}");
+    // Drawn left to right on the page, so a right-to-left word comes out last letter first.
+    let word: String = arabic
+        .iter()
+        .map(|(.., t)| t.as_str())
+        .filter(|t| "بحر".contains(*t))
+        .collect();
+    assert_eq!(word, "رحب", "{glyphs:?}");
+}
+
+#[test]
+fn devanagari_conjuncts_shape() {
+    let (pdf, requested, warnings) = write_with_noto("<p>नमस्ते</p>");
+    assert_eq!(requested, ["noto_sans_devanagari"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    let deva: Vec<_> = glyphs
+        .iter()
+        .filter(|(base, ..)| base.starts_with("NotoSansDevanagari"))
+        .collect();
+    assert!(
+        !deva.is_empty() && deva.iter().all(|(_, code, _)| *code != 0),
+        "{glyphs:?}"
+    );
+    // स्त is one conjunct: the virama is never drawn on its own, and six code points take fewer
+    // glyphs.
+    assert!(deva.iter().all(|(.., t)| t != "\u{094D}"), "{glyphs:?}");
+    assert!(deva.len() < "नमस्ते".chars().count(), "{glyphs:?}");
+}
+
+#[test]
+fn hebrew_thai_and_korean_draw_with_their_fonts() {
+    let (pdf, requested, warnings) = write_with_noto(r#"<p>שלום</p><p>สวัสดี</p><p lang="ko">한국어 漢字</p>"#);
+    assert_eq!(requested, ["noto_sans_kr", "noto_sans_hebrew", "noto_sans_thai"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    assert!(glyphs.iter().all(|(_, code, _)| *code != 0), "{glyphs:?}");
+    for (text, font) in [
+        ("שלום", "NotoSansHebrew-Regular"),
+        ("漢字", "NotoSansCJKkr-Regular"),
+    ] {
+        assert_eq!(
+            fonts_drawing(&glyphs, text),
+            [font.to_string()].into(),
+            "{text}: {glyphs:?}"
+        );
+    }
+    assert!(
+        glyphs.iter().any(|(base, ..)| base == "NotoSansThai-Regular"),
+        "{glyphs:?}"
+    );
+    // Hebrew runs right to left: drawn last letter first.
+    let hebrew: String = glyphs
+        .iter()
+        .filter(|(base, ..)| base.starts_with("NotoSansHebrew"))
+        .map(|(.., t)| t.as_str())
+        .collect();
+    assert_eq!(hebrew, "םולש", "{glyphs:?}");
+}
+
+#[test]
+fn templates_own_font_rules_keep_their_order_and_still_fall_back_by_lang() {
+    let (pdf, requested, warnings) = write_with_noto(
+        r#"<html lang="ja"><head><style>td { font-family: "IBM Plex Mono" !important; }</style></head><body><table><tr><td lang="zh">直 mono</td></tr></table></body></html>"#,
+    );
+    assert_eq!(requested, ["noto_sans_sc"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    assert_eq!(
+        fonts_drawing(&glyphs, "直"),
+        ["NotoSansCJKsc-Regular".to_string()].into()
+    );
+    assert_eq!(
+        fonts_drawing(&glyphs, "mono"),
+        ["IBMPlexMono-Regular".to_string()].into(),
+        "{glyphs:?}"
+    );
+}
+
+#[test]
+fn a_failed_download_warns_by_script_and_still_makes_the_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("fail.html");
+    std::fs::write(&template, "<p>مرحبا नमस्ते</p>").unwrap();
+    let out = dir.path().join("fail.pdf");
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        "pdf",
+        Default::default(),
+        vec![],
+        Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let bad = dir.path().join("not-a-font.otf");
+    std::fs::write(&bad, b"not a font").unwrap();
+    let (_, warnings) = p
+        .write_finish_with_fonts(&mut |font| match font.name.as_str() {
+            "noto_sans_arabic" => Err("registry unavailable".into()),
+            _ => Ok(vec![bad.to_string_lossy().into_owned()]),
+        })
+        .unwrap();
+    p.close().unwrap();
+    assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-"));
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with("Arabic PDF fallback font unavailable: registry unavailable"),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings[1].starts_with("Devanagari PDF fallback font unavailable"),
+        "{warnings:?}"
+    );
+}

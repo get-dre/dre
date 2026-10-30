@@ -176,21 +176,69 @@ body { font-family: Brand, sans-serif; }
 A `font-family` that's neither bundled nor declared falls back to IBM Plex Sans, with a warning
 naming it. Fonts are subset: the PDF holds only the characters it uses.
 
-From `document` 1.2.0, Japanese text such as `こんにちは, 東京` needs no project fonts when
-used with a core that supports font requests. Before laying out the PDF, the plugin checks
-characters against Plex and the project's `@font-face` fonts. Core fetches **Noto Sans CJK JP**
-regular and bold only when those fonts leave Japanese characters uncovered. Project fonts stay
-first when explicitly selected. Other declared project families are available as fallbacks after
-Plex, including outside elements that select them; Noto is the final fallback. HTML behavior stays the same: the
-reader's browser supplies missing fonts, and DRE never downloads Noto for HTML.
+### Fonts for other languages
 
-The registry pins `noto_sans_jp` at **2.4.0** (upstream Noto **2.004**, tag `Sans2.004`), with a
-SHA-256 checksum for each weight and its SIL Open Font License 1.1 text. Font files are not
-bundled in the plugin or added to the project. Core keeps verified files and the licence in
-`~/.dre/fonts/noto_sans_jp/2.4.0/`; a second run uses this cache without contacting the registry.
-`DRE_REGISTRY_URL` mirrors cover fonts as well as plugins. If a download fails, the PDF is still
-made and a warning gives the reason; uncovered characters can appear as boxes. Older cores
-keep their previous PDF behavior, and older document plugins keep working with newer cores.
+From `document` 1.3.0, PDF text in Japanese, Simplified and Traditional Chinese, Korean, Arabic,
+Hebrew, Devanagari (Hindi, Marathi, Nepali) and Thai needs no project fonts when used with a core
+that supports font requests. Before laying out the PDF, the plugin checks its characters against
+Plex and the project's `@font-face` fonts. For each script they leave uncovered, core fetches
+that script's **Noto Sans** regular and bold, and only those: a Hindi report downloads Devanagari
+and nothing else. Arabic and Hebrew run right to left, Arabic letters join, and Devanagari forms
+its conjuncts (`नमस्ते`).
+
+Project fonts stay first when explicitly selected. Other declared project families are available
+as fallbacks after Plex, including outside elements that select them; Noto is the final fallback.
+HTML behavior stays the same: the reader's browser supplies missing fonts, and DRE never
+downloads Noto for HTML.
+
+#### Han characters follow `lang`
+
+Chinese, Japanese and Korean share the Han characters (`直`, `東京`) but draw many of them
+differently. As in a browser, the HTML `lang` attribute of an element, or of its nearest ancestor
+that has one, picks the font: `ja` Japanese, `ko` Korean, `zh` Simplified Chinese, and `zh-Hant`,
+`zh-TW`, `zh-HK` or `zh-MO` Traditional Chinese. Set it once for the whole document, or per
+element:
+
+```html
+<html lang="ja">
+  <p>東京本社</p>
+  <td lang="zh-TW">臺北</td>
+</html>
+```
+
+In a per-row report, set it from the row, with no new YAML key:
+
+```html
+<td lang="{{ each.lang }}">{{ each.city }}</td>
+```
+
+Text with no Chinese, Japanese or Korean `lang` (none, or another language such as `en`) is
+guessed from the document: kana (`です`) means Japanese, Hangul (`한국어`) means Korean, and Han
+characters alone mean Simplified Chinese. That last guess adds a one-line note suggesting `lang`.
+CSS generated content (`content:`) follows the `lang` of `<html>`.
+
+#### Pinned versions and the cache
+
+The registry pins each package with a SHA-256 checksum for each weight and its SIL Open Font
+License 1.1 text:
+
+| Script | Package | Version | Upstream |
+| --- | --- | --- | --- |
+| Japanese | `noto_sans_jp` | 2.4.0 | Noto Sans CJK JP 2.004 |
+| Simplified Chinese | `noto_sans_sc` | 2.4.0 | Noto Sans CJK SC 2.004 |
+| Traditional Chinese | `noto_sans_tc` | 2.4.0 | Noto Sans CJK TC 2.004 |
+| Korean | `noto_sans_kr` | 2.4.0 | Noto Sans CJK KR 2.004 |
+| Arabic | `noto_sans_arabic` | 2.13.0 | Noto Sans Arabic 2.013 |
+| Hebrew | `noto_sans_hebrew` | 3.1.0 | Noto Sans Hebrew 3.001 |
+| Devanagari | `noto_sans_devanagari` | 2.7.0 | Noto Sans Devanagari 2.007 |
+| Thai | `noto_sans_thai` | 2.2.0 | Noto Sans Thai 2.002 |
+
+Font files are not bundled in the plugin or added to the project. Core keeps verified files and
+the licence in `~/.dre/fonts/<package>/<version>/`; a second run uses this cache without
+contacting the registry. `DRE_REGISTRY_URL` mirrors cover fonts as well as plugins. If a download
+fails, the PDF is still made and a warning names the script and the reason; its characters can
+appear as boxes. Older cores keep their previous PDF behavior, and older document plugins keep
+working with newer cores.
 
 Text inside an SVG is the exception: it's drawn with the machine's fonts. For a logo that looks the
 same everywhere, convert its text to outlines (paths) in your design tool, or write the name in

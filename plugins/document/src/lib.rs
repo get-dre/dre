@@ -13,6 +13,7 @@
 //! `@page`; `author`, `subject`; `password` (an open password: AES-256, after rendering).
 
 mod assets;
+mod fallback;
 mod fonts;
 pub mod pdf;
 mod template;
