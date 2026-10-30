@@ -90,8 +90,16 @@ pub enum Request {
         format: String,
         options: Map<String, Value>,
         result_sets: Vec<ResultSetMeta>,
+        /// Core can answer `need_fonts` during this write. Absent on older cores.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        font_requests: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         template: Option<Value>,
+    },
+    /// Reply to a font request within a write; retains the write request id.
+    Fonts {
+        paths: Vec<String>,
+        error: Option<String>,
     },
     ResultSetEnd {},
     Finish {},
@@ -188,6 +196,10 @@ pub enum Response {
     NoResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rows_affected: Option<u64>,
+    },
+    /// A format needs a pinned registry font before completing its write.
+    NeedFonts {
+        font: FontRequest,
     },
     Written {
         files: Vec<String>,
@@ -477,4 +489,37 @@ impl ConnectionField {
         self.manual = true;
         self
     }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    #[test]
+    fn old_write_requests_do_not_enable_font_requests() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "type": "write", "path": "out.pdf", "format": "pdf", "options": {}, "result_sets": []
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            Request::Write {
+                font_requests: false,
+                ..
+            }
+        ));
+        assert!(
+            serde_json::to_value(request)
+                .unwrap()
+                .get("font_requests")
+                .is_none()
+        );
+    }
+}
+
+/// One immutable font package requested by a format plugin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FontRequest {
+    pub name: String,
+    pub version: String,
 }

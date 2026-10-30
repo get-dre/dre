@@ -176,6 +176,21 @@ body { font-family: Brand, sans-serif; }
 A `font-family` that's neither bundled nor declared falls back to IBM Plex Sans, with a warning
 naming it. Fonts are subset: the PDF holds only the characters it uses.
 
+From `document` 1.2.0, Japanese text such as `こんにちは, 東京` needs no project fonts when
+used with a core that supports font requests. Before laying out the PDF, the plugin checks
+characters against Plex and the project's `@font-face` fonts. Core fetches **Noto Sans CJK JP**
+regular and bold only when those fonts leave Japanese characters uncovered. Project fonts stay
+first in each font-family list; Noto is the final fallback. HTML behavior stays the same: the
+reader's browser supplies missing fonts, and DRE never downloads Noto for HTML.
+
+The registry pins `noto_sans_jp` at **2.4.0** (upstream Noto **2.004**, tag `Sans2.004`), with a
+SHA-256 checksum for each weight and its SIL Open Font License 1.1 text. Font files are not
+bundled in the plugin or added to the project. Core keeps verified files and the licence in
+`~/.dre/fonts/noto_sans_jp/2.4.0/`; a second run uses this cache without contacting the registry.
+`DRE_REGISTRY_URL` mirrors cover fonts as well as plugins. If a download fails, the PDF is still
+made and a warning gives the reason; uncovered characters can appear as boxes. Older cores
+keep their previous PDF behavior, and older document plugins keep working with newer cores.
+
 Text inside an SVG is the exception: it's drawn with the machine's fonts. For a logo that looks the
 same everywhere, convert its text to outlines (paths) in your design tool, or write the name in
 the html next to an icon-only SVG.

@@ -35,6 +35,17 @@ class RegistryExtensions(unittest.TestCase):
                 if expected:
                     self.assertEqual(result['extensions'][0]['versions'][0]['artifacts']['linux-x86_64']['sha256'], 'a' * 64)
 
+    def test_registry_rebuild_preserves_font_packages(self):
+        fonts = [{'name': 'noto_sans_jp', 'scripts': ['ja'], 'license': 'OFL-1.1',
+                  'versions': [{'version': '2.4.0', 'regular': {'url': 'font.otf', 'sha256': 'a' * 64}}]}]
+        with tempfile.TemporaryDirectory() as temporary:
+            old = Path(temporary) / 'packages.json'
+            old.write_text(json.dumps({'schema': 2, 'plugins': [], 'fonts': fonts}))
+            output = io.StringIO()
+            with patch.object(registry, 'releases', return_value=iter([])), contextlib.redirect_stdout(output):
+                registry.main(old, 'get-dre/dre')
+        self.assertEqual(json.loads(output.getvalue())['fonts'], fonts)
+
     def test_signatures_and_catalog_settings_reach_the_index(self):
         archive = 'dre-mcp-0.1.0-rc.2-linux-x86_64.tar.gz'
         release = {'tag_name': 'dre-mcp-v0.1.0-rc.2', 'assets': [

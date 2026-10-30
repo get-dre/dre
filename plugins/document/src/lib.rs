@@ -213,7 +213,21 @@ impl Format for Document {
         let base = rendered.base_dir.as_path();
         if self.pdf {
             let mut warnings = Vec::new();
-            let mut bytes = pdf::render_pdf(&rendered.html, root, base, &o.page, &ctx, &mut warnings)?;
+            let mut resolve = |font| sets.request_fonts(font).map_err(|e| e.to_string());
+            let resolver = if req.font_requests {
+                Some(&mut resolve as &mut dyn FnMut(_) -> std::result::Result<Vec<String>, String>)
+            } else {
+                None
+            };
+            let mut bytes = pdf::render_pdf_with_fonts(
+                &rendered.html,
+                root,
+                base,
+                &o.page,
+                &ctx,
+                &mut warnings,
+                resolver,
+            )?;
             if let Some(pw) = &o.password {
                 if dre_protocol::options::is_template(pw) {
                     return Err(PluginError::new(

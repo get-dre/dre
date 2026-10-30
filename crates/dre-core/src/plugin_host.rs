@@ -313,6 +313,7 @@ impl PluginHost for SubprocessHost {
         )?;
         Ok(Box::new(Subprocess {
             process: Some(process),
+            font_context: crate::context::Context::subprocess(self.env.clone()),
             _registration: registration,
         }))
     }
@@ -333,6 +334,7 @@ impl PluginHost for SubprocessHost {
 struct Subprocess {
     /// `None` only while closing.
     process: Option<PluginProcess>,
+    font_context: crate::context::Context,
     _registration: Registration,
 }
 
@@ -397,8 +399,14 @@ impl Plugin for Subprocess {
     }
 
     fn write(&mut self, r: WriteRequest) -> HostResult<()> {
-        self.process()
-            .write_begin(&r.path, &r.format, r.options, r.result_sets, r.template)
+        self.process().write_begin_with_font_requests(
+            &r.path,
+            &r.format,
+            r.options,
+            r.result_sets,
+            r.template,
+            true,
+        )
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> HostResult<()> {
@@ -410,7 +418,10 @@ impl Plugin for Subprocess {
     }
 
     fn finish(&mut self) -> HostResult<Written> {
-        let (files, warnings) = self.process().write_finish_with_warnings()?;
+        let ctx = self.font_context.clone();
+        let (files, warnings) = self
+            .process()
+            .write_finish_with_fonts(&mut |font| crate::fonts::resolve(&ctx, font))?;
         Ok(Written { files, warnings })
     }
 

@@ -44,8 +44,46 @@ pub fn render_pdf(
     ctx: &Context,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, String> {
+    render_pdf_with_fonts(html, root, base, page, ctx, warnings, None)
+}
+
+/// Lay out a PDF, asking the host for missing Japanese fonts before layout.
+/// Without a resolver (older cores), keep the previous offline rendering behavior.
+pub fn render_pdf_with_fonts(
+    html: &str,
+    root: &Path,
+    base: &Path,
+    page: &PageOptions,
+    ctx: &Context,
+    warnings: &mut Vec<String>,
+    resolver: Option<&mut dyn FnMut(dre_protocol::msg::FontRequest) -> Result<Vec<String>, String>>,
+) -> Result<Vec<u8>, String> {
     let (html, files) = assets::for_pdf(html, root, base)?;
-    let (html, project_fonts) = fonts::prepare(&html, &files, warnings)?;
+    let (mut html, project_fonts) = fonts::prepare(&html, &files, warnings)?;
+    let mut fallback_fonts = Vec::new();
+    if fonts::needs_japanese(&html, &project_fonts)
+        && let Some(resolve) = resolver
+    {
+        let request = dre_protocol::msg::FontRequest {
+            name: "noto_sans_jp".into(),
+            version: "2.4.0".into(),
+        };
+        match resolve(request) {
+            Ok(paths) => {
+                for path in paths {
+                    let bytes =
+                        std::fs::read(&path).map_err(|e| format!("can't read fallback font {path}: {e}"))?;
+                    let family =
+                        fonts::family_name(&bytes).ok_or_else(|| format!("invalid fallback font {path}"))?;
+                    if fallback_fonts.is_empty() {
+                        html = fonts::append_fallback(&html, &family);
+                    }
+                    fallback_fonts.push(bytes);
+                }
+            }
+            Err(e) => warnings.push(format!("Japanese PDF fallback font unavailable: {e}")),
+        }
+    }
     let mut bundle = AssetBundle::new();
     for f in fonts::BUNDLED {
         bundle
@@ -56,6 +94,11 @@ pub fn render_pdf(
         bundle
             .add_font_bytes(f.bytes)
             .map_err(|e| format!("a project font: {e}"))?;
+    }
+    for bytes in fallback_fonts {
+        bundle
+            .add_font_bytes(bytes)
+            .map_err(|e| format!("a fallback font: {e}"))?;
     }
     for (name, bytes) in files {
         bundle.add_image(name, bytes);

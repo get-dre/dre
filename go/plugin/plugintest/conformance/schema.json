@@ -242,6 +242,10 @@
                 "$ref": "#/$defs/ResultSetMeta"
               }
             },
+            "font_requests": {
+              "type": "boolean",
+              "description": "Core can answer `need_fonts` during this write. Absent on older cores."
+            },
             "template": true
           },
           "required": [
@@ -252,6 +256,32 @@
             "result_sets"
           ],
           "description": "Format: write result sets to `path`. Followed, per result set, by Arrow frames (at least one,\ncarrying the schema) and a `result_set_end`, then `finish`. Replies `written`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fonts"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "paths"
+          ],
+          "description": "Reply to a font request within a write; retains the write request id."
         },
         {
           "type": "object",
@@ -1008,6 +1038,23 @@
           "properties": {
             "type": {
               "type": "string",
+              "const": "need_fonts"
+            },
+            "font": {
+              "$ref": "#/$defs/FontRequest"
+            }
+          },
+          "required": [
+            "type",
+            "font"
+          ],
+          "description": "A format needs a pinned registry font before completing its write."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
               "const": "written"
             },
             "files": {
@@ -1371,6 +1418,22 @@
         "field"
       ],
       "description": "A source's connection field naming a file only one process may write at a time."
+    },
+    "FontRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "description": "One immutable font package requested by a format plugin."
     },
     "LogLevel": {
       "type": "string",

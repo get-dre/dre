@@ -221,6 +221,64 @@ fn family_list(
     out
 }
 
+/// Japanese characters absent from every bundled and project font need Noto.
+pub fn needs_japanese(html: &str, project: &[Font]) -> bool {
+    static NON_TEXT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)<!--.*?-->|<style\b[^>]*>.*?</style>|<script\b[^>]*>.*?</script>|<[^>]*>")
+            .expect("the pattern is a valid regex")
+    });
+    static ENTITY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").expect("the pattern is a valid regex"));
+    let text = NON_TEXT.replace_all(html, "");
+    let text = ENTITY.replace_all(&text, |c: &Captures| {
+        let number = c[1]
+            .strip_prefix('x')
+            .map(|n| u32::from_str_radix(n, 16))
+            .unwrap_or_else(|| c[1].parse());
+        number
+            .ok()
+            .and_then(char::from_u32)
+            .map(|c| c.to_string())
+            .unwrap_or_default()
+    });
+    let faces: Vec<_> = BUNDLED
+        .iter()
+        .copied()
+        .chain(project.iter().map(|f| f.bytes.as_slice()))
+        .filter_map(|bytes| ttf_parser::Face::parse(bytes, 0).ok())
+        .collect();
+    text.chars().any(|c| matches!(c as u32, 0x3000..=0x30ff | 0x31f0..=0x31ff | 0x3400..=0x9fff | 0xff00..=0xffef | 0x20000..=0x323af)
+        && !faces.iter().any(|f| f.glyph_index(c).is_some_and(|id| id.0 != 0)))
+}
+
+/// Append the downloaded family after each project's declared family and Plex.
+pub fn append_fallback(html: &str, family: &str) -> String {
+    let fix = |css: &str| {
+        FAMILY_DECL
+            .replace_all(css, |c: &Captures| {
+                let value = c[2].trim();
+                let (value, important) = if let Some(i) = value.to_ascii_lowercase().find("!important") {
+                    (value[..i].trim(), " !important")
+                } else {
+                    (value, "")
+                };
+                format!("{}{value}, \"{family}\"{important}", &c[1])
+            })
+            .into_owned()
+    };
+    let html = STYLE_BLOCK.replace_all(html, |c: &Captures| format!("{}{}{}", &c[1], fix(&c[2]), &c[3]));
+    STYLE_ATTR
+        .replace_all(&html, |c: &Captures| match c.get(2) {
+            Some(v) => format!("{}\"{}\"", &c[1], fix(v.as_str()).replace('"', "'")),
+            None => format!(
+                "{}'{}'",
+                &c[1],
+                fix(c.get(3).map_or("", |m| m.as_str())).replace('\'', "\"")
+            ),
+        })
+        .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
