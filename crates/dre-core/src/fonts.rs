@@ -71,6 +71,20 @@ pub fn resolve(ctx: &Context, request: &FontRequest) -> Result<Vec<String>, Stri
             .join(&request.version),
     )
     .map_err(|e| format!("can't locate font cache: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("can't create font cache: {e}"))?;
+    // Hold one OS lock through validation and publication, across threads and processes.
+    // Concurrent replacements can fail on Windows even when each individual write is atomic.
+    // Keep this lock file in place: deleting it would let waiters lock different files.
+    let cache_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join("cache.lock"))
+        .map_err(|e| format!("can't open font cache lock: {e}"))?;
+    cache_lock
+        .lock()
+        .map_err(|e| format!("can't lock font cache: {e}"))?;
     let manifest = dir.join("font.json");
     let cached: Option<Version> = std::fs::read(&manifest)
         .ok()
@@ -88,7 +102,6 @@ pub fn resolve(ctx: &Context, request: &FontRequest) -> Result<Vec<String>, Stri
             .find(|p| p.name == request.name)
             .and_then(|p| p.versions.into_iter().find(|v| v.version == request.version))
             .ok_or_else(|| format!("font {} {} isn't in the registry", request.name, request.version))?;
-        std::fs::create_dir_all(&dir).map_err(|e| format!("can't create font cache: {e}"))?;
         for (name, artifact) in version.files() {
             if !valid_checksum(&artifact.sha256) {
                 return Err(format!("font {} {name} needs a SHA-256 checksum", request.name));
