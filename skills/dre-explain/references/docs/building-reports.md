@@ -36,7 +36,8 @@ selected reports. Errors discovered in other reports produce a stderr warning an
 `project_errors` in each Binding's [`run_results.json`](manifest.md#run_resultsjson), with a
 `path`, `code` and `message` for each affected report. Selected reports and the SQL, templates,
 profiles, lookups and macros they need must still be valid. A broken project-wide file still
-stops the run.
+stops the run. An unreadable YAML file whose role cannot be established also stops it; restore
+readable UTF-8 configuration before running a selection.
 
 Discovery includes report YAML structure, references, cheap template preflight checks, profile
 names and plugin declarations where provider metadata is available. It does not execute other

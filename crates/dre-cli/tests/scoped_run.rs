@@ -223,3 +223,98 @@ fn other_report_messages_follow_secret_masking_in_text_and_json_logs() {
         serde_json::from_str::<serde_json::Value>(line).unwrap();
     }
 }
+
+#[test]
+fn a_missing_profile_records_every_report_that_uses_it() {
+    for setting in [
+        "profile: absent",
+        "output: {destination: {profile: absent, path: out.csv}}",
+    ] {
+        let p = project();
+        p.write("reports/bad/bad.yml", &format!("queries: [bad]\n{setting}\n"));
+        p.write(
+            "reports/other/other.yml",
+            &format!("queries: [other]\n{setting}\n"),
+        );
+        p.write("reports/other/other.sql", "rows 1");
+        let run = p.dre("run", &["good"]);
+        run.ok();
+        assert!(
+            run.stderr.contains("2 other reports have errors"),
+            "{setting}: {run:?}"
+        );
+        let results = p.json("target/run/good/default/run_results.json");
+        let errors = results["project_errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 2, "{setting}: {errors:?}");
+        assert_eq!(errors[0]["path"], "reports/bad/bad.yml");
+        assert_eq!(errors[1]["path"], "reports/other/other.yml");
+        assert!(
+            errors.iter().all(|error| error["code"] == "unknown-profile"),
+            "{setting}: {errors:?}"
+        );
+        p.write("reports/good/good.yml", &format!("queries: [good]\n{setting}\n"));
+        p.dre("run", &["good"]).failed().says("absent");
+    }
+}
+
+#[test]
+fn a_schedule_for_an_unbuilt_report_does_not_block_another_report() {
+    let p = project();
+    p.write("reports/bad/bad.yml", "name: bad\noutput: {format: csv}\n");
+    std::fs::remove_file(p.path("reports/bad/bad.sql")).unwrap();
+    p.write(
+        "schedules.yml",
+        "- {name: nightly, report: bad, cron: '0 6 * * *'}\n",
+    );
+    p.dre("run", &["good"]).ok();
+    let results = p.json("target/run/good/default/run_results.json");
+    assert_eq!(results["project_errors"][0]["path"], "reports/bad/bad.yml");
+    p.dre("run", &["bad"]).failed();
+    p.dre("run", &["--schedule", "nightly"]).failed();
+    p.dre("validate", &[]).failed();
+    p.write(
+        "schedules.yml",
+        "- {name: nightly, report: nonexistent, cron: '0 6 * * *'}\n",
+    );
+    p.dre("run", &["good"]).failed().says("doesn't exist");
+}
+
+#[test]
+fn a_schedule_can_name_a_set_of_a_report_that_cannot_be_built() {
+    let p = project();
+    p.write("reports/bad/bad.yml", "name: bad\nsets: [{name: daily}]\n");
+    std::fs::remove_file(p.path("reports/bad/bad.sql")).unwrap();
+    p.write(
+        "schedules.yml",
+        "- {name: nightly, report: bad, set: daily, cron: '0 6 * * *'}\n",
+    );
+    p.dre("run", &["good"]).ok();
+    p.dre("run", &["--schedule", "nightly"]).failed();
+    p.dre("validate", &[]).failed();
+}
+
+#[test]
+fn malformed_flow_yaml_with_global_keys_still_blocks_a_selected_report() {
+    for yaml in [
+        "{sources: [], queries: [bad]",
+        r#"{"sour\u0063es": [], queries: [bad]"#,
+        "{queries: [bad], 'plugins': [csv]",
+    ] {
+        let p = project();
+        p.write("reports/bad/bad.yml", yaml);
+        p.dre("run", &["good"]).failed().says("yaml-syntax");
+    }
+    let p = project();
+    p.write(
+        "reports/bad/bad.yml",
+        "{queries: [bad], meta: {sources: [], note: 'plugins: [csv]'}",
+    );
+    p.dre("run", &["good"]).ok();
+}
+
+#[test]
+fn unreadable_yaml_whose_role_is_unknown_is_a_project_error() {
+    let p = project();
+    std::fs::write(p.path("reports/bad/bad.yml"), [0xff]).unwrap();
+    p.dre("run", &["good"]).failed().says("io-error");
+}

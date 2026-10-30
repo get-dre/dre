@@ -167,11 +167,18 @@ impl Project {
 
 impl Usage {
     pub(super) fn for_selection(project: &Project, scope: &Option<BTreeSet<String>>) -> Self {
+        Self::for_reports(
+            project,
+            project.reports().iter().filter(|r| in_scope(scope, &r.name)),
+        )
+    }
+
+    pub(super) fn for_reports<'a>(project: &Project, reports: impl Iterator<Item = &'a Report>) -> Self {
         let mut used = Self::default();
         if let Some(profile) = project.default_profile() {
             used.connection(profile, Some(PROJECT_FILE.into()), project.default_profile_line);
         }
-        for report in project.reports().iter().filter(|r| in_scope(scope, &r.name)) {
+        for report in reports {
             let file = Some(report.file.clone());
             for binding in &report.bindings {
                 if let Some(parsed) = &binding.parsed {
@@ -200,7 +207,9 @@ impl Usage {
                     }
                 }
                 for output in &binding.outputs {
-                    used.format(&output.format, &format!("report `{}`", report.name), &report.file);
+                    if !output.is_message() {
+                        used.format(&output.format, &format!("report `{}`", report.name), &report.file);
+                    }
                 }
             }
         }
@@ -284,20 +293,82 @@ pub(super) struct ReportIdentity {
     pub tags: Vec<String>,
 }
 
+/// Recover role information with the same YAML tokenizer as the config parser. Tokens before
+/// a syntax error still distinguish top-level keys from nested keys and scalar contents.
+fn malformed_yaml_is_global(text: &str) -> bool {
+    use serde_saphyr::granit_parser::{ErrorKind, Scanner, StrInput, TokenType};
+    use std::borrow::Cow;
+
+    // An unclosed root flow mapping can prevent even its first key from being emitted.
+    // Close only the tokenizer's named missing delimiters in a bounded, role-only probe.
+    // The original text and syntax diagnostic remain unchanged and are never executed.
+    let mut probe: Cow<'_, str> = Cow::Borrowed(text);
+    for _ in 0..16 {
+        let mut depth = 0usize;
+        let mut root_key = false;
+        let mut report_key_seen = false;
+        let mut closer = None;
+        for token in Scanner::new(StrInput::new(&probe)) {
+            let token = match token {
+                Ok(token) => token,
+                Err(error) => {
+                    closer = match error.kind() {
+                        ErrorKind::UnclosedFlowCollection { open: '{' } => Some('}'),
+                        ErrorKind::UnclosedFlowCollection { open: '[' } => Some(']'),
+                        _ => return !report_key_seen,
+                    };
+                    break;
+                }
+            };
+            match token.token_type() {
+                TokenType::BlockMappingStart
+                | TokenType::FlowMappingStart
+                | TokenType::BlockSequenceStart
+                | TokenType::FlowSequenceStart => {
+                    if root_key {
+                        return true;
+                    }
+                    depth += 1;
+                }
+                TokenType::BlockEnd | TokenType::FlowMappingEnd | TokenType::FlowSequenceEnd => {
+                    depth = depth.saturating_sub(1);
+                    root_key = false;
+                }
+                TokenType::Key => root_key = depth == 1,
+                TokenType::Scalar(_, key) if root_key => {
+                    if PLUGIN_KEYS.contains(&key.as_ref())
+                        || matches!(key.as_ref(), SOURCES_KEY | "packages" | "<<")
+                    {
+                        return true;
+                    }
+                    report_key_seen |= REPORT_KEYS.contains(&key.as_ref());
+                    root_key = false;
+                }
+                TokenType::Alias(_) if root_key => return true,
+                TokenType::Value => root_key = false,
+                _ => {}
+            }
+        }
+        let Some(closer) = closer else {
+            return !report_key_seen;
+        };
+        probe.to_mut().push(closer);
+    }
+    // Recovery exhausted: the file's role cannot be established safely.
+    true
+}
+
 impl Loader {
     pub(super) fn record_unreadable_report(&mut self, file: &Path) {
         if !file.starts_with(REPORTS_DIR) {
             return;
         }
-        if let Ok(text) = std::fs::read_to_string(self.root.join(file)) {
-            let shared = text
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .map(|(key, _)| key.trim().trim_matches(['\'', '"']))
-                .any(|key| matches!(key, "sources" | "plugins" | "packages"));
-            if shared {
-                self.global_files.insert(file.to_path_buf());
-            }
+        let Ok(text) = std::fs::read_to_string(self.root.join(file)) else {
+            self.global_files.insert(file.to_path_buf());
+            return;
+        };
+        if malformed_yaml_is_global(&text) {
+            self.global_files.insert(file.to_path_buf());
         }
         let folder = folder_segments(file.parent().unwrap_or(Path::new("")));
         let name = folder

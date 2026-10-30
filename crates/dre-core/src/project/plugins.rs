@@ -37,17 +37,28 @@ impl Loader {
                     continue;
                 }
                 if !profiles.declares(role, name) {
-                    self.diags.error(
-                        Code::UnknownProfile,
-                        file.clone(),
-                        *line,
-                        format!(
-                            "{} profile `{name}` isn't defined under `{}:` in {}",
-                            role.as_str(),
-                            profiles.section_key(role),
-                            profiles.path.display()
-                        ),
-                    );
+                    let mut locations =
+                        if self.scope.is_some() && file.as_deref() != Some(Path::new(PROJECT_FILE)) {
+                            Usage::profile_locations(project, role, name)
+                        } else {
+                            Vec::new()
+                        };
+                    if locations.is_empty() {
+                        locations.push((file.clone(), *line));
+                    }
+                    for (file, line) in locations {
+                        self.diags.error(
+                            Code::UnknownProfile,
+                            file,
+                            line,
+                            format!(
+                                "{} profile `{name}` isn't defined under `{}:` in {}",
+                                role.as_str(),
+                                profiles.section_key(role),
+                                profiles.path.display()
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -361,6 +372,22 @@ pub(super) struct Usage {
 }
 
 impl Usage {
+    /// Shared profiles need a location for every owning report in scoped diagnostics.
+    fn profile_locations(project: &Project, role: Role, name: &str) -> Vec<(Option<PathBuf>, Option<usize>)> {
+        let mut locations = BTreeMap::new();
+        for report in project.reports() {
+            let used = Self::for_reports(project, std::iter::once(report));
+            let profiles = match role {
+                Role::Connection => used.connections,
+                Role::Destination => used.destinations,
+            };
+            if let Some((file, line)) = profiles.get(name) {
+                locations.insert(file.clone(), *line);
+            }
+        }
+        locations.into_iter().collect()
+    }
+
     pub(super) fn include_project_wide(&mut self, other: &Self) {
         for (name, at) in &other.connections {
             if at.0.as_deref() == Some(Path::new(PROJECT_FILE)) {

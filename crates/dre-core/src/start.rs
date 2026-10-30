@@ -387,7 +387,7 @@ pub fn run(ctx: &Context, mut req: RunRequest, console: &mut dyn Console) -> Sta
     opts.scheduled_at = crate::settings::run_at(env).ok().flatten();
     opts.manifest_checksum = manifest_checksum;
     if let Some(name) = &opts.schedule
-        && !project.schedule(name).is_some()
+        && project.schedule(name).is_none()
     {
         console.error(&crate::run::unknown_schedule(&project, name));
         return Started::NotStarted;

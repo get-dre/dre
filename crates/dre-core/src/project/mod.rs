@@ -1508,7 +1508,21 @@ impl Loader {
         }
         let broken_timings;
         (project.timings, broken_timings) = self.parse_timings(&timing_files);
-        project.schedules = self.parse_schedules(&schedule_files, &project, &broken_timings);
+        // Broken report definitions retain their identities for schedule membership. This
+        // catalog is never executed; selecting that report still keeps its own errors fatal.
+        let unbuilt_reports: BTreeSet<String> = self
+            .report_candidates
+            .iter()
+            .filter(|candidate| self.scope.is_some() && project.report(&candidate.name).is_none())
+            .map(|candidate| candidate.name.clone())
+            .collect();
+        let schedule_catalog = (!unbuilt_reports.is_empty()).then(|| self.selection_catalog(&project));
+        project.schedules = self.parse_schedules(
+            &schedule_files,
+            schedule_catalog.as_ref().unwrap_or(&project),
+            &broken_timings,
+            &unbuilt_reports,
+        );
         self.apply_schedules(&mut project);
         self.check_template_files(&project);
         self.partition_report_errors(&mut project);
