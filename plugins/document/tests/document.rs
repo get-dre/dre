@@ -1196,11 +1196,206 @@ fn a_failed_download_warns_by_script_and_still_makes_the_pdf() {
     assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-"));
     assert_eq!(warnings.len(), 2, "{warnings:?}");
     assert!(
-        warnings[0].starts_with("Arabic PDF fallback font unavailable: registry unavailable"),
+        warnings[0].starts_with(
+            "no Arabic font for this PDF, so its Arabic text shows as boxes (registry unavailable)"
+        ),
         "{warnings:?}"
     );
     assert!(
-        warnings[1].starts_with("Devanagari PDF fallback font unavailable"),
+        warnings[1].starts_with("no Devanagari font for this PDF")
+            && warnings[1].contains("isn't a font file"),
         "{warnings:?}"
     );
+}
+
+/// Write a PDF of `html` with `options`, answering every font request with core's error (as an
+/// offline core with nothing cached does), `repeated` when core already gave it this run. The
+/// requested packages, and the warnings or the error.
+fn write_offline(
+    html: &str,
+    options: Value,
+    repeated: bool,
+) -> (Vec<String>, Result<Vec<String>, String>, bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("offline.html");
+    std::fs::write(&template, html).unwrap();
+    let out = dir.path().join("offline.pdf");
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    let Value::Object(options) = options else { panic!() };
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        "pdf",
+        options,
+        vec![],
+        Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let mut requested = Vec::new();
+    let result = p
+        .write_finish_with_fonts(&mut |font| {
+            requested.push(font.name.clone());
+            Err(dre_protocol::msg::FontError {
+                message: "can't reach the registry".into(),
+                repeated,
+            })
+        })
+        .map(|(_, warnings)| warnings)
+        .map_err(|e| e.to_string());
+    let _ = p.close();
+    (requested, result, out.exists())
+}
+
+#[test]
+fn offline_pdf_is_made_and_warns_per_script_with_the_three_fixes() {
+    let html = "<html lang=\"ja\"><body><p>東京</p><p>مرحبا</p></body></html>";
+    let (requested, warnings, made) = write_offline(html, json!({}), false);
+    assert_eq!(requested, ["noto_sans_jp", "noto_sans_arabic"]);
+    assert!(made, "the PDF is still made, with boxes");
+    assert_eq!(
+        warnings.unwrap(),
+        [
+            "no Japanese font for this PDF, so its Japanese text shows as boxes (can't reach the registry). To fix it, set `DRE_REGISTRY_URL` to an offline copy of the registry, run `dre fonts install ja` on a connected machine and copy its `~/.dre/fonts` here, or add a font covering Japanese to the project with `@font-face`",
+            "no Arabic font for this PDF, so its Arabic text shows as boxes (can't reach the registry). To fix it, set `DRE_REGISTRY_URL` to an offline copy of the registry, run `dre fonts install ar` on a connected machine and copy its `~/.dre/fonts` here, or add a font covering Arabic to the project with `@font-face`",
+        ]
+    );
+}
+
+#[test]
+fn a_font_core_already_reported_this_run_is_not_warned_again() {
+    let (_, warnings, made) = write_offline("<html lang=\"ja\"><p>東京</p></html>", json!({}), true);
+    assert!(made);
+    assert_eq!(warnings.unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn missing_fonts_error_fails_the_pdf_naming_each_script() {
+    let html = "<html lang=\"ja\"><body><p>東京</p><p>مرحبا</p></body></html>";
+    // Even when core already reported the fonts: each row's PDF fails.
+    let (_, result, made) = write_offline(html, json!({"missing_fonts": "error"}), true);
+    let e = result.unwrap_err();
+    assert!(!made, "no PDF with boxes");
+    assert!(
+        e.contains("no Japanese or Arabic font for this PDF (Japanese: can't reach the registry; Arabic: can't reach the registry), so it isn't made (`missing_fonts: error`)"),
+        "{e}"
+    );
+    assert!(
+        e.contains("run `dre fonts install ja ar` on a connected machine"),
+        "{e}"
+    );
+}
+
+#[test]
+fn missing_fonts_error_needs_a_core_that_fetches_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("legacy.html");
+    std::fs::write(&template, "<html lang=\"ja\"><p>東京</p></html>").unwrap();
+    let e = write(
+        "pdf",
+        dir.path(),
+        Some(template),
+        json!({"missing_fonts": "error"}),
+        1,
+    )
+    .unwrap_err();
+    assert!(e.contains("no Japanese font") && e.contains("DRE 0.9.0"), "{e}");
+}
+
+#[test]
+fn missing_fonts_takes_warn_or_error_and_only_on_pdf() {
+    let log: LogSink = Arc::new(|_, _| {});
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        log.clone(),
+        None,
+    )
+    .unwrap();
+    for (value, ok) in [("warn", true), ("error", true), ("fail", false)] {
+        let Value::Object(o) = json!({ "missing_fonts": value }) else {
+            panic!()
+        };
+        let (errors, _) = p.validate_with(o, None).unwrap();
+        assert_eq!(errors.is_empty(), ok, "{value}: {errors:?}");
+    }
+    let _ = p.close();
+    let mut p =
+        PluginProcess::start_for(bin(), Some(&PluginId::new(Kind::Format, "html")), log, None).unwrap();
+    let Value::Object(o) = json!({"missing_fonts": "error"}) else {
+        panic!()
+    };
+    let (errors, _) = p.validate_with(o, None).unwrap();
+    assert!(
+        errors.iter().any(|e| e.contains("the reader's fonts")),
+        "{errors:?}"
+    );
+    let _ = p.close();
+}
+
+#[test]
+fn an_offline_registry_copy_serves_fonts_like_plugins() {
+    // A copy of the registry on disk: `DRE_REGISTRY_URL` is a plain path to its index, whose
+    // artifact URLs are plain paths too. No network.
+    let dir = tempfile::tempdir().unwrap();
+    let mirror = dir.path().join("mirror");
+    std::fs::create_dir(&mirror).unwrap();
+    let font = mirror.join("font.ttf");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/IBMPlexSans-Regular.ttf"),
+        &font,
+    )
+    .unwrap();
+    // Independent SHA-256 literal of the bundled Plex Sans Regular (`shasum -a 256`).
+    let sum = "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5";
+    let artifact = json!({"url": font, "sha256": sum});
+    let registry = mirror.join("packages.json");
+    std::fs::write(
+        &registry,
+        json!({"schema":2,"plugins":[],"fonts":[{"name":"noto_sans_jp","license":"OFL-1.1",
+            "scripts":["ja"],"versions":[{"version":"2.4.0","regular":artifact,"bold":artifact,
+            "license":artifact}]}]})
+        .to_string(),
+    )
+    .unwrap();
+    let template = dir.path().join("offline.html");
+    std::fs::write(&template, "<html lang=\"ja\"><p>東京</p></html>").unwrap();
+    let home = dir.path().join("home");
+    let env = dre_core::context::Env::from_vars([("DRE_REGISTRY_URL", registry.to_str().unwrap())])
+        .with_home(home.clone());
+    let run = dre_core::context::Context::subprocess(env);
+    let mut plugin = run
+        .host()
+        .start(
+            &dre_core::plugins::Located {
+                path: bin().to_path_buf(),
+                plugin: PluginId::new(Kind::Format, "pdf"),
+                package: "document".into(),
+            },
+            Arc::new(|_, _| {}),
+            None,
+        )
+        .unwrap();
+    plugin
+        .write(dre_core::plugin_host::WriteRequest {
+            path: dir.path().join("offline.pdf").to_string_lossy().into_owned(),
+            format: "pdf".into(),
+            options: Default::default(),
+            result_sets: vec![],
+            template: Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        })
+        .unwrap();
+    let written = plugin.finish().unwrap();
+    plugin.close();
+    assert!(
+        !written.warnings.iter().any(|w| w.contains("no Japanese font")),
+        "{:?}",
+        written.warnings
+    );
+    assert!(home.join(".dre/fonts/noto_sans_jp/2.4.0/regular.otf").is_file());
 }

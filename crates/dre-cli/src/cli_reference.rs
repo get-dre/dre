@@ -28,6 +28,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("plugin update", "dre plugin update postgres"),
     ("plugin remove", "dre plugin remove duckdb@1.1.0"),
     ("system update", "dre system update --check"),
+    ("fonts install", "dre fonts install ja zh-Hans ar"),
+    ("fonts ls", "dre fonts ls"),
     ("explain", "dre explain unknown-key"),
     ("history", "dre history monthly_revenue --latest --path"),
     ("unlock", "dre unlock monthly_revenue --binding client_a"),

@@ -473,8 +473,12 @@ impl ResultSets<'_> {
     }
 
     /// Ask core for an immutable registry font after consuming all result sets.
-    /// Only call when `WriteRequest::font_requests` is true.
-    pub fn request_fonts(&mut self, font: crate::msg::FontRequest) -> Result<Vec<String>> {
+    /// Only call when `WriteRequest::font_requests` is true. The outer error is a protocol
+    /// failure; the inner one is core's reason it couldn't supply the font.
+    pub fn request_fonts(
+        &mut self,
+        font: crate::msg::FontRequest,
+    ) -> Result<std::result::Result<Vec<String>, crate::msg::FontError>> {
         if self.metas.len() != 0 {
             return Err("read all result sets before requesting fonts".into());
         }
@@ -488,10 +492,14 @@ impl ResultSets<'_> {
         send(&Response::NeedFonts { font });
         match self.input.read()? {
             Frame::Json(v) => match serde_json::from_value::<crate::msg::Envelope<Request>>(v)?.body {
-                Request::Fonts { paths, error: None } => Ok(paths),
                 Request::Fonts {
-                    error: Some(error), ..
-                } => Err(error.into()),
+                    paths, error: None, ..
+                } => Ok(Ok(paths)),
+                Request::Fonts {
+                    error: Some(message),
+                    repeated,
+                    ..
+                } => Ok(Err(crate::msg::FontError { message, repeated })),
                 other => Err(format!("expected font paths, got {other:?}").into()),
             },
             other => Err(format!("expected font paths, got {other:?}").into()),

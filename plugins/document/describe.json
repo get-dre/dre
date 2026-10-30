@@ -85,6 +85,17 @@
         "type": "string",
         "description": "an open password: the PDF is encrypted with AES-256 and opens only with it; Jinja like `{{ each.pdf_password }}`",
         "required": false
+      },
+      {
+        "name": "missing_fonts",
+        "type": "string",
+        "description": "when a script's font can't be fetched (offline, nothing cached): `warn` makes the PDF with boxes for its characters and warns once per script per run; `error` fails the output (each row, per row) instead",
+        "required": false,
+        "default": "warn",
+        "choices": [
+          "warn",
+          "error"
+        ]
       }
     ]
   }

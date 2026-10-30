@@ -185,7 +185,10 @@ updated index. Preserve its existing plugin, extension and font entries. No new 
 release or tag is needed. Registry rebuilds preserve the `fonts` array. Mirrors can copy the
 index and artifacts and replace their URLs with mirror locations, as for plugins. Downloads use
 core's existing registry transport and SHA-256 verification; verified font files and their OFL
-text are cached under `~/.dre/fonts/<name>/<version>/`.
+text are cached under `~/.dre/fonts/<name>/<version>/`. `dre fonts install <script>...` fills that cache ahead of
+a run with each matching package's newest version, matching a script to an entry's `scripts`
+case-insensitively (`ar`, `he`, `hi`, `mr`, `ne`, `th` and the `zh` region codes also name their
+script); `dre fonts ls` lists the cache.
 
 ## Publishing a release
 
