@@ -508,6 +508,8 @@ Subcommands:
 
 Download and verify fallback fonts into ~/.dre/fonts ahead of a run: by script (`ja`, `zh-Hans`, `zh-Hant`, `ko`, `Arab`, `Hebr`, `Deva`, `Thai`) or language (`ar`, `he`, `hi`, `th`, `zh`, `zh-TW`), or `--all`.
 
+Copy ~/.dre/fonts to an offline machine afterwards, or run it in a Docker image build. It installs each package's newest registry version. `dre fonts --help` explains how PDFs pick fonts (the `lang` rule) and the other offline routes.
+
 ```text
 dre fonts install [OPTIONS] [SCRIPTS]...
 ```

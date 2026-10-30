@@ -26,7 +26,6 @@ static LANG: LazyLock<Regex> = LazyLock::new(|| {
         .expect("the pattern is a valid regex")
 });
 
-/// The page options, used where the template's CSS sets no `@page`.
 /// What a PDF does when a script's fallback font can't be had (`missing_fonts`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MissingFonts {
@@ -37,6 +36,7 @@ pub enum MissingFonts {
     Error,
 }
 
+/// The page options, used where the template's CSS sets no `@page`.
 pub struct PageOptions {
     pub size: String,
     pub landscape: bool,
@@ -196,7 +196,6 @@ pub fn render_pdf_with_fonts(
     }
 }
 
-/// A fetched package's files and the family inside them. Any unreadable file fails the package,
 /// The ways to get a missing font, for `codes` (`dre fonts install` codes, space-separated) and
 /// `which` (the script, or "those scripts").
 fn fixes(codes: &str, which: &str) -> String {
@@ -222,16 +221,20 @@ fn missing_fonts_error(unavailable: &[(fallback::Noto, dre_protocol::msg::FontEr
         .map(|(n, e)| format!("{}: {}", n.label(), e.message))
         .collect();
     let codes: Vec<_> = unavailable.iter().map(|(n, _)| n.code()).collect();
-    let which = match labels.as_slice() {
-        [one] => (*one).to_string(),
-        _ => "those scripts".into(),
-    };
     format!(
         "no {} font for this PDF ({}), so it isn't made (`missing_fonts: error`). {}",
         or_list(&labels),
         reasons.join("; "),
-        fixes(&codes.join(" "), &which)
+        fixes(&codes.join(" "), which(&labels))
     )
+}
+
+/// The script, or "those scripts" for several.
+fn which<'a>(labels: &[&'a str]) -> &'a str {
+    match labels {
+        [one] => one,
+        _ => "those scripts",
+    }
 }
 
 /// "A", "A or B", "A, B or C".
@@ -243,7 +246,8 @@ fn or_list(items: &[&str]) -> String {
     }
 }
 
-/// which becomes a warning: a fallback font never fails the PDF.
+/// A fetched package's files and the family inside them. Any unreadable file fails the package,
+/// which counts as a missing font: a warning, or an error with `missing_fonts: error`.
 fn load_fallback(paths: &[String]) -> Result<(String, Vec<Vec<u8>>), String> {
     let mut family = None;
     let mut files = Vec::new();

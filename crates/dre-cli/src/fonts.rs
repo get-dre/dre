@@ -30,6 +30,10 @@ pub enum FontsCommand {
     /// Download and verify fallback fonts into ~/.dre/fonts ahead of a run: by script (`ja`,
     /// `zh-Hans`, `zh-Hant`, `ko`, `Arab`, `Hebr`, `Deva`, `Thai`) or language (`ar`, `he`, `hi`,
     /// `th`, `zh`, `zh-TW`), or `--all`.
+    ///
+    /// Copy ~/.dre/fonts to an offline machine afterwards, or run it in a Docker image build. It
+    /// installs each package's newest registry version. `dre fonts --help` explains how PDFs pick
+    /// fonts (the `lang` rule) and the other offline routes.
     Install(InstallArgs),
     /// List the cached fonts, the scripts each covers, and whether its files verify.
     Ls,
@@ -48,8 +52,8 @@ pub struct InstallArgs {
 /// `dre fonts install`.
 pub fn install(ctx: &dre_core::Context, a: &InstallArgs, printer: &Printer) -> ExitCode {
     // An empty list asks for every package; clap makes it `--all` only.
-    let scripts = if a.all { Vec::new() } else { a.scripts.clone() };
-    match dre_core::fonts::install(ctx, &scripts) {
+    let scripts: &[String] = if a.all { &[] } else { &a.scripts };
+    match dre_core::fonts::install(ctx, scripts) {
         Ok(installed) => {
             for f in installed {
                 let verb = if f.downloaded { "Installed" } else { "Cached" };

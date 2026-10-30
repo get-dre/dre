@@ -3,6 +3,7 @@
 use serde_json::json;
 
 /// `dre fonts <args>` with `home` as HOME and `registry` as the registry: exit code and output.
+/// Not `TestProject::dre_env`: `dre fonts` takes no project, so no `--project-dir`.
 fn dre_fonts(home: &std::path::Path, registry: &std::path::Path, args: &[&str]) -> (i32, String) {
     let out = assert_cmd::Command::cargo_bin("dre")
         .unwrap()

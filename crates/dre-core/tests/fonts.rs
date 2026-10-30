@@ -189,3 +189,25 @@ fn install_all_takes_every_package_and_a_second_install_downloads_nothing() {
     let again = dre_core::fonts::install(&ctx, &["ja".into()]).unwrap();
     assert!(!again[0].downloaded);
 }
+
+#[test]
+fn a_registry_font_name_never_leaves_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("font.otf");
+    std::fs::write(&file, b"font bytes").unwrap();
+    let sum = "ee2e88308610019dce3856035fb572b7675dc9d4c990091374349476b5beecb1";
+    let a = json!({"url": file, "sha256": sum});
+    let registry = dir.path().join("packages.json");
+    std::fs::write(
+        &registry,
+        json!({"schema":2,"plugins":[],"fonts":[{"name":"../../escape","scripts":["ja"],
+            "versions":[{"version":"1.0.0","regular":a,"bold":a,"license":a}]}]})
+        .to_string(),
+    )
+    .unwrap();
+    let env =
+        Env::from_vars([("DRE_REGISTRY_URL", registry.to_str().unwrap())]).with_home(dir.path().join("home"));
+    let err = dre_core::fonts::install(&Context::subprocess(env), &["ja".into()]).unwrap_err();
+    assert!(err.contains("invalid font package name"), "{err}");
+    assert!(!dir.path().join("home/escape").exists());
+}

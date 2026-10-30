@@ -53,9 +53,11 @@ impl Version {
     }
 }
 
-/// One run's font answers, shared by its plugin processes: each package is resolved once, so an
-/// offline run tries the registry once per font rather than once per row, and only the first
-/// answer to a failed font is new to the person (later ones are `repeated`).
+/// The font answers of one plugin host (one `dre` command, so one run), shared by its plugin
+/// processes: each package is resolved once, so an offline run tries the registry once per font
+/// rather than once per row, and only the first answer to a failed font is new to the person
+/// (later ones are `repeated`). A failure is kept for the host's life: a long-lived host would
+/// need a new one per run to retry.
 #[derive(Default)]
 pub struct RunFonts {
     answers: Mutex<HashMap<(String, String), Arc<Answer>>>,
@@ -98,16 +100,6 @@ fn valid_checksum(sum: &str) -> bool {
 /// Resolve an exact font version, using the verified cache before contacting the registry.
 /// The registry's optional `fonts` sibling leaves older plugin index readers unchanged.
 pub fn resolve(ctx: &Context, request: &FontRequest) -> Result<Vec<String>, String> {
-    // A plugin controls this request: never let it choose a path outside the cache.
-    if request.name.is_empty()
-        || !request
-            .name
-            .bytes()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
-        || semver::Version::parse(&request.version).is_err()
-    {
-        return Err("invalid font package name or version".into());
-    }
     let mut index = None;
     let (dir, _) = ensure(ctx, &request.name, &request.version, || {
         let index = match &mut index {
@@ -218,11 +210,11 @@ pub fn cached(env: &Env) -> Vec<Cached> {
                 .filter_map(|(name, _)| std::fs::metadata(dir.join(name)).ok())
                 .map(|m| m.len())
                 .sum();
+            let Some(name) = package.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                continue;
+            };
             found.push(Cached {
-                name: package
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
+                name,
                 verified: version.cached(&dir),
                 version: version.version,
                 scripts: version.scripts,
@@ -325,6 +317,17 @@ fn ensure(
     version: &str,
     lookup: impl FnOnce() -> Result<Version, String>,
 ) -> Result<(PathBuf, bool), String> {
+    // A plugin or a registry chose these: never let them name a path outside the cache.
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+        || semver::Version::parse(version).is_err()
+    {
+        return Err(format!(
+            "invalid font package name or version: `{name}` `{version}`"
+        ));
+    }
     let dir = std::path::absolute(ctx.env().dre_home().join("fonts").join(name).join(version))
         .map_err(|e| format!("can't locate font cache: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("can't create font cache: {e}"))?;
