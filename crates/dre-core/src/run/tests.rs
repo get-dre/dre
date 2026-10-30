@@ -86,10 +86,14 @@ fn host(destination: Script) -> MemoryHost {
 
 /// A project with one report, `pack`, whose YAML is `report`.
 fn project(report: &str, ctx: &Context) -> (TempDir, Project) {
+    project_with_profiles(report, PROFILES, ctx)
+}
+
+fn project_with_profiles(report: &str, profiles: &str, ctx: &Context) -> (TempDir, Project) {
     let dir = tempfile::tempdir().unwrap();
     let files = [
         ("dre_project.yml", "name: packs\ndefault_profile: warehouse\n"),
-        ("profiles.yml", PROFILES),
+        ("profiles.yml", profiles),
         ("reports/pack/pack.yml", report),
         ("reports/pack/summary.sql", "select 'acme' as client, 12 as total"),
         ("reports/pack/members.sql", "select * from members"),
@@ -778,4 +782,364 @@ fn bindings_at_once_all_run_and_report_in_declaration_order() {
             .count();
         assert_eq!(starts, 3);
     }
+}
+
+#[test]
+fn formats_and_destinations_are_reused_across_outputs_and_bindings() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput:\n  - {name: first, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/first.csv'}}\n  - {name: second, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/second.csv'}}\n";
+    let (_dir, project) = project(report, &ctx);
+    let summary = run_once(
+        &ctx,
+        &project,
+        &RunOptions {
+            set: Some("all".into()),
+            ..options()
+        },
+    );
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Write").len(), 4);
+    assert_eq!(calls_of(&host, "Deliver").len(), 4);
+    let starts = calls_of(&host, "Start");
+    assert_eq!(
+        starts.iter().filter(|c| c.starts_with("format/csv")).count(),
+        1,
+        "{starts:?}"
+    );
+    assert_eq!(
+        starts
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        2,
+        "{starts:?}"
+    );
+    let closes = calls_of(&host, "Close");
+    assert_eq!(
+        closes.iter().filter(|c| c.starts_with("format/csv")).count(),
+        1,
+        "{closes:?}"
+    );
+    assert_eq!(
+        closes
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        2,
+        "{closes:?}"
+    );
+}
+
+#[test]
+fn a_failed_destination_is_closed_and_replaced_while_formats_stay_warm() {
+    let host = host(Script::new(&[]).fail(Call::Deliver, 2, "mailbox full"));
+    let ctx = context(&host);
+    let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput:\n  - {name: first, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/first.csv'}}\n  - {name: second, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/second.csv'}}\n";
+    let (_dir, project) = project(report, &ctx);
+    let summary = run_once(
+        &ctx,
+        &project,
+        &RunOptions {
+            set: Some("all".into()),
+            ..options()
+        },
+    );
+    assert!(summary.failed());
+    assert_eq!(summary.outcomes.len(), 2);
+    assert_eq!(summary.outcomes[1].status, Status::Success);
+    assert_eq!(calls_of(&host, "Deliver").len(), 4);
+    let starts = calls_of(&host, "Start");
+    assert_eq!(
+        starts.iter().filter(|c| c.starts_with("format/csv")).count(),
+        1,
+        "{starts:?}"
+    );
+    // One describe process, the original delivery process, and its replacement.
+    assert_eq!(
+        starts
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        3,
+        "{starts:?}"
+    );
+    assert_eq!(calls_of(&host, "Close").len(), starts.len());
+}
+
+#[test]
+fn cancelling_a_reused_destination_closes_every_retained_process() {
+    let host = host(Script::new(&[]).delay(Call::Deliver, Duration::from_millis(500)));
+    let ctx = context(&host);
+    let report = "queries: [summary]\nsets: [{name: east}, {name: west}, {name: north}]\noutput: {name: detail, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/detail.csv'}}\n";
+    let (_dir, project) = project(report, &ctx);
+    let opts = RunOptions {
+        set: Some("all".into()),
+        ..options()
+    };
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while calls_of(&host, "Deliver").len() < 2 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "second delivery never started"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            opts.cancel.cancel();
+            ctx.host().cancel();
+        });
+        let summary = run_once(&ctx, &project, &opts);
+        assert_eq!(summary.cancelled, Some(crate::engine::CancelReason::Interrupt));
+    });
+    assert_eq!(calls_of(&host, "Deliver").len(), 2);
+    let starts = calls_of(&host, "Start");
+    assert_eq!(
+        starts.iter().filter(|c| c.starts_with("format/csv")).count(),
+        1,
+        "{starts:?}"
+    );
+    assert_eq!(
+        starts
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        2,
+        "{starts:?}"
+    );
+    assert_eq!(calls_of(&host, "Close").len(), starts.len());
+}
+
+fn many_members(start: i64, count: usize) -> RecordBatch {
+    RecordBatch::try_from_iter([
+        (
+            "member_id",
+            Arc::new(Int64Array::from_iter_values(start..start + count as i64)) as arrow::array::ArrayRef,
+        ),
+        (
+            "name",
+            Arc::new(StringArray::from_iter_values(
+                (0..count).map(|i| format!("Member {i}")),
+            )) as arrow::array::ArrayRef,
+        ),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn per_row_chunks_reuse_processes_and_match_unsorted_detail_batches() {
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS])
+                .batches(
+                    "select * from members",
+                    vec![many_members(1, 150), many_members(151, 150)],
+                )
+                .batches(
+                    "select 'acme' as client, 12 as total",
+                    vec![many_members(151, 150), many_members(1, 150)],
+                ),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let report = "queries: [members, summary]\noutput: \n  - name: letter\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'out/{{ each.member_id }}.csv'}\n  - name: copy\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'copy/{{ each.member_id }}.csv'}\n";
+    let (dir, project) = project(report, &ctx);
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Write").len(), 600);
+    assert_eq!(calls_of(&host, "Deliver").len(), 600);
+    let row_files: Vec<std::path::PathBuf> =
+        walkdir::WalkDir::new(dir.path().join("target/run/pack/default/runs"))
+            .into_iter()
+            .map(Result::unwrap)
+            .filter(|entry| {
+                entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "csv")
+            })
+            .map(|entry| entry.into_path())
+            .collect();
+    assert_eq!(row_files.len(), 600);
+    for file in row_files {
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "summary: 1 rows\n");
+    }
+    let starts = calls_of(&host, "Start");
+    assert_eq!(
+        starts.iter().filter(|c| c.starts_with("format/csv")).count(),
+        1,
+        "{starts:?}"
+    );
+    assert_eq!(
+        starts
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        2,
+        "{starts:?}"
+    );
+    assert_eq!(calls_of(&host, "Close").len(), starts.len());
+}
+
+#[test]
+fn driver_duplicates_in_later_spool_batches_fail_before_delivery() {
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS]).batches(
+                "select * from members",
+                vec![many_members(1, 150), many_members(150, 1)],
+            ),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(PER_ROW, &ctx);
+    let summary = run_once(&ctx, &project, &options());
+    assert!(summary.failed());
+    assert!(
+        summary.outcomes[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("key `150` twice")
+    );
+    assert!(calls_of(&host, "Write").is_empty());
+    assert!(calls_of(&host, "Deliver").is_empty());
+}
+
+#[test]
+fn two_destination_profiles_of_one_kind_keep_distinct_processes() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let report = "queries: [summary]\noutput: {name: detail, format: csv, destination: [{profile: outbox, path: out/detail.csv}, {profile: archive, path: shelf/detail.csv}]}\n";
+    let (_dir, project) = project_with_profiles(report, &PROFILES.replace("type: shelf", "type: drop"), &ctx);
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Deliver").len(), 2);
+    let starts = calls_of(&host, "Start");
+    // One describe process, then one delivery process per profile.
+    assert_eq!(
+        starts
+            .iter()
+            .filter(|c| c.starts_with("destination/drop"))
+            .count(),
+        3,
+        "{starts:?}"
+    );
+    assert_eq!(calls_of(&host, "Close").len(), starts.len());
+}
+
+fn large_per_row(format: Script, changes: &str) -> (MemoryHost, Context, TempDir, Project) {
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS]).batches(
+                "select * from members",
+                vec![many_members(1, 150), many_members(151, 150)],
+            ),
+        )
+        .plugin(Kind::Format, "csv", format)
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let report = PER_ROW.replace(
+        "key: member_id}",
+        &format!("key: member_id, concurrency: 1{changes}}}"),
+    );
+    let (dir, project) = project(&report, &ctx);
+    (host, ctx, dir, project)
+}
+
+#[test]
+fn all_or_nothing_rows_deliver_after_every_chunk_has_rendered() {
+    let (host, ctx, dir, project) = large_per_row(Script::new(&[]), ", on_row_error: fail");
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Write").len(), 300);
+    assert_eq!(calls_of(&host, "Deliver").len(), 300);
+    let calls = host.calls();
+    let last_write = calls.iter().rposition(|c| c.contains(" Write ")).unwrap();
+    let first_delivery = calls.iter().position(|c| c.contains(" Deliver ")).unwrap();
+    assert!(last_write < first_delivery);
+    assert_eq!(
+        results_json(&dir)["output_results"][0]["for_each"]["succeeded"],
+        300
+    );
+}
+
+#[test]
+fn a_format_failure_in_a_later_chunk_blocks_every_delivery() {
+    let (host, ctx, dir, project) = large_per_row(
+        Script::new(&[]).fail(Call::Write, 250, "invalid row"),
+        ", on_row_error: fail",
+    );
+    let summary = run_once(&ctx, &project, &options());
+    assert!(summary.failed());
+    assert_eq!(calls_of(&host, "Write").len(), 300);
+    assert!(calls_of(&host, "Deliver").is_empty());
+    assert_eq!(results_json(&dir)["output_results"][0]["for_each"]["failed"], 300);
+    let starts = calls_of(&host, "Start");
+    assert_eq!(calls_of(&host, "Close").len(), starts.len());
+}
+
+#[test]
+fn filename_collisions_in_later_chunks_fail_before_any_row_is_written() {
+    let (host, ctx, dir, _) = large_per_row(Script::new(&[]), "");
+    let path = dir.path().join("reports/pack/pack.yml");
+    let report = std::fs::read_to_string(&path).unwrap().replace(
+        "  format: csv",
+        "  format: csv\n  file_name: '{{ each.member_id % 129 }}.csv'",
+    );
+    std::fs::write(&path, report).unwrap();
+    let (project, diags) = crate::project::load_with(dir.path(), &Default::default(), &ctx);
+    assert!(!diags.has_errors());
+    let summary = run_once(&ctx, &project.unwrap(), &options());
+    assert!(summary.failed());
+    assert!(
+        summary.outcomes[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("would both write `1.csv`")
+    );
+    assert!(calls_of(&host, "Write").is_empty());
+    assert!(calls_of(&host, "Deliver").is_empty());
+}
+
+#[test]
+fn reused_plugins_log_to_the_current_bindings_event_block() {
+    let host = host(Script::new(&[]).log_on(Call::Deliver, "sent")).plugin(
+        Kind::Format,
+        "csv",
+        Script::new(&[]).log_on(Call::Write, "written"),
+    );
+    let ctx = context(&host);
+    let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput: {name: detail, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/detail.csv'}}\n";
+    let (_dir, project) = project(report, &ctx);
+    let opts = RunOptions {
+        set: Some("all".into()),
+        threads: Some(2),
+        ..options()
+    };
+    let (summary, events) = run_recorded(&ctx, &project, &opts);
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    let mut binding = None;
+    let mut logs = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for event in events {
+        match event {
+            RunEvent::BindingStart { set, .. } => binding = set,
+            RunEvent::PluginLog(_, line) if line == "written" || line == "sent" => {
+                logs.entry(binding.clone().expect("a Binding started"))
+                    .or_default()
+                    .push(line);
+            }
+            RunEvent::BindingEnd(_) => binding = None,
+            _ => {}
+        }
+    }
+    assert_eq!(logs.get("east").unwrap(), &["written", "sent"]);
+    assert_eq!(logs.get("west").unwrap(), &["written", "sent"]);
 }

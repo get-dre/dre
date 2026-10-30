@@ -5,7 +5,7 @@
 //! `path` onto each file, applies the local store's rules (`if_exists`, `atomic`, `temp_dir`)
 //! or hands the files to the destination plugin, using its message capabilities
 //! (`message`, `message_only`, `multi_file`). Plugin processes are started on first use and
-//! reused, one per destination type, until a delivery through one fails (it may be broken, so
+//! reused, one per destination profile, until a delivery through one fails (it may be broken, so
 //! the next request starts a fresh one) or the [`Deliverer`] is dropped.
 
 use std::collections::HashMap;
@@ -110,14 +110,14 @@ pub struct Sent {
     pub files: Vec<Option<String>>,
 }
 
-/// Delivers to destination entries, reusing a plugin process per destination type.
+/// Delivers to destination entries, reusing a plugin process per destination profile.
 pub struct Deliverer<'a> {
     ctx: Context,
     project: &'a Project,
     log: LogSink,
     /// Where `Kept` and `Delivered` steps go (a Binding run's; per-row and release log none).
     steps: Option<Events>,
-    plugins: HashMap<String, Box<dyn Plugin>>,
+    plugins: ProcessCache,
 }
 
 impl<'a> Deliverer<'a> {
@@ -129,7 +129,7 @@ impl<'a> Deliverer<'a> {
             project,
             log,
             steps: None,
-            plugins: HashMap::new(),
+            plugins: ProcessCache::default(),
         }
     }
 
@@ -138,6 +138,15 @@ impl<'a> Deliverer<'a> {
     pub fn with_steps(mut self, events: Events) -> Deliverer<'a> {
         self.steps = Some(events);
         self
+    }
+
+    pub(crate) fn with_cache(mut self, cache: ProcessCache) -> Self {
+        self.plugins = cache;
+        self
+    }
+
+    pub(crate) fn take_cache(&mut self) -> ProcessCache {
+        std::mem::take(&mut self.plugins)
     }
 
     /// Deliver `r`. `Ok(None)`: the entry delivers nowhere for this target (`deliver: false`).
@@ -179,11 +188,11 @@ impl<'a> Deliverer<'a> {
             return self.send_local(&r, &targets).map(Some);
         }
         let steps = self.steps.clone();
-        let p = self.plugin(&kind)?;
+        let p = self.plugin(r.profile, &kind)?;
         let result = send_through(p, &kind, &r, &targets, connection, steps.as_ref());
         if result.is_err() {
             // A destination plugin that failed may be broken: the next delivery starts a fresh one.
-            if let Some(p) = self.plugins.remove(&kind) {
+            if let Some(p) = self.plugins.remove(r.profile) {
                 p.close();
             }
         }
@@ -246,9 +255,9 @@ impl<'a> Deliverer<'a> {
         })
     }
 
-    /// The running plugin for destination type `kind`, started on first use.
-    fn plugin(&mut self, kind: &str) -> Result<&mut dyn Plugin, Fail> {
-        if !self.plugins.contains_key(kind) {
+    /// The running plugin for destination `profile` of type `kind`, started on first use.
+    fn plugin(&mut self, profile: &str, kind: &str) -> Result<&mut dyn Plugin, Fail> {
+        if !self.plugins.contains_key(profile) {
             let located = find_plugin(&self.ctx, self.project, PluginKind::Destination, kind)
                 .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
             let p = self
@@ -256,16 +265,31 @@ impl<'a> Deliverer<'a> {
                 .host()
                 .start(&located, self.log.clone(), Some(self.project.root()))
                 .map_err(|e| Fail::new(Code::DeliveryFailed, e.to_string()))?;
-            self.plugins.insert(kind.to_string(), p);
+            self.plugins.insert(profile.to_string(), p);
         }
-        Ok(self.plugins.get_mut(kind).expect("started above").as_mut())
+        Ok(self.plugins.get_mut(profile).expect("started above").as_mut())
     }
 }
 
-impl Drop for Deliverer<'_> {
+/// Destination processes retained between delivery stages and closed with their owner.
+#[derive(Default)]
+pub(crate) struct ProcessCache(HashMap<String, Box<dyn Plugin>>);
+
+impl std::ops::Deref for ProcessCache {
+    type Target = HashMap<String, Box<dyn Plugin>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for ProcessCache {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl Drop for ProcessCache {
     fn drop(&mut self) {
-        for (_, p) in self.plugins.drain() {
-            p.close();
+        for (_, process) in self.0.drain() {
+            process.close();
         }
     }
 }
