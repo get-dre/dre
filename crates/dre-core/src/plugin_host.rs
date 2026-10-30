@@ -192,6 +192,8 @@ pub(crate) struct Described {
     pub capabilities: Vec<String>,
     /// A message destination's length limit.
     pub message_limit: Option<u64>,
+    /// A source's field naming a file only one process may write at a time.
+    pub single_writer: Option<dre_protocol::msg::SingleWriter>,
 }
 
 /// Runs each plugin as a child process speaking the protocol. Each host keeps its own list of
@@ -486,4 +488,19 @@ impl Prober {
             .insert(path.to_path_buf(), (modified, ids.clone()));
         Ok(ids)
     }
+}
+
+/// Locate the plugin for a declared type among the project's packages, honouring `dre.lock`
+/// pins and declared constraints.
+pub fn find_plugin(
+    ctx: &crate::Context,
+    project: &crate::project::Project,
+    kind: crate::project::PluginKind,
+    name: &str,
+) -> Result<crate::plugins::Located, crate::plugins::LocateError> {
+    ctx.host().locate(
+        project.root(),
+        project.plugins(),
+        &crate::project::PluginId::new(kind, name),
+    )
 }

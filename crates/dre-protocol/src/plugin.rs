@@ -361,6 +361,12 @@ pub trait Source {
     fn string_literal(&self) -> Option<&'static str> {
         None
     }
+    /// A connection field naming a file only one process may write at a time, reported in
+    /// `describe` (DuckDB's `path`, unless `:memory:`): core then runs one Binding at a time on
+    /// a connection that sets it.
+    fn single_writer(&self) -> Option<crate::msg::SingleWriter> {
+        None
+    }
     /// Rules the declared [`Source::connection_fields`] can't express (two keys that can't go
     /// together, a value's form), each a sentence naming the field, never its value. Static:
     /// no network. Run by `validate_connection` and before `open`.
@@ -964,12 +970,13 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Handler::Destination(d) => d.connection_fields(),
             Handler::Format(_) => Vec::new(),
         };
-        let (identifier_quote, string_literal) = match h {
+        let (identifier_quote, string_literal, single_writer) = match h {
             Handler::Source(s) => (
                 s.identifier_quote().map(str::to_string),
                 s.string_literal().map(str::to_string),
+                s.single_writer(),
             ),
-            _ => (None, None),
+            _ => (None, None, None),
         };
         let message_limit = match h {
             Handler::Destination(d) => d.message_limit(),
@@ -981,6 +988,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             identifier_quote,
             string_literal,
             message_limit,
+            single_writer,
         });
         return Ok(());
     }

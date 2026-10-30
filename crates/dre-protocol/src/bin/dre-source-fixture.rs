@@ -251,6 +251,7 @@ fn close_probe() -> ! {
                 identifier_quote: Some("\"".into()),
                 string_literal: None,
                 message_limit: None,
+                single_writer: None,
             },
             Request::Open { .. } => {
                 opened = true;

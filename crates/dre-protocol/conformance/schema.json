@@ -888,6 +888,17 @@
               "format": "uint64",
               "minimum": 0,
               "description": "Destination advertising `message`: the most characters a message may have in the\nservice, after translation. Core shows it next to a message's length in a preview."
+            },
+            "single_writer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SingleWriter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source: a connection field naming a file only one process may write at a time\n(DuckDB's `path`). Core runs one Binding at a time on a connection that sets it,\nwhatever the entry's `threads:`."
             }
           },
           "required": [
@@ -1340,6 +1351,26 @@
         }
       ],
       "description": "What a value must be."
+    },
+    "SingleWriter": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "The connection field (`path`)."
+        },
+        "except": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Values of the field that name no file, so connections may share them (`:memory:`)."
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "description": "A source's connection field naming a file only one process may write at a time."
     },
     "LogLevel": {
       "type": "string",

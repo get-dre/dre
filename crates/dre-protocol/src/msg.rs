@@ -164,6 +164,11 @@ pub enum Response {
         /// service, after translation. Core shows it next to a message's length in a preview.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_limit: Option<u64>,
+        /// Source: a connection field naming a file only one process may write at a time
+        /// (DuckDB's `path`). Core runs one Binding at a time on a connection that sets it,
+        /// whatever the entry's `threads:`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        single_writer: Option<SingleWriter>,
     },
     /// Every problem with the options, each a sentence naming the key; empty when they're fine.
     Validated {
@@ -356,6 +361,26 @@ pub enum ColumnWidth {
 #[serde(rename_all = "lowercase")]
 pub enum AutoWidth {
     Auto,
+}
+
+/// A source's connection field naming a file only one process may write at a time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SingleWriter {
+    /// The connection field (`path`).
+    pub field: String,
+    /// Values of the field that name no file, so connections may share them (`:memory:`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
+}
+
+impl SingleWriter {
+    /// Whether `connection` sets the field to a file: a string other than the exceptions.
+    pub fn applies(&self, connection: &Map<String, Value>) -> bool {
+        connection
+            .get(&self.field)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !self.except.iter().any(|e| e == v))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

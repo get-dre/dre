@@ -307,6 +307,13 @@ core; core asks the plugin to update DRE when it names a style core doesn't know
 in the service after translation. `dre run --preview` shows it next to each message's length.
 It may be omitted. Added in DRE 0.3.
 
+`single_writer` (sources only, optional) names a connection field that holds a file only one
+process may write at a time: `{"field": "path", "except": [":memory:"]}` for DuckDB. On a
+connection whose entry sets that field to a string other than the exceptions, core runs one
+Binding at a time, whatever the entry's `threads:`. Core asks only when `threads:` is above 1.
+Added in DRE 0.9 (duckdb 1.3.0); an older DuckDB plugin doesn't send it, so a DuckDB file with
+`threads:` above 1 needs duckdb 1.3.0 or later.
+
 `validate` may carry a `template` (DRE 0.6, formats only): for the `html` and `pdf` formats,
 `{"file": "<absolute path>" or null, "project_root", "queries": [...]}`, so the plugin checks the
 template too (syntax, includes, assets, `results.<name>`), replying template problems in `errors`
