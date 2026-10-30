@@ -305,3 +305,43 @@ impl Loader {
         index
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_loader;
+    use super::*;
+
+    #[test]
+    fn finds_yaml_sql_macros_and_folders_but_not_the_target_folder() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        for (path, text) in [
+            ("dre_project.yml", "name: p\n"),
+            ("reports/finance/monthly/monthly.yml", "queries: [monthly]\n"),
+            ("reports/finance/monthly/monthly.sql", "select 1\n"),
+            ("macros/helpers.sql", "{% macro x() %}1{% endmacro %}\n"),
+            ("target/compiled/old.yml", "queries: [old]\n"),
+        ] {
+            let p = dir.path().join(path);
+            std::fs::create_dir_all(p.parent().expect("a parent")).expect("mkdir");
+            std::fs::write(p, text).expect("write");
+        }
+        let found = test_loader(dir.path()).discover();
+        let rel = |v: &[PathBuf]| -> Vec<String> {
+            v.iter()
+                .map(|p| {
+                    crate::slash(p.strip_prefix(dir.path()).unwrap_or(p))
+                        .display()
+                        .to_string()
+                })
+                .collect()
+        };
+        assert_eq!(rel(&found.yaml), vec!["reports/finance/monthly/monthly.yml"]);
+        assert_eq!(rel(&found.sql), vec!["reports/finance/monthly/monthly.sql"]);
+        assert_eq!(rel(&found.macros), vec!["macros/helpers.sql"]);
+        assert!(
+            found
+                .folders
+                .contains(&vec!["finance".to_string(), "monthly".to_string()])
+        );
+    }
+}

@@ -747,6 +747,11 @@ impl Output {
         self.queries.as_ref().is_none_or(|q| q.iter().any(|n| n == query))
     }
 
+    /// Its files' names, from the format catalog.
+    pub fn files(&self) -> Files<'_> {
+        Files::of(self)
+    }
+
     pub fn is_message(&self) -> bool {
         Format::new(&self.format).is_message()
     }
@@ -1086,6 +1091,10 @@ pub struct LoadOptions {
     /// The settings the command line resolved (the run's timezone, date and scheduled
     /// instant); the load adds the project's.
     pub settings: crate::settings::Settings,
+    /// Check only the reports this selection picks (`-s` syntax): the pre-flight, the parse pass
+    /// and template files skip the others, which are still loaded, so selectors and schedules
+    /// resolve. `None`: check everything.
+    pub select: Option<String>,
 }
 
 /// [`load_with`] in an empty context: no environment variables (no `DRE_*` setting, no
@@ -1106,6 +1115,7 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
         default_output: None,
+        scope: None,
     };
     let project = l.run();
     (project, l.diags)
@@ -1126,6 +1136,8 @@ struct Loader {
     /// `default_output:` from the project file: the output every report starts from, over the
     /// built-in one.
     default_output: Option<OutputConfig>,
+    /// The reports [`LoadOptions::select`] picked; `None`: every report.
+    scope: Option<BTreeSet<String>>,
 }
 
 /// One report YAML fragment, before merging.
@@ -1169,6 +1181,25 @@ struct Discovered {
 }
 
 impl Loader {
+    /// Resolve [`LoadOptions::select`] into the reports later checks cover.
+    fn limit_to_selection(&mut self, project: &Project) {
+        let Some(selection) = &self.opts.select else {
+            return;
+        };
+        match project.select(selection) {
+            Ok(reports) => self.scope = Some(reports.into_iter().map(|r| r.name.clone()).collect()),
+            Err(e) => {
+                self.diags.error(Code::InvalidSelector, None, None, e.to_string());
+                self.scope = Some(BTreeSet::new());
+            }
+        }
+    }
+
+    /// Which reports the load checks: [`in_scope`] says whether one is.
+    fn scope(&self) -> Option<BTreeSet<String>> {
+        self.scope.clone()
+    }
+
     fn rel(&self, p: &Path) -> PathBuf {
         crate::slash(p.strip_prefix(&self.root).unwrap_or(p))
     }
@@ -1411,6 +1442,7 @@ impl Loader {
         }
         resolved.sort_by(|a, b| a.name.cmp(&b.name));
         project.reports = resolved;
+        self.limit_to_selection(&project);
 
         // Pre-flight first: its errors say a template's problem better than a failed parse does.
         self.preflight(&project, &used);
@@ -1530,4 +1562,228 @@ fn is_identifier(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(|c: char| c.is_ascii_digit())
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Whether the load checks `report`: it's in the selection, or there's none.
+fn in_scope(scope: &Option<BTreeSet<String>>, report: &str) -> bool {
+    scope.as_ref().is_none_or(|s| s.contains(report))
+}
+
+/// A loader over `root` with default options, for the concern modules' unit tests.
+#[cfg(test)]
+fn test_loader(root: &Path) -> Loader {
+    Loader {
+        ctx: crate::Context::empty(),
+        root: root.to_path_buf(),
+        target: crate::target::TargetPath::default_for(root),
+        target_inside: Some(PathBuf::from(TARGET_DIR)),
+        opts: LoadOptions::default(),
+        diags: Diagnostics::default(),
+        format_options: Mapping::new(),
+        default_output: None,
+        scope: None,
+    }
+}
+
+/// An in-memory YAML file, as discovery hands it to a concern module.
+#[cfg(test)]
+fn test_yaml(display: &str, text: &str) -> Rc<YamlFile> {
+    let mut diags = Diagnostics::default();
+    let yf =
+        YamlFile::parse(text.to_string(), PathBuf::from(display), &mut diags).expect("the test YAML parses");
+    Rc::new(yf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A project written to a temp folder: `(path, contents)` pairs.
+    fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        for (path, text) in files {
+            let p = dir.path().join(path);
+            std::fs::create_dir_all(p.parent().expect("a file has a parent")).expect("mkdir");
+            std::fs::write(p, text).expect("write");
+        }
+        dir
+    }
+
+    const FILES: &[(&str, &str)] = &[
+        (
+            "dre_project.yml",
+            "name: acme\ntimezone: Australia/Sydney\nweek_start: sunday\n",
+        ),
+        ("sets.yml", "a: {vars: {region: AU}}\nb: {vars: {region: NZ}}\n"),
+        (
+            "reports/finance/monthly/monthly.yml",
+            "queries: [monthly]\nsets: [a, b]\ntags: [regulatory]\n",
+        ),
+        (
+            "reports/finance/monthly/monthly.sql",
+            "select '{{ var('region') }}' as r\n",
+        ),
+        ("reports/ops/daily/daily.yml", "queries: [daily]\n"),
+        (
+            "reports/ops/daily/daily.sql",
+            "select '{{ var('missing') }}' as x\n",
+        ),
+        (
+            "schedules.yml",
+            "- {name: nightly, report: monthly, set: a, cron: '0 2 * * *'}\n",
+        ),
+    ];
+
+    fn codes(diags: &Diagnostics) -> Vec<String> {
+        diags
+            .iter()
+            .map(|d| format!("{} {}", d.code, d.message))
+            .collect()
+    }
+
+    #[test]
+    fn reports_come_sorted_and_answer_by_name() {
+        let dir = project(FILES);
+        let (p, _) = load(dir.path(), &LoadOptions::default());
+        let p = p.expect("the project loads");
+        let names: Vec<&str> = p.reports().iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["daily", "monthly"]);
+        assert_eq!(p.name(), "acme");
+        assert_eq!(p.report("monthly").map(|r| r.bindings.len()), Some(2));
+        assert!(p.report("nope").is_none());
+        assert_eq!(
+            p.set("a").map(|s| s.vars["region"].clone()),
+            Some(Json::from("AU"))
+        );
+    }
+
+    #[test]
+    fn a_selection_picks_reports_and_their_bindings() {
+        let dir = project(FILES);
+        let p = load(dir.path(), &LoadOptions::default()).0.expect("loads");
+        let picked: Vec<&str> = p
+            .select("tag:regulatory")
+            .expect("resolves")
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(picked, vec!["monthly"]);
+        let bindings: Vec<(&str, Option<&str>)> = p
+            .bindings("finance daily")
+            .expect("resolves")
+            .into_iter()
+            .map(|(r, b)| (r.name.as_str(), b.set.as_deref()))
+            .collect();
+        assert_eq!(
+            bindings,
+            vec![("daily", None), ("monthly", Some("a")), ("monthly", Some("b"))]
+        );
+        assert!(p.select("nothing_called_this").is_err());
+    }
+
+    #[test]
+    fn schedules_answer_by_name_with_the_bindings_they_run() {
+        let dir = project(FILES);
+        let p = load(dir.path(), &LoadOptions::default()).0.expect("loads");
+        assert!(p.schedule("nightly").is_some());
+        assert!(p.schedule("weekly").is_none());
+        let runs: Vec<(&str, Option<&str>)> = p
+            .scheduled_bindings("nightly")
+            .into_iter()
+            .map(|(r, b)| (r.name.as_str(), b.set.as_deref()))
+            .collect();
+        assert_eq!(runs, vec![("monthly", Some("a"))]);
+    }
+
+    #[test]
+    fn the_calendar_keeps_the_projects_week_in_any_timezone() {
+        let dir = project(FILES);
+        let p = load(dir.path(), &LoadOptions::default()).0.expect("loads");
+        assert_eq!(p.timezone(), Some("Australia/Sydney"));
+        let c = p.calendar(Some("Europe/Paris"));
+        assert_eq!(c.tz, chrono_tz::Europe::Paris);
+        assert_eq!(c.week_start, WeekStart::Sunday);
+        assert_eq!(p.calendar(Some("Not/AZone")).tz, chrono_tz::Tz::UTC);
+    }
+
+    #[test]
+    fn a_load_checks_every_report_by_default() {
+        let dir = project(FILES);
+        let (_, diags) = load(dir.path(), &LoadOptions::default());
+        assert!(
+            codes(&diags)
+                .iter()
+                .any(|c| c.starts_with("unresolved-var") && c.contains("var('missing')")),
+            "{:?}",
+            codes(&diags)
+        );
+    }
+
+    #[test]
+    fn a_load_limited_to_a_selection_checks_only_those_reports() {
+        let dir = project(FILES);
+        let opts = LoadOptions {
+            select: Some("monthly".into()),
+            ..LoadOptions::default()
+        };
+        let (p, diags) = load(dir.path(), &opts);
+        let p = p.expect("loads");
+        assert!(
+            !codes(&diags).iter().any(|c| c.starts_with("unresolved-var")),
+            "{:?}",
+            codes(&diags)
+        );
+        // Every report is still there, so selectors and schedules resolve.
+        assert_eq!(p.reports().len(), 2);
+        assert!(
+            p.report("monthly")
+                .is_some_and(|r| r.bindings.iter().all(|b| b.parsed.is_some()))
+        );
+        assert!(
+            p.report("daily")
+                .is_some_and(|r| r.bindings.iter().all(|b| b.parsed.is_none()))
+        );
+    }
+
+    #[test]
+    fn a_selection_that_resolves_to_nothing_is_an_error() {
+        let dir = project(FILES);
+        let opts = LoadOptions {
+            select: Some("nothing_called_this".into()),
+            ..LoadOptions::default()
+        };
+        let (_, diags) = load(dir.path(), &opts);
+        assert!(
+            codes(&diags).iter().any(|c| c.starts_with("invalid-selector")),
+            "{:?}",
+            codes(&diags)
+        );
+    }
+
+    #[test]
+    fn a_report_whose_template_fails_to_parse_has_parse_errors() {
+        let mut files = FILES.to_vec();
+        files.push(("reports/ops/broken/broken.yml", "queries: [broken]\n"));
+        files.push((
+            "reports/ops/broken/broken.sql",
+            "select {{ 1 | no_such_filter }}\n",
+        ));
+        let dir = project(&files);
+        let p = load(dir.path(), &LoadOptions::default()).0.expect("loads");
+        assert!(p.parse_errors("monthly").is_empty());
+        assert!(!p.parse_errors("broken").is_empty());
+        assert_eq!(p.all_parse_errors().count(), p.parse_errors("broken").len());
+    }
+
+    #[test]
+    fn no_project_file_is_an_error() {
+        let dir = project(&[("reports/x.sql", "select 1")]);
+        let (p, diags) = load(dir.path(), &LoadOptions::default());
+        assert!(p.is_none());
+        assert!(
+            codes(&diags)[0].starts_with("project-file-missing"),
+            "{:?}",
+            codes(&diags)
+        );
+    }
 }

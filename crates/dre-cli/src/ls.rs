@@ -73,6 +73,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
         scheduled_at: dre_core::settings::run_at(env).ok().flatten(),
         timezone: env.setting(dre_core::settings::TIMEZONE),
         settings: dre_core::settings::run_settings(env, None),
+        select: None,
     };
     let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
     let Some(project) = project else {

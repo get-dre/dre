@@ -2724,7 +2724,7 @@ impl<'a> BindingRun<'a> {
             .iter()
             .filter(|d| d.zip.is_none())
             .filter_map(|d| d.path.as_deref());
-        Files::of(o).base_name(stem, output_name.as_deref(), paths)
+        o.files().base_name(stem, output_name.as_deref(), paths)
     }
 
     /// Write output `oi`'s files from the result sets of its queries.
@@ -2748,7 +2748,8 @@ impl<'a> BindingRun<'a> {
             return Ok(());
         }
         let tabs: Vec<&str> = mine.iter().map(|&i| self.produced[i].name.as_str()).collect();
-        let groups: Vec<(String, Vec<usize>)> = Files::of(out)
+        let groups: Vec<(String, Vec<usize>)> = out
+            .files()
             .plan(filename, &tabs)?
             .into_iter()
             .map(|(name, of)| (name, of.into_iter().map(|t| mine[t]).collect()))

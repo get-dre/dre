@@ -75,7 +75,7 @@ impl Loader {
         // Two unnamed outputs of one format would write the same default file.
         let mut exts = BTreeSet::new();
         for o in outputs.iter().filter(|o| o.name.is_none()) {
-            if !exts.insert(Files::of(o).extension()) {
+            if !exts.insert(o.files().extension()) {
                 self.diags.error(
                     Code::DuplicateOutput,
                     at.clone(),
@@ -210,7 +210,7 @@ impl Loader {
                 return None;
             }
             let stem = o.name.as_deref().unwrap_or(&report);
-            let files = Files::of(o);
+            let files = o.files();
             let base = files.base_name(stem, None, path);
             let tabs: Vec<&str> = queries
                 .iter()
@@ -1289,7 +1289,8 @@ impl Loader {
 
     pub(super) fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
-        for r in &project.reports {
+        let scope = self.scope();
+        for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
             for (format, t) in r.bindings.iter().flat_map(|b| {
                 b.outputs
                     .iter()
@@ -1468,7 +1469,8 @@ pub fn merge_output(base: &mut OutputConfig, over: &OutputConfig) -> Option<Stri
     merge_options(&mut base.options, options);
     match destination {
         Some(Loose::Ok(de::OneOf::A(o))) => {
-            let fits = |b: &DestinationConfig| o.profile.is_none() || same(b.profile.as_ref(), o.profile.as_ref());
+            let fits =
+                |b: &DestinationConfig| o.profile.is_none() || same(b.profile.as_ref(), o.profile.as_ref());
             match &mut base.destination {
                 Some(Loose::Ok(de::OneOf::B(list))) if o.profile.is_none() && list.len() > 1 => {
                     problem = Some(format!(
@@ -1629,13 +1631,19 @@ mod tests {
     }
 
     fn options(o: &OutputConfig) -> Vec<String> {
-        o.options.iter().map(|(k, v)| format!("{}={v}", k.value)).collect()
+        o.options
+            .iter()
+            .map(|(k, v)| format!("{}={v}", k.value))
+            .collect()
     }
 
     #[test]
     fn a_path_only_override_keeps_the_inherited_profile() {
         let mut base = output("destination: {profile: s3, path: a.csv}");
-        assert_eq!(merge_output(&mut base, &output("destination: {path: b.csv}")), None);
+        assert_eq!(
+            merge_output(&mut base, &output("destination: {path: b.csv}")),
+            None
+        );
         assert_eq!(dest(&base), vec!["s3 b.csv"]);
     }
 
@@ -1659,13 +1667,17 @@ mod tests {
     #[test]
     fn a_path_only_override_of_a_one_entry_list_merges_into_that_entry() {
         let mut base = output("destination: [{profile: s3, path: a.csv}]");
-        assert_eq!(merge_output(&mut base, &output("destination: {path: b.csv}")), None);
+        assert_eq!(
+            merge_output(&mut base, &output("destination: {path: b.csv}")),
+            None
+        );
         assert_eq!(dest(&base), vec!["s3 b.csv"]);
     }
 
     #[test]
     fn a_path_only_override_of_several_destinations_is_refused() {
-        let mut base = output("destination: [{profile: s3, path: a.csv}, {profile: mail, to: x@example.com}]");
+        let mut base =
+            output("destination: [{profile: s3, path: a.csv}, {profile: mail, to: x@example.com}]");
         let before = dest(&base);
         let err = merge_output(&mut base, &output("destination: {path: b.csv}")).unwrap();
         assert!(err.contains("2 destinations"), "{err}");
@@ -1677,7 +1689,10 @@ mod tests {
     fn format_options_merge_key_by_key_in_first_written_order() {
         let mut base = output("format: delimited\ndelimiter: ';'\nquote: always");
         merge_output(&mut base, &output("header: false\ndelimiter: '|'"));
-        assert_eq!(options(&base), vec![r#"delimiter="|""#, r#"quote="always""#, "header=false"]);
+        assert_eq!(
+            options(&base),
+            vec![r#"delimiter="|""#, r#"quote="always""#, "header=false"]
+        );
     }
 
     #[test]
@@ -1686,7 +1701,10 @@ mod tests {
         merge_output(&mut base, &output("format: parquet"));
         assert!(options(&base).is_empty());
         assert_eq!(base.extension, de::Maybe::Absent);
-        assert_eq!(base.name.as_ref().and_then(Loose::ok).map(String::as_str), Some("out"));
+        assert_eq!(
+            base.name.as_ref().and_then(Loose::ok).map(String::as_str),
+            Some("out")
+        );
     }
 
     #[test]
@@ -1715,8 +1733,14 @@ mod tests {
     #[test]
     fn a_layer_of_the_wrong_shape_is_a_problem() {
         let mut outs = vec![builtin_output()];
-        assert_eq!(layer_outputs(&mut outs, &layer("csv")), vec!["`output` must be a map or a list of maps"]);
+        assert_eq!(
+            layer_outputs(&mut outs, &layer("csv")),
+            vec!["`output` must be a map or a list of maps"]
+        );
         assert_eq!(layer_outputs(&mut outs, &layer("[]")).len(), 1);
-        assert_eq!(layer_outputs(&mut outs, &layer("[csv]")), vec!["`output` entry 1 must be a map"]);
+        assert_eq!(
+            layer_outputs(&mut outs, &layer("[csv]")),
+            vec!["`output` entry 1 must be a map"]
+        );
     }
 }

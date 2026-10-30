@@ -270,7 +270,7 @@ impl BindingRun<'_> {
 
         // File names, by row: checked for collisions before anything renders.
         let folder = self.run_dir.join(safe_name(&self.output_stem(oi)));
-        let files = Files::of(&o);
+        let files = o.files();
         let renderer = self.renderer(None)?;
         let cal = self.calendar;
         let mut eaches = Vec::with_capacity(rows.len());

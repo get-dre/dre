@@ -554,3 +554,39 @@ pub(super) fn is_timing_registry(m: &Mapping) -> bool {
                 .is_some_and(|t| ["cron", "every", "rrule"].iter().any(|k| t.contains_key(*k)))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{test_loader, test_yaml};
+    use super::*;
+
+    #[test]
+    fn reads_named_timings_and_marks_broken_ones() {
+        let mut l = test_loader(Path::new("/p"));
+        let (timings, broken) = l.parse_timings(&[test_yaml(
+            "timings.yml",
+            "month_start: {cron: '0 6 1 * *', timezone: Australia/Sydney}\ntwo_forms: {cron: '0 6 * * *', rrule: 'FREQ=DAILY'}\n",
+        )]);
+        assert_eq!(
+            timings["month_start"].timezone.as_deref(),
+            Some("Australia/Sydney")
+        );
+        assert!(broken.contains("two_forms"));
+        assert!(l.diags.has_errors());
+    }
+
+    #[test]
+    fn a_timings_registry_is_known_by_its_shape() {
+        let map = |s: &str| {
+            test_yaml("x.yml", s)
+                .value
+                .as_object()
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(is_timing_registry(&map(
+            "a: {cron: '0 6 * * *'}\nb: {every: {days: 7}}"
+        )));
+        assert!(!is_timing_registry(&map("a: {vars: {x: 1}}")));
+    }
+}

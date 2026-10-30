@@ -248,11 +248,14 @@ impl Scan {
             out.push((p.at, (format!("target.{field}"), instead, p.line)));
         }
         for p in self.paths("run") {
-            let (Some(attr), Some(instead)) = (p.attr(0), match p.attr(0) {
-                Some("profile") => Some("`connection.name` (the query's connection)"),
-                Some("source_type") => Some("`connection.type` (the query's connection)"),
-                _ => None,
-            }) else {
+            let (Some(attr), Some(instead)) = (
+                p.attr(0),
+                match p.attr(0) {
+                    Some("profile") => Some("`connection.name` (the query's connection)"),
+                    Some("source_type") => Some("`connection.type` (the query's connection)"),
+                    _ => None,
+                },
+            ) else {
                 continue;
             };
             out.push((p.at, (format!("run.{attr}"), instead.to_string(), p.line)));
@@ -359,7 +362,11 @@ mod tests {
     fn ignores_sql_outside_jinja_and_method_like_names() {
         assert!(calls("select var('x') from t").is_empty());
         assert!(calls("{{ my.var('x') }} {{ env_var_x('y') }}").is_empty());
-        assert!(Scan::new("select run.dat from runs run").unknown_run_refs().is_empty());
+        assert!(
+            Scan::new("select run.dat from runs run")
+                .unknown_run_refs()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -397,7 +404,8 @@ mod tests {
 
     #[test]
     fn finds_refs_and_called_names() {
-        let scan = Scan::new("{{ ref('a') }} {{ x.ref('b') }}\n{% call wrap() %}{{ helper(1) }}{% endcall %}");
+        let scan =
+            Scan::new("{{ ref('a') }} {{ x.ref('b') }}\n{% call wrap() %}{{ helper(1) }}{% endcall %}");
         assert_eq!(scan.refs_at(), &[("a".to_string(), 1)]);
         assert_eq!(scan.called_names(), &["ref", "wrap", "helper"]);
     }
@@ -406,7 +414,8 @@ mod tests {
     fn a_macro_body_keeps_its_own_calls_with_file_lines() {
         let src = "{% macro a() %}{{ var('x') }}{% endmacro %}\n{% macro b(n) %}\n{{ a() }} {{ var('y', 1) }}\n{% endmacro %}";
         let scan = Scan::new(src);
-        let defs: Vec<(&str, Vec<(&str, usize)>, &[String])> = scan
+        type Def<'a> = (&'a str, Vec<(&'a str, usize)>, &'a [String]);
+        let defs: Vec<Def<'_>> = scan
             .macros()
             .iter()
             .map(|d| {
@@ -439,7 +448,10 @@ mod tests {
                 Step::Attr("pw".into())
             ]
         );
-        assert_eq!(scan.attributes("results"), vec![("q".to_string(), 1), ("r".to_string(), 1)]);
+        assert_eq!(
+            scan.attributes("results"),
+            vec![("q".to_string(), 1), ("r".to_string(), 1)]
+        );
         assert_eq!(scan.attributes("outputs"), vec![("x".to_string(), 1)]);
     }
 

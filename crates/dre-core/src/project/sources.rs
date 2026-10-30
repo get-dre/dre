@@ -464,3 +464,37 @@ impl Loader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{test_loader, test_yaml};
+    use super::*;
+
+    #[test]
+    fn reads_sources_with_their_tables_and_quoting() {
+        let mut l = test_loader(Path::new("/p"));
+        let sources = l.parse_sources(&[test_yaml(
+            "reports/sources.yml",
+            "sources:\n  - name: erp\n    schema: sales\n    profile: duck\n    quoting: {identifier: true}\n    tables: [{name: orders, identifier: ORDERS}]\n",
+        )]);
+        let erp = &sources["erp"];
+        assert_eq!(
+            (erp.schema.as_deref(), erp.profile.as_deref()),
+            (Some("sales"), Some("duck"))
+        );
+        let orders = erp.table("orders").expect("the table is declared");
+        assert_eq!(orders.identifier.as_deref(), Some("ORDERS"));
+        assert!(orders.quoting.over(&erp.quoting).identifier);
+        assert!(!l.diags.has_errors());
+    }
+
+    #[test]
+    fn a_source_declared_twice_is_an_error() {
+        let mut l = test_loader(Path::new("/p"));
+        l.parse_sources(&[
+            test_yaml("a.yml", "sources: [{name: erp, tables: [{name: t}]}]\n"),
+            test_yaml("b.yml", "sources: [{name: erp, tables: [{name: u}]}]\n"),
+        ]);
+        assert!(l.diags.has_errors());
+    }
+}

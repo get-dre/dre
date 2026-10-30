@@ -387,6 +387,7 @@ impl ProjectArgs {
             scheduled_at: settings::run_at(env).ok().flatten(),
             timezone: self.timezone(env),
             settings: settings::run_settings(env, self.timezone.as_deref()),
+            select: None,
         }
     }
 

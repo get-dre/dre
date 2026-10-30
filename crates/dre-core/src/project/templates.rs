@@ -27,6 +27,9 @@ impl Loader {
             .collect();
         let mut results = Vec::new();
         for (ri, r) in project.reports.iter().enumerate() {
+            if !in_scope(&self.scope, &r.name) {
+                continue;
+            }
             for (bi, b) in r.bindings.iter().enumerate() {
                 let parsed = crate::parse::binding(project, r, b, &b.vars, &inputs);
                 results.push((ri, bi, parsed));
@@ -99,7 +102,9 @@ impl Loader {
         };
         let mut checked: BTreeSet<PathBuf> = BTreeSet::new();
         // Macros: syntax, env_var, run.*; their definitions, for var() checks per Binding.
-        let mut defs: BTreeMap<String, (PathBuf, Rc<(String, Scan)>, usize)> = BTreeMap::new();
+        // Each macro: its file, the file's source and scan, and its index in the scan.
+        type MacroAt = (PathBuf, Rc<(String, Scan)>, usize);
+        let mut defs: BTreeMap<String, MacroAt> = BTreeMap::new();
         for m in &project.templates.macros {
             if let Some(file) = read(m) {
                 self.check_template_text(m, &file.0, &file.1, 0, None);
@@ -109,7 +114,8 @@ impl Loader {
                 }
             }
         }
-        for r in &project.reports {
+        let scope = self.scope();
+        for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
             for b in &r.bindings {
                 for error in crate::variables::check_given_values(&r.var_schema, &b.vars, &self.opts.vars) {
                     self.diags

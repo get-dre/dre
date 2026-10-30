@@ -387,3 +387,36 @@ pub(super) fn is_set_registry(m: &Mapping) -> bool {
                     .is_some_and(|e| e.keys().all(|k| is_one_of(k, &["profile", "vars", "locale"])))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{test_loader, test_yaml};
+    use super::*;
+
+    #[test]
+    fn reads_a_sets_registry_and_refuses_a_set_declared_twice() {
+        let mut l = test_loader(Path::new("/p"));
+        let sets = l.parse_sets(&[
+            test_yaml("sets.yml", "a: {profile: duck, vars: {region: AU}}\nplain: {}\n"),
+            test_yaml("more/sets.yml", "a: {vars: {region: NZ}}\n"),
+        ]);
+        assert_eq!(sets.keys().collect::<Vec<_>>(), vec!["a", "plain"]);
+        assert_eq!(sets["a"].profile.as_deref(), Some("duck"));
+        assert_eq!(sets["a"].file, PathBuf::from("sets.yml"));
+        assert!(l.diags.has_errors());
+    }
+
+    #[test]
+    fn a_registry_is_known_by_its_shape() {
+        let map = |s: &str| {
+            test_yaml("x.yml", s)
+                .value
+                .as_object()
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(is_set_registry(&map("a: {vars: {x: 1}}\nb:\n")));
+        assert!(!is_set_registry(&map("a: {cron: '0 6 * * *'}")));
+        assert!(!is_set_registry(&map("queries: [a]")));
+    }
+}
