@@ -190,7 +190,8 @@ its conjuncts (`नमस्ते`).
 Project fonts stay first when explicitly selected. Other declared project families are available
 as fallbacks after Plex, including outside elements that select them; Noto is the final fallback.
 HTML behavior stays the same: the reader's browser supplies missing fonts, and DRE never
-downloads Noto for HTML.
+downloads Noto for HTML. The [multilingual example](https://github.com/get-dre/dre/blob/master/examples/multilingual/README.md) makes a
+PDF letter in each of nine languages this way.
 
 #### Han characters follow `lang`
 

@@ -9,6 +9,15 @@ output:
     for_each: {query: offices, key: city}
     destination: {profile: local, path: "out/offices/{{ each.city }}.xlsx"}
 
+  # One PDF letter per office. The template's `lang` picks the font for Chinese, Japanese and
+  # Korean text; DRE fetches the Noto font for each script on first use, nothing is committed.
+  - name: letter
+    format: pdf
+    template: {file: letter.html}
+    queries: [offices, staff]
+    for_each: {query: offices, key: city}
+    destination: {profile: local, path: "out/letters/{{ each.city }}.pdf"}
+
   # Every office on one sheet.
   - name: all_offices
     format: xlsx

@@ -1,0 +1,18 @@
+<!doctype html>
+{# lang picks the font for Han characters (ja, zh, ko); dir turns Arabic right to left. #}
+<html lang="{{ each.lang }}" dir="{{ each.dir }}">
+<head>
+  <title>{{ each.city }}</title>
+  <style>
+    body { font-family: sans-serif; font-size: 12pt; }
+    h1 { color: #1f7a4d; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #ccc; padding: 4px; text-align: start; }
+  </style>
+</head>
+<body>
+  <h1>{{ each.greeting }}</h1>
+  <p>{{ each.city }} · {{ each.language }}</p>
+  {{ table(results.staff) }}
+</body>
+</html>

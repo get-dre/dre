@@ -20,6 +20,7 @@ no database account. Start with [Your first report in 10 minutes](first-report.m
 | Slack headline | Message controlled by a result threshold | [Slack project](../examples/slack-headline/README.md) |
 | SFTP delivery | CSV and an environment-based remote profile | [SFTP project](../examples/sftp-delivery/README.md) |
 | Password statements | Password PDFs per member, a password list and an AES-256 zip pack | [Password project](../examples/password-statements/README.md) |
+| Multilingual | A workbook and a PDF letter per office in nine languages and scripts, no fonts in the project | [Multilingual project](../examples/multilingual/README.md) |
 
 [Install DRE](install.md), copy the chosen project directory and run `dre validate` from it.
 Each README gives the run commands and expected values. Dependencies install on demand.
