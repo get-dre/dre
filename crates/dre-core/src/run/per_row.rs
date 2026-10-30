@@ -1560,7 +1560,7 @@ fn make_files(shared: &Shared<'_>, job: &RowJob, format: &mut Option<Box<dyn Plu
             shared
                 .ctx
                 .host()
-                .start(&plugin, shared.log.clone(), Some(&shared.project.root()))
+                .start(&plugin, shared.log.clone(), Some(shared.project.root()))
                 .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?,
         );
     }
