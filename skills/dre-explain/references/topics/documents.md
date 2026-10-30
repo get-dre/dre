@@ -15,6 +15,13 @@ come from the `document` package (add `document` under `plugins:` in `dependenci
    running header and footer, page numbers ("Page 2 of 5").
 4. **Branding:** a logo file, colours, a font file (`.ttf`/`.otf`) they're licensed to use.
    Without a font, the bundled IBM Plex Sans is used.
+   **Other languages:** Japanese, Chinese, Korean, Arabic, Hebrew, Hindi and Thai need nothing in
+   the project. For a PDF, DRE fetches the matching Noto font on first use (pinned, checksummed,
+   cached in `~/.dre/fonts`); an offline machine needs `dre fonts install ja ar ...` once, an
+   offline registry copy or the project's own `@font-face`; `missing_fonts: error` fails instead
+   of drawing boxes. Han characters follow the HTML `lang` (`<html lang="{{ each.lang }}">`, or
+   `<td lang="ja">`); without it, only Chinese is guessed. Never commit fonts for this.
+   `examples/multilingual` has a PDF letter per office in nine languages.
 5. **Legal text:** terms or disclaimers go in their own template files, included per Set or
    client (REP-11).
 

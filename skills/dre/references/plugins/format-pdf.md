@@ -185,7 +185,8 @@ its conjuncts (`नमस्ते`).
 Project fonts stay first when explicitly selected. Other declared project families are available
 as fallbacks after Plex, including outside elements that select them; Noto is the final fallback.
 HTML behavior stays the same: the reader's browser supplies missing fonts, and DRE never
-downloads Noto for HTML.
+downloads Noto for HTML. The [multilingual example](https://github.com/get-dre/dre/blob/master/examples/multilingual/README.md) makes a
+PDF letter in each of nine languages this way.
 
 ###### Han characters follow `lang`
 
@@ -406,6 +407,9 @@ Every format but xlsx also takes `extension`: the output file's extension (`aba`
 - Page setup goes in CSS: `@page { size: A4; margin: 20mm; @bottom-center { content: "Page "
   counter(page) " of " counter(pages) } }`, `break-before: page`. Long tables repeat `<thead>`.
 - Fonts: IBM Plex Sans/Mono are bundled; add brand fonts with `@font-face` from a `.ttf` in the
-  project. System fonts are never used; an unknown family falls back with a warning.
+  project. System fonts are never used; an unknown family falls back with a warning. Other
+  scripts (Japanese, Chinese, Korean, Arabic, Hebrew, Devanagari, Thai) get a Noto font fetched on
+  first use and cached; set `<html lang>` (or `lang` on an element) so Han text picks the right
+  one, `missing_fonts: error` to fail rather than draw boxes, and `dre fonts install` for offline.
 - Assets (`<img>`, stylesheets) are files in the project; URLs are refused.
 - `max_rows` (default 50,000) fails the run rather than truncate; aggregate in SQL.

@@ -8,16 +8,18 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import re
 import tempfile
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
          "slack-headline", "sftp-delivery", "password-statements", "multilingual")
 # Examples that need a newer DRE than the released one the examples workflow installs: skipped
 # there (the CI job against this build runs them all).
-NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 8, 1)}
+NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0)}
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True
 
@@ -67,6 +69,92 @@ def workbook(path):
                                          None if formula is None else formula.text)
             result[sheet.attrib["name"]] = cells
         return result
+
+
+def pdf_strings(source):
+    """Split PDF literal strings `(...)` (with `\\ddd` escapes) out of a TJ array body."""
+    escapes = {ord("n"): 10, ord("r"): 13, ord("t"): 9, ord("b"): 8, ord("f"): 12}
+    result, current, depth, i = [], None, 0, 0
+    while i < len(source):
+        char = source[i]
+        if current is None:
+            if char == ord("("):
+                current, depth = bytearray(), 1
+        elif char == ord("\\"):
+            i += 1
+            if source[i:i + 1].isdigit():
+                digits = re.match(rb"[0-7]{1,3}", source[i:]).group()
+                current.append(int(digits, 8) & 255)
+                i += len(digits) - 1
+            else:
+                current.append(escapes.get(source[i], source[i]))
+        elif char == ord("(") or char == ord(")"):
+            depth += 1 if char == ord("(") else -1
+            if depth:
+                current.append(char)
+            else:
+                result.append(bytes(current))
+                current = None
+        else:
+            current.append(char)
+        i += 1
+    return result
+
+
+def pdf_text(path):
+    """Read the text of a PDF made by DRE with the standard library.
+
+    Fonts are subset Type0 fonts with a ToUnicode map, so each shown glyph id maps back to its
+    characters. Returns one string per page-content stream; line order is the drawing order.
+    """
+    data = Path(path).read_bytes()
+    streams = {}
+    for number, body in re.findall(rb"(\d+) 0 obj(.*?)endobj", data, re.S):
+        found = re.search(rb"stream\r?\n(.*)\r?\nendstream", body, re.S)
+        head = body if not found else body[:found.start()]
+        content = None if not found else found.group(1)
+        if content is not None and b"FlateDecode" in head:
+            content = zlib.decompress(content)
+        streams[int(number)] = (head, content)
+
+    def cmap(number):
+        table = {}
+        text = streams[number][1].decode("latin-1")
+        for block in re.findall(r"beginbfchar(.*?)endbfchar", text, re.S):
+            for src, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+                table[int(src, 16)] = bytes.fromhex(dst).decode("utf-16-be")
+        for block in re.findall(r"beginbfrange(.*?)endbfrange", text, re.S):
+            for lo, hi, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+                start = int(dst, 16)
+                for offset in range(int(hi, 16) - int(lo, 16) + 1):
+                    table[int(lo, 16) + offset] = chr(start + offset)
+        return table
+
+    fonts = {}
+    for number, (head, _) in streams.items():
+        unicode_map = re.search(rb"/ToUnicode (\d+) 0 R", head)
+        if unicode_map and b"/Type0" in head:
+            fonts[number] = cmap(int(unicode_map.group(1)))
+    names = {}
+    for head, _ in streams.values():
+        for name, number in re.findall(rb"/(f\d+) (\d+) 0 R", head):
+            if int(number) in fonts:
+                names[name.decode()] = fonts[int(number)]
+    pages = []
+    for head, content in streams.values():
+        if content is None or b"BT" not in content:
+            continue
+        table, out = {}, []
+        for match in re.finditer(rb"/(f\d+) [\d.]+ Tf|\[(.*?)\]\s*TJ|(\(.*?\))\s*Tj", content, re.S):
+            if match.group(1):
+                table = names.get(match.group(1).decode(), {})
+                continue
+            for chunk in pdf_strings(match.group(2) or match.group(3)):
+                out.extend(table.get(int.from_bytes(chunk[i:i + 2], "big"), "?")
+                           for i in range(0, len(chunk), 2))
+            out.append(" ")
+        pages.append("".join(out))
+    return "\n".join(pages)
 
 
 def assert_cell(sheet, cell, expected):
@@ -203,6 +291,30 @@ def check(dre, plugins):
             mumbai = workbook(offices / "offices/मुंबई.xlsx")["staff"]
             assert_cell(mumbai, "B2", "प्रिया पटेल")
             assert_cell(mumbai, "C2", "लेखाकार")
+            # One PDF letter per office. Han text follows the template's `lang`, so each CJK
+            # office embeds its own Noto font; the rest is checked from the PDF's own text.
+            letters = multilingual / "out" / "letters"
+            assert sorted(p.name for p in letters.iterdir()) == sorted(c + ".pdf" for c in cities)
+            noto = {"東京": "NotoSansCJKjp", "北京": "NotoSansCJKsc", "서울": "NotoSansCJKkr",
+                    "القاهرة": "NotoSansArabic", "मुंबई": "NotoSansDevanagari"}
+            shaped = ("القاهرة", "मुंबई")  # joined or reordered glyphs: the text map is partial
+            for row, city in enumerate(cities, start=2):
+                pdf = letters / (city + ".pdf")
+                fonts = set(re.findall(rb"/BaseFont /[A-Z]{6}\+([\w-]+)", pdf.read_bytes()))
+                names = {f.decode().split("-")[0] for f in fonts}
+                assert (noto[city] in names) if city in noto else not any(
+                    n.startswith("Noto") for n in names), (city, names)
+                staff = workbook(offices / "offices" / (city + ".xlsx"))["staff"]
+                expected = [everyone[f"{column}{row}"][0] for column in "ABE"] + [
+                    staff[f"{column}{line}"][0] for line in (2, 3) for column in "BC"]
+                text = "".join(pdf_text(pdf).split())
+                if city in shaped:
+                    # Minus the table's English headers, the "·" separator and unmapped glyphs.
+                    found = {c for c in text if c.isalpha() and not c.isascii()}
+                    assert 5 < len(found) and found <= set("".join(expected)), (city, text)
+                else:
+                    for word in expected:
+                        assert "".join(word.split()) in text, (city, word, text)
         sftp_record = latest(records(projects["sftp-delivery"]))
         output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
         assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"
