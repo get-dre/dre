@@ -218,7 +218,7 @@ pub fn mask_value(v: &str) -> String {
 }
 
 /// Masks a row's values wherever they appear in a text (a rendered path, a plugin's error).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RowMask {
     /// (value, its mask), longest first.
     values: Arc<Vec<(String, String)>>,

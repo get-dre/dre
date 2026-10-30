@@ -39,7 +39,7 @@ pub struct Script {
     capabilities: Vec<String>,
     description: Description,
     /// Rows by SQL (trimmed, without a trailing `;`). Any other statement returns no result set.
-    rows: BTreeMap<String, RecordBatch>,
+    rows: BTreeMap<String, Vec<RecordBatch>>,
     /// `(call, n, message)`: the plugin's `n`th such call (from 1, counted across the host)
     /// fails with `message`.
     failures: Vec<(Call, usize, String)>,
@@ -48,6 +48,8 @@ pub struct Script {
     failures_on: Vec<(Call, String, String)>,
     /// How long each such call takes; a cancel ends the wait early with an error.
     delays: BTreeMap<Call, Duration>,
+    logs: BTreeMap<Call, String>,
+    record_writes: bool,
 }
 
 impl Script {
@@ -61,7 +63,13 @@ impl Script {
 
     /// `sql` returns `batch`.
     pub fn rows(mut self, sql: &str, batch: RecordBatch) -> Script {
-        self.rows.insert(normalize(sql), batch);
+        self.rows.insert(normalize(sql), vec![batch]);
+        self
+    }
+
+    /// `sql` streams these batches, in order. An empty list returns no result set.
+    pub fn batches(mut self, sql: &str, batches: Vec<RecordBatch>) -> Script {
+        self.rows.insert(normalize(sql), batches);
         self
     }
 
@@ -85,6 +93,19 @@ impl Script {
         self
     }
 
+    /// Emit a plugin diagnostic on each `call`, through the sink given at process start.
+    pub fn log_on(mut self, call: Call, message: &str) -> Script {
+        self.logs.insert(call, message.to_string());
+        self
+    }
+
+    /// Retain the batches sent to this format, for assertions through [`MemoryHost::writes`].
+    /// Off by default so a test host does not buffer a streamed population unintentionally.
+    pub fn record_writes(mut self) -> Script {
+        self.record_writes = true;
+        self
+    }
+
     /// What `describe` answers.
     pub fn description(mut self, description: Description) -> Script {
         self.description = description;
@@ -100,11 +121,21 @@ fn normalize(sql: &str) -> String {
 #[derive(Default)]
 struct State {
     calls: Mutex<Vec<String>>,
+    writes: Mutex<Vec<WriteBatch>>,
     counts: Mutex<BTreeMap<(PluginId, Call), usize>>,
     /// Set by [`PluginHost::cancel`]: calls waiting out a delay stop.
     cancelled: AtomicBool,
     /// Calls waiting out a delay now.
     waiting: AtomicUsize,
+}
+
+/// One batch sent to a format that opted into [`Script::record_writes`].
+#[derive(Clone)]
+pub struct WriteBatch {
+    pub path: String,
+    /// Zero-based result-set position in the format's write request.
+    pub result_set: usize,
+    pub batch: RecordBatch,
 }
 
 /// Scripted plugins, by kind and name.
@@ -135,6 +166,15 @@ impl MemoryHost {
         self.state.calls.lock().unwrap().clone()
     }
 
+    /// The actual batches observed by formats with [`Script::record_writes`] enabled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the observation list is poisoned (a thread panicked while changing it).
+    pub fn writes(&self) -> Vec<WriteBatch> {
+        self.state.writes.lock().unwrap().clone()
+    }
+
     /// Whether [`PluginHost::cancel`] was called.
     pub fn cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::SeqCst)
@@ -161,7 +201,7 @@ impl PluginHost for MemoryHost {
         })
     }
 
-    fn start(&self, plugin: &Located, _log: LogSink, _cwd: Option<&Path>) -> HostResult<Box<dyn Plugin>> {
+    fn start(&self, plugin: &Located, log: LogSink, _cwd: Option<&Path>) -> HostResult<Box<dyn Plugin>> {
         let id = plugin.plugin.clone();
         let script = self
             .scripts
@@ -184,6 +224,7 @@ impl PluginHost for MemoryHost {
             script,
             state: self.state.clone(),
             writing: None,
+            log,
         };
         p.call(Call::Start, "")?;
         Ok(Box::new(p))
@@ -211,6 +252,7 @@ struct Scripted {
     script: Script,
     state: Arc<State>,
     writing: Option<Writing>,
+    log: LogSink,
 }
 
 impl Scripted {
@@ -227,6 +269,9 @@ impl Scripted {
     fn call(&mut self, call: Call, detail: &str) -> HostResult<()> {
         let line = format!("{}/{} {call:?} {detail}", self.id.kind, self.id.name);
         self.state.calls.lock().unwrap().push(line.trim_end().to_string());
+        if let Some(message) = self.script.logs.get(&call) {
+            (self.log)(&self.id.name, message);
+        }
         let n = {
             let mut counts = self.state.counts.lock().unwrap();
             let n = counts.entry((self.id.clone(), call)).or_default();
@@ -319,12 +364,17 @@ impl Plugin for Scripted {
     ) -> HostResult<Execution> {
         let sql = normalize(sql);
         self.call(Call::Execute, &sql)?;
-        let Some(batch) = self.script.rows.get(&sql).cloned() else {
+        let Some(batches) = self.script.rows.get(&sql).cloned() else {
             return Ok(Execution::NoResult { rows_affected: None });
         };
-        let schema = batch.schema();
-        let rows = batch.num_rows() as u64;
-        on_batch(&schema, batch).map_err(|e| self.error(&e))?;
+        let Some(first) = batches.first() else {
+            return Ok(Execution::NoResult { rows_affected: None });
+        };
+        let schema = first.schema();
+        let rows = batches.iter().map(|batch| batch.num_rows() as u64).sum();
+        for batch in batches {
+            on_batch(&schema, batch).map_err(|e| self.error(&e))?;
+        }
         Ok(Execution::Result { schema, rows })
     }
 
@@ -342,9 +392,18 @@ impl Plugin for Scripted {
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> HostResult<()> {
+        let record = self.script.record_writes;
         let w = self.writing()?;
         if let Some(n) = w.rows.last_mut() {
             *n += batch.num_rows();
+        }
+        if record {
+            let observed = WriteBatch {
+                path: w.request.path.clone(),
+                result_set: w.rows.len() - 1,
+                batch: batch.clone(),
+            };
+            self.state.writes.lock().unwrap().push(observed);
         }
         Ok(())
     }

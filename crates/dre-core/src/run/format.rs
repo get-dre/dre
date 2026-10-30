@@ -401,11 +401,15 @@ impl BindingRun<'_> {
         };
         let plugin = find_plugin(&self.ctx, self.project, PluginKind::Format, &out.format)
             .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
-        let mut p = self
-            .ctx
-            .host()
-            .start(&plugin, self.ui.plugin_log(), Some(self.project.root()))
-            .map_err(|e| e.to_string())?;
+        let mut processes = self.processes.lease(&self.ui);
+        if !processes.formats.contains_key(&out.format) {
+            let process = self
+                .ctx
+                .host()
+                .start(&plugin, processes.log(), Some(self.project.root()))
+                .map_err(|e| e.to_string())?;
+            processes.formats.insert(out.format.clone(), process);
+        }
         let template = match &out.template {
             _ if Format::new(&out.format).is_document() => {
                 Some(self.document_payload(out.template.as_ref())?)
@@ -422,9 +426,14 @@ impl BindingRun<'_> {
                 result_sets: idxs.iter().map(|&i| self.produced[i].meta()).collect(),
                 template: template.clone(),
             };
-            self.write_file(oi, p.as_mut(), request, &idxs)?;
+            let p = processes.formats.get_mut(&out.format).expect("started above");
+            if let Err(error) = self.write_file(oi, p.as_mut(), request, &idxs) {
+                if let Some(p) = processes.formats.remove(&out.format) {
+                    p.close();
+                }
+                return Err(error);
+            }
         }
-        p.close();
         Ok(())
     }
 

@@ -57,9 +57,10 @@ impl<'a> BindingRun<'a> {
         }
         let mut failures = Vec::new();
         let mut nowhere = Vec::new();
-        let mut deliverer = self.deliverer.take().unwrap_or_else(|| {
-            Deliverer::new(&self.ctx, self.project, self.ui.plugin_log()).with_steps(self.ui.clone())
-        });
+        let mut processes = self.processes.lease(&self.ui);
+        let mut deliverer = Deliverer::new(&self.ctx, self.project, processes.log())
+            .with_steps(self.ui.clone())
+            .with_cache(std::mem::take(&mut processes.destinations));
         for d in &dests {
             let profiles = self.project.profiles();
             let target = profiles.target_of(Role::Destination, &d.profile);
@@ -105,7 +106,7 @@ impl<'a> BindingRun<'a> {
             };
             self.outs[oi].deliveries.push(record);
         }
-        self.deliverer = Some(deliverer);
+        processes.destinations = deliverer.take_cache();
         let o = &mut self.outs[oi];
         o.dests = dests;
         if !o.deliveries.iter().any(|d| d.status == "delivered") && !nowhere.is_empty() {

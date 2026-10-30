@@ -14,24 +14,23 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use arrow::array::RecordBatch;
-use arrow::ipc::reader::FileReader;
-use dre_protocol::host::{HostError, LogSink};
+use dre_protocol::host::HostError;
 use dre_protocol::msg::ResultSetMeta;
 use serde_json::{Map as JsonMap, Value as Json};
 
 use super::mode::Deliver;
+use super::population::Population;
 use super::scheduler::{Job, Scheduler};
-use super::{BindingRun, Fail, OutputStatus, Produced, RowProgress, record_path, rel, thousands};
+use super::{BindingRun, Fail, OutputStatus, RowProgress, record_path, rel, thousands};
 use crate::codes::Code;
 use crate::context::Context;
 use crate::dates::Calendar;
 use crate::delivery::{Deliverer, Request};
 use crate::engine::{CancelToken, Events, Level};
-use crate::for_each::{Population, RowMask, Table as RowTable, collision, safe_name};
+use crate::for_each::{RowMask, safe_name};
 use crate::formats::{self, Files, Format};
 use crate::message::QueryResult;
-use crate::plugin_host::{Plugin, WriteRequest, find_plugin};
+use crate::plugin_host::{WriteRequest, find_plugin};
 use crate::project::{ForEach, OrphanRows, Output, PluginKind, Project, RowErrors};
 use crate::render::{RenderError, Renderer};
 use crate::run_results::{FailedKey, ForEachResult, RowDelivery, RowFile, RowRecord};
@@ -51,7 +50,7 @@ fn finished(r: &RowRecord) -> bool {
 }
 
 /// A destination entry of one row, rendered with its `each`.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RowDest {
     /// Its place in the output's destinations (for pacing).
     idx: usize,
@@ -77,7 +76,7 @@ pub(super) const SNAPSHOT_DIR: &str = "results";
 type Attached = (String, Option<HashMap<String, Vec<PathBuf>>>, Vec<PathBuf>);
 
 /// What a worker does with a row.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum Phase {
     /// Render, then deliver.
     All,
@@ -88,7 +87,7 @@ enum Phase {
 }
 
 /// One row's work, prepared on the run's thread.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RowJob {
     i: usize,
     key: String,
@@ -147,12 +146,12 @@ struct Shared<'a> {
     deliver: bool,
     /// `--hold`: hold every destination.
     hold_all: bool,
-    log: LogSink,
     events: Events,
     cancel: CancelToken,
     pacer: crate::rate::Pacer,
     rows_file: Mutex<File>,
     progress: Progress,
+    processes: super::processes::Pool,
 }
 
 /// Rows done so far, sent to the UI as each one finishes.
@@ -190,17 +189,8 @@ impl Progress {
 }
 
 /// A worker's own plugin processes, reused from row to row and closed when it's done.
-struct Worker<'a> {
-    format: Option<Box<dyn Plugin>>,
-    deliverer: Deliverer<'a>,
-}
-
-impl Drop for Worker<'_> {
-    fn drop(&mut self) {
-        if let Some(p) = self.format.take() {
-            p.close();
-        }
-    }
+struct Worker {
+    processes: super::processes::Lease,
 }
 
 impl BindingRun<'_> {
@@ -210,13 +200,13 @@ impl BindingRun<'_> {
         let fe = o.for_each.clone().expect("a per-row output");
         let label = o.label(oi);
         let pop = self.population(oi, &o, &fe)?;
-        let (rows, population) = self.pick_rows(oi, &pop, &fe, &label);
+        let (rows, population) = self.pick_rows(oi, &o, &pop, &fe, &label)?;
         let stem = self.output_stem(oi);
         let sidecar = self.run_dir.join(format!("{stem}.rows.jsonl"));
         self.outs[oi].for_each = Some(ForEachResult {
             query: fe.query.clone(),
             key: fe.key.clone(),
-            rows: rows.len() as u64,
+            rows: rows as u64,
             orphan_rows: pop.orphan_rows,
             partial: self.retry.is_some()
                 || self.opts.rows.only_keys.is_some()
@@ -224,10 +214,9 @@ impl BindingRun<'_> {
             sidecar: record_path(self.project, &sidecar),
             ..ForEachResult::default()
         });
-        if rows.is_empty() {
+        if rows == 0 {
             return self.no_rows(oi, &pop, &fe, &label, &sidecar);
         }
-        let (names, eaches) = self.row_names(&o, &pop, &rows, &label)?;
         let plan = self.row_plan(oi, &o, &pop, &fe)?;
         std::fs::create_dir_all(&plan.folder).map_err(|e| e.to_string())?;
         let rows_file =
@@ -239,41 +228,33 @@ impl BindingRun<'_> {
             .or(fe.concurrency)
             .unwrap_or(crate::project::DEFAULT_ROW_CONCURRENCY)
             .clamp(1, 64);
-        let shared = self.row_shared(&o, &pop, &plan, &label, rows.len(), rows_file);
+        let shared = self.row_shared(&o, &pop, &plan, &label, rows, rows_file);
         let started = Instant::now();
         self.ui.step(
             Level::Info,
             "Rows",
             &format!(
                 "{label}: {} row(s) of `{}`, {concurrency} at a time",
-                rows.len(),
-                fe.query
+                rows, fe.query
             ),
             None,
         );
         shared.events.rows(shared.progress.event(false));
         let scheduler = Scheduler::new(concurrency).queue(concurrency * 2).threaded();
-        let rows: Vec<Row<'_>> = rows
-            .iter()
-            .zip(&names)
-            .zip(&eaches)
-            .map(|((&i, name), each)| Row { i, name, each })
-            .collect();
-        let records = self.make_rows(
+        self.make_rows(
             &plan,
             &shared,
             &scheduler,
-            &rows,
             fe.on_row_error == RowErrors::Fail,
+            population,
         )?;
         shared.events.rows(shared.progress.event(true));
-        self.finish_rows(oi, &records, &label, started);
-        if self.stages.preview.is_some() {
-            self.preview_rows(oi, &records, population);
-        }
-        if self.retry.is_some() {
-            self.record_retried(&stem, &records)?;
-        }
+        let summary = self.outs[oi]
+            .for_each
+            .as_ref()
+            .expect("the per-row summary was set above");
+        self.ui
+            .step(Level::Info, "Rows", &rows_line(&label, summary, started), None);
         self.rows_outcome(oi, shared.deliver, &label, &sidecar)
     }
 
@@ -293,17 +274,14 @@ impl BindingRun<'_> {
             .sum();
         if total > fe.max_population_rows {
             return Err(failed(format!(
-                "its queries return {} rows, more than `for_each.max_population_rows` ({}); the whole population is held in memory to split it, so filter or aggregate in SQL, or raise `max_population_rows`",
+                "its queries return {} rows, more than `for_each.max_population_rows` ({}); filter or aggregate in SQL, or raise `max_population_rows`",
                 thousands(total),
                 thousands(fe.max_population_rows)
             )));
         }
-        let driver = read_table(&self.produced[driver_p])?;
-        let data: Vec<RowTable> = data_ps
-            .iter()
-            .map(|&i| read_table(&self.produced[i]))
-            .collect::<Result<_, _>>()?;
-        let pop = Population::build(driver, data, &fe.key).map_err(failed)?;
+        let data: Vec<&super::Produced> = data_ps.iter().map(|&i| &self.produced[i]).collect();
+        let pop =
+            Population::build(&self.produced[driver_p], &data, &fe.key, &self.opts.cancel).map_err(failed)?;
         if pop.orphan_rows > 0 {
             let msg = format!(
                 "{} row(s) of its queries have a key that isn't in the driver `{}`, so they're in no copy (keys: {}{})",
@@ -334,21 +312,25 @@ impl BindingRun<'_> {
 
     /// Which rows: all, less those a retry finished, `--only-keys`, then `--limit-rows` (or a
     /// preview's first three). Also how many there were before the limit.
-    fn pick_rows(&mut self, oi: usize, pop: &Population, fe: &ForEach, label: &str) -> (Vec<usize>, usize) {
+    fn pick_rows(
+        &mut self,
+        oi: usize,
+        output: &Output,
+        pop: &Population,
+        fe: &ForEach,
+        label: &str,
+    ) -> Result<(usize, usize), Fail> {
+        let renderer = self.renderer(None)?;
         let stem = self.output_stem(oi);
-        let done = self
-            .retry
-            .as_ref()
-            .and_then(|r| r.done.get(&stem))
-            .cloned()
-            .unwrap_or_default();
+        let done = self.retry.as_ref().and_then(|r| r.done.get(&stem));
         let only_keys = self.opts.rows.only_keys.as_ref();
         if let Some(keys) = only_keys {
-            let missing: Vec<&str> = keys
-                .iter()
-                .filter(|k| !pop.keys.contains(k))
-                .map(String::as_str)
-                .collect();
+            let mut missing = Vec::new();
+            for key in keys {
+                if !pop.contains(key)? {
+                    missing.push(key.as_str());
+                }
+            }
             if !missing.is_empty() {
                 self.ui.warn(&format!(
                     "  {label}: --only-keys names keys that aren't in the driver `{}`: {}",
@@ -357,15 +339,45 @@ impl BindingRun<'_> {
                 ));
             }
         }
-        let mut rows: Vec<usize> = (0..pop.len())
-            .filter(|&i| !done.contains(&pop.keys[i]))
-            .filter(|&i| only_keys.is_none_or(|k| k.contains(&pop.keys[i])))
-            .collect();
-        let population = rows.len();
-        if let Some(n) = self.stages.sample_rows {
-            rows.truncate(n);
+        let files = Files::of(output);
+        let failed = |message: String| Fail::new(Code::ForEachFailed, format!("{label}: {message}"));
+        let mut population = 0;
+        let mut selected = 0;
+        for i in 0..pop.len() {
+            self.not_cancelled()?;
+            let key = pop.key(i)?;
+            if done.is_some_and(|d| d.contains(&key)) || only_keys.is_some_and(|keys| !keys.contains(&key)) {
+                continue;
+            }
+            population += 1;
+            if self.stages.sample_rows.is_some_and(|n| selected >= n) {
+                continue;
+            }
+            let name = if let Some(source) = &output.file_name {
+                let (_, each) = each_of(pop, i, self.calendar)?;
+                let name = renderer
+                    .render_with(
+                        &self.report.file,
+                        source,
+                        minijinja::context! { each => each },
+                        false,
+                    )
+                    .map_err(|e| failed(format!("`file_name`: {}", e.message)))?
+                    .trim()
+                    .to_string();
+                if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+                    return Err(failed(format!(
+                        "`file_name` rendered `{name}` for key `{key}`; it must be a file name, without folders"
+                    )));
+                }
+                name
+            } else {
+                files.name(&safe_name(&key))
+            };
+            pop.select(i, &name).map_err(failed)?;
+            selected += 1;
         }
-        (rows, population)
+        Ok((selected, population))
     }
 
     /// No row to make: an empty driver (`on_empty` has decided already), or nothing left to
@@ -390,55 +402,6 @@ impl BindingRun<'_> {
         self.outs[oi].status = Some(OutputStatus::Skipped);
         self.outs[oi].reason = Some("no_data".into());
         Ok(())
-    }
-
-    /// Each row's file name and `each`, checked for collisions before anything renders.
-    #[allow(clippy::type_complexity)]
-    fn row_names(
-        &mut self,
-        o: &Output,
-        pop: &Population,
-        rows: &[usize],
-        label: &str,
-    ) -> Result<(Vec<String>, Vec<(JsonMap<String, Json>, minijinja::Value)>), Fail> {
-        let failed = |m: String| Fail::new(Code::ForEachFailed, format!("{label}: {m}"));
-        let files = Files::of(o);
-        let renderer = self.renderer(None)?;
-        let mut eaches = Vec::with_capacity(rows.len());
-        let mut names = Vec::with_capacity(rows.len());
-        for &i in rows {
-            let (each_json, each_value) = each_of(pop, i, self.calendar);
-            let name = match &o.file_name {
-                Some(src) => {
-                    let ctx = minijinja::context! { each => each_value.clone() };
-                    let n = renderer
-                        .render_with(&self.report.file, src, ctx, false)
-                        .map_err(|e| failed(format!("`file_name`: {}", e.message)))?
-                        .trim()
-                        .to_string();
-                    if n.is_empty() || n.contains(['/', '\\']) || n == "." || n == ".." {
-                        return Err(failed(format!(
-                            "`file_name` rendered `{n}` for key `{}`; it must be a file name, without folders",
-                            pop.keys[i]
-                        )));
-                    }
-                    n
-                }
-                None => files.name(&safe_name(&pop.keys[i])),
-            };
-            names.push(name);
-            eaches.push((each_json, each_value));
-        }
-        if let Some((file, a, b)) = collision(
-            rows.iter()
-                .map(|&i| pop.keys[i].as_str())
-                .zip(names.iter().map(String::as_str)),
-        ) {
-            return Err(failed(format!(
-                "the rows with keys `{a}` and `{b}` would both write `{file}`; make `file_name` (or the key) unique per row"
-            )));
-        }
-        Ok((names, eaches))
     }
 
     /// What every row of output `oi` shares: its folder, its sections, its template, and the
@@ -520,11 +483,11 @@ impl BindingRun<'_> {
             is_message: o.is_message(),
             deliver: !matches!(self.stages.deliver, Deliver::Keep(_)),
             hold_all,
-            log: self.ui.plugin_log(),
             events: self.ui.clone(),
             cancel: self.opts.cancel.clone(),
             pacer: crate::rate::Pacer::default(),
             rows_file: Mutex::new(rows_file),
+            processes: self.processes.clone(),
             progress: Progress {
                 output: label.to_string(),
                 total: total as u64,
@@ -548,58 +511,112 @@ impl BindingRun<'_> {
         plan: &RowPlan<'_>,
         shared: &Shared<'_>,
         scheduler: &Scheduler,
-        rows: &[Row<'_>],
         two_pass: bool,
-    ) -> Result<Vec<Done>, Fail> {
-        let first = if two_pass { Phase::Render } else { Phase::All };
-        let jobs = rows
-            .iter()
-            .map(|row| self.prepare_row(plan, row, first).map(Job::free));
-        let ran = run_jobs(scheduler, shared, jobs);
-        let mut records: Vec<Done> = ran.done.into_iter().map(|(_, d)| d).collect();
-        if let Some(e) = ran.stopped {
-            return Err(e);
+        population: usize,
+    ) -> Result<(), Fail> {
+        let mut after = 0;
+        let mut failed = false;
+        loop {
+            let selected = plan.pop.selected(after)?;
+            if selected.is_empty() || shared.cancel.is_cancelled() {
+                break;
+            }
+            after = selected.last().expect("nonempty above").0 + 1;
+            let mut prepared = Vec::with_capacity(selected.len());
+            for (i, name) in &selected {
+                let each = each_of(plan.pop, *i, self.calendar)?;
+                let row = Row {
+                    i: *i,
+                    name,
+                    each: &each,
+                };
+                prepared.push(
+                    self.prepare_row(plan, &row, if two_pass { Phase::Render } else { Phase::All })
+                        .map(Job::free),
+                );
+                if prepared.last().is_some_and(Result::is_err) {
+                    break;
+                }
+            }
+            let ran = run_jobs(scheduler, shared, prepared);
+            let records: Vec<Done> = ran.done.into_iter().map(|(_, done)| done).collect();
+            if two_pass {
+                for (job, record) in &records {
+                    failed |= record.status == "failed";
+                    plan.pop.save_job(
+                        job.i,
+                        &serde_json::to_string(&(job, record)).map_err(|e| e.to_string())?,
+                    )?;
+                }
+            } else {
+                self.consume_rows(plan.oi, &records, population)?;
+            }
+            if let Some(error) = ran.stopped {
+                return Err(error);
+            }
         }
         if !two_pass {
-            return Ok(records);
+            return Ok(());
         }
-        if records.iter().any(|(_, r)| r.status == "failed") {
-            // Deliver nothing: record every rendered row as not delivered.
-            for (job, r) in records.iter_mut().filter(|(_, r)| r.status == "rendered") {
-                r.status = "failed".into();
-                r.error = Some(FailedKey {
-                    key: job.key.clone(),
-                    code: Code::RowsFailed.to_string(),
-                    message:
-                        "not delivered: another row failed and `on_row_error: fail` delivers all or nothing"
-                            .into(),
-                });
-                write_record(shared, r);
-                shared.progress.row_done(&shared.events, true);
+        let mut after = 0;
+        loop {
+            let saved = plan.pop.jobs(after)?;
+            if saved.is_empty() {
+                break;
             }
-            return Ok(records);
+            after = saved.last().expect("nonempty above").0 + 1;
+            let mut kept = Vec::new();
+            let mut jobs = Vec::new();
+            for (_, json) in saved {
+                let (mut job, mut record): Done = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                if record.status != "rendered" {
+                    kept.push((job, record));
+                    continue;
+                }
+                if failed {
+                    record.status = "failed".into();
+                    record.error = Some(FailedKey { key: job.key.clone(), code: Code::RowsFailed.to_string(), message: "not delivered: another row failed and `on_row_error: fail` delivers all or nothing".into() });
+                    write_record(shared, &record);
+                    shared.progress.row_done(&shared.events, true);
+                    kept.push((job, record));
+                } else {
+                    job.phase = Phase::Deliver;
+                    jobs.push(Ok::<_, Fail>(Job::free(job)));
+                }
+            }
+            kept.extend(
+                run_jobs(scheduler, shared, jobs)
+                    .done
+                    .into_iter()
+                    .map(|(_, done)| done),
+            );
+            kept.sort_by_key(|(job, _)| job.i);
+            self.consume_rows(plan.oi, &kept, population)?;
         }
-        // Rows the first pass skipped keep their record; the rendered ones deliver now.
-        let (rendered, mut kept): (Vec<Done>, Vec<Done>) =
-            records.into_iter().partition(|(_, r)| r.status == "rendered");
-        let second = rendered.into_iter().map(|(mut job, _)| {
-            job.phase = Phase::Deliver;
-            Ok::<_, Fail>(Job::free(job))
-        });
-        kept.extend(
-            run_jobs(scheduler, shared, second)
-                .done
-                .into_iter()
-                .map(|(_, d)| d),
-        );
-        kept.sort_by_key(|(job, _)| job.i);
-        Ok(kept)
+        Ok(())
+    }
+
+    fn consume_rows(&mut self, oi: usize, records: &[Done], population: usize) -> Result<(), Fail> {
+        self.finish_rows(oi, records);
+        if self.stages.preview.is_some() {
+            self.preview_rows(oi, records, population);
+        }
+        if self.retry.is_some() {
+            self.record_retried(&self.output_stem(oi), records)?;
+        }
+        Ok(())
     }
 
     /// The output's summary from its rows, what a message attaching it finds, its held
     /// deliveries, and its `Rows` line.
-    fn finish_rows(&mut self, oi: usize, records: &[Done], label: &str, started: Instant) {
+    fn finish_rows(&mut self, oi: usize, records: &[Done]) {
         let mut s = self.outs[oi].for_each.take().unwrap_or_default();
+        let attached = self.b.outputs[oi].name.as_ref().is_some_and(|name| {
+            self.b
+                .outputs
+                .iter()
+                .any(|o| o.destinations.iter().any(|d| d.attach.contains(name)))
+        });
         for (job, r) in records {
             match r.status.as_str() {
                 "succeeded" => s.succeeded += 1,
@@ -612,17 +629,15 @@ impl BindingRun<'_> {
                     }
                 }
             }
-            if matches!(r.status.as_str(), "succeeded" | "held") {
+            if attached && matches!(r.status.as_str(), "succeeded" | "held") {
                 self.outs[oi].row_files.insert(
                     job.key.clone(),
                     job.files.iter().map(|(f, _)| f.clone()).collect(),
                 );
             }
         }
-        s.not_started = s.rows - records.len() as u64;
+        s.not_started = s.rows - s.succeeded - s.held - s.skipped - s.failed;
         self.hold_rows(oi, records);
-        self.ui
-            .step(Level::Info, "Rows", &rows_line(label, &s, started), None);
         self.outs[oi].for_each = Some(s);
     }
 
@@ -666,7 +681,7 @@ impl BindingRun<'_> {
 
     /// What's finished now, this retry included, for the next `--retry-failed`.
     fn record_retried(&mut self, stem: &str, records: &[Done]) -> Result<(), Fail> {
-        let Some(r) = &self.retry else {
+        let Some(r) = &mut self.retry else {
             return Ok(());
         };
         let mut all = r.done.get(stem).cloned().unwrap_or_default();
@@ -676,6 +691,7 @@ impl BindingRun<'_> {
                 .filter(|(_, r)| finished(r))
                 .map(|(j, _)| j.key.clone()),
         );
+        r.done.insert(stem.to_string(), all.clone());
         let path = self.run_dir.join(format!("{stem}.done.json"));
         let mut keys: Vec<&String> = all.iter().collect();
         keys.sort();
@@ -890,7 +906,7 @@ impl BindingRun<'_> {
     /// rendered with `each`.
     fn prepare_row(&mut self, plan: &RowPlan<'_>, row: &Row<'_>, phase: Phase) -> Result<RowJob, Fail> {
         let o = &self.b.outputs[plan.oi];
-        let key = plan.pop.keys[row.i].clone();
+        let key = plan.pop.key(row.i)?;
         let mask = if o
             .for_each
             .as_ref()
@@ -913,7 +929,7 @@ impl BindingRun<'_> {
             pre: None,
             phase,
         };
-        let decision = self.row_decision(plan, row.i);
+        let decision = self.row_decision(plan, row.i)?;
         if let Some(why) = decision.fail {
             job.pre = Some(pre_record(
                 &job.key,
@@ -928,7 +944,7 @@ impl BindingRun<'_> {
             return Ok(job);
         }
         let kept: Vec<usize> = (0..plan.pop.data.len())
-            .filter(|&q| !decision.drop.contains(&plan.pop.data[q].0.name))
+            .filter(|&q| !decision.drop.contains(&plan.pop.data[q].name))
             .collect();
         job.files = row_files(plan, row.name, &kept)?;
         if let Some(Json::Object(base)) = &plan.template_base {
@@ -951,29 +967,31 @@ impl BindingRun<'_> {
     }
 
     /// Row `i`'s slices and their `on_empty`.
-    fn row_decision(&self, plan: &RowPlan<'_>, i: usize) -> crate::no_data::Decision {
+    fn row_decision(&self, plan: &RowPlan<'_>, i: usize) -> Result<crate::no_data::Decision, Fail> {
         let o = &self.b.outputs[plan.oi];
         let entries: Vec<crate::no_data::Query<'_>> = plan
             .pop
             .data
             .iter()
             .enumerate()
-            .map(|(q, (t, _))| crate::no_data::Query {
-                name: &t.name,
-                rows: plan.pop.slice_len(i, q),
-                on_empty: self
-                    .b
-                    .queries
-                    .iter()
-                    .find(|x| x.query == t.name)
-                    .and_then(|x| x.on_empty),
+            .map(|(q, t)| {
+                Ok(crate::no_data::Query {
+                    name: &t.name,
+                    rows: plan.pop.slice_len(i, q)?,
+                    on_empty: self
+                        .b
+                        .queries
+                        .iter()
+                        .find(|x| x.query == t.name)
+                        .and_then(|x| x.on_empty),
+                })
             })
-            .collect();
-        if entries.is_empty() {
+            .collect::<Result<_, Fail>>()?;
+        Ok(if entries.is_empty() {
             crate::no_data::Decision::default()
         } else {
             crate::no_data::decide(o.on_empty, &entries, plan.droppable)
-        }
+        })
     }
 
     /// What the row's Jinja sees: `each`, and for a message its row's `results` and `outputs`;
@@ -995,14 +1013,8 @@ impl BindingRun<'_> {
         let results: Vec<(String, Arc<QueryResult>)> = kept
             .iter()
             .map(|&q| {
-                let t = &plan.pop.data[q].0;
-                let cols = t
-                    .batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|f| f.name().clone())
-                    .collect();
+                let t = &plan.pop.data[q];
+                let cols = t.schema.fields().iter().map(|f| f.name().clone()).collect();
                 (
                     t.name.clone(),
                     Arc::new(crate::document::query_result(cols, &slices[q..=q], self.calendar)),
@@ -1186,7 +1198,7 @@ fn row_files(plan: &RowPlan<'_>, name: &str, kept: &[usize]) -> Result<Vec<(Path
     if !plan.splits {
         return Ok(vec![(plan.folder.join(name), kept.to_vec())]);
     }
-    let tabs: Vec<&str> = kept.iter().map(|&q| plan.pop.data[q].0.name.as_str()).collect();
+    let tabs: Vec<&str> = kept.iter().map(|&q| plan.pop.data[q].name.as_str()).collect();
     Ok(Files::split_names(name, &tabs)?
         .into_iter()
         .zip(kept)
@@ -1279,18 +1291,14 @@ fn rows_line(label: &str, s: &ForEachResult, started: Instant) -> String {
     )
 }
 
-/// A spooled result, read whole: the population is split in memory.
-fn read_table(p: &Produced) -> Result<RowTable, String> {
-    let reader = FileReader::try_new(File::open(&p.spool).map_err(|e| e.to_string())?, None)
-        .map_err(|e| e.to_string())?;
-    let batches: Vec<RecordBatch> = reader.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-    RowTable::new(&p.query, &p.schema, &batches)
-}
-
 /// Row `i` of the driver: as JSON (for a document's context) and as a template value (dates
 /// stay DRE dates).
-fn each_of(pop: &Population, i: usize, cal: Calendar) -> (JsonMap<String, Json>, minijinja::Value) {
-    let row = pop.driver_row(i);
+fn each_of(
+    pop: &Population,
+    i: usize,
+    cal: Calendar,
+) -> Result<(JsonMap<String, Json>, minijinja::Value), Fail> {
+    let row = pop.driver_row(i)?;
     let names: Vec<String> = row.schema().fields().iter().map(|f| f.name().clone()).collect();
     let typed = crate::values::typed_rows(&row, cal).pop().unwrap_or_default();
     let json: JsonMap<String, Json> = names
@@ -1299,7 +1307,7 @@ fn each_of(pop: &Population, i: usize, cal: Calendar) -> (JsonMap<String, Json>,
         .map(|(n, v)| (n.clone(), serde_json::to_value(v).unwrap_or(Json::Null)))
         .collect();
     let value: BTreeMap<String, minijinja::Value> = names.into_iter().zip(typed).collect();
-    (json, minijinja::Value::from(value))
+    Ok((json, minijinja::Value::from(value)))
 }
 
 /// Whether a JSON value holds Jinja at any depth.
@@ -1355,8 +1363,7 @@ fn run_jobs<E>(
         jobs,
         &shared.cancel,
         || Worker {
-            format: None,
-            deliverer: Deliverer::new(&shared.ctx, shared.project, shared.log.clone()),
+            processes: shared.processes.lease(&shared.events),
         },
         |w, _, job| {
             let record = run_job(shared, &job, w)?;
@@ -1410,14 +1417,14 @@ fn row_failed(
 
 /// Make the row's files and zips (unless the first pass did), then deliver them; `None` when
 /// the run stopped part-way.
-fn run_job(shared: &Shared<'_>, job: &RowJob, w: &mut Worker<'_>) -> Option<RowRecord> {
+fn run_job(shared: &Shared<'_>, job: &RowJob, w: &mut Worker) -> Option<RowRecord> {
     if let Some(pre) = &job.pre {
         return Some(pre.clone());
     }
     if job.phase != Phase::Deliver {
-        if let Err(e) = make_files(shared, job, &mut w.format) {
+        if let Err(e) = make_files(shared, job, &mut w.processes) {
             // A plugin that failed may be broken: the next row starts a fresh one.
-            if let Some(p) = w.format.take() {
+            if let Some(p) = w.processes.formats.remove(&shared.format) {
                 p.close();
             }
             return Some(row_failed(
@@ -1456,7 +1463,11 @@ fn run_job(shared: &Shared<'_>, job: &RowJob, w: &mut Worker<'_>) -> Option<RowR
             error: None,
         });
     }
-    deliver_row(shared, job, &mut w.deliverer, files)
+    let mut deliverer = Deliverer::new(&shared.ctx, shared.project, w.processes.log())
+        .with_cache(std::mem::take(&mut w.processes.destinations));
+    let record = deliver_row(shared, job, &mut deliverer, files);
+    w.processes.destinations = deliverer.take_cache();
+    record
 }
 
 /// Deliver a made row to each of its destinations (or hold, or keep it); `None` when the run
@@ -1545,7 +1556,11 @@ fn address(options: &JsonMap<String, Json>) -> Option<String> {
 }
 
 /// Write a row's files through the format plugin (or a message's `.md`).
-fn make_files(shared: &Shared<'_>, job: &RowJob, format: &mut Option<Box<dyn Plugin>>) -> Result<(), Fail> {
+fn make_files(
+    shared: &Shared<'_>,
+    job: &RowJob,
+    processes: &mut super::processes::Processes,
+) -> Result<(), Fail> {
     if shared.is_message {
         let (title, text) = job.message.clone().unwrap_or_default();
         let (path, _) = job.files.first().ok_or("the message has no file to write")?;
@@ -1553,18 +1568,21 @@ fn make_files(shared: &Shared<'_>, job: &RowJob, format: &mut Option<Box<dyn Plu
         return Ok(());
     }
     let slices = shared.pop.slices(job.i)?;
-    if format.is_none() {
+    if !processes.formats.contains_key(&shared.format) {
         let plugin = find_plugin(&shared.ctx, shared.project, PluginKind::Format, &shared.format)
             .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
-        *format = Some(
-            shared
-                .ctx
-                .host()
-                .start(&plugin, shared.log.clone(), Some(shared.project.root()))
-                .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?,
-        );
+        let process = shared
+            .ctx
+            .host()
+            .start(&plugin, processes.log(), Some(shared.project.root()))
+            .map_err(|e| Fail::new(Code::FormatFailed, e.to_string()))?;
+        processes.formats.insert(shared.format.clone(), process);
     }
-    let p = format.as_deref_mut().expect("started");
+    let p = processes
+        .formats
+        .get_mut(&shared.format)
+        .expect("started")
+        .as_mut();
     let fmt_err =
         |e: HostError| Fail::from_plugin(&e, format!("{} format: {e}", shared.format)).or(Code::FormatFailed);
     for (path, qs) in &job.files {

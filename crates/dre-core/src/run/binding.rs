@@ -27,6 +27,7 @@ impl<'a> BindingRun<'a> {
         opts: &'a RunOptions,
         ui: Events,
         store: &'a RunStore,
+        processes: super::processes::Pool,
     ) -> Self {
         let (report, b) = (planned.report, &planned.binding);
         let schedule = opts
@@ -95,7 +96,7 @@ impl<'a> BindingRun<'a> {
             started_at,
             produced: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
-            deliverer: None,
+            processes,
             drift: Vec::new(),
             protected_snapshot: None,
             retry: None,

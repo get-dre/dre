@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "database"]
 exclude = ["tests/"]
 
 [dependencies]
-serde.workspace = true
+serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
 thiserror.workspace = true
 serde-saphyr.workspace = true
@@ -36,6 +36,9 @@ flate2 = "1"
 tar = "0.4"
 croner = "4"
 rrule = "0.14"
+# Disk-backed per-row key and job indexes keep population memory bounded. SQLite is MIT.
+rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
+tempfile.workspace = true
 sqlparser = { version = "0.63", features = ["visitor"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -43,6 +46,3 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
-[dev-dependencies]
-tempfile.workspace = true

@@ -24,7 +24,6 @@ use serde_json::{Map as JsonMap, Value as Json};
 use crate::codes::{Code, ErrorCode};
 use crate::context::Context;
 use crate::dates::Calendar;
-use crate::delivery::Deliverer;
 use crate::engine::{CancelToken, EventSink, Events, RunEvent, RunStore};
 use crate::error::Error;
 use crate::parse::ParsedBinding;
@@ -40,6 +39,8 @@ mod format;
 mod mode;
 pub(crate) mod per_row;
 mod plan;
+mod population;
+mod processes;
 mod query;
 mod record;
 mod scheduler;
@@ -448,6 +449,7 @@ pub fn execute(
             item: p,
         })
     });
+    let processes = processes::Pool::new(events.plugin_log());
     let run_one = |_: &mut (), _: usize, p: &Planned<'_>| {
         let events = if at_once { events.held() } else { events.clone() };
         if at_once {
@@ -460,7 +462,7 @@ pub fn execute(
             report: p.report.name.clone(),
             set: p.binding.set.clone(),
         });
-        let outcome = BindingRun::new(ctx, project, p, opts, events.clone(), &store).run();
+        let outcome = BindingRun::new(ctx, project, p, opts, events.clone(), &store, processes.clone()).run();
         events.emit(RunEvent::BindingEnd(outcome.clone()));
         if at_once {
             events.emit_now(RunEvent::Running {
@@ -567,8 +569,8 @@ struct BindingRun<'a> {
     /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
     /// (`oi`) reads both.
     outs: Vec<OutputRun>,
-    /// Delivers the Binding's outputs, reusing a destination process per type.
-    deliverer: Option<Deliverer<'a>>,
+    /// The run's format and destination processes, leased by active output workers.
+    processes: processes::Pool,
     drift: Vec<String>,
     /// The current schema with stable identities and any protection carried from the baseline.
     protected_snapshot: Option<Json>,

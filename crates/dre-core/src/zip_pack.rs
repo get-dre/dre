@@ -26,7 +26,7 @@ impl Encryption {
 }
 
 /// A destination entry's `zip:`, as written: the password may hold Jinja.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZipSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
