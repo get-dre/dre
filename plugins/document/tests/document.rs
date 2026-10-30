@@ -1134,4 +1134,73 @@ fn hebrew_thai_and_korean_draw_with_their_fonts() {
         glyphs.iter().any(|(base, ..)| base == "NotoSansThai-Regular"),
         "{glyphs:?}"
     );
+    // Hebrew runs right to left: drawn last letter first.
+    let hebrew: String = glyphs
+        .iter()
+        .filter(|(base, ..)| base.starts_with("NotoSansHebrew"))
+        .map(|(.., t)| t.as_str())
+        .collect();
+    assert_eq!(hebrew, "םולש", "{glyphs:?}");
+}
+
+#[test]
+fn templates_own_font_rules_keep_their_order_and_still_fall_back_by_lang() {
+    let (pdf, requested, warnings) = write_with_noto(
+        r#"<html lang="ja"><head><style>td { font-family: "IBM Plex Mono" !important; }</style></head><body><table><tr><td lang="zh">直 mono</td></tr></table></body></html>"#,
+    );
+    assert_eq!(requested, ["noto_sans_sc"]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let glyphs = drawn_glyphs(&pdf);
+    assert_eq!(
+        fonts_drawing(&glyphs, "直"),
+        ["NotoSansCJKsc-Regular".to_string()].into()
+    );
+    assert_eq!(
+        fonts_drawing(&glyphs, "mono"),
+        ["IBMPlexMono-Regular".to_string()].into(),
+        "{glyphs:?}"
+    );
+}
+
+#[test]
+fn a_failed_download_warns_by_script_and_still_makes_the_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = dir.path().join("fail.html");
+    std::fs::write(&template, "<p>مرحبا नमस्ते</p>").unwrap();
+    let out = dir.path().join("fail.pdf");
+    let mut p = PluginProcess::start_for(
+        bin(),
+        Some(&PluginId::new(Kind::Format, "pdf")),
+        Arc::new(|_, _| {}),
+        None,
+    )
+    .unwrap();
+    p.write_begin_with_font_requests(
+        out.to_str().unwrap(),
+        "pdf",
+        Default::default(),
+        vec![],
+        Some(serde_json::to_value(ctx(dir.path(), Some(template))).unwrap()),
+        true,
+    )
+    .unwrap();
+    let bad = dir.path().join("not-a-font.otf");
+    std::fs::write(&bad, b"not a font").unwrap();
+    let (_, warnings) = p
+        .write_finish_with_fonts(&mut |font| match font.name.as_str() {
+            "noto_sans_arabic" => Err("registry unavailable".into()),
+            _ => Ok(vec![bad.to_string_lossy().into_owned()]),
+        })
+        .unwrap();
+    p.close().unwrap();
+    assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-"));
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with("Arabic PDF fallback font unavailable: registry unavailable"),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings[1].starts_with("Devanagari PDF fallback font unavailable"),
+        "{warnings:?}"
+    );
 }

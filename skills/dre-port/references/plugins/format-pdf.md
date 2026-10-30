@@ -178,8 +178,8 @@ Hebrew, Devanagari (Hindi, Marathi, Nepali) and Thai needs no project fonts when
 that supports font requests. Before laying out the PDF, the plugin checks its characters against
 Plex and the project's `@font-face` fonts. For each script they leave uncovered, core fetches
 that script's **Noto Sans** regular and bold, and only those: a Hindi report downloads Devanagari
-and nothing else. Arabic and Hebrew run right to left and Arabic letters join; Devanagari and Thai
-form their conjuncts and vowel signs.
+and nothing else. Arabic and Hebrew run right to left, Arabic letters join, and Devanagari forms
+its conjuncts (`नमस्ते`).
 
 Project fonts stay first when explicitly selected. Other declared project families are available
 as fallbacks after Plex, including outside elements that select them; Noto is the final fallback.
@@ -210,6 +210,7 @@ In a per-row report, set it from the row, with no new YAML key:
 Text with no Chinese, Japanese or Korean `lang` (none, or another language such as `en`) is
 guessed from the document: kana (`です`) means Japanese, Hangul (`한국어`) means Korean, and Han
 characters alone mean Simplified Chinese. That last guess adds a one-line note suggesting `lang`.
+CSS generated content (`content:`) follows the `lang` of `<html>`.
 
 ###### Pinned versions and the cache
 

@@ -74,16 +74,10 @@ pub fn render_pdf_with_fonts(
                 name: name.into(),
                 version: version.into(),
             };
-            match resolve(request) {
-                Ok(paths) => {
-                    for path in paths {
-                        let bytes = std::fs::read(&path)
-                            .map_err(|e| format!("can't read fallback font {path}: {e}"))?;
-                        let family = fonts::family_name(&bytes)
-                            .ok_or_else(|| format!("invalid fallback font {path}"))?;
-                        families.entry(noto).or_insert(family);
-                        fallback_fonts.push(bytes);
-                    }
+            match resolve(request).and_then(|paths| load_fallback(&paths)) {
+                Ok((family, files)) => {
+                    families.insert(noto, family);
+                    fallback_fonts.extend(files);
                 }
                 Err(e) => warnings.push(format!("{} PDF fallback font unavailable: {e}", noto.label())),
             }
@@ -157,6 +151,20 @@ pub fn render_pdf_with_fonts(
                 .into(),
         ),
     }
+}
+
+/// A fetched package's files and the family inside them. Any unreadable file fails the package,
+/// which becomes a warning: a fallback font never fails the PDF.
+fn load_fallback(paths: &[String]) -> Result<(String, Vec<Vec<u8>>), String> {
+    let mut family = None;
+    let mut files = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|e| format!("can't read {path}: {e}"))?;
+        let name = fonts::family_name(&bytes).ok_or_else(|| format!("{path} isn't a font file"))?;
+        family.get_or_insert(name);
+        files.push(bytes);
+    }
+    Ok((family.ok_or("the registry gave no font files")?, files))
 }
 
 /// Encrypt a PDF with an open (user) `password`: AES-256 (PDF 2.0, revision 6), every

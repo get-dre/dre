@@ -100,6 +100,7 @@ pub fn plan(html: &str, project: &[Font]) -> Plan {
                 (Script::Other(noto), _) => {
                     plan.fonts.insert(noto);
                 }
+                // Each Noto CJK font is complete: kana, Hangul and every Han form.
                 (_, Some(noto)) => {
                     han_langs.insert(noto);
                 }
@@ -140,7 +141,8 @@ pub fn plan(html: &str, project: &[Font]) -> Plan {
 /// Every declaration `font-family: L` becomes `--dre-font: L; font-family: L,
 /// var(--dre-fallback)`, and a rule per `lang` value sets `--dre-fallback`. Custom properties
 /// inherit, so a descendant's own `font-family` gets its ancestor's order. An element with a
-/// `lang` and no `font-family` of its own recomputes its inherited list from `--dre-font`.
+/// `lang` and no `font-family` of its own recomputes its inherited list from `--dre-font`; that
+/// rule has no specificity, so any of the template's own `font-family` rules win over it.
 pub fn apply(html: &str, plan: &Plan, families: &BTreeMap<Noto, String>) -> String {
     if families.is_empty() {
         return html.to_string();
@@ -160,7 +162,7 @@ pub fn apply(html: &str, plan: &Plan, families: &BTreeMap<Noto, String>) -> Stri
         ))
     });
     let mut css = format!(
-        "html {{ --dre-fallback: {}; }} [lang] {{ font-family: var(--dre-font), var(--dre-fallback); }}",
+        "html {{ --dre-fallback: {}; }} :where([lang]) {{ font-family: var(--dre-font), var(--dre-fallback); }}",
         order(plan.guess)
     );
     for (lang, han) in &plan.langs {
@@ -263,7 +265,7 @@ fn text_runs(html: &str) -> Vec<(String, Option<&str>)> {
     }
     static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?is)<!--.*?-->|<style\b[^>]*>(.*?)</style>|<script\b[^>]*>.*?</script>|<(/?)([a-z][^\s/>]*)([^>]*)>",
+            r"(?is)<!--.*?-->|<style\b[^>]*>(.*?)</style>|<script\b[^>]*>.*?</script>|<title\b[^>]*>.*?</title>|<(/?)([a-z][^\s/>]*)([^>]*)>",
         )
         .expect("the pattern is a valid regex")
     });
@@ -287,9 +289,9 @@ fn text_runs(html: &str) -> Vec<(String, Option<&str>)> {
         let Some(name) = t.get(3) else { continue };
         let name = name.as_str().to_ascii_lowercase();
         let attrs = t.get(4).map_or("", |a| a.as_str());
-        if let Some(style) = STYLE_ATTR.captures(attrs) {
+        if let Some(style) = crate::fonts::STYLE_ATTR.captures(attrs) {
             generated.push_str(&generated_content(
-                style.get(1).or(style.get(2)).map_or("", |m| m.as_str()),
+                style.get(2).or(style.get(3)).map_or("", |m| m.as_str()),
             ));
         }
         if !t[2].is_empty() {
@@ -310,10 +312,6 @@ fn text_runs(html: &str) -> Vec<(String, Option<&str>)> {
     runs.push((generated, root_lang));
     runs
 }
-
-static STYLE_ATTR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("the pattern is a valid regex")
-});
 
 /// The text of CSS `content:` values, CSS escapes decoded: it's laid out like document text.
 fn generated_content(css: &str) -> String {
@@ -414,7 +412,10 @@ mod tests {
             fonts("<p>שלום مرحبا नमस्ते สวัสดี &#x05D0;</p>"),
             [Noto::Arabic, Noto::Hebrew, Noto::Devanagari, Noto::Thai]
         );
-        assert!(fonts("<p>Hello, Ελληνικά, Кириллица</p><!-- 東京 --><script>'東京'</script>").is_empty());
+        assert!(
+            fonts("<title>東京</title><p>Hello, Ελληνικά, Кириллица</p><!-- 東京 --><script>'東京'</script>")
+                .is_empty()
+        );
         assert!(plan("<p>Hello</p>", &[]).note.is_none());
     }
 

@@ -43,7 +43,7 @@ const GENERIC: &[&str] = &[
 static STYLE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)(<style\b[^>]*>)(.*?)(</style>)").expect("the pattern is a valid regex")
 });
-static STYLE_ATTR: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static STYLE_ATTR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?is)(\bstyle\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).expect("the pattern is a valid regex")
 });
 static FONT_FACE: LazyLock<Regex> =
