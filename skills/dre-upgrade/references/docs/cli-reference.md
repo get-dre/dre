@@ -488,6 +488,60 @@ Example:
 dre system update --check
 ```
 
+## `dre fonts`
+
+PDFs from the `document` plugin use IBM Plex and the project's own `@font-face` fonts. For text they can't draw (Chinese, Japanese, Korean, Arabic, Hebrew, Devanagari, Thai), a run fetches the script's pinned Noto Sans from the registry once and caches it in ~/.dre/fonts.
+
+Han characters follow the HTML `lang` of their element or its nearest ancestor: `ja` Japanese, `ko` Korean, `zh` Simplified Chinese, `zh-Hant`/`zh-TW`/`zh-HK` Traditional Chinese. Without a CJK `lang`, kana means Japanese, Hangul Korean, and Han alone Simplified Chinese.
+
+Offline, with nothing cached, the PDF shows boxes for that text and the run warns (or fails, with `missing_fonts: error`). Three ways to have the fonts offline:
+  1. set DRE_REGISTRY_URL to an offline copy of the registry (its index and font files);
+  2. run `dre fonts install <script>...` on a connected machine and copy ~/.dre/fonts, or run it in the Docker image build;
+  3. add fonts covering the text to the project with `@font-face`.
+
+Subcommands:
+
+- [`dre fonts install`](#dre-fonts-install): Download and verify fallback fonts into ~/.dre/fonts ahead of a run: by script (`ja`, `zh-Hans`, `zh-Hant`, `ko`, `Arab`, `Hebr`, `Deva`, `Thai`) or language (`ar`, `he`, `hi`, `th`, `zh`, `zh-TW`), or `--all`.
+- [`dre fonts ls`](#dre-fonts-ls): List the cached fonts, the scripts each covers, and whether its files verify.
+
+## `dre fonts install`
+
+Download and verify fallback fonts into ~/.dre/fonts ahead of a run: by script (`ja`, `zh-Hans`, `zh-Hant`, `ko`, `Arab`, `Hebr`, `Deva`, `Thai`) or language (`ar`, `he`, `hi`, `th`, `zh`, `zh-TW`), or `--all`.
+
+Copy ~/.dre/fonts to an offline machine afterwards, or run it in a Docker image build. It installs each package's newest registry version. `dre fonts --help` explains how PDFs pick fonts (the `lang` rule) and the other offline routes.
+
+```text
+dre fonts install [OPTIONS] [SCRIPTS]...
+```
+
+| Argument | Description |
+|---|---|
+| `SCRIPTS...` | Scripts or languages, like `ja zh-Hans ar`. |
+
+| Option | Default | Description |
+|---|---|---|
+| `--all` |  | Every font in the registry. |
+
+Example:
+
+```bash
+dre fonts install ja zh-Hans ar
+```
+
+## `dre fonts ls`
+
+List the cached fonts, the scripts each covers, and whether its files verify.
+
+```text
+dre fonts ls [OPTIONS]
+```
+
+Example:
+
+```bash
+dre fonts ls
+```
+
 ## `dre explain`
 
 Explain an error code (`dre explain unknown-key`): what it means and how to fix it.

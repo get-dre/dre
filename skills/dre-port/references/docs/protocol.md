@@ -436,6 +436,13 @@ with absolute local font paths, or an error. The reply retains the write request
 {"type":"fonts","id":1,"paths":["/…/.dre/fonts/noto_sans_jp/2.4.0/regular.otf","/…/.dre/fonts/noto_sans_jp/2.4.0/bold.otf"],"error":null}
 ```
 
+Core answers each package once per run, shared by every process of the run: a font it couldn't
+supply is not tried again, and later replies for it carry the same `error` with
+`"repeated": true` (absent means false). The person has then been told once, so a format warns
+only on a reply without `repeated`; it can still fail the write on any error. In the Rust SDK,
+`ResultSets::request_fonts` returns core's reason as a `FontError` with `message` and
+`repeated`.
+
 The format then sends its usual `written` reply. `fonts` continues the existing write; it does
 not start a new request. The wire protocol version remains 1: the exchange is additive and
 only used when core advertises support. `dre-protocol` 0.10.0 adds the SDK helpers.

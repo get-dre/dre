@@ -10,7 +10,8 @@
 //! Options (defaults): `max_rows` (50,000 rows across the output's queries; more is an error,
 //! never a truncated document). html: `embed_assets` (true). pdf: `page_size` (`A4`),
 //! `orientation` (`portrait`), `margins` (`20mm`), used only where the template's CSS sets no
-//! `@page`; `author`, `subject`; `password` (an open password: AES-256, after rendering).
+//! `@page`; `author`, `subject`; `password` (an open password: AES-256, after rendering); `missing_fonts`
+//! (`warn`: a script whose font can't be fetched shows as boxes; `error`: fail instead).
 
 mod assets;
 mod fallback;
@@ -51,6 +52,8 @@ pub struct Options {
     pub page: pdf::PageOptions,
     /// pdf: the open password, rendered by core.
     pub password: Option<String>,
+    /// pdf: what a script without a font does.
+    pub missing_fonts: pdf::MissingFonts,
 }
 
 impl Options {
@@ -70,6 +73,10 @@ impl Options {
                 subject: s("subject"),
             },
             password: s("password"),
+            missing_fonts: match s("missing_fonts").as_deref() {
+                Some("error") => pdf::MissingFonts::Error,
+                _ => pdf::MissingFonts::Warn,
+            },
         }
     }
 }
@@ -111,6 +118,13 @@ impl Format for Document {
                     String,
                     "an open password: the PDF is encrypted with AES-256 and opens only with it; Jinja like `{{ each.pdf_password }}`",
                 ),
+                OptionField::new(
+                    "missing_fonts",
+                    String,
+                    "when a script's font can't be fetched (offline, nothing cached): `warn` makes the PDF with boxes for its characters and warns once per script per run; `error` fails the output (each row, per row) instead",
+                )
+                .choices(&["warn", "error"])
+                .default("warn"),
             ]);
         } else {
             v.push(
@@ -144,9 +158,16 @@ impl Format for Document {
     }
 
     fn unknown_option_hint(&self, key: &str) -> Option<String> {
-        (!self.pdf && key == "password").then(|| {
-            "an HTML file can't carry a password: use `format: pdf`, or zip it with `zip: {password: ...}` on the destination".into()
-        })
+        match key {
+            _ if self.pdf => None,
+            "password" => Some(
+                "an HTML file can't carry a password: use `format: pdf`, or zip it with `zip: {password: ...}` on the destination".into(),
+            ),
+            "missing_fonts" => Some(
+                "HTML uses the reader's fonts, so it never misses one: `missing_fonts` is for `format: pdf`".into(),
+            ),
+            _ => None,
+        }
     }
 
     fn validate_template(&self, _options: &Map<String, Value>, t: &Value) -> (Vec<String>, Vec<String>) {
@@ -214,9 +235,14 @@ impl Format for Document {
         let base = rendered.base_dir.as_path();
         if self.pdf {
             let mut warnings = Vec::new();
-            let mut resolve = |font| sets.request_fonts(font).map_err(|e| e.to_string());
+            // A protocol failure is reported like core's own reasons: the PDF never fails on it
+            // unless `missing_fonts: error`.
+            let mut resolve = |font| {
+                sets.request_fonts(font)
+                    .unwrap_or_else(|e| Err(e.to_string().into()))
+            };
             let resolver = if req.font_requests {
-                Some(&mut resolve as &mut dyn FnMut(_) -> std::result::Result<Vec<String>, String>)
+                Some(&mut resolve as &mut dyn FnMut(_) -> pdf::FontAnswer)
             } else {
                 None
             };
@@ -227,6 +253,7 @@ impl Format for Document {
                 &o.page,
                 &ctx,
                 &mut warnings,
+                o.missing_fonts,
                 resolver,
             )?;
             if let Some(pw) = &o.password {

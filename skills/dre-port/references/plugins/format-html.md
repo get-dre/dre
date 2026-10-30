@@ -225,10 +225,52 @@ License 1.1 text:
 
 Font files are not bundled in the plugin or added to the project. Core keeps verified files and
 the licence in `~/.dre/fonts/<package>/<version>/`; a second run uses this cache without
-contacting the registry. `DRE_REGISTRY_URL` mirrors cover fonts as well as plugins. If a download
-fails, the PDF is still made and a warning names the script and the reason; its characters can
-appear as boxes. Older cores keep their previous PDF behavior, and older document plugins keep
-working with newer cores.
+contacting the registry. `DRE_REGISTRY_URL` mirrors cover fonts as well as plugins. Older cores
+keep their previous PDF behavior, and older document plugins keep working with newer cores.
+
+###### Offline servers
+
+A run fetches each font once, and only when the cache doesn't have it. On a machine that can't
+reach the registry, any of these makes the fonts available:
+
+1. **An offline copy of the registry.** Copy `packages.json` and its font files, point their
+   `url`s at the copies, and set `DRE_REGISTRY_URL` to the index (a plain path, a `file://` URL
+   or an internal `https://` mirror), as for plugins ([registry](../docs/registry.md#the-registry)).
+2. **`dre fonts install` on a connected machine.** It downloads and verifies fonts into
+   `~/.dre/fonts` ahead of time, by script or language: `dre fonts install ja zh-Hans ar`, or
+   `--all`. Copy `~/.dre/fonts` to the offline machine, or run it in the Docker image build.
+   `dre fonts ls` lists what's cached. It installs each package's newest version in the
+   registry, which the current `document` plugin pins (the table above); an older plugin may
+   pin an older one.
+3. **The project's own fonts**, declared with `@font-face` (above). They always come first, and
+   a script they cover never needs a download.
+
+```dockerfile
+RUN dre fonts install ja ko ar
+```
+
+Otherwise the PDF is still made, with boxes for the characters of each script DRE has no font
+for, and the run warns once per script, however many PDFs or rows need it:
+
+```
+   Warning    row `1`: pdf format: no Japanese font for this PDF, so its Japanese text shows as boxes (can't read /srv/registry/packages.json: No such file or directory (os error 2)). To fix it, set `DRE_REGISTRY_URL` to an offline copy of the registry, run `dre fonts install ja` on a connected machine and copy its `~/.dre/fonts` here, or add a font covering Japanese to the project with `@font-face`
+```
+
+A run tries the registry once per font: after a failure, its other PDFs don't wait for it again.
+
+###### Failing instead: `missing_fonts`
+
+For PDFs that must never show boxes, `missing_fonts: error` fails the output instead of making
+the PDF (each row's, for a per-row output); the error names every script without a font and the
+same fixes. The default is `warn`. `dre validate` rejects other values, and the option is for
+`format: pdf` only: HTML uses the reader's fonts.
+
+```yaml
+output:
+  format: pdf
+  template: {file: statement.html}
+  missing_fonts: error
+```
 
 Text inside an SVG is the exception: it's drawn with the machine's fonts. For a logo that looks the
 same everywhere, convert its text to outlines (paths) in your design tool, or write the name in

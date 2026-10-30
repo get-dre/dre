@@ -275,13 +275,16 @@
                 "string",
                 "null"
               ]
+            },
+            "repeated": {
+              "type": "boolean"
             }
           },
           "required": [
             "type",
             "paths"
           ],
-          "description": "Reply to a font request within a write; retains the write request id."
+          "description": "Reply to a font request within a write; retains the write request id. `repeated` is set\nwhen core already gave this font's `error` earlier in the run, so the person has been\ntold once and the format needn't warn again."
         },
         {
           "type": "object",

@@ -1146,17 +1146,27 @@ impl PluginProcess {
     /// Complete a write, resolving nested font requests through the caller's registry.
     pub fn write_finish_with_fonts(
         &mut self,
-        resolve: &mut dyn FnMut(&crate::msg::FontRequest) -> std::result::Result<Vec<String>, String>,
+        resolve: &mut dyn FnMut(
+            &crate::msg::FontRequest,
+        ) -> std::result::Result<Vec<String>, crate::msg::FontError>,
     ) -> Result<(Vec<String>, Vec<String>)> {
         self.send(&Request::Finish {})?;
         loop {
             match self.recv_json("a written reply")? {
                 Response::NeedFonts { font } => {
-                    let (paths, error) = match resolve(&font) {
-                        Ok(paths) => (paths, None),
-                        Err(error) => (Vec::new(), Some(error)),
+                    let reply = match resolve(&font) {
+                        Ok(paths) => Request::Fonts {
+                            paths,
+                            error: None,
+                            repeated: false,
+                        },
+                        Err(e) => Request::Fonts {
+                            paths: Vec::new(),
+                            error: Some(e.message),
+                            repeated: e.repeated,
+                        },
                     };
-                    self.send(&Request::Fonts { paths, error })?;
+                    self.send(&reply)?;
                 }
                 Response::Written { files, warnings } => return Ok((files, warnings)),
                 other => return Err(self.unexpected("a written reply", &Incoming::Json(other))),
