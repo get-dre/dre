@@ -32,7 +32,18 @@ impl Loader {
         // template error caused by treating its leftover SQL as an unmanaged report.
         let mut other = BTreeMap::new();
         let mut kept = Diagnostics::default();
-        for diagnostic in self.diags.sorted() {
+        let mut diagnostics = self.diags.sorted();
+        diagnostics.sort_by_key(|diagnostic| {
+            !matches!(
+                diagnostic
+                    .file
+                    .as_ref()
+                    .and_then(|file| file.extension())
+                    .and_then(|extension| extension.to_str()),
+                Some("yml" | "yaml")
+            )
+        });
+        for diagnostic in diagnostics {
             let Some(file) = &diagnostic.file else {
                 kept.push(diagnostic.clone());
                 continue;
