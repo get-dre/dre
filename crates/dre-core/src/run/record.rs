@@ -349,6 +349,7 @@ impl BindingRun<'_> {
             target_path: self.project.target_dir().to_path_buf(),
             settings: self.project.settings().clone(),
             manifest_checksum: self.opts.manifest_checksum.clone(),
+            project_errors: self.opts.project_errors.clone(),
             retry_of: self.retry.as_ref().map(|r| r.original.clone()),
             release_of: None,
             released_by: None,

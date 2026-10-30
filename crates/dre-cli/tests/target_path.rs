@@ -58,6 +58,7 @@ fn arg(path: &Path) -> String {
 #[test]
 fn the_default_is_target_in_the_project() {
     let p = project();
+    p.dre("validate", &[]).ok();
     p.dre("run", &["s"]).ok();
     assert!(p.path("target/compiled/s/default/sq.sql").is_file());
     assert!(p.path("target/run/s/default/run_results.json").is_file());
@@ -73,6 +74,7 @@ fn the_default_is_target_in_the_project() {
 fn everything_moves_to_the_flags_folder_and_delivery_still_works() {
     let p = project();
     let t = outside(&p, "build/dre");
+    p.dre("validate", &["--target-path", &arg(&t)]).ok();
     let r = p.dre("run", &["s", "--target-path", &arg(&t)]);
     r.ok();
     assert!(t.join("compiled/s/default/sq.sql").is_file());

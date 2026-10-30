@@ -384,6 +384,7 @@ impl ProjectArgs {
     fn load_options(&self, env: &Env) -> LoadOptions {
         LoadOptions {
             select: None,
+            schedule: None,
             profiles_dir: self.profiles_dir.clone(),
             target: self.target.clone(),
             vars: self.vars.iter().cloned().collect(),

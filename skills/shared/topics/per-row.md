@@ -56,7 +56,7 @@ output:
 - `each.<column>` is the driver row, in templates, titles, texts, paths and addresses; not in SQL.
 - Each row's file is `<output>/<key>.<ext>` in the run folder, or what `file_name:` renders.
 - Other `for_each` keys: `concurrency` (default 4), `on_orphan_rows` (`warn` or `fail` for rows
-  whose key isn't in the driver), `max_population_rows`, `keep_results`.
+  whose key isn't in the driver), `keep_results`.
 - `on_empty` applies to the driver (empty: nothing is made) and to each row's slice (`skip`: no
   file for that row). A message attaching a row's skipped or failed file is skipped for that row.
 - Addresses and other `each.*` values are masked in logs and results; the key isn't.

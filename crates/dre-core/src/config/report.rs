@@ -360,13 +360,13 @@ pub struct ForEach {
     pub on_row_error: Option<Loose<crate::project::RowErrors>>,
     /// Rows of a query whose key isn't in the driver: `warn` (default) or `fail`.
     pub on_orphan_rows: Option<Loose<crate::project::OrphanRows>>,
-    /// The most rows across the output's queries before anything renders. Default: 5,000,000.
-    #[schemars(range(min = 1))]
-    pub max_population_rows: Option<Loose<u64>>,
     /// Keep the run's query results in its run folder, for `--retry-failed`. Default: true.
     pub keep_results: Option<Loose<bool>>,
     /// Mask destination values rendered from `each.*` (addresses, paths) in the console, logs and results. Default: the project's `mask_row_values`, true.
     pub mask_row_values: Option<Loose<bool>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    pub unknown: UnknownKeys,
 }
 
 fn string_or_strings(_: &mut schemars::SchemaGenerator) -> schemars::Schema {

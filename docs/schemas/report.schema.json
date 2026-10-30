@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-dre-schema-version": "0.8",
+  "x-dre-schema-version": "0.9",
   "title": "DRE report",
   "type": "object",
   "description": "A report: SQL queries plus an output, in a YAML file under `reports/`.",
@@ -625,11 +625,6 @@
         "on_orphan_rows": {
           "description": "Rows of a query whose key isn't in the driver: `warn` (default) or `fail`.",
           "$ref": "#/$defs/OrphanRows"
-        },
-        "max_population_rows": {
-          "type": "integer",
-          "description": "The most rows across the output's queries before anything renders. Default: 5,000,000.",
-          "minimum": 1
         },
         "keep_results": {
           "type": "boolean",

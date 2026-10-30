@@ -70,6 +70,7 @@ mod plugins;
 mod project_file;
 mod reports;
 mod schedules;
+mod scope;
 mod sets;
 mod sources;
 mod templates;
@@ -265,6 +266,8 @@ pub struct Project {
     /// Templates the load's parse pass couldn't render, by report: they make the report invalid
     /// in the manifest. Its own run, compile or validate reports them.
     parse_errors: BTreeMap<String, Vec<crate::Diagnostic>>,
+    project_errors: Vec<crate::run_results::ProjectError>,
+    loaded_selection: Option<BTreeSet<String>>,
     /// What the load's parse pass rendered with: the target, `--var`, the run date and timezone.
     inputs: crate::parse::Inputs,
     /// Declared sources (dbt's `sources:`), by name.
@@ -487,6 +490,11 @@ impl Project {
         self.parse_errors.get(report).map_or(&[], Vec::as_slice)
     }
 
+    /// Errors discovered in reports outside this load's selection, one per report.
+    pub fn project_errors(&self) -> &[crate::run_results::ProjectError] {
+        &self.project_errors
+    }
+
     /// Every report's parse errors, by report name.
     pub fn all_parse_errors(&self) -> impl Iterator<Item = &crate::Diagnostic> {
         self.parse_errors.values().flatten()
@@ -703,15 +711,12 @@ pub struct ForEach {
     pub concurrency: Option<usize>,
     pub on_row_error: RowErrors,
     pub on_orphan_rows: OrphanRows,
-    pub max_population_rows: u64,
     pub keep_results: bool,
     /// `None`: the project's `mask_row_values`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mask_row_values: Option<bool>,
 }
 
-/// The default `for_each.max_population_rows`.
-pub const DEFAULT_MAX_POPULATION_ROWS: u64 = 5_000_000;
 /// The default `for_each.concurrency`.
 pub const DEFAULT_ROW_CONCURRENCY: usize = 4;
 
@@ -1091,10 +1096,12 @@ pub struct LoadOptions {
     /// The settings the command line resolved (the run's timezone, date and scheduled
     /// instant); the load adds the project's.
     pub settings: crate::settings::Settings,
-    /// Check only the reports this selection picks (`-s` syntax): the pre-flight, the parse pass
-    /// and template files skip the others, which are still loaded, so selectors and schedules
-    /// resolve. `None`: check everything.
+    /// Parse and check the selected reports (`-s` syntax), retaining discovery metadata so
+    /// selectors and schedules resolve. Cheap diagnostics elsewhere go to `project_errors`;
+    /// database and plugin option checks remain scoped. `None`: check everything.
     pub select: Option<String>,
+    /// Scope a run to the reports named by this schedule, intersected with `select`.
+    pub schedule: Option<String>,
 }
 
 /// [`load_with`] in an empty context: no environment variables (no `DRE_*` setting, no
@@ -1116,6 +1123,11 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
         format_options: Mapping::new(),
         default_output: None,
         scope: None,
+        report_owners: BTreeMap::new(),
+        report_candidates: Vec::new(),
+        global_files: BTreeSet::new(),
+        schedule_select: None,
+        other_errors: BTreeMap::new(),
     };
     let project = l.run();
     (project, l.diags)
@@ -1138,6 +1150,13 @@ struct Loader {
     default_output: Option<OutputConfig>,
     /// The reports [`LoadOptions::select`] picked; `None`: every report.
     scope: Option<BTreeSet<String>>,
+    /// Report fragments remain attributable even when resolution fails.
+    report_owners: BTreeMap<PathBuf, BTreeSet<String>>,
+    report_candidates: Vec<scope::ReportIdentity>,
+    /// Files with project-wide declarations cannot be treated as report-local.
+    global_files: BTreeSet<PathBuf>,
+    schedule_select: Option<String>,
+    other_errors: BTreeMap<String, crate::run_results::ProjectError>,
 }
 
 /// One report YAML fragment, before merging.
@@ -1183,16 +1202,29 @@ struct Discovered {
 impl Loader {
     /// Resolve [`LoadOptions::select`] into the reports later checks cover.
     fn limit_to_selection(&mut self, project: &Project) {
-        let Some(selection) = &self.opts.select else {
-            return;
-        };
-        match project.select(selection) {
-            Ok(reports) => self.scope = Some(reports.into_iter().map(|r| r.name.clone()).collect()),
-            Err(e) => {
-                self.diags.error(Code::InvalidSelector, None, None, e.to_string());
-                self.scope = Some(BTreeSet::new());
+        let catalog = self
+            .report_candidates
+            .iter()
+            .any(|c| project.report(&c.name).is_none())
+            .then(|| self.selection_catalog(project));
+        let catalog = catalog.as_ref().unwrap_or(project);
+        let mut scope: Option<BTreeSet<String>> = None;
+        for selection in self.opts.select.iter().chain(self.schedule_select.iter()) {
+            match catalog.select(selection) {
+                Ok(reports) => {
+                    let selected: BTreeSet<String> = reports.into_iter().map(|r| r.name.clone()).collect();
+                    scope = Some(match scope {
+                        Some(previous) => previous.intersection(&selected).cloned().collect(),
+                        None => selected,
+                    });
+                }
+                Err(e) => {
+                    self.diags.error(Code::InvalidSelector, None, None, e.to_string());
+                    scope = Some(BTreeSet::new());
+                }
             }
         }
+        self.scope = scope;
     }
 
     /// Which reports the load checks: [`in_scope`] says whether one is.
@@ -1349,6 +1381,7 @@ impl Loader {
         for path in &found.yaml {
             let display = self.rel(path);
             let Some(yf) = YamlFile::load(path, display.clone(), &mut self.diags) else {
+                self.record_unreadable_report(&display);
                 continue;
             };
             let yf = Rc::new(yf);
@@ -1442,18 +1475,58 @@ impl Loader {
         }
         resolved.sort_by(|a, b| a.name.cmp(&b.name));
         project.reports = resolved;
-        self.limit_to_selection(&project);
+        self.schedule_select = scope::schedule_selection(&schedule_files, self.opts.schedule.as_deref());
+        let defer_scope =
+            scope::needs_parse(self.opts.select.as_deref()) || scope::schedules_need_parse(&schedule_files);
+        if !defer_scope {
+            self.limit_to_selection(&project);
+        }
 
-        // Pre-flight first: its errors say a template's problem better than a failed parse does.
-        self.preflight(&project, &used);
-        self.parse_pass(&mut project, &mut used);
-        self.check_profiles(&project, &used);
-        self.check_plugins(&plugin_decls, &mut project, &used);
+        // Source selectors need parsed dependencies first. Other selections preserve the
+        // pre-flight's more precise diagnostics before parsing their Bindings.
+        if defer_scope {
+            self.parse_pass(&mut project, &mut used);
+            self.limit_to_selection(&project);
+            self.preflight(&project, &used);
+        } else {
+            self.preflight(&project, &used);
+            self.parse_pass(&mut project, &mut used);
+        }
+        if self.scope.is_some() {
+            // Cheap profile/declaration checks still discover errors in other reports. Plugin
+            // option validation and runtime use checks below receive only the selected uses.
+            let mut all_used = Usage::for_selection(&project, &None);
+            all_used.include_project_wide(&used);
+            self.check_profiles(&project, &all_used);
+            self.check_plugins(&plugin_decls, &mut project, &all_used);
+            crate::plugins::check_uses(&project, self.ctx.env(), &mut self.diags);
+            used = Usage::for_selection(&project, &self.scope);
+            self.check_plugins(&plugin_decls, &mut project, &used);
+        } else {
+            self.check_profiles(&project, &used);
+            self.check_plugins(&plugin_decls, &mut project, &used);
+        }
         let broken_timings;
         (project.timings, broken_timings) = self.parse_timings(&timing_files);
-        project.schedules = self.parse_schedules(&schedule_files, &project, &broken_timings);
+        // Broken report definitions retain their identities for schedule membership. This
+        // catalog is never executed; selecting that report still keeps its own errors fatal.
+        let unbuilt_reports: BTreeSet<String> = self
+            .report_candidates
+            .iter()
+            .filter(|candidate| self.scope.is_some() && project.report(&candidate.name).is_none())
+            .map(|candidate| candidate.name.clone())
+            .collect();
+        let schedule_catalog = (!unbuilt_reports.is_empty()).then(|| self.selection_catalog(&project));
+        project.schedules = self.parse_schedules(
+            &schedule_files,
+            schedule_catalog.as_ref().unwrap_or(&project),
+            &broken_timings,
+            &unbuilt_reports,
+        );
         self.apply_schedules(&mut project);
         self.check_template_files(&project);
+        self.partition_report_errors(&mut project);
+        project.loaded_selection = self.scope.clone();
 
         Some(project)
     }
@@ -1582,6 +1655,11 @@ fn test_loader(root: &Path) -> Loader {
         format_options: Mapping::new(),
         default_output: None,
         scope: None,
+        report_owners: BTreeMap::new(),
+        report_candidates: Vec::new(),
+        global_files: BTreeSet::new(),
+        schedule_select: None,
+        other_errors: BTreeMap::new(),
     }
 }
 
@@ -1742,6 +1820,83 @@ mod tests {
         assert!(
             p.report("daily")
                 .is_some_and(|r| r.bindings.iter().all(|b| b.parsed.is_none()))
+        );
+    }
+
+    #[test]
+    fn a_scoped_load_isolates_an_unrelated_malformed_report() {
+        let dir = project(&[
+            ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
+            ("reports/good/good.yml", "queries: [good]\n"),
+            ("reports/good/good.sql", "select 1"),
+            ("reports/bad/bad.yml", "queries: [\n"),
+        ]);
+        let (_, diags) = load(
+            dir.path(),
+            &LoadOptions {
+                select: Some("good".into()),
+                ..LoadOptions::default()
+            },
+        );
+        assert!(!diags.has_errors(), "{:?}", codes(&diags));
+    }
+
+    #[test]
+    fn a_folder_selection_keeps_errors_from_reports_that_cannot_be_built() {
+        let dir = project(&[
+            ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
+            ("reports/finance/good/good.yml", "queries: [good]\n"),
+            ("reports/finance/good/good.sql", "select 1"),
+            ("reports/finance/bad/bad.yml", "queries: [\n"),
+        ]);
+        let (_, diags) = load(
+            dir.path(),
+            &LoadOptions {
+                select: Some("finance".into()),
+                ..LoadOptions::default()
+            },
+        );
+        assert!(
+            diags.iter().any(|d| d.code == Code::YamlSyntax),
+            "{:?}",
+            codes(&diags)
+        );
+    }
+
+    #[test]
+    fn a_removed_population_cap_names_the_migration() {
+        let dir = project(&[
+            ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            (
+                "reports/letters/letters.yml",
+                "queries: [driver, data]\noutput:\n  for_each: {query: driver, key: id, max_population_rows: 5}\n",
+            ),
+            ("reports/letters/driver.sql", "select 1 as id"),
+            ("reports/letters/data.sql", "select 1 as id"),
+        ]);
+        let (_, diags) = load(dir.path(), &LoadOptions::default());
+        assert!(
+            diags.iter().any(|d| d.code == Code::InvalidOutputOption
+                && d.message.contains("max_population_rows")
+                && d.message.contains("removed")
+                && d.message.contains("stream")),
+            "{:?}",
+            codes(&diags)
         );
     }
 

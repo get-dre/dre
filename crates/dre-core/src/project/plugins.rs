@@ -37,17 +37,28 @@ impl Loader {
                     continue;
                 }
                 if !profiles.declares(role, name) {
-                    self.diags.error(
-                        Code::UnknownProfile,
-                        file.clone(),
-                        *line,
-                        format!(
-                            "{} profile `{name}` isn't defined under `{}:` in {}",
-                            role.as_str(),
-                            profiles.section_key(role),
-                            profiles.path.display()
-                        ),
-                    );
+                    let mut locations =
+                        if self.scope.is_some() && file.as_deref() != Some(Path::new(PROJECT_FILE)) {
+                            Usage::profile_locations(project, role, name)
+                        } else {
+                            Vec::new()
+                        };
+                    if locations.is_empty() {
+                        locations.push((file.clone(), *line));
+                    }
+                    for (file, line) in locations {
+                        self.diags.error(
+                            Code::UnknownProfile,
+                            file,
+                            line,
+                            format!(
+                                "{} profile `{name}` isn't defined under `{}:` in {}",
+                                role.as_str(),
+                                profiles.section_key(role),
+                                profiles.path.display()
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -292,7 +303,7 @@ impl Loader {
             (Role::Connection, PluginKind::Source, &used.connections),
             (Role::Destination, PluginKind::Destination, &used.destinations),
         ] {
-            for name in refs.keys() {
+            for (name, (file, line)) in refs {
                 let Some(p) = profiles.get(role, name) else {
                     continue;
                 };
@@ -307,8 +318,16 @@ impl Loader {
                     }
                     uses.push(PluginUse {
                         plugin: id,
-                        file: profiles.file.clone(),
-                        line: profiles.line_of(role, name),
+                        file: if self.opts.select.is_some() || self.opts.schedule.is_some() {
+                            file.clone().or_else(|| profiles.file.clone())
+                        } else {
+                            profiles.file.clone()
+                        },
+                        line: if self.opts.select.is_some() || self.opts.schedule.is_some() {
+                            *line
+                        } else {
+                            profiles.line_of(role, name)
+                        },
                         what: format!("`type: {}` used by {role_name} profile `{name}`", out_.kind),
                     });
                 }
@@ -353,6 +372,35 @@ pub(super) struct Usage {
 }
 
 impl Usage {
+    /// Shared profiles need a location for every owning report in scoped diagnostics.
+    fn profile_locations(project: &Project, role: Role, name: &str) -> Vec<(Option<PathBuf>, Option<usize>)> {
+        let mut locations = BTreeMap::new();
+        for report in project.reports() {
+            let used = Self::for_reports(project, std::iter::once(report));
+            let profiles = match role {
+                Role::Connection => used.connections,
+                Role::Destination => used.destinations,
+            };
+            if let Some((file, line)) = profiles.get(name) {
+                locations.insert(file.clone(), *line);
+            }
+        }
+        locations.into_iter().collect()
+    }
+
+    pub(super) fn include_project_wide(&mut self, other: &Self) {
+        for (name, at) in &other.connections {
+            if at.0.as_deref() == Some(Path::new(PROJECT_FILE)) {
+                self.connections.insert(name.clone(), at.clone());
+            }
+        }
+        for (name, at) in &other.destinations {
+            if at.0.as_deref() == Some(Path::new(PROJECT_FILE)) {
+                self.destinations.insert(name.clone(), at.clone());
+            }
+        }
+    }
+
     /// A connection profile used by name. A value holding Jinja is recorded once the parse pass
     /// has rendered it.
     pub(super) fn connection(&mut self, p: &str, file: Option<PathBuf>, line: Option<usize>) {

@@ -116,10 +116,9 @@ The population stays in the Arrow spool. A temporary disk index groups its rows 
 workers prepare and render bounded chunks. Format and destination processes are reused across
 outputs and Bindings for the run, bounded by concurrent workers.
 
-`for_each.max_population_rows` (default 5,000,000
-rows across the output's queries) fails the run before anything renders when a query returns
-more: filter or aggregate in SQL. A document's own [`max_rows`](plugin-document.md#how-big-a-document-can-be)
-applies to each row's document.
+Population size has no row cap: rows stay in the spool and the temporary index. Allow disk
+space for those files, and filter or aggregate in SQL when you need fewer copies. A document's
+own [`max_rows`](plugin-document.md#how-big-a-document-can-be) applies to each row's document.
 
 ## No data and orphan rows
 

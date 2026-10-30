@@ -13,8 +13,8 @@ DRE writes two kinds of JSON file into the [target path](target-path.md)
 - **`manifest.json`** says what the project *is*: every report, Set, Binding, schedule and
   plugin, as DRE resolves them. One file for the whole project.
 - **`run/<report>/<binding>/runs/<run id>/run_results.json`** says what one run of one Binding *did*: its
-  vars, rows, files, deliveries and status. It records the checksum of the manifest the run
-  wrote, so a run's results can be matched to the exact project behind them.
+  vars, rows, files, deliveries and status. A scoped CLI run also records discovered errors
+  outside its selection; its `manifest_checksum` is null because it did not rebuild a manifest.
 
 > **Changed in 0.2.** Schema 2: a `sources` section, the run's `target`, and each query's
 > `connection` and `depends_on`. Like dbt's, the manifest is resolved for the run's inputs. See
@@ -26,7 +26,7 @@ layering (project < folders < report < Set) and schedule resolution already appl
 
 ## The project manifest at a glance
 
-`dre compile`, `dre validate` and `dre run` write `target/manifest.json`: the whole project as
+`dre compile` and `dre validate` write `target/manifest.json`: the whole project as
 DRE resolves it, whatever was selected. It lists every report with its Sets and Bindings (merged
 vars, queries with their connection and the sources they read, output, destinations), every
 schedule with the Bindings it runs, the declared [sources](sources.md) and plugins, and checksums
@@ -39,11 +39,14 @@ close_monthly --output json`. See its [JSON Schema](manifest.schema.json).
 
 ## When it's written
 
-`dre compile`, `dre validate` and `dre run` write `manifest.json` right after the project loads
-and the [parse pass](connections.md#the-parse-pass) has rendered each query without a database,
-before any SQL runs, in every mode (selectors, `--set`, `--schedule`, `--dry-run`,
-`--preview`). It always describes the whole project, whatever was selected. A run that fails
-later still leaves the manifest it started from.
+`dre compile` and `dre validate` write `manifest.json` right after the project loads, before
+plugin option checks and compilation. It always describes the whole project, whatever was
+selected. A later error still leaves that manifest.
+
+From DRE 0.9, `dre run` loads its selection without building the whole manifest. It leaves an
+existing manifest unchanged, including when the project cannot load. Integrations should use
+`dre validate --json` or `dre compile` when they need a current full-project manifest. A manifest
+left by an earlier command can be stale; a run's null `manifest_checksum` makes no claim about it.
 
 - A report with problems (a missing query file, a bad option, a query whose parse pass fails or
   whose connection doesn't resolve) is listed with `"valid": false` and its `errors`; the manifest is still written. `dre validate` still fails. `valid` covers
@@ -243,7 +246,14 @@ each result set (rows, columns and the `connection` it came from), each output f
 the target path when that's outside the project), each delivery (its profile, `type`, `target`
 and `status`: `delivered`, `not_delivered` for a `{deliver: false}` entry, or `failed`), schema
 drift, the resolved
-`target_path`, and `manifest_checksum`: the SHA-256 of the `manifest.json` bytes that run wrote.
+`target_path`, and `manifest_checksum`: the SHA-256 of manifest bytes written by the caller,
+when supplied. A scoped CLI run sets it to null and does not hash or rebuild a stale manifest.
+
+`project_errors`, when non-empty, lists the first discovered error in each report outside the
+run's selection: `{"path": "reports/other/other.yml", "code": "unknown-key", "message": "..."}`.
+Paths use forward slashes, and messages follow the normal secret masking rules. The same list
+is written to every Binding result, including a failed query's result. Whole-project
+`dre validate` remains the full check; a run does not execute other reports' plugin validators.
 
 With several outputs, `outputs` (every file) and `deliveries` (every destination) cover all of
 them, and each file names its `output`. `output_results` has one entry per output, in declared

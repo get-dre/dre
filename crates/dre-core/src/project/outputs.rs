@@ -817,6 +817,14 @@ impl Loader {
                 format!("{ctx}: {msg}"),
             );
         };
+        for key in &f.unknown.0 {
+            let message = if key.name == "max_population_rows" {
+                "`for_each.max_population_rows` was removed in DRE 0.9; remove it: populations stream to disk; filter or aggregate in SQL when needed".to_string()
+            } else {
+                format!("unknown `for_each` key `{}`", key.name)
+            };
+            err(self, message);
+        }
         let names: Vec<&str> = queries
             .iter()
             .filter(|q| q.tab)
@@ -887,8 +895,6 @@ impl Loader {
             }
         };
         let concurrency = positive(self, f.concurrency, "concurrency").map(|n| n as usize);
-        let max_population_rows = positive(self, f.max_population_rows, "max_population_rows")
-            .unwrap_or(DEFAULT_MAX_POPULATION_ROWS);
         let flag = |s: &mut Self, v: Option<Loose<bool>>, what: &str| -> Option<bool> {
             match v {
                 None => None,
@@ -942,7 +948,6 @@ impl Loader {
             concurrency,
             on_row_error,
             on_orphan_rows,
-            max_population_rows,
             keep_results,
             mask_row_values,
         })

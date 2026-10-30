@@ -79,6 +79,8 @@ fn the_flag_and_the_environment_win_over_the_project() {
 #[test]
 fn clean_prune_removes_old_runs_and_keeps_the_rest() {
     let p = project("flags:\n  keep_runs: 4\n");
+    // A whole-project command creates the manifest; runs leave that snapshot unchanged.
+    p.dre("validate", &[]).ok();
     run_times(&p, 3, &["daily"], &[]);
     assert_eq!(runs(&p).len(), 3);
     let out = p.dre("clean", &["--prune", "--keep-runs", "1"]);

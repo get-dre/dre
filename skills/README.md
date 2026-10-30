@@ -68,7 +68,8 @@ the plugins'. Each release supports a range of DRE minor versions (every `SKILL.
 | 2.1, 2.2 | 0.2.1 and later 0.2.x |
 | 2.3 and later 2.x | 0.2.1 and later; messages and the other 0.3 features need 0.3 |
 | 3.x | 0.4.1 and later 0.4, 0.5 and 0.6 |
-| 4.x | 0.6.x |
+| 4.x | 0.6.x through 0.8.x |
+| 5.x | 0.9.x |
 
 A new DRE minor gets a skills release that supports it. Dropping support for an older DRE minor
 is a new major skills version, so if you stay on an older DRE, pin the skills release that

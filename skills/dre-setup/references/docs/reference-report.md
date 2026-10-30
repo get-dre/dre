@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.8/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.9/report.schema.json
 ```
 
 For copyable examples and common errors, see [Build and run reports](building-reports.md). The [glossary](glossary.md) defines DRE's terms.
@@ -177,7 +177,6 @@ One copy of the output per row of a driver query (a per-row output): each copy g
 | `concurrency` | integer |  | How many rows render and deliver at once. Default: 4. `--row-concurrency` and `DRE_ROW_CONCURRENCY` override it. |
 | `on_row_error` | string |  | `continue` (default): a failed row is recorded and the others carry on; the run ends failed. `fail`: render every row first, and deliver only if all rendered. |
 | `on_orphan_rows` | `warn` or `fail` |  | Rows of a query whose key isn't in the driver: `warn` (default) or `fail`. |
-| `max_population_rows` | integer |  | The most rows across the output's queries before anything renders. Default: 5,000,000. |
 | `keep_results` | boolean |  | Keep the run's query results in its run folder, for `--retry-failed`. Default: true. |
 | `mask_row_values` | boolean |  | Mask destination values rendered from `each.*` (addresses, paths) in the console, logs and results. Default: the project's `mask_row_values`, true. |
 

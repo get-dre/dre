@@ -137,6 +137,7 @@ impl Loader {
         files: &[Rc<YamlFile>],
         project: &Project,
         broken_timings: &BTreeSet<String>,
+        unbuilt_reports: &BTreeSet<String>,
     ) -> Vec<ScheduleEntry> {
         let mut out = Vec::new();
         let mut used_timings = BTreeSet::new();
@@ -340,6 +341,9 @@ impl Loader {
                         Some(r) => {
                             if let Some(sn) = &set
                                 && r.binding(sn).is_none()
+                                // A broken definition's own diagnostic is authoritative;
+                                // its Sets cannot be resolved until that report is repaired.
+                                && !unbuilt_reports.contains(rn)
                             {
                                 self.diags.error(
                                     Code::SelectorMatchesNothing,
