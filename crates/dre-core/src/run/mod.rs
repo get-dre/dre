@@ -436,7 +436,7 @@ pub fn execute(
         .as_ref()
         .map(|p| project.root().join(p))
         .unwrap_or_else(|| project.target_dir().to_path_buf());
-    let at_once = plan.scheduler.workers() > 1;
+    let at_once = plan.at_once;
     let store = if at_once {
         RunStore::concurrent(&target, ctx.secrets())
     } else {

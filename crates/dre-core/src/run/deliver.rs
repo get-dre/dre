@@ -132,7 +132,7 @@ impl<'a> BindingRun<'a> {
     /// Build (or reuse) the zip for output `oi`'s entry `d`: its files and every attached
     /// output's, in `<run>/zips/`. Entries with the same files, name and password share one.
     fn build_zip(&mut self, oi: usize, d: &RenderedDest) -> Result<PathBuf, Fail> {
-        let z = d.zip.as_ref().expect("a zipping entry");
+        let z = d.zip.as_ref().expect("only a zipping entry is zipped");
         let label = self.b.outputs[oi].label(oi);
         let output = self.b.outputs[oi]
             .name

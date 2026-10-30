@@ -4,7 +4,7 @@
 //! A new format or destination therefore needs no change to core.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dre_protocol::host::LogSink;
@@ -58,14 +58,14 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
     for ((kind, name), blocks) in by_plugin {
         // Core's own destination.
         if kind == PluginKind::Destination && name == LOCAL_TYPE {
-            check_local(routes.get(&name), &blocks, diags);
+            check_local(routes.get(&name).map(Vec::as_slice), &blocks, diags);
             continue;
         }
         let Some(mut p) = start_checker(ctx, project, kind, &name, &blocks, offline, diags) else {
             continue;
         };
         if kind == PluginKind::Destination {
-            check_routes(p.as_ref(), &name, routes.get(&name), diags);
+            check_routes(p.as_ref(), &name, routes.get(&name).map(Vec::as_slice), diags);
         }
         validate_blocks(p.as_mut(), kind, &name, blocks, diags);
         p.close();
@@ -237,7 +237,7 @@ fn report(diags: &mut Diagnostics, u: &Use, e: &str) {
 }
 
 /// Core's own `local` destination: its options, and no `attach:`.
-fn check_local(routes: Option<&Vec<Route>>, blocks: &Blocks, diags: &mut Diagnostics) {
+fn check_local(routes: Option<&[Route]>, blocks: &Blocks, diags: &mut Diagnostics) {
     for r in routes.into_iter().flatten().filter(|r| r.attach) {
         report(
             diags,
@@ -309,7 +309,7 @@ fn start_checker(
 fn check_routes(
     p: &dyn crate::plugin_host::Plugin,
     name: &str,
-    routes: Option<&Vec<Route>>,
+    routes: Option<&[Route]>,
     diags: &mut Diagnostics,
 ) {
     for r in routes.into_iter().flatten() {
@@ -453,7 +453,7 @@ pub fn check_connections(
             let line = project.profiles().line_of(entry.0, &entry.1);
             let at = format!("{} `{}` (entry `{}`)", entry.0.as_str(), entry.1, entry.2);
             let Some((rendered, unresolved)) =
-                settings_to_check(ctx, t, &at, line, &file, &mut unset_reported, diags)
+                settings_to_check(ctx, t, &at, line, file.as_deref(), &mut unset_reported, diags)
             else {
                 continue;
             };
@@ -463,7 +463,7 @@ pub fn check_connections(
                 rendered,
                 unresolved,
                 &at,
-                (&file, line),
+                (file.as_deref(), line),
                 diags,
             ) {
                 break;
@@ -508,7 +508,7 @@ fn settings_to_check(
     t: &ProfileTarget,
     at: &str,
     line: Option<usize>,
-    file: &Option<PathBuf>,
+    file: Option<&Path>,
     unset_reported: &mut std::collections::BTreeSet<String>,
     diags: &mut Diagnostics,
 ) -> Option<(Map<String, Value>, Vec<String>)> {
@@ -526,7 +526,7 @@ fn settings_to_check(
             if unset_reported.insert(var.clone()) {
                 diags.warning(
                     Code::UnsetEnvVar,
-                    file.clone(),
+                    file.map(Path::to_path_buf),
                     line,
                     format!(
                         "{at}: `env_var('{var}')`: environment variable `{var}` is not set and no default is given; `dre run` will need it"
@@ -540,7 +540,7 @@ fn settings_to_check(
         Err(e) => {
             diags.error(
                 Code::InvalidConnectionSetting,
-                file.clone(),
+                file.map(Path::to_path_buf),
                 line,
                 format!("{at}: {e}"),
             );
@@ -557,7 +557,7 @@ fn report_connection_check(
     rendered: Map<String, Value>,
     unresolved: Vec<String>,
     at: &str,
-    (file, line): (&Option<PathBuf>, Option<usize>),
+    (file, line): (Option<&Path>, Option<usize>),
     diags: &mut Diagnostics,
 ) -> bool {
     match p.validate_connection(rendered, unresolved) {
@@ -565,7 +565,7 @@ fn report_connection_check(
             for e in errors {
                 diags.error(
                     Code::InvalidConnectionSetting,
-                    file.clone(),
+                    file.map(Path::to_path_buf),
                     line,
                     format!("{at}: {e}"),
                 );
@@ -573,7 +573,7 @@ fn report_connection_check(
             for w in warnings {
                 diags.warning(
                     Code::UnknownConnectionKey,
-                    file.clone(),
+                    file.map(Path::to_path_buf),
                     line,
                     format!("{at}: {w}"),
                 );
@@ -583,7 +583,7 @@ fn report_connection_check(
         Err(e) => {
             diags.warning(
                 Code::OptionsUnchecked,
-                file.clone(),
+                file.map(Path::to_path_buf),
                 line,
                 format!(
                     "{at}: {kind} `{name}` {} couldn't check its settings ({e}); run `dre plugin update {kind}/{name}`",
@@ -652,7 +652,7 @@ mod tests {
             attach: true,
         }];
         let mut diags = Diagnostics::default();
-        check_local(Some(&routes), &Blocks::new(), &mut diags);
+        check_local(Some(routes.as_slice()), &Blocks::new(), &mut diags);
         assert_eq!(
             messages(&diags),
             [

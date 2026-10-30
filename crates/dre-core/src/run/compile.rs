@@ -187,7 +187,12 @@ impl BindingRun<'_> {
             return Ok(());
         }
         let renderer = self.renderer(None)?;
-        let connections = self.pool.as_ref().expect("pool").connections.clone();
+        let connections = self
+            .pool
+            .as_ref()
+            .expect("the pool is made before rendering")
+            .connections
+            .clone();
         for (key, d) in self.b.keyed_destinations() {
             let oi = key.output;
             // A per-row output's destinations are rendered for each row, with its `each`.
@@ -302,7 +307,7 @@ impl BindingRun<'_> {
             });
         }
         let first = outputs.first().cloned();
-        let pool = self.pool.clone().expect("pool");
+        let pool = self.pool.clone().expect("the pool is made before rendering");
         let queries = self
             .parsed
             .queries

@@ -45,6 +45,8 @@ pub(crate) struct Scheduler {
     workers: usize,
     limits: BTreeMap<String, usize>,
     queue: usize,
+    /// Run a single worker's jobs on the calling thread.
+    here: bool,
 }
 
 /// The jobs waiting and running, behind the scheduler's lock.
@@ -68,7 +70,16 @@ impl Scheduler {
             workers: workers.max(1),
             limits: BTreeMap::new(),
             queue: usize::MAX,
+            here: true,
         }
+    }
+
+    /// Always run jobs on worker threads, even with one worker, so the next jobs are prepared
+    /// while one runs.
+    #[must_use]
+    pub fn threaded(mut self) -> Scheduler {
+        self.here = false;
+        self
     }
 
     /// At most `n` jobs (at least one) on `resource` at once.
@@ -85,6 +96,7 @@ impl Scheduler {
         self
     }
 
+    #[cfg(test)]
     pub fn workers(&self) -> usize {
         self.workers
     }
@@ -96,7 +108,7 @@ impl Scheduler {
     ///
     /// # Panics
     ///
-    /// Panics if a job panics (a bug): the scheduler's state is then poisoned.
+    /// Panics if a job panics (a bug), once the other workers have finished theirs.
     pub fn run<T, R, E, W>(
         &self,
         jobs: impl IntoIterator<Item = Result<Job<T>, E>>,
@@ -108,7 +120,7 @@ impl Scheduler {
         T: Send,
         R: Send,
     {
-        if self.workers == 1 {
+        if self.workers == 1 && self.here {
             return self.run_here(jobs, cancel, worker, work);
         }
         let state = Mutex::new(State {
@@ -125,8 +137,14 @@ impl Scheduler {
                 s.spawn(|| {
                     let mut w = worker();
                     while let Some((i, job)) = self.take(&state, &wake, cancel) {
+                        // Frees the job's resources even if it panics, so the others go on.
+                        let _running = Running {
+                            scheduler: self,
+                            state: &state,
+                            wake: &wake,
+                            uses: job.uses,
+                        };
                         let result = work(&mut w, i, job.item);
-                        self.finish(&state, &wake, &job.uses);
                         match result {
                             Some(r) => done.lock().unwrap().push((i, r)),
                             None => break,
@@ -242,12 +260,27 @@ impl Scheduler {
     }
 
     fn finish<T>(&self, state: &Mutex<State<T>>, wake: &Condvar, uses: &[String]) {
+        // The lock is never held while a job runs, so a job's panic can't poison it.
         let mut st = state.lock().unwrap();
         for r in uses {
             *st.on.entry(r.clone()).or_default() -= 1;
             st.warm.insert(r.clone());
         }
         wake.notify_all();
+    }
+}
+
+/// A job running: its resources are freed when it ends, however it ends.
+struct Running<'s, T> {
+    scheduler: &'s Scheduler,
+    state: &'s Mutex<State<T>>,
+    wake: &'s Condvar,
+    uses: Vec<String>,
+}
+
+impl<T> Drop for Running<'_, T> {
+    fn drop(&mut self) {
+        self.scheduler.finish(self.state, self.wake, &self.uses);
     }
 }
 
@@ -436,6 +469,35 @@ mod tests {
         );
         assert!(made.load(Ordering::SeqCst) <= 3);
         assert_eq!(ran.done.len(), 12);
+    }
+
+    #[test]
+    fn a_job_that_panics_frees_its_resource_and_the_run_still_ends() {
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Scheduler::new(2).limit("a", 1).run(
+                jobs((0..4).map(|i| (vec!["a"], i))),
+                &CancelToken::new(),
+                || (),
+                |_, _, n| {
+                    assert_ne!(n, 0, "the first job breaks");
+                    Some(n)
+                },
+            )
+        }));
+        assert!(ran.is_err());
+    }
+
+    #[test]
+    fn a_threaded_scheduler_runs_even_one_worker_off_the_calling_thread() {
+        let here = std::thread::current().id();
+        let ran = Scheduler::new(1).threaded().run(
+            jobs((0..3).map(|i| (vec![], i))),
+            &CancelToken::new(),
+            || (),
+            |_, _, _| Some(std::thread::current().id()),
+        );
+        assert_eq!(ran.done.len(), 3);
+        assert!(ran.done.iter().all(|(_, id)| *id != here));
     }
 
     #[test]

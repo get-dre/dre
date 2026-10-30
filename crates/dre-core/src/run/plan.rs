@@ -25,6 +25,8 @@ pub struct Plan<'a> {
     pub bindings: Vec<Planned<'a>>,
     pub targets: RunTargets,
     pub(super) scheduler: Scheduler,
+    /// Bindings may run at once: each holds its events and sends them as one block.
+    pub(super) at_once: bool,
 }
 
 /// One Binding a run will run, with its parse pass for the run's inputs.
@@ -80,11 +82,12 @@ pub fn plan<'a>(
     // Every profile the run uses needs an entry for it, before anything runs.
     let targets =
         run_targets(project, &bindings, opts).map_err(|e| Error::new(Code::MissingTargetEntry, e))?;
-    let scheduler = schedule(ctx, project, &bindings, opts, sink);
+    let (scheduler, at_once) = schedule(ctx, project, &bindings, opts, sink);
     Ok(Plan {
         bindings,
         targets,
         scheduler,
+        at_once,
     })
 }
 
@@ -191,21 +194,21 @@ pub(super) fn inputs(
 /// `threads:` above 1 or the run sets `--threads` (`DRE_THREADS`); then each connection runs at
 /// most its `threads:` at once (1 on a file only one process may write, as its source plugin's
 /// `describe` says), and the run at most `--threads`. Only a run that runs Bindings (`--preview`
-/// included) runs them at once.
+/// included) runs them at once. Also whether they may: then each Binding's events are held.
 fn schedule(
     ctx: &Context,
     project: &Project,
     bindings: &[Planned<'_>],
     opts: &RunOptions,
     sink: &mut dyn EventSink,
-) -> Scheduler {
+) -> (Scheduler, bool) {
     let cap = if opts.mode.concurrent() {
         opts.threads.unwrap_or(usize::MAX).max(1)
     } else {
         1
     };
     if cap == 1 {
-        return Scheduler::new(1);
+        return (Scheduler::new(1), false);
     }
     // Plugin log lines from `describe`, shown before the run starts.
     let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -226,7 +229,7 @@ fn schedule(
         sink.event(RunEvent::PluginLog(plugin, line));
     }
     if cap == usize::MAX && limits.iter().all(|(_, n)| *n <= 1) {
-        return Scheduler::new(1);
+        return (Scheduler::new(1), false);
     }
     // No more workers than Bindings could ever run at once.
     let most = if bindings.iter().any(|p| p.parsed.connections().is_empty()) {
@@ -234,11 +237,11 @@ fn schedule(
     } else {
         limits.iter().map(|(_, n)| *n).sum::<usize>().min(bindings.len())
     };
-    let mut scheduler = Scheduler::new(cap.min(most));
+    let mut scheduler = Scheduler::new(cap.min(most).max(1));
     for (c, n) in &limits {
         scheduler = scheduler.limit(c, *n);
     }
-    scheduler
+    (scheduler, true)
 }
 
 /// The profiles the planned Bindings use (by their parse pass) and each one's entry. A profile

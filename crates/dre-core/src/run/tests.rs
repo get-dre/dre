@@ -729,27 +729,28 @@ fn three_reports(single_writer: bool) -> (MemoryHost, Context, TempDir, Project)
     (host, ctx, dir, project)
 }
 
-fn planned_workers(ctx: &Context, project: &Project) -> usize {
+/// How many workers the plan runs three Bindings on, and whether they hold their events.
+fn planned_workers(ctx: &Context, project: &Project) -> (usize, bool) {
     let opts = RunOptions {
         selector: Some("pack a b".into()),
         ..options()
     };
     let p = plan(ctx, project, &opts, &mut Recorder::default(), &mut Vec::new()).unwrap();
     assert_eq!(p.bindings.len(), 3);
-    p.scheduler.workers()
+    (p.scheduler.workers(), p.at_once)
 }
 
 #[test]
 fn a_connection_runs_bindings_at_once_up_to_its_threads() {
     let (_host, ctx, _dir, project) = three_reports(false);
-    assert_eq!(planned_workers(&ctx, &project), 3);
+    assert_eq!(planned_workers(&ctx, &project), (3, true));
 }
 
 #[test]
 fn a_file_only_one_process_may_write_runs_one_binding_at_a_time() {
     // The source's `describe` says `path` names such a file, whatever `threads:` says.
     let (_host, ctx, _dir, project) = three_reports(true);
-    assert_eq!(planned_workers(&ctx, &project), 1);
+    assert_eq!(planned_workers(&ctx, &project), (1, false));
 }
 
 #[test]

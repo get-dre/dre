@@ -252,7 +252,7 @@ impl BindingRun<'_> {
             None,
         );
         shared.events.rows(shared.progress.event(false));
-        let scheduler = Scheduler::new(concurrency).queue(concurrency * 2);
+        let scheduler = Scheduler::new(concurrency).queue(concurrency * 2).threaded();
         let rows: Vec<Row<'_>> = rows
             .iter()
             .zip(&names)
@@ -1105,7 +1105,12 @@ impl BindingRun<'_> {
                     format!("destination profile: {}", mask.apply(&e.message)),
                 )
             })?;
-        let connections = self.pool.as_ref().expect("pool").connections.clone();
+        let connections = self
+            .pool
+            .as_ref()
+            .expect("the pool is made before rendering")
+            .connections
+            .clone();
         renderer.set_destination(
             crate::render::Connections::profile(&*connections, &profile, Some("destination")).ok(),
         );

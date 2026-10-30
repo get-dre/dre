@@ -381,7 +381,7 @@ impl BindingRun<'_> {
     /// `dre validate --live`: execute temp creates, `check` everything else, each on its
     /// connection; then check declared source columns against the database.
     fn live_check(&mut self, statements: &[Statement]) -> Result<(), Fail> {
-        let pool = self.pool.clone().expect("pool");
+        let pool = self.pool.clone().expect("the pool is made before rendering");
         let mut failures = Vec::new();
         let mut unexecuted_setup: BTreeMap<String, (PathBuf, usize)> = BTreeMap::new();
         let mut uncheckable: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();

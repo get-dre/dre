@@ -796,7 +796,7 @@ pub fn render_connection(
     }
     match walk(&env, &Json::Object(output.fields.clone()))? {
         Json::Object(o) => Ok(o),
-        _ => unreachable!(),
+        _ => unreachable!("walking an object gives an object"),
     }
 }
 
