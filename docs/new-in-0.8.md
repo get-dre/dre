@@ -52,4 +52,4 @@ A block scalar at the end of a file whose last line holds only spaces, with no f
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.7](new-in-0.7.md)
+**Previous:** [New in 0.9](new-in-0.9.md) · **Next:** [New in 0.7](new-in-0.7.md)

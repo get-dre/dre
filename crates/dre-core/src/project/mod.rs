@@ -65,12 +65,12 @@ use schedules::is_timing_registry;
 use sets::is_set_registry;
 
 mod discover;
-mod scope;
 mod outputs;
 mod plugins;
 mod project_file;
 mod reports;
 mod schedules;
+mod scope;
 mod sets;
 mod sources;
 mod templates;
@@ -1202,7 +1202,10 @@ struct Discovered {
 impl Loader {
     /// Resolve [`LoadOptions::select`] into the reports later checks cover.
     fn limit_to_selection(&mut self, project: &Project) {
-        let catalog = self.report_candidates.iter().any(|c| project.report(&c.name).is_none())
+        let catalog = self
+            .report_candidates
+            .iter()
+            .any(|c| project.report(&c.name).is_none())
             .then(|| self.selection_catalog(project));
         let catalog = catalog.as_ref().unwrap_or(project);
         let mut scope: Option<BTreeSet<String>> = None;
@@ -1473,9 +1476,11 @@ impl Loader {
         resolved.sort_by(|a, b| a.name.cmp(&b.name));
         project.reports = resolved;
         self.schedule_select = scope::schedule_selection(&schedule_files, self.opts.schedule.as_deref());
-        let defer_scope = scope::needs_parse(self.opts.select.as_deref())
-            || scope::schedules_need_parse(&schedule_files);
-        if !defer_scope { self.limit_to_selection(&project); }
+        let defer_scope =
+            scope::needs_parse(self.opts.select.as_deref()) || scope::schedules_need_parse(&schedule_files);
+        if !defer_scope {
+            self.limit_to_selection(&project);
+        }
 
         // Source selectors need parsed dependencies first. Other selections preserve the
         // pre-flight's more precise diagnostics before parsing their Bindings.
@@ -1809,15 +1814,21 @@ mod tests {
         let dir = project(&[
             ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
             ("dependencies.yml", "plugins: [duckdb, csv]\n"),
-            ("profiles.yml", "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
             ("reports/good/good.yml", "queries: [good]\n"),
             ("reports/good/good.sql", "select 1"),
             ("reports/bad/bad.yml", "queries: [\n"),
         ]);
-        let (_, diags) = load(dir.path(), &LoadOptions {
-            select: Some("good".into()),
-            ..LoadOptions::default()
-        });
+        let (_, diags) = load(
+            dir.path(),
+            &LoadOptions {
+                select: Some("good".into()),
+                ..LoadOptions::default()
+            },
+        );
         assert!(!diags.has_errors(), "{:?}", codes(&diags));
     }
 
@@ -1826,32 +1837,53 @@ mod tests {
         let dir = project(&[
             ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
             ("dependencies.yml", "plugins: [duckdb, csv]\n"),
-            ("profiles.yml", "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
             ("reports/finance/good/good.yml", "queries: [good]\n"),
             ("reports/finance/good/good.sql", "select 1"),
             ("reports/finance/bad/bad.yml", "queries: [\n"),
         ]);
-        let (_, diags) = load(dir.path(), &LoadOptions {
-            select: Some("finance".into()),
-            ..LoadOptions::default()
-        });
-        assert!(diags.iter().any(|d| d.code == Code::YamlSyntax), "{:?}", codes(&diags));
+        let (_, diags) = load(
+            dir.path(),
+            &LoadOptions {
+                select: Some("finance".into()),
+                ..LoadOptions::default()
+            },
+        );
+        assert!(
+            diags.iter().any(|d| d.code == Code::YamlSyntax),
+            "{:?}",
+            codes(&diags)
+        );
     }
 
     #[test]
     fn a_removed_population_cap_names_the_migration() {
         let dir = project(&[
             ("dre_project.yml", "name: scoped\ndefault_profile: db\n"),
-            ("profiles.yml", "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n"),
+            (
+                "profiles.yml",
+                "connections:\n  db:\n    targets:\n      dev: {type: duckdb}\n",
+            ),
             ("dependencies.yml", "plugins: [duckdb, csv]\n"),
-            ("reports/letters/letters.yml", "queries: [driver, data]\noutput:\n  for_each: {query: driver, key: id, max_population_rows: 5}\n"),
+            (
+                "reports/letters/letters.yml",
+                "queries: [driver, data]\noutput:\n  for_each: {query: driver, key: id, max_population_rows: 5}\n",
+            ),
             ("reports/letters/driver.sql", "select 1 as id"),
             ("reports/letters/data.sql", "select 1 as id"),
         ]);
         let (_, diags) = load(dir.path(), &LoadOptions::default());
-        assert!(diags.iter().any(|d| d.code == Code::InvalidOutputOption
-            && d.message.contains("max_population_rows") && d.message.contains("removed")
-            && d.message.contains("stream")), "{:?}", codes(&diags));
+        assert!(
+            diags.iter().any(|d| d.code == Code::InvalidOutputOption
+                && d.message.contains("max_population_rows")
+                && d.message.contains("removed")
+                && d.message.contains("stream")),
+            "{:?}",
+            codes(&diags)
+        );
     }
 
     #[test]

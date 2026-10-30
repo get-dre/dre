@@ -43,7 +43,7 @@ Schedules, orchestrators and where runs write their files.
 - [Schedules](schedules.md): Name schedules in schedules.yml, share timings, see when they fire, and run them from your orchestrator.
 - [Schedule occurrences: `dre schedule ls`](schedule-ls.md): When a project's schedules fire, as a table or a versioned JSON document with the command for each firing, and its JSON Schema.
 - [Orchestration recipe](orchestration.md): Self-host scheduling: load occurrences into a database after every merge, refresh weekly, and run what's due. With Airflow, Databricks Jobs and cron.
-- [The target path](target-path.md): The target path: where DRE writes compiled SQL, outputs, snapshots and the manifest for each run, how overlapping runs are kept apart, and how to clean it.
+- [The target path](target-path.md): The target path: where DRE writes compiled SQL, outputs, snapshots and the project manifest, how overlapping runs are kept apart, and how to clean it.
 
 ## Plugins
 
@@ -99,6 +99,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
+- [New in 0.9](new-in-0.9.md): Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects.
 - [New in 0.8](new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.
 - [New in 0.6](new-in-0.6.md): PDF and HTML documents, per-row outputs (a statement per member), held deliveries with dre release, on_empty, --from-results and delivery rate limits.

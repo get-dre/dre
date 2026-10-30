@@ -2,7 +2,7 @@
 title: "New in 0.5"
 description: "New in DRE 0.5: templates follow Jinja2 more closely (Python-style lists and dicts, rounding, division) and an old flag of dre query and dre catalog is gone."
 section: upgrading
-position: 5
+position: 6
 ---
 
 # New in 0.5

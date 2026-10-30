@@ -29,6 +29,24 @@ dre clean                # remove the target folder
 dre system update        # update DRE itself
 ```
 
+## Run a selection when another report is broken
+
+`dre run monthly` loads project-wide configuration and dependencies, then parses and checks the
+selected reports. Errors discovered in other reports produce a stderr warning and appear as
+`project_errors` in each Binding's [`run_results.json`](manifest.md#run_resultsjson), with a
+`path`, `code` and `message` for each affected report. Selected reports and the SQL, templates,
+profiles, lookups and macros they need must still be valid. A broken project-wide file still
+stops the run.
+
+Discovery includes report YAML structure, references, cheap template preflight checks, profile
+names and plugin declarations where provider metadata is available. It does not execute other
+reports' plugin option checks or database queries. `source:` selectors, and projects with
+source-based schedule selectors, need a full dependency parse to resolve the selection.
+
+`dre validate` checks the whole project and fails for any report error, including with `-s`.
+Use it as the CI gate. `dre run` leaves the full manifest to `dre compile` and `dre validate`;
+it neither rebuilds nor replaces an existing manifest.
+
 A report is a YAML file next to its `.sql` files:
 
 ```yaml

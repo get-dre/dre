@@ -24,13 +24,21 @@ fn selected_run_records_other_report_errors_without_building_a_manifest() {
     let p = project();
     let result = p.dre("run", &["good"]);
     result.ok();
-    assert!(result.stderr.contains("1 other report has errors; run dre validate"), "{result:?}");
+    assert!(
+        result
+            .stderr
+            .contains("1 other report has errors; run dre validate"),
+        "{result:?}"
+    );
     let results = p.json("target/run/good/default/run_results.json");
-    assert_eq!(results["project_errors"], json!([{
-        "path": "reports/bad/bad.yml",
-        "code": "unknown-key",
-        "message": "unknown report key `unknown`"
-    }]));
+    assert_eq!(
+        results["project_errors"],
+        json!([{
+            "path": "reports/bad/bad.yml",
+            "code": "unknown-key",
+            "message": "unknown report key `unknown`"
+        }])
+    );
     assert!(results["manifest_checksum"].is_null());
     assert!(!p.path("target/manifest.json").exists());
 }
@@ -38,8 +46,14 @@ fn selected_run_records_other_report_errors_without_building_a_manifest() {
 #[test]
 fn unselected_reports_do_not_need_their_plugins_or_profiles() {
     let p = project();
-    p.write("reports/bad/bad.yml", "queries: [bad]\nprofile: absent\noutput: {format: unavailable}\n");
-    p.write("reports/plugin/plugin.yml", "queries: [plugin]\noutput: {format: unavailable}\n");
+    p.write(
+        "reports/bad/bad.yml",
+        "queries: [bad]\nprofile: absent\noutput: {format: unavailable}\n",
+    );
+    p.write(
+        "reports/plugin/plugin.yml",
+        "queries: [plugin]\noutput: {format: unavailable}\n",
+    );
     p.write("reports/plugin/plugin.sql", "rows 1");
     let run = p.dre("run", &["good"]);
     run.ok();
@@ -57,8 +71,14 @@ fn unselected_reports_do_not_need_their_plugins_or_profiles() {
 #[test]
 fn source_selectors_still_resolve_before_scoping_the_run() {
     let p = project();
-    p.write("sources.yml", "sources: [{name: sales, profile: fixture, tables: [{name: orders}]}]\n");
-    p.write("reports/good/good.sql", "select * from {{ source('sales', 'orders') }}");
+    p.write(
+        "sources.yml",
+        "sources: [{name: sales, profile: fixture, tables: [{name: orders}]}]\n",
+    );
+    p.write(
+        "reports/good/good.sql",
+        "select * from {{ source('sales', 'orders') }}",
+    );
     p.dre("run", &["source:sales.orders", "--dry-run"]).ok();
     assert!(p.path("target/compiled/good/default/good.sql").exists());
     assert!(!p.path("target/compiled/bad/default/bad.sql").exists());
@@ -67,7 +87,10 @@ fn source_selectors_still_resolve_before_scoping_the_run() {
 #[test]
 fn schedule_runs_isolate_reports_outside_the_schedule() {
     let p = project();
-    p.write("schedules.yml", "- {name: nightly, report: good, cron: '0 6 * * *'}\n");
+    p.write(
+        "schedules.yml",
+        "- {name: nightly, report: good, cron: '0 6 * * *'}\n",
+    );
     p.dre("run", &["--schedule", "nightly"]).ok();
     assert!(p.path("target/run/good/default/run_results.json").exists());
     assert!(!p.path("target/run/bad/default/run_results.json").exists());
@@ -89,7 +112,10 @@ fn other_report_template_errors_are_discovered_without_parsing_their_bindings() 
 fn an_uninstalled_package_used_only_elsewhere_does_not_block_a_selected_run() {
     let p = project();
     p.write("dependencies.yml", "plugins: [fixture, csv, uninstalled]\n");
-    p.write("reports/bad/bad.yml", "queries: [bad]\noutput: {format: uninstalled}\n");
+    p.write(
+        "reports/bad/bad.yml",
+        "queries: [bad]\noutput: {format: uninstalled}\n",
+    );
     p.dre("run", &["good", "--no-auto-install"]).ok();
 }
 
@@ -97,8 +123,13 @@ fn an_uninstalled_package_used_only_elsewhere_does_not_block_a_selected_run() {
 fn an_empty_schedule_intersection_still_explains_the_schedules_real_members() {
     let p = project();
     p.write("reports/bad/bad.yml", "queries: [bad]\n");
-    p.write("schedules.yml", "- {name: nightly, report: good, cron: '0 6 * * *'}\n");
-    p.dre("run", &["bad", "--schedule", "nightly"]).failed().says("it runs: good");
+    p.write(
+        "schedules.yml",
+        "- {name: nightly, report: good, cron: '0 6 * * *'}\n",
+    );
+    p.dre("run", &["bad", "--schedule", "nightly"])
+        .failed()
+        .says("it runs: good");
 }
 
 #[test]
@@ -109,7 +140,8 @@ fn scoped_results_validate_against_the_published_schema_even_when_the_query_fail
     let results = p.json("target/run/good/default/run_results.json");
     assert_eq!(results["status"], "error");
     assert_eq!(results["project_errors"][0]["code"], "unknown-key");
-    let schema: serde_json::Value = serde_json::from_str(include_str!("../../../docs/run-results.schema.json")).unwrap();
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../../docs/run-results.schema.json")).unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
     let errors: Vec<_> = validator.iter_errors(&results).map(|e| e.to_string()).collect();
     assert!(errors.is_empty(), "{errors:?}");
@@ -133,7 +165,10 @@ fn malformed_reports_are_reported_elsewhere_but_fail_when_selected() {
     let run = p.dre("run", &["good"]);
     run.ok();
     assert!(run.stderr.contains("1 other report has errors"), "{run:?}");
-    assert_eq!(p.json("target/run/good/default/run_results.json")["project_errors"][0]["code"], "yaml-syntax");
+    assert_eq!(
+        p.json("target/run/good/default/run_results.json")["project_errors"][0]["code"],
+        "yaml-syntax"
+    );
     p.dre("run", &["bad"]).failed().says("yaml-syntax");
     p.dre("validate", &["-s", "good"]).failed().says("yaml-syntax");
 }
@@ -144,7 +179,10 @@ fn selected_transitive_refs_keep_shared_dependency_errors_fatal() {
     p.write("reports/bad/bad.yml", "queries: [bad]\n");
     p.write("reports/bad/bad.sql", "select {{ ref('missing') }}");
     p.dre("run", &["good"]).ok();
-    assert_eq!(p.json("target/run/good/default/run_results.json")["project_errors"][0]["code"], "unknown-ref");
+    assert_eq!(
+        p.json("target/run/good/default/run_results.json")["project_errors"][0]["code"],
+        "unknown-ref"
+    );
     p.write("reports/good/good.sql", "select * from ({{ ref('bad') }})");
     p.dre("run", &["good"]).failed().says("unknown-ref");
 }
@@ -164,13 +202,24 @@ fn other_report_messages_follow_secret_masking_in_text_and_json_logs() {
     let p = project();
     p.write("reports/bad/bad.yml", "queries: [bad]\n");
     p.write("reports/bad/bad.sql", "select {{ var('sensitive-value') }}");
-    let run = p.dre_env("run", &["good", "--log-format", "json"], &[("DRE_SECRET_TEST", "sensitive-value")]);
+    let run = p.dre_env(
+        "run",
+        &["good", "--log-format", "json"],
+        &[("DRE_SECRET_TEST", "sensitive-value")],
+    );
     run.ok();
     assert!(!run.stdout.contains("sensitive-value"), "{run:?}");
     assert!(!run.stderr.contains("sensitive-value"), "{run:?}");
     let results = p.json("target/run/good/default/run_results.json");
     assert!(!results["project_errors"].to_string().contains("sensitive-value"));
-    assert!(results["project_errors"][0]["message"].as_str().unwrap().contains("*****"));
+    assert!(
+        results["project_errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("*****")
+    );
     assert!(run.stderr.contains("1 other report has errors"), "{run:?}");
-    for line in run.stdout.lines() { serde_json::from_str::<serde_json::Value>(line).unwrap(); }
+    for line in run.stdout.lines() {
+        serde_json::from_str::<serde_json::Value>(line).unwrap();
+    }
 }

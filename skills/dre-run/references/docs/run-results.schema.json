@@ -223,7 +223,14 @@
         "string",
         "null"
       ],
-      "description": "The SHA-256 of the manifest.json bytes this run wrote."
+      "description": "The SHA-256 of a manifest written by the caller, when supplied. Null for scoped CLI runs, which do not rebuild the manifest."
+    },
+    "project_errors": {
+      "type": "array",
+      "description": "First discovered error per report outside this run's selection. `dre validate` performs the full project check.",
+      "items": {
+        "$ref": "#/$defs/ProjectError"
+      }
     },
     "retry_of": {
       "type": [
@@ -821,6 +828,28 @@
       "required": [
         "title",
         "text"
+      ]
+    },
+    "ProjectError": {
+      "type": "object",
+      "description": "One report outside a scoped run with a discovered error. `dre validate` checks the whole project.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-relative path of the first error found in this report."
+        },
+        "code": {
+          "type": "string",
+          "description": "The registered diagnostic code."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "code",
+        "message"
       ]
     },
     "Released": {

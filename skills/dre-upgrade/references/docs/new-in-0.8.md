@@ -2,7 +2,7 @@
 title: "New in 0.8"
 description: "A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.8
@@ -52,4 +52,4 @@ A block scalar at the end of a file whose last line holds only spaces, with no f
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.7](new-in-0.7.md)
+**Previous:** [New in 0.9](new-in-0.9.md) · **Next:** [New in 0.7](new-in-0.7.md)

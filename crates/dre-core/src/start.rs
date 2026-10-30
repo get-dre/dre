@@ -89,12 +89,20 @@ fn load_command(
         ctx.secrets().set_enabled(p.mask_secrets());
     }
     let checksum = if manifest {
-        let errors = project.as_ref().map(|p| crate::manifest::report_errors(p, &diags)).unwrap_or_default();
+        let errors = project
+            .as_ref()
+            .map(|p| crate::manifest::report_errors(p, &diags))
+            .unwrap_or_default();
         match write_manifest(ctx, project.as_ref(), &errors, req) {
             Ok(checksum) => checksum,
-            Err(error) => { console.error(&error); return None; }
+            Err(error) => {
+                console.error(&error);
+                return None;
+            }
         }
-    } else { None };
+    } else {
+        None
+    };
     for d in diags.sorted() {
         // Unmanaged reports warn again when they run.
         if d.severity == Severity::Warning && d.code == "unmanaged-report" {
@@ -299,7 +307,9 @@ pub fn run(ctx: &Context, mut req: RunRequest, console: &mut dyn Console) -> Sta
             severity: Severity::Warning,
             code: crate::codes::Code::OtherReportErrors,
             message: format!("{count} other {reports} errors; run dre validate"),
-            file: None, line: None, plugin: None,
+            file: None,
+            line: None,
+            plugin: None,
         });
     }
     if let Some(path) = &opts.output_json {

@@ -309,10 +309,14 @@ impl Loader {
                         plugin: id,
                         file: if self.opts.select.is_some() || self.opts.schedule.is_some() {
                             file.clone().or_else(|| profiles.file.clone())
-                        } else { profiles.file.clone() },
+                        } else {
+                            profiles.file.clone()
+                        },
                         line: if self.opts.select.is_some() || self.opts.schedule.is_some() {
                             *line
-                        } else { profiles.line_of(role, name) },
+                        } else {
+                            profiles.line_of(role, name)
+                        },
                         what: format!("`type: {}` used by {role_name} profile `{name}`", out_.kind),
                     });
                 }
