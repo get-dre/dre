@@ -4,11 +4,11 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-import re
 import tempfile
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -105,7 +105,8 @@ def pdf_text(path):
     """Read the text of a PDF made by DRE with the standard library.
 
     Fonts are subset Type0 fonts with a ToUnicode map, so each shown glyph id maps back to its
-    characters. Returns one string per page-content stream; line order is the drawing order.
+    characters. Returns the shown text in drawing order, a space after each run; shaped scripts (Arabic,
+    Devanagari) come back in visual order with `?` for glyphs the map doesn't cover.
     """
     data = Path(path).read_bytes()
     streams = {}
