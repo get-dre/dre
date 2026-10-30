@@ -241,7 +241,7 @@ pub struct Located {
 
 /// The installed copies of a declared package, honouring its `dre.lock` pin and constraint;
 /// `Err` for a `local:` package that can't be used.
-fn installed(
+pub(crate) fn installed(
     root: &Path,
     lock: &crate::lock::Lock,
     req: &crate::project::PluginRequirement,

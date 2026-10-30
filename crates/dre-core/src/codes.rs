@@ -266,6 +266,9 @@ codes! {
         "A YAML file isn't a report, Set, plugin or schedule file.",
         "DRE recognises project YAML files by their keys. A file outside `reports/` that's none of a report (`queries:`), Sets, timings, schedules, `plugins:` or `sources:` is ignored. Move it, or fix its keys.";
     // -- reports and queries ----------------------------------------------------------------
+    OtherReportErrors = "other-report-errors", Config,
+        "Reports outside the run's selection have errors.",
+        "The selected reports can run. Errors discovered in other reports are recorded in `run_results.json` under `project_errors`, one entry per report. Run `dre validate` for the full project check; project-wide dependency errors still stop a run.";
     DuplicateReportName = "duplicate-report-name", Config,
         "Two reports have the same name.",
         "Report names are unique across the project: a report's name is its folder's (or its `name:`), and an unmanaged report is named after its `.sql` file. Rename one of them.";
@@ -498,7 +501,7 @@ codes! {
         "The query's last statement returned no rows to write (it created a view, set a variable). If it only prepares data for later queries, give it `tab: false` in the YAML.";
     ForEachFailed = "for-each-failed", Config,
         "A per-row output can't be split by its key.",
-        "Before anything renders, a `for_each` output's driver must give one row per key (no duplicates), every query of the output must have the key columns, the rows' file names must differ, the population must fit `max_population_rows`, and with `on_orphan_rows: fail` no row may have a key missing from the driver. The message says which. Nothing was written or delivered.";
+        "Before anything renders, a `for_each` output's driver must give one row per key (no duplicates), every query of the output must have the key columns, the rows' file names must differ, and with `on_orphan_rows: fail` no row may have a key missing from the driver. The message says which. Nothing was written or delivered.";
     RowsFailed = "rows-failed", Delivery,
         "Rows of a per-row output failed.",
         "One or more rows of a `for_each` output failed to render or deliver. With `on_row_error: continue` (the default) the other rows were made and delivered; with `fail`, nothing was delivered. Each failed row's key, code and message are in `run_results.json` (`output_results[].for_each.failed_keys`) and in the `<output>.rows.jsonl` sidecar. Fix the cause and run `dre run <report> --retry-failed <run id>` to redo only those rows, from the same saved results.";

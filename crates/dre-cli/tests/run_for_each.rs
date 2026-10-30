@@ -254,14 +254,15 @@ fn an_empty_driver_makes_nothing() {
 }
 
 #[test]
-fn the_population_guard_fails_before_rendering() {
+fn the_removed_population_cap_is_rejected_before_rendering() {
     let p = project(
         &REPORT.replace("key: member_id}", "key: member_id, max_population_rows: 5}"),
         &[],
     );
     p.dre("run", &["statements"])
         .failed()
-        .says("more than `for_each.max_population_rows` (5)");
+        .says("`for_each.max_population_rows` was removed")
+        .says("populations stream to disk");
 }
 
 #[test]

@@ -70,6 +70,9 @@ impl Loader {
         timings: &mut Vec<Rc<YamlFile>>,
     ) {
         let in_reports = yf.display.starts_with(REPORTS_DIR);
+        if PLUGIN_KEYS.iter().any(|k| yf.value.get(*k).is_some()) || yf.value.get(SOURCES_KEY).is_some() {
+            self.global_files.insert(yf.display.clone());
+        }
         let timings_file = yf.display.file_name() == Some(std::ffi::OsStr::new(TIMINGS_FILE));
         match &yf.value {
             Value::Null => {}
@@ -144,6 +147,17 @@ impl Loader {
     }
 
     fn report_fragment(&mut self, yf: Rc<YamlFile>, map: Mapping, out: &mut Vec<Fragment>) {
+        let inferred = map.get("name").and_then(Value::as_str).map(str::to_string)
+            .or_else(|| folder_segments(yf.display.parent().unwrap_or(Path::new(""))).last().cloned());
+        if let Some(name) = inferred {
+            self.report_owners.entry(yf.display.clone()).or_default().insert(name.clone());
+            self.report_candidates.push(scope::ReportIdentity {
+                name, file: yf.display.clone(),
+                folder: folder_segments(yf.display.parent().unwrap_or(Path::new(""))),
+                tags: map.get("tags").and_then(Json::as_array).into_iter().flatten()
+                    .filter_map(Json::as_str).map(str::to_string).collect(),
+            });
+        }
         for k in map.keys().map(String::as_str) {
             if !REPORT_KEYS.contains(&k) {
                 self.diags.error(

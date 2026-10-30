@@ -231,6 +231,8 @@ impl Loader {
             files: Vec::new(),
             inputs: crate::parse::Inputs::new(self.ctx.clone()),
             parse_errors: BTreeMap::new(),
+            project_errors: Vec::new(),
+            loaded_selection: None,
             sources: BTreeMap::new(),
             profiles: Profiles::default(),
             settings: self.opts.settings.clone(),

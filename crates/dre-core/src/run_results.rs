@@ -84,8 +84,11 @@ pub struct RunResults {
     /// Every setting and where its value came from.
     #[schemars(schema_with = "settings")]
     pub settings: Settings,
-    /// The SHA-256 of the manifest.json bytes this run wrote.
+    /// The SHA-256 of a manifest written by the caller, when supplied. Null for scoped CLI runs, which do not rebuild the manifest.
     pub manifest_checksum: Option<String>,
+    /// First discovered error per report outside this run's selection. `dre validate` performs the full project check.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub project_errors: Vec<ProjectError>,
     /// `dre run --retry-failed <run id>`: the run whose failed and never-started rows this one redid.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_of: Option<String>,
@@ -98,6 +101,16 @@ pub struct RunResults {
     /// Each held delivery a release delivered (or refused), with its result.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub released: Vec<Released>,
+}
+
+/// One report outside a scoped run with a discovered error. `dre validate` checks the whole project.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProjectError {
+    /// Project-relative path of the first error found in this report.
+    pub path: PathBuf,
+    /// The registered diagnostic code.
+    pub code: Code,
+    pub message: String,
 }
 
 /// One held delivery, as `dre release` delivered it.

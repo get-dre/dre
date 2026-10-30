@@ -77,7 +77,7 @@ pub fn subset(
 
 type Map = JsonMap<String, Json>;
 
-/// target/manifest.json, written by `dre compile`, `dre validate` and `dre run`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within a version; consumers should ignore fields they don't know. See docs/manifest.md.
+/// target/manifest.json, written by `dre compile` and `dre validate`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within a version; consumers should ignore fields they don't know. See docs/manifest.md.
 #[derive(Serialize, JsonSchema)]
 #[schemars(title = "DRE project manifest")]
 pub struct Manifest {

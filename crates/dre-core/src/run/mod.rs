@@ -88,8 +88,10 @@ pub struct RunOptions {
     pub accept_schema_change: bool,
     /// Asks a person which Set of a report to run; `None` when nobody is at a terminal.
     pub choose_set: Option<SetChooser>,
-    /// SHA-256 of the manifest this command wrote, for `run_results.json`.
+    /// SHA-256 of a manifest written by the caller, if supplied; scoped CLI runs use `None`.
     pub manifest_checksum: Option<String>,
+    /// Errors discovered outside the reports selected by this run.
+    pub project_errors: Vec<crate::run_results::ProjectError>,
     /// Stops the run: no further Binding, statement or delivery starts once it's cancelled.
     pub cancel: CancelToken,
     /// `--keep-runs` or `DRE_KEEP_RUNS`: above `flags: keep_runs`.

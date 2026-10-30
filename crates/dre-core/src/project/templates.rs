@@ -115,7 +115,12 @@ impl Loader {
             }
         }
         let scope = self.scope();
-        for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
+        for r in &project.reports {
+            // Discover cheap template problems elsewhere without making their Binding context
+            // (for example a var used by a shared macro) a selected report's error.
+            let outside = !in_scope(&scope, &r.name);
+            let saved = outside.then(|| std::mem::take(&mut self.diags));
+            let checked_before = outside.then(|| checked.clone());
             for b in &r.bindings {
                 for error in crate::variables::check_given_values(&r.var_schema, &b.vars, &self.opts.vars) {
                     self.diags
@@ -187,6 +192,11 @@ impl Loader {
                     self.check_template_text(&r.file, v, &scan, offset, line);
                     self.check_vars(&r.file, &scan, offset, &b.vars, &cli, &ctx);
                 }
+            }
+            if let Some(saved) = saved {
+                self.record_other_error(&r.name, &self.diags.clone());
+                self.diags = saved;
+                checked = checked_before.expect("outside reports saved the checked files");
             }
         }
     }

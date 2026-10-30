@@ -268,17 +268,6 @@ impl BindingRun<'_> {
             .position(|p| p.query == fe.query)
             .ok_or_else(|| failed(format!("its driver `{}` made no result", fe.query)))?;
         let data_ps = self.sections(oi, o);
-        let total: u64 = std::iter::once(driver_p)
-            .chain(data_ps.iter().copied())
-            .map(|i| self.produced[i].rows)
-            .sum();
-        if total > fe.max_population_rows {
-            return Err(failed(format!(
-                "its queries return {} rows, more than `for_each.max_population_rows` ({}); filter or aggregate in SQL, or raise `max_population_rows`",
-                thousands(total),
-                thousands(fe.max_population_rows)
-            )));
-        }
         let data: Vec<&super::Produced> = data_ps.iter().map(|&i| &self.produced[i]).collect();
         let pop =
             Population::build(&self.produced[driver_p], &data, &fe.key, &self.opts.cancel).map_err(failed)?;

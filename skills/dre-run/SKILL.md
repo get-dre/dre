@@ -3,8 +3,8 @@ name: dre-run
 description: Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews per-row outputs, retries failed rows, releases held deliveries after review (dre release), paces deliveries with rates, previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.2.1"
-  dre: ">=0.6.0, <0.9.0"
+  version: "5.0.0"
+  dre: ">=0.9.0, <0.10.0"
 ---
 
 # Run, check and deliver DRE reports
@@ -161,6 +161,13 @@ every entry in `profiles.yml`, used or not. An unset `env_var()` in a profile is
 read the SQL exactly as the database will get it. `dre validate -s <report> --live` also checks
 every statement against the database without running it.
 
+If validation fails only in reports outside the chosen selection, explain that the full-project
+check still failed. A selected `dre run <report> --preview` can continue in DRE 0.9: it checks
+that selection and its dependencies, warns about discovered errors elsewhere, and records them
+in `run_results.json.project_errors` (`path`, `code`, `message`, one entry per report). Check
+those records and the selected outputs; keep the same production and delivery confirmations.
+Use `dre validate` as the whole-project gate; a successful selected run does not clear it.
+
 ### Step 4: preview
 
 Run `dre run <report> --preview` (100 rows; `--preview 20` for fewer). It runs the queries with a
@@ -282,6 +289,11 @@ Load `references/topics/per-row.md` and `references/topics/delivery.md` first.
 
 ## If this fails
 
+- **Other reports have errors:** read `project_errors` in the selected Binding's
+  `run_results.json`, explain each path/code/message, and use `dre validate` for the full list.
+  A global dependency error still stops the selected run. The run leaves any full manifest
+  unchanged; `dre validate --json` or `dre compile` builds a current one.
+
 Read the error: DRE names the report, Binding, file and line. Then:
 
 - **Connection or sign-in errors:** the source's reference (`references/plugins/source-<type>.md`)
@@ -314,8 +326,8 @@ Read the error: DRE names the report, Binding, file and line. Then:
   scope, the DM tab turned off), SFTP (unknown host key), FTP (path relative to the login
   folder), object storage (credentials, bucket, region).
 - **Per-row:** "two rows have the same key" or the same file name: the key doesn't identify one
-  row; fix the driver or add a column to the key. `max_population_rows` exceeded: filter or
-  aggregate in SQL. Orphan rows (a key not in the driver) are a warning, or an error with
+  row; fix the driver or add a column to the key. Populations stream to disk; filter or
+  aggregate in SQL when fewer copies are needed. Orphan rows (a key not in the driver) are a warning, or an error with
   `on_orphan_rows: fail`.
 - **`dre release` refuses a file:** it changed since the run (its SHA-256 differs), or the run
   was pruned (`keep_runs`). Run again and review the new files.

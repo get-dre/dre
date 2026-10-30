@@ -1,5 +1,5 @@
 //! How project commands start, and `dre run` from its command line to its summary: install the
-//! project's packages and plugins, load and check it, write its manifest, resolve each setting
+//! project's packages and plugins, load and check its selection, resolve each setting
 //! (flag, else environment variable, else `dre_project.yml`) and run. The CLI parses flags, calls
 //! [`run`] and prints what comes back; everything it shows on the way goes through a [`Console`].
 
@@ -67,28 +67,34 @@ pub fn load_project(
     load_for_run(ctx, req, console)
 }
 
-/// Load the project for `compile` and `run`, writing its manifest; `None` (after saying why)
-/// when it can't run. Also returns the SHA-256 of the manifest written.
+/// Load a whole project for commands such as `compile`, writing its manifest; `None` (after
+/// saying why) when it cannot proceed. Also returns the SHA-256 of the manifest written.
 pub fn load_for_run(
     ctx: &Context,
     req: &ProjectRequest,
     console: &dyn Console,
 ) -> Option<(Project, Option<String>)> {
+    load_command(ctx, req, console, true)
+}
+
+/// Loading for a run leaves the whole-project manifest to `compile` and `validate`.
+fn load_command(
+    ctx: &Context,
+    req: &ProjectRequest,
+    console: &dyn Console,
+    manifest: bool,
+) -> Option<(Project, Option<String>)> {
     let (project, diags) = crate::project::load_with(&req.dir, &req.load, ctx);
     if let Some(p) = &project {
         ctx.secrets().set_enabled(p.mask_secrets());
     }
-    let errors = project
-        .as_ref()
-        .map(|p| crate::manifest::report_errors(p, &diags))
-        .unwrap_or_default();
-    let checksum = match write_manifest(ctx, project.as_ref(), &errors, req) {
-        Ok(c) => c,
-        Err(e) => {
-            console.error(&e);
-            return None;
+    let checksum = if manifest {
+        let errors = project.as_ref().map(|p| crate::manifest::report_errors(p, &diags)).unwrap_or_default();
+        match write_manifest(ctx, project.as_ref(), &errors, req) {
+            Ok(checksum) => checksum,
+            Err(error) => { console.error(&error); return None; }
         }
-    };
+    } else { None };
     for d in diags.sorted() {
         // Unmanaged reports warn again when they run.
         if d.severity == Severity::Warning && d.code == "unmanaged-report" {
@@ -271,11 +277,31 @@ pub enum Started {
 }
 
 /// `dre run`: get the project ready, resolve the run's settings and run it.
-pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started {
-    let Some((project, manifest_checksum)) = load_project(ctx, &req.project, console) else {
+pub fn run(ctx: &Context, mut req: RunRequest, console: &mut dyn Console) -> Started {
+    req.project.load.select = req.options.selector.clone();
+    req.project.load.schedule = req.options.schedule.clone();
+    if req.project.install && !install_packages(&req.project.dir, console) {
+        return Started::NotStarted;
+    }
+    let Some((mut project, manifest_checksum)) = load_command(ctx, &req.project, console, false) else {
         return Started::NotStarted;
     };
+    if let Err(error) = project.retain_needed_plugins(ctx, req.project.install) {
+        console.error(&error);
+        return Started::NotStarted;
+    }
     let mut opts = req.options;
+    opts.project_errors = project.project_errors().to_vec();
+    let count = opts.project_errors.len();
+    if count > 0 {
+        let reports = if count == 1 { "report has" } else { "reports have" };
+        console.diagnostic(&Diagnostic {
+            severity: Severity::Warning,
+            code: crate::codes::Code::OtherReportErrors,
+            message: format!("{count} other {reports} errors; run dre validate"),
+            file: None, line: None, plugin: None,
+        });
+    }
     if let Some(path) = &opts.output_json {
         let value = path.to_string_lossy();
         if let Err(error) = crate::target::resolve(project.root(), Some(&value), None, ctx.env()) {
@@ -333,9 +359,11 @@ pub fn run(ctx: &Context, req: RunRequest, console: &mut dyn Console) -> Started
     let Some(threads) = count(req.threads.as_deref(), "--threads", crate::settings::THREADS) else {
         return Started::NotStarted;
     };
+    let mut checked_project = project.clone();
+    checked_project.retain_loaded_selection();
     if !check_project(
         ctx,
-        &project,
+        &checked_project,
         req.project.install,
         Checks::PluginUsesAndOptions,
         console,

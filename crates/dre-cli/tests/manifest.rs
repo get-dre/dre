@@ -1,4 +1,4 @@
-//! The project manifest (`target/manifest.json`): what `compile`, `validate` and `run` write,
+//! The project manifest (`target/manifest.json`): what `compile` and `validate` write,
 //! its contents, change-detection checksums, and what it leaves out.
 
 mod common;
@@ -270,42 +270,36 @@ fn clean_removes_it() {
 }
 
 #[test]
-fn validate_and_run_write_it_too_whatever_is_selected() {
+fn validate_writes_the_whole_manifest_and_run_leaves_it_unchanged() {
     let p = project();
     p.duckdb("dev.duckdb", "select 1;");
     p.dre("validate", &["-s", "daily"]).ok();
-    let m = manifest(&p);
-    assert_eq!(m["reports"].as_object().unwrap().len(), 3);
+    assert_eq!(manifest(&p)["reports"].as_object().unwrap().len(), 3);
     let bytes = p.read("target/manifest.json");
-
-    std::fs::remove_file(p.path("target/manifest.json")).unwrap();
     p.dre("run", &["-s", "daily", "--dry-run"]).ok();
     assert_eq!(p.read("target/manifest.json"), bytes);
-
-    std::fs::remove_file(p.path("target/manifest.json")).unwrap();
     p.dre("run", &["--schedule", "daily_all"]).ok();
     assert_eq!(p.read("target/manifest.json"), bytes);
-
     std::fs::remove_file(p.path("target/manifest.json")).unwrap();
     p.dre("run", &["-s", "daily"]).ok();
-    assert_eq!(p.read("target/manifest.json"), bytes);
+    assert!(!p.path("target/manifest.json").exists());
 }
 
 #[test]
-fn run_results_record_the_manifest_checksum_even_when_a_query_fails() {
+fn scoped_runs_do_not_claim_the_checksum_of_an_earlier_manifest() {
     let p = project();
     p.duckdb("dev.duckdb", "select 1;");
+    p.dre("compile", &[]).ok();
+    let bytes = p.read("target/manifest.json");
     p.dre("run", &["-s", "daily"]).ok();
-    let want = dre_core::checksum::sha256_hex(&std::fs::read(p.path("target/manifest.json")).unwrap());
-    let results = p.json("target/run/daily/default/run_results.json");
-    assert_eq!(results["manifest_checksum"], want);
-
+    assert!(p.json("target/run/daily/default/run_results.json")["manifest_checksum"].is_null());
+    assert_eq!(p.read("target/manifest.json"), bytes);
     p.write("reports/ops/daily/summary.sql", "select * from no_such_table\n");
     p.dre("run", &["-s", "daily"]).failed();
-    let want = dre_core::checksum::sha256_hex(&std::fs::read(p.path("target/manifest.json")).unwrap());
     let results = p.json("target/run/daily/default/run_results.json");
     assert_eq!(results["status"], "error");
-    assert_eq!(results["manifest_checksum"], want);
+    assert!(results["manifest_checksum"].is_null());
+    assert_eq!(p.read("target/manifest.json"), bytes);
 }
 
 #[test]

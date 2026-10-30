@@ -292,7 +292,7 @@ impl Loader {
             (Role::Connection, PluginKind::Source, &used.connections),
             (Role::Destination, PluginKind::Destination, &used.destinations),
         ] {
-            for name in refs.keys() {
+            for (name, (file, line)) in refs {
                 let Some(p) = profiles.get(role, name) else {
                     continue;
                 };
@@ -307,8 +307,12 @@ impl Loader {
                     }
                     uses.push(PluginUse {
                         plugin: id,
-                        file: profiles.file.clone(),
-                        line: profiles.line_of(role, name),
+                        file: if self.opts.select.is_some() || self.opts.schedule.is_some() {
+                            file.clone().or_else(|| profiles.file.clone())
+                        } else { profiles.file.clone() },
+                        line: if self.opts.select.is_some() || self.opts.schedule.is_some() {
+                            *line
+                        } else { profiles.line_of(role, name) },
                         what: format!("`type: {}` used by {role_name} profile `{name}`", out_.kind),
                     });
                 }
@@ -353,6 +357,19 @@ pub(super) struct Usage {
 }
 
 impl Usage {
+    pub(super) fn include_project_wide(&mut self, other: &Self) {
+        for (name, at) in &other.connections {
+            if at.0.as_deref() == Some(Path::new(PROJECT_FILE)) {
+                self.connections.insert(name.clone(), at.clone());
+            }
+        }
+        for (name, at) in &other.destinations {
+            if at.0.as_deref() == Some(Path::new(PROJECT_FILE)) {
+                self.destinations.insert(name.clone(), at.clone());
+            }
+        }
+    }
+
     /// A connection profile used by name. A value holding Jinja is recorded once the parse pass
     /// has rendered it.
     pub(super) fn connection(&mut self, p: &str, file: Option<PathBuf>, line: Option<usize>) {

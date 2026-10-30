@@ -117,6 +117,11 @@ pub const ALL_PLUGINS: &[&str] = &[
 impl TestProject {
     /// `files` are written under the project root; `profiles.yml` goes to a separate dir.
     pub fn new(files: &[(&str, &str)], profiles: &str) -> TestProject {
+        Self::with_plugins(files, profiles, ALL_PLUGINS)
+    }
+
+    /// A project using only the named test plugins, avoiding unrelated native builds.
+    pub fn with_plugins(files: &[(&str, &str)], profiles: &str, bins: &[&str]) -> TestProject {
         let dir = tempfile::tempdir().unwrap();
         for (rel, content) in files {
             let p = dir.path().join("project").join(rel);
@@ -128,7 +133,7 @@ impl TestProject {
         std::fs::write(dir.path().join("profiles/profiles.yml"), profiles).unwrap();
         TestProject {
             dir,
-            plugins: test_plugins(ALL_PLUGINS),
+            plugins: test_plugins(bins),
         }
     }
 

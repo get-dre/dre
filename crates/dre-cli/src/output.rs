@@ -173,10 +173,14 @@ impl Printer {
                 json!({"event": "diagnostic", "severity": d.severity, "code": d.code,
                 "file": d.file, "line": d.line, "message": message}),
             );
-            None
+            (d.code == dre_core::codes::Code::OtherReportErrors).then(|| i.diagnostic(d))
         });
         if let Some(text) = text {
-            println!("{text}");
+            if d.code == dre_core::codes::Code::OtherReportErrors {
+                eprintln!("{text}");
+            } else {
+                println!("{text}");
+            }
         }
     }
 
