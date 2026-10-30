@@ -3,8 +3,8 @@ name: dre-explain
 description: Explain DRE in plain words - what it can do for the user's goal, what a report's YAML will do when it runs (its queries, outputs, documents, per-row copies, no-data rules, destinations, rates, holds and schedules), and what an option does with its default, choices and a recommendation. Read-only, it changes no file. Use when the user asks "what can dre do", "what does this report do", "what happens if I run this", "what does for_each / hold / on_empty / rate mean", "which should I pick", or when another DRE skill needs an option explained before the user chooses. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "4.2.1"
-  dre: ">=0.6.0, <0.9.0"
+  version: "5.0.0"
+  dre: ">=0.9.0, <0.10.0"
 ---
 
 # Explain DRE

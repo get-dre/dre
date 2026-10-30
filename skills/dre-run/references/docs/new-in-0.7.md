@@ -2,7 +2,7 @@
 title: "New in 0.7"
 description: "Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results."
 section: upgrading
-position: 3
+position: 4
 ---
 
 # New in 0.7

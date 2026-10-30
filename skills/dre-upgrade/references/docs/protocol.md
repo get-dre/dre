@@ -26,7 +26,8 @@ It has three parts:
 
 - the core side, `host`;
 - a plugin SDK, `plugin`, which gives Rust authors framing, the handshake and error handling;
-- a conformance suite, `conformance`, that any plugin binary can be checked against.
+- a conformance suite, `conformance`, that any plugin binary can be checked against (see
+  [Conformance](#conformance): the cases and the message schema are data, for any language).
 
 ## The plugin interface
 
@@ -306,6 +307,13 @@ core; core asks the plugin to update DRE when it names a style core doesn't know
 in the service after translation. `dre run --preview` shows it next to each message's length.
 It may be omitted. Added in DRE 0.3.
 
+`single_writer` (sources only, optional) names a connection field that holds a file only one
+process may write at a time: `{"field": "path", "except": [":memory:"]}` for DuckDB. On a
+connection whose entry sets that field to a string other than the exceptions, core runs one
+Binding at a time, whatever the entry's `threads:`. Core asks only when `threads:` is above 1.
+Added in DRE 0.9 (duckdb 1.3.0); an older DuckDB plugin doesn't send it, so a DuckDB file with
+`threads:` above 1 needs duckdb 1.3.0 or later.
+
 `validate` may carry a `template` (DRE 0.6, formats only): for the `html` and `pdf` formats,
 `{"file": "<absolute path>" or null, "project_root", "queries": [...]}`, so the plugin checks the
 template too (syntax, includes, assets, `results.<name>`), replying template problems in `errors`
@@ -412,6 +420,34 @@ result set, core sends `{"type":"finish"}`. The plugin writes the file(s) and re
 
 `warnings` (optional) are shown to the person, e.g. a value the format had to write as text.
 
+A core that can resolve registry fonts sends `"font_requests": true` in `write`. Otherwise this
+optional field is absent or false. A format must not request fonts without that opt-in, so a
+new format still works with older cores; older formats ignore the extra field.
+After consuming all result sets and `finish`, the format can reply before layout:
+
+```json
+{"type":"need_fonts","id":1,"font":{"name":"noto_sans_jp","version":"2.4.0"}}
+```
+
+Core downloads the exact font package through its registry, verifies its checksums, and replies
+with absolute local font paths, or an error. The reply retains the write request's id:
+
+```json
+{"type":"fonts","id":1,"paths":["/…/.dre/fonts/noto_sans_jp/2.4.0/regular.otf","/…/.dre/fonts/noto_sans_jp/2.4.0/bold.otf"],"error":null}
+```
+
+Core answers each package once per run, shared by every process of the run: a font it couldn't
+supply is not tried again, and later replies for it carry the same `error` with
+`"repeated": true` (absent means false). The person has then been told once, so a format warns
+only on a reply without `repeated`; it can still fail the write on any error. In the Rust SDK,
+`ResultSets::request_fonts` returns core's reason as a `FontError` with `message` and
+`repeated`.
+
+The format then sends its usual `written` reply. `fonts` continues the existing write; it does
+not start a new request. The wire protocol version remains 1: the exchange is additive and
+only used when core advertises support. `dre-protocol` 0.10.0 adds the SDK helpers.
+
+
 If the write fails part-way, the plugin replies `{"type": "error", ...}` at once, without waiting
 for `finish`, and then reads (and discards) the rest of the stream up to `finish`, sending
 nothing more. Core stops sending data when it sees the error, so a large result isn't streamed
@@ -516,17 +552,111 @@ optional field to a message does not change the version; anything else does.
 
 ## Conformance
 
-`dre_protocol::conformance::run(path)` checks a plugin binary. It covers the handshake and
-identity, speaking versions 0 and 1, refusal of an unsupported version, request ids on replies,
-ignoring a `cancel` for a request that isn't running, `describe` (and, for a source, that it gives a
-one-character `identifier_quote`), error replies for unknown and wrong-kind
-requests, `validate` (advertised, answered, and refusing an option the plugin doesn't declare),
-behaviour on a malformed frame, and a clean exit on `close` and on end of input. For a
-destination it also sends a `deliver` carrying `options` and, when `multi_file` is advertised, a
-`files` delivery, and when `message` is advertised a message `deliver`, and expects a reply to
-each (`delivered` or `error`) with the plugin still serving. A `message_only` plugin must also
-advertise `message` and must refuse a file `deliver` with an `error`. `conformance::run_with_env` runs the suite with extra environment variables. Every
-first-party plugin runs the suite in its tests.
+The protocol is published as data, so a plugin in any language can be checked against it. Three
+files in [`crates/dre-protocol/conformance`](https://github.com/get-dre/dre/blob/master/crates/dre-protocol/conformance/) are the
+contract:
+
+- `schema.json`: a JSON Schema (draft 2020-12) for every message. `$defs/Request` is any message
+  core sends and `$defs/Response` any message a plugin sends. Its `x-dre` block lists the
+  protocol version range (`min_version`, `max_version`, `core_min_version`), every capability
+  name and every error `kind`. It is generated from `dre-protocol`'s message types, and CI fails
+  when the two differ; the Go SDK checks its constants against it.
+- `protocol.json`: the conformance cases. Each is a request sequence and the properties the
+  replies must have: the handshake and identity, versions 0 and 1, refusing an unsupported
+  version, request ids, `cancel`, `describe`, `validate` and `validate_connection`, error replies
+  (with a known `kind` and a namespaced `code`), malformed frames, a format's write, a source's
+  session (streaming a result set, `row_limit`, `no_result`, `check`, a failed statement,
+  cancelling a running statement), a destination's `deliver` forms, and exiting on `close` and
+  at end of input. Every message a plugin sends is also checked against the schema.
+- `delivery.json`: the delivery rules file destinations share (`if_exists`, temporary names and
+  `temp_dir`, retries, `retry_wait`, `max_retry_wait`, `Retry-After`, numbered names), as cases
+  each SDK runs against its delivery code with an in-memory store.
+
+### Running the suite on your plugin
+
+Build your plugin, then run the `dre-conformance` command from the `dre-protocol` crate
+(`cargo install dre-protocol`) against the executable:
+
+```text
+dre-conformance ./dre-plugin-mydb --session session.json
+```
+
+It prints every case (passed, failed with the reason, or skipped because it doesn't apply to
+your plugin's kind or capabilities) and exits 1 when one fails. The session cases run only for a
+source given a session file: a connection that opens, and a statement per role.
+
+```json
+{
+  "connection": {"path": ":memory:"},
+  "statements": {
+    "rows": "select * from range(10) t(n)",
+    "empty": "select 1 as n where false",
+    "no_result": "create temporary table t (n int)",
+    "error": "select * from no_such_table",
+    "slow": "a statement that runs until it's cancelled"
+  }
+}
+```
+
+`rows` returns at least 3 rows; `slow` runs for at least a few seconds. Leave out a role your
+database can't express; the cases that need it are skipped.
+
+In Rust, `dre_protocol::conformance::assert_conforms(path)` (or `assert_conforms_with` with
+`conformance::Options`, for a session or environment variables) fails a test on any failed
+case. In Go, `plugintest.Conformance(t, pkg, plugintest.Options{})` (module
+`github.com/get-dre/dre/go/plugin`, which embeds a copy of the cases) runs the same cases against
+a `plugin.Package` in-process. Every first-party plugin, Rust and Go, passes the suite in its
+tests.
+
+### Writing a runner
+
+A runner in another language reads `protocol.json` and, for each case that applies, starts the
+plugin and runs the steps in order. A case applies when the plugin's kind is in `kinds` (all
+kinds when absent), it advertises every capability in `requires`, and the runner has a session
+with every statement in `session`. A case with `"scope": "package"` runs once per package
+executable rather than once per plugin.
+
+Unless a case's first step is a `hello`, the runner first sends a `hello` with its own version
+range (naming the plugin, for a package) and expects a `hello` reply. Steps:
+
+| Step | What the runner does |
+|---|---|
+| `{"hello": {...}}` | Send a `hello`, its fields overriding the default range (`plugin` too) |
+| `{"send": {...}}` | Send the JSON message as given |
+| `{"send_raw": "<hex>"}` | Write these bytes as they are |
+| `{"send_arrow": {"columns": [{"name", "type", "values"}], "rows": n}}` | Send an Arrow frame of `n` rows: each column's `values` (`null` for a null), or `n` nulls without them; types `int64`, `float64`, `utf8`, `boolean` |
+| `{"result_set": {"id": n, "rows": m}}` | Read Arrow frames (at least one, its columns those of the last `result` reply), then a `result_end` with id `n` whose `rows` is the rows sent and matches `m` |
+| `{"close_input": true}` | Close the plugin's stdin |
+| `{"exit": m}` | Wait for the process to exit; its exit code must match `m` |
+
+A step with `expect` then reads the next message other than `log` and `progress` and matches it
+against `expect`; with `"or_exit": true`, the plugin exiting instead also passes. A plugin has
+20 seconds for each reply.
+
+Matching: an object matches an object that has at least its keys, each matching; a list
+matches a list item by item; any other value matches an equal value (numbers by value). An
+object whose keys start with `$` is a matcher:
+
+| Matcher | Matches |
+|---|---|
+| `{"$absent": true}` | a missing (or null) value |
+| `{"$any": true}` | any value that is there |
+| `{"$one_of": [m, ...]}` | a value matching one of them |
+| `{"$type": "string"}` | a value of that JSON type (`integer` too) |
+| `{"$nonempty": true}` | a non-empty string or list |
+| `{"$len": n}` | a string of `n` characters or a list of `n` items |
+| `{"$contains": m}` | a string containing the text `m`, or a list with an item matching `m` |
+| `{"$every": m}` | a list whose items all match `m` |
+| `{"$in": [v, ...]}` | one of these values |
+| `{"$min": n}`, `{"$lt": n}` | a number at least `n`, or below `n` |
+| `{"$file_exists": true}` | a path to an existing file |
+
+Before a case runs, every `${name}` in it is replaced: a string that is only a placeholder
+becomes the value, whatever its type; elsewhere it is spliced in as text. The names are `kind`,
+`name` and `plugin` (`<kind>/<name>`), `tmp` (an empty directory for the case), `min_version`
+and `max_version` (the runner's range), `far_version` (a version no plugin speaks),
+`capabilities` and `error_kinds` (from the schema), `connection`, and `sql.<role>` for each
+session statement.
 
 <!-- docs-nav: generated by .github/scripts/docs_sections.py from docs/sections.json -->
 

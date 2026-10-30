@@ -177,7 +177,7 @@ A Set either leaves queries out (`exclude:`) or replaces them (`queries:`), not 
 
 A per-row output can't be split by its key.
 
-Before anything renders, a `for_each` output's driver must give one row per key (no duplicates), every query of the output must have the key columns, the rows' file names must differ, the population must fit `max_population_rows`, and with `on_orphan_rows: fail` no row may have a key missing from the driver. The message says which. Nothing was written or delivered.
+Before anything renders, a `for_each` output's driver must give one row per key (no duplicates), every query of the output must have the key columns, the rows' file names must differ, and with `on_orphan_rows: fail` no row may have a key missing from the driver. The message says which. Nothing was written or delivered.
 
 ### invalid-cell
 
@@ -376,6 +376,12 @@ Nothing gives the query a connection: give it `profile:`, use a source with a `p
 A query that makes a tab returned no result set.
 
 The query's last statement returned no rows to write (it created a view, set a variable). If it only prepares data for later queries, give it `tab: false` in the YAML.
+
+### other-report-errors
+
+Reports outside the run's selection have errors.
+
+The selected reports can run. Errors discovered in other reports are recorded in `run_results.json` under `project_errors`, one entry per report. Run `dre validate` for the full project check; project-wide dependency errors still stop a run.
 
 ### package-missing
 

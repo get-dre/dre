@@ -112,10 +112,13 @@ A send under 30 seconds prints no extra line. `--output json` writes a `rows_pro
 (`output`, `done`, `total`, `failed`, `rate`, `rows_per_second`, `seconds_left`) on the same
 schedule, and `-q` shows neither.
 
-The population is held in memory to split it. `for_each.max_population_rows` (default 5,000,000
-rows across the output's queries) fails the run before anything renders when a query returns
-more: filter or aggregate in SQL. A document's own [`max_rows`](plugin-document.md#how-big-a-document-can-be)
-applies to each row's document.
+The population stays in the Arrow spool. A temporary disk index groups its rows by key, and
+workers prepare and render bounded chunks. Format and destination processes are reused across
+outputs and Bindings for the run, bounded by concurrent workers.
+
+Population size has no row cap: rows stay in the spool and the temporary index. Allow disk
+space for those files, and filter or aggregate in SQL when you need fewer copies. A document's
+own [`max_rows`](plugin-document.md#how-big-a-document-can-be) applies to each row's document.
 
 ## No data and orphan rows
 
