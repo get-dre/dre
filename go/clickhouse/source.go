@@ -105,6 +105,10 @@ func (s *session) start() (context.Context, func()) {
 	s.mu.Lock()
 	s.cancel, s.queryID = cancel, id
 	s.mu.Unlock()
+	// The SDK can accept cancel after dispatch but before this context exists.
+	if plugin.Cancelled() {
+		cancel()
+	}
 	return ctx, func() {
 		s.mu.Lock()
 		s.cancel, s.queryID = nil, ""
