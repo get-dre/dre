@@ -2,6 +2,7 @@
 //! for the PDF), in-process, offline. Nothing else in the plugin touches it, so it can be
 //! replaced.
 
+use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::LazyLock;
@@ -10,7 +11,7 @@ use dre_core::document::Context;
 use fulgur::{AssetBundle, Engine, Margin, PageSize};
 use regex::Regex;
 
-use crate::{assets, fonts};
+use crate::{assets, fallback, fonts};
 
 /// The `page_size` choices.
 pub const PAGE_SIZES: &[&str] = &["A3", "A4", "A5", "Letter", "Legal"];
@@ -47,7 +48,7 @@ pub fn render_pdf(
     render_pdf_with_fonts(html, root, base, page, ctx, warnings, None)
 }
 
-/// Lay out a PDF, asking the host for missing Japanese fonts before layout.
+/// Lay out a PDF, asking the host for the Noto fonts its uncovered scripts need before layout.
 /// Without a resolver (older cores), keep the previous offline rendering behavior.
 pub fn render_pdf_with_fonts(
     html: &str,
@@ -61,28 +62,33 @@ pub fn render_pdf_with_fonts(
     let (html, files) = assets::for_pdf(html, root, base)?;
     let (mut html, project_fonts) = fonts::prepare(&html, &files, warnings)?;
     let mut fallback_fonts = Vec::new();
-    if fonts::needs_japanese(&html, &project_fonts)
-        && let Some(resolve) = resolver
-    {
-        let request = dre_protocol::msg::FontRequest {
-            name: "noto_sans_jp".into(),
-            version: "2.4.0".into(),
-        };
-        match resolve(request) {
-            Ok(paths) => {
-                for path in paths {
-                    let bytes =
-                        std::fs::read(&path).map_err(|e| format!("can't read fallback font {path}: {e}"))?;
-                    let family =
-                        fonts::family_name(&bytes).ok_or_else(|| format!("invalid fallback font {path}"))?;
-                    if fallback_fonts.is_empty() {
-                        html = fonts::append_fallback(&html, &family);
-                    }
-                    fallback_fonts.push(bytes);
-                }
-            }
-            Err(e) => warnings.push(format!("Japanese PDF fallback font unavailable: {e}")),
+    if let Some(resolve) = resolver {
+        let plan = fallback::plan(&html, &project_fonts);
+        if let Some(note) = &plan.note {
+            warnings.push(note.clone());
         }
+        let mut families = BTreeMap::new();
+        for &noto in &plan.fonts {
+            let (name, version) = noto.package();
+            let request = dre_protocol::msg::FontRequest {
+                name: name.into(),
+                version: version.into(),
+            };
+            match resolve(request) {
+                Ok(paths) => {
+                    for path in paths {
+                        let bytes = std::fs::read(&path)
+                            .map_err(|e| format!("can't read fallback font {path}: {e}"))?;
+                        let family = fonts::family_name(&bytes)
+                            .ok_or_else(|| format!("invalid fallback font {path}"))?;
+                        families.entry(noto).or_insert(family);
+                        fallback_fonts.push(bytes);
+                    }
+                }
+                Err(e) => warnings.push(format!("{} PDF fallback font unavailable: {e}", noto.label())),
+            }
+        }
+        html = fallback::apply(&html, &plan, &families);
     }
     let mut bundle = AssetBundle::new();
     for f in fonts::BUNDLED {

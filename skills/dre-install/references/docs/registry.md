@@ -122,15 +122,54 @@ readers ignore this sibling and continue reading `plugins`. A font entry has `na
 `bold`, and `license` artifacts, each with `url` and a required `sha256`. Fonts are raw `.otf`
 or `.ttf` files, not plugin executables; the licence artifact is its complete text.
 
-The first package is `noto_sans_jp` 2.4.0, from Noto Sans CJK JP upstream 2.004 (`Sans2.004`,
-commit `523d033d6cb47f4a80c58a35753646f5c3608a78`), under SIL OFL 1.1. It supplies Japanese
-regular and bold; see [document fonts](plugin-document.md#images-stylesheets-and-fonts).
+The packages and their upstream sources, all under SIL OFL 1.1 (see
+[document fonts](plugin-document.md#fonts-for-other-languages)). Each version's `notice` artifact
+records its upstream repository, tag, pinned commit and the unmodified upstream files.
+
+| Package | Version | Upstream | Tag | Commit |
+| --- | --- | --- | --- | --- |
+| `noto_sans_jp` | 2.4.0 | `notofonts/noto-cjk` 2.004 | `Sans2.004` | `523d033d6cb47f4a80c58a35753646f5c3608a78` |
+| `noto_sans_sc` | 2.4.0 | `notofonts/noto-cjk` 2.004 | `Sans2.004` | `523d033d6cb47f4a80c58a35753646f5c3608a78` |
+| `noto_sans_tc` | 2.4.0 | `notofonts/noto-cjk` 2.004 | `Sans2.004` | `523d033d6cb47f4a80c58a35753646f5c3608a78` |
+| `noto_sans_kr` | 2.4.0 | `notofonts/noto-cjk` 2.004 | `Sans2.004` | `523d033d6cb47f4a80c58a35753646f5c3608a78` |
+| `noto_sans_arabic` | 2.13.0 | `notofonts/arabic` 2.013 | `NotoSansArabic-v2.013` | `1b2b7e5c6ce3ab4d50681c854892325530084c35` |
+| `noto_sans_hebrew` | 3.1.0 | `notofonts/hebrew` 3.001 | `NotoSansHebrew-v3.001` | `036f3206f67caac235cf8546a7751d3440771a7e` |
+| `noto_sans_devanagari` | 2.7.0 | `notofonts/devanagari` 2.007 | `NotoSansDevanagari-v2.007` | `e123d230c160ebe949d731cc19017cdb354180d1` |
+| `noto_sans_thai` | 2.2.0 | `notofonts/thai` 2.002 | `NotoSansThai-v2.002` | `f8b482c158650260bba5d5edba9da3e8bb7185b4` |
+
+The registry version is the upstream version as semver (2.013 is 2.13.0). The CJK files are
+`Sans/OTF/<language>/NotoSansCJK<xx>-{Regular,Bold}.otf`; the others are
+`full/otf/NotoSans<Script>-{Regular,Bold}.otf` from the upstream release archive. Assets on the
+`registry` release are named `<file stem>-{Regular,Bold}-<upstream>.otf`,
+`<stem>-<upstream>-OFL.txt` and `<stem>-<upstream>-NOTICE.txt`, for example
+`NotoSansArabic-Regular-2.013.otf`.
 
 | Asset on the `registry` release | SHA-256 |
 | --- | --- |
 | `NotoSansCJKjp-Regular-2.004.otf` | `68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5` |
 | `NotoSansCJKjp-Bold-2.004.otf` | `e53dcb0dcb2922e45d01aae1ebd2f382bb81d4229b18b6b883bd170678af1f76` |
 | `NotoSansCJKjp-2.004-OFL.txt` | `6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2` |
+| `NotoSansCJKsc-Regular-2.004.otf` | `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b` |
+| `NotoSansCJKsc-Bold-2.004.otf` | `b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a` |
+| `NotoSansCJKsc-2.004-OFL.txt` | `6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2` |
+| `NotoSansCJKtc-Regular-2.004.otf` | `dce08bd4fd91aa8aa76ed8fea4b694c2dfb8550f67871e326843212ddbeb88b4` |
+| `NotoSansCJKtc-Bold-2.004.otf` | `3ee160e5015106e3ec1a394301df54fa9bbbf8a251519984aec5c0abc50840c0` |
+| `NotoSansCJKtc-2.004-OFL.txt` | `6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2` |
+| `NotoSansCJKkr-Regular-2.004.otf` | `6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a` |
+| `NotoSansCJKkr-Bold-2.004.otf` | `26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a` |
+| `NotoSansCJKkr-2.004-OFL.txt` | `6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2` |
+| `NotoSansArabic-Regular-2.013.otf` | `a51b3dcc5286ad3b814ecdb761ca4110fec6066056d99203dfb44e5d22946f14` |
+| `NotoSansArabic-Bold-2.013.otf` | `2f780cc6365d5adfb4390fca8bf4ad11a404138a1b8088f8259a6adde27e37ac` |
+| `NotoSansArabic-2.013-OFL.txt` | `a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af` |
+| `NotoSansHebrew-Regular-3.001.otf` | `422ad95aee46670467b2f8433bb0ab9c24ece00f14a1201a032490d9cdaaede4` |
+| `NotoSansHebrew-Bold-3.001.otf` | `3cf6ce9b431d456e3a4eb3c7aded56fb278a7517705e53b3bcb890ec2c79cb97` |
+| `NotoSansHebrew-3.001-OFL.txt` | `9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47` |
+| `NotoSansDevanagari-Regular-2.007.otf` | `c58d52da54093511c4fe16d6b64ea423fb742e4f8ae7fd2f3411a25584667dea` |
+| `NotoSansDevanagari-Bold-2.007.otf` | `9ccf4130234912ce4b8ab15d29a4a5bdedeb8719b6285ffaa1bd99abe9480e2a` |
+| `NotoSansDevanagari-2.007-OFL.txt` | `a216f6f8d85c7228093e0ee5e258d9d377e6671f68acb4db1930b29583d0f331` |
+| `NotoSansThai-Regular-2.002.otf` | `d01313df8cd6131148f2e00c2973cff525944f0050bcd29cf566c5efc953757b` |
+| `NotoSansThai-Bold-2.002.otf` | `a6cc6ae257e2c8c196a551fcd6654a7f14b3a5a2b50ad5ced329aec2cc066922` |
+| `NotoSansThai-2.002-OFL.txt` | `2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0` |
 
 To publish a font version, upload these immutable, versioned assets to the existing `registry`
 release without replacing older assets, then add its version to `packages.json` and upload the

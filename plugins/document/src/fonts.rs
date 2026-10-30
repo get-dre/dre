@@ -6,7 +6,7 @@
 //! this module reads each `@font-face`, registers its file, and rewrites the `font-family` lists
 //! that use the declared name. Every list gets the bundled family followed by other declared
 //! project families as fallbacks; a family that's neither bundled nor declared is warned about
-//! by name. Downloaded Noto follows those project and bundled families.
+//! by name. Downloaded Noto follows those project and bundled families ([`crate::fallback`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -116,11 +116,7 @@ pub fn prepare(
         ));
     }
     // The default for text with no `font-family` at all.
-    let base = format!("<style>html {{ font-family: \"{SANS}\"; }}</style>");
-    let mut html = match HEAD.find(&html) {
-        Some(m) => format!("{}{base}{}", &html[..m.end()], &html[m.end()..]),
-        None => format!("{base}{html}"),
-    };
+    let mut html = insert_style(&html, &format!("html {{ font-family: \"{SANS}\"; }}"));
     // Coverage checks count every declared project face. Make those faces available as actual
     // fallbacks too, including outside elements that explicitly select their declared alias.
     let families: BTreeSet<&String> = aliases.values().collect();
@@ -233,64 +229,25 @@ fn family_list(
     out
 }
 
-/// Japanese characters absent from every bundled and project font need Noto.
-pub fn needs_japanese(html: &str, project: &[Font]) -> bool {
-    static NON_TEXT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?is)<!--.*?-->|<style\b[^>]*>.*?</style>|<script\b[^>]*>.*?</script>|<[^>]*>")
-            .expect("the pattern is a valid regex")
-    });
-    static ENTITY: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"&#([xX][0-9a-fA-F]+|[0-9]+);").expect("the pattern is a valid regex"));
-    let mut text = NON_TEXT.replace_all(html, "").into_owned();
-    // Generated content participates in shaping even though it lives in CSS, not text nodes.
-    static CONTENT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?is)\bcontent\s*:\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^;}'"])+)"#)
-            .expect("the pattern is a valid regex")
-    });
-    static CSS_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\r\n\x0c])?").expect("the pattern is a valid regex")
-    });
-    let mut add_content = |css: &str| {
-        for content in CONTENT.captures_iter(css) {
-            let decoded = CSS_ESCAPE.replace_all(&content[1], |c: &Captures| {
-                u32::from_str_radix(&c[1], 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                    .map(|c| c.to_string())
-                    .unwrap_or_default()
-            });
-            text.push_str(&decoded);
-        }
-    };
-    for style in STYLE_BLOCK.captures_iter(html) {
-        add_content(&style[2]);
-    }
-    for style in STYLE_ATTR.captures_iter(html) {
-        add_content(style.get(2).or(style.get(3)).map_or("", |m| m.as_str()));
-    }
-    let text = ENTITY.replace_all(&text, |c: &Captures| {
-        let number = c[1]
-            .strip_prefix(['x', 'X'])
-            .map(|n| u32::from_str_radix(n, 16))
-            .unwrap_or_else(|| c[1].parse());
-        number
-            .ok()
-            .and_then(char::from_u32)
-            .map(|c| c.to_string())
-            .unwrap_or_default()
-    });
-    let faces: Vec<_> = BUNDLED
-        .iter()
-        .copied()
-        .chain(project.iter().map(|f| f.bytes.as_slice()))
-        .filter_map(|bytes| ttf_parser::Face::parse(bytes, 0).ok())
-        .collect();
-    text.chars().any(|c| matches!(c as u32, 0x3000..=0x30ff | 0x31f0..=0x31ff | 0x3400..=0x9fff | 0xff00..=0xffef | 0x20000..=0x323af)
-        && !faces.iter().any(|f| f.glyph_index(c).is_some_and(|id| id.0 != 0)))
-}
-
 /// Append a fallback family after explicitly selected families and Plex.
 pub fn append_fallback(html: &str, family: &str) -> String {
+    map_families(html, |value, important| {
+        if value.split(',').any(|name| {
+            name.trim()
+                .trim_matches(['\"', '\''])
+                .eq_ignore_ascii_case(family)
+        }) {
+            None
+        } else {
+            Some(format!("font-family: {value}, \"{family}\"{important}"))
+        }
+    })
+}
+
+/// Rewrite every `font-family` declaration in `<style>` blocks and `style` attributes. `rewrite`
+/// gets the value without `!important` and the `" !important"` suffix (or `""`), and returns the
+/// declarations to put in its place, or `None` to keep it.
+pub fn map_families(html: &str, rewrite: impl Fn(&str, &str) -> Option<String>) -> String {
     let fix = |css: &str| {
         FAMILY_DECL
             .replace_all(css, |c: &Captures| {
@@ -300,15 +257,7 @@ pub fn append_fallback(html: &str, family: &str) -> String {
                 } else {
                     (value, "")
                 };
-                if value.split(',').any(|name| {
-                    name.trim()
-                        .trim_matches(['\"', '\''])
-                        .eq_ignore_ascii_case(family)
-                }) {
-                    c[0].to_string()
-                } else {
-                    format!("{}{value}, \"{family}\"{important}", &c[1])
-                }
+                rewrite(value, important).unwrap_or_else(|| c[0].to_string())
             })
             .into_owned()
     };
@@ -323,6 +272,15 @@ pub fn append_fallback(html: &str, family: &str) -> String {
             ),
         })
         .into_owned()
+}
+
+/// Insert a `<style>` block at the start of `<head>`, or of the document without one.
+pub fn insert_style(html: &str, css: &str) -> String {
+    let style = format!("<style>{css}</style>");
+    match HEAD.find(html) {
+        Some(m) => format!("{}{style}{}", &html[..m.end()], &html[m.end()..]),
+        None => format!("{style}{html}"),
+    }
 }
 
 #[cfg(test)]
