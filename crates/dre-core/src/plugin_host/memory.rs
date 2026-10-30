@@ -49,6 +49,7 @@ pub struct Script {
     /// How long each such call takes; a cancel ends the wait early with an error.
     delays: BTreeMap<Call, Duration>,
     logs: BTreeMap<Call, String>,
+    record_writes: bool,
 }
 
 impl Script {
@@ -98,6 +99,13 @@ impl Script {
         self
     }
 
+    /// Retain the batches sent to this format, for assertions through [`MemoryHost::writes`].
+    /// Off by default so a test host does not buffer a streamed population unintentionally.
+    pub fn record_writes(mut self) -> Script {
+        self.record_writes = true;
+        self
+    }
+
     /// What `describe` answers.
     pub fn description(mut self, description: Description) -> Script {
         self.description = description;
@@ -113,11 +121,21 @@ fn normalize(sql: &str) -> String {
 #[derive(Default)]
 struct State {
     calls: Mutex<Vec<String>>,
+    writes: Mutex<Vec<WriteBatch>>,
     counts: Mutex<BTreeMap<(PluginId, Call), usize>>,
     /// Set by [`PluginHost::cancel`]: calls waiting out a delay stop.
     cancelled: AtomicBool,
     /// Calls waiting out a delay now.
     waiting: AtomicUsize,
+}
+
+/// One batch sent to a format that opted into [`Script::record_writes`].
+#[derive(Clone)]
+pub struct WriteBatch {
+    pub path: String,
+    /// Zero-based result-set position in the format's write request.
+    pub result_set: usize,
+    pub batch: RecordBatch,
 }
 
 /// Scripted plugins, by kind and name.
@@ -146,6 +164,15 @@ impl MemoryHost {
     /// Panics if the call list is poisoned (a thread panicked while changing it).
     pub fn calls(&self) -> Vec<String> {
         self.state.calls.lock().unwrap().clone()
+    }
+
+    /// The actual batches observed by formats with [`Script::record_writes`] enabled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the observation list is poisoned (a thread panicked while changing it).
+    pub fn writes(&self) -> Vec<WriteBatch> {
+        self.state.writes.lock().unwrap().clone()
     }
 
     /// Whether [`PluginHost::cancel`] was called.
@@ -365,9 +392,18 @@ impl Plugin for Scripted {
     }
 
     fn write_batch(&mut self, batch: &RecordBatch) -> HostResult<()> {
+        let record = self.script.record_writes;
         let w = self.writing()?;
         if let Some(n) = w.rows.last_mut() {
             *n += batch.num_rows();
+        }
+        if record {
+            let observed = WriteBatch {
+                path: w.request.path.clone(),
+                result_set: w.rows.len() - 1,
+                batch: batch.clone(),
+            };
+            self.state.writes.lock().unwrap().push(observed);
         }
         Ok(())
     }

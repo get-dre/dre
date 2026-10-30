@@ -784,20 +784,26 @@ fn bindings_at_once_all_run_and_report_in_declaration_order() {
     }
 }
 
+const TWO_BINDING_FILES: &str = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput:\n  - {name: first, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/first.csv'}}\n  - {name: second, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/second.csv'}}\n";
+
+fn two_binding_files(destination: Script) -> (MemoryHost, Context, TempDir, Project) {
+    let host = host(destination);
+    let ctx = context(&host);
+    let (dir, project) = project(TWO_BINDING_FILES, &ctx);
+    (host, ctx, dir, project)
+}
+
+fn all_sets() -> RunOptions {
+    RunOptions {
+        set: Some("all".into()),
+        ..options()
+    }
+}
+
 #[test]
 fn formats_and_destinations_are_reused_across_outputs_and_bindings() {
-    let host = host(Script::new(&[]));
-    let ctx = context(&host);
-    let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput:\n  - {name: first, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/first.csv'}}\n  - {name: second, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/second.csv'}}\n";
-    let (_dir, project) = project(report, &ctx);
-    let summary = run_once(
-        &ctx,
-        &project,
-        &RunOptions {
-            set: Some("all".into()),
-            ..options()
-        },
-    );
+    let (host, ctx, _dir, project) = two_binding_files(Script::new(&[]));
+    let summary = run_once(&ctx, &project, &all_sets());
     assert!(!summary.failed(), "{:?}", summary.outcomes);
     assert_eq!(calls_of(&host, "Write").len(), 4);
     assert_eq!(calls_of(&host, "Deliver").len(), 4);
@@ -833,18 +839,9 @@ fn formats_and_destinations_are_reused_across_outputs_and_bindings() {
 
 #[test]
 fn a_failed_destination_is_closed_and_replaced_while_formats_stay_warm() {
-    let host = host(Script::new(&[]).fail(Call::Deliver, 2, "mailbox full"));
-    let ctx = context(&host);
-    let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput:\n  - {name: first, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/first.csv'}}\n  - {name: second, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/second.csv'}}\n";
-    let (_dir, project) = project(report, &ctx);
-    let summary = run_once(
-        &ctx,
-        &project,
-        &RunOptions {
-            set: Some("all".into()),
-            ..options()
-        },
-    );
+    let (host, ctx, _dir, project) =
+        two_binding_files(Script::new(&[]).fail(Call::Deliver, 2, "mailbox full"));
+    let summary = run_once(&ctx, &project, &all_sets());
     assert!(summary.failed());
     assert_eq!(summary.outcomes.len(), 2);
     assert_eq!(summary.outcomes[1].status, Status::Success);
@@ -943,7 +940,7 @@ fn per_row_chunks_reuse_processes_and_match_unsorted_detail_batches() {
                     vec![many_members(151, 150), many_members(1, 150)],
                 ),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", Script::new(&[]).record_writes())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let report = "queries: [members, summary]\noutput: \n  - name: letter\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'out/{{ each.member_id }}.csv'}\n  - name: copy\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'copy/{{ each.member_id }}.csv'}\n";
@@ -964,6 +961,43 @@ fn per_row_chunks_reuse_processes_and_match_unsorted_detail_batches() {
     assert_eq!(row_files.len(), 600);
     for file in row_files {
         assert_eq!(std::fs::read_to_string(file).unwrap(), "summary: 1 rows\n");
+    }
+    let writes = host.writes();
+    assert_eq!(writes.len(), 600);
+    // Literal keys and values straddle both 128-row job chunks and the reversed 150-row
+    // source batches. A correct row count cannot hide a batch/row location mix-up.
+    for (id, name) in [
+        (1, "Member 0"),
+        (128, "Member 127"),
+        (129, "Member 128"),
+        (150, "Member 149"),
+        (151, "Member 0"),
+        (256, "Member 105"),
+        (257, "Member 106"),
+        (300, "Member 149"),
+    ] {
+        for output in ["letter", "copy"] {
+            let suffix = std::path::PathBuf::from(output).join(format!("{id}.csv"));
+            let written = writes
+                .iter()
+                .find(|w| std::path::Path::new(&w.path).ends_with(&suffix))
+                .unwrap();
+            assert_eq!(written.result_set, 0);
+            let keys = written
+                .batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            let names = written
+                .batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(keys.value(0), id, "{}", written.path);
+            assert_eq!(names.value(0), name, "{}", written.path);
+        }
     }
     let starts = calls_of(&host, "Start");
     assert_eq!(
