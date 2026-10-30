@@ -39,7 +39,6 @@ use crate::render::{
 };
 use crate::run_results::{self, Delivery, RunResults};
 use crate::secrets::Secrets;
-use crate::selector;
 use crate::sqlsplit::{self, StatementKind};
 
 pub(crate) mod per_row;
@@ -412,17 +411,17 @@ pub fn plan<'a>(
     ui: &mut dyn Ui,
     summary: &mut RunSummary,
 ) -> Option<Plan<'a>> {
-    if let Err(e) = crate::target::ensure(&project.target_dir) {
+    if let Err(e) = crate::target::ensure(project.target_dir()) {
         summary.error = Some(format!(
             "can't write to the target path {} (from {}): {e}",
-            project.target_dir.display(),
-            project.target_source
+            project.target_dir().display(),
+            project.target_source()
         ));
         return None;
     }
     let planned: Vec<(&Report, Binding)> = match &opts.schedule {
         Some(name) => {
-            if !project.schedules.iter().any(|e| &e.name == name) {
+            if !project.schedule(name).is_some() {
                 summary.error = Some(unknown_schedule(project, name));
                 return None;
             }
@@ -436,8 +435,8 @@ pub fn plan<'a>(
         }
         None => {
             let reports: Vec<&Report> = match &opts.selector {
-                None => project.reports.iter().collect(),
-                Some(s) => match selector::resolve(project, s) {
+                None => project.reports().iter().collect(),
+                Some(s) => match project.select(s) {
                     Ok(r) if r.is_empty() => {
                         summary.error = Some(format!("selector `{s}` matches no report"));
                         return None;
@@ -513,8 +512,8 @@ pub fn execute(
     let target = opts
         .output_json
         .as_ref()
-        .map(|p| project.root.join(p))
-        .unwrap_or_else(|| project.target_dir.clone());
+        .map(|p| project.root().join(p))
+        .unwrap_or_else(|| project.target_dir().to_path_buf());
     if limits.sequential() {
         let store = RunStore::new(&target, ctx.secrets());
         let mut outcomes = Vec::new();
@@ -647,10 +646,10 @@ impl Limits {
         let schedule_vars = opts
             .schedule
             .as_ref()
-            .and_then(|n| project.schedules.iter().find(|e| &e.name == n))
+            .and_then(|n| project.schedule(n))
             .map(|e| e.vars.clone());
         let inputs = crate::parse::Inputs {
-            target: project.target_name.clone(),
+            target: project.target_name().to_string(),
             cli_vars: opts.vars.clone(),
             date: opts.date,
             scheduled_at: opts.scheduled_at,
@@ -718,7 +717,7 @@ impl Limits {
 
 /// A connection entry's `threads:` (default 1); a DuckDB file is 1 whatever it says.
 fn connection_threads(project: &Project, connection: &str) -> usize {
-    let Some(t) = project.profiles.target(Role::Connection, connection) else {
+    let Some(t) = project.profiles().target(Role::Connection, connection) else {
         return 1;
     };
     let n = match t.fields.get("threads") {
@@ -790,14 +789,14 @@ pub fn run_targets(
     planned: &[(&Report, Binding)],
     opts: &RunOptions,
 ) -> Result<RunTargets, String> {
-    let profiles = &project.profiles;
+    let profiles = project.profiles();
     let schedule_vars = opts
         .schedule
         .as_ref()
-        .and_then(|n| project.schedules.iter().find(|e| &e.name == n))
+        .and_then(|n| project.schedule(n))
         .map(|e| e.vars.clone());
     let inputs = crate::parse::Inputs {
-        target: project.target_name.clone(),
+        target: project.target_name().to_string(),
         cli_vars: opts.vars.clone(),
         date: opts.date,
         scheduled_at: opts.scheduled_at,
@@ -853,8 +852,8 @@ pub fn run_targets(
     }
     match missing.as_slice() {
         [] => Ok(RunTargets {
-            name: project.target_name.clone(),
-            from: project.target_from.to_string(),
+            name: project.target_name().to_string(),
+            from: project.run_target().from.to_string(),
             profiles: out,
         }),
         [one] => Err(format!("{one}; nothing was run")),
@@ -876,7 +875,8 @@ fn schedule_bindings<'a>(
     let reports: Option<Vec<&str>> = match &opts.selector {
         None => None,
         Some(s) => Some(
-            selector::resolve(project, s)
+            project
+                .select(s)
                 .map_err(|e| e.to_string())?
                 .into_iter()
                 .map(|r| r.name.as_str())
@@ -884,16 +884,7 @@ fn schedule_bindings<'a>(
         ),
     };
     let set = opts.set.as_deref().filter(|s| *s != "all");
-    let all: Vec<(&Report, &Binding)> = project
-        .reports
-        .iter()
-        .flat_map(|r| {
-            r.bindings
-                .iter()
-                .filter(|b| b.schedules.iter().any(|s| s == name))
-                .map(move |b| (r, b))
-        })
-        .collect();
+    let all: Vec<(&Report, &Binding)> = project.scheduled_bindings(name);
     let picked: Vec<(&Report, Binding)> = all
         .iter()
         .filter(|(r, _)| reports.as_ref().is_none_or(|rs| rs.contains(&r.name.as_str())))
@@ -937,7 +928,7 @@ fn schedule_bindings<'a>(
 
 /// The usage error for `--schedule` with a name that isn't declared.
 pub fn unknown_schedule(project: &Project, name: &str) -> String {
-    let names: Vec<&str> = project.schedules.iter().map(|e| e.name.as_str()).collect();
+    let names: Vec<&str> = project.schedules().iter().map(|e| e.name.as_str()).collect();
     if names.is_empty() {
         format!("no schedule `{name}`: this project's schedules.yml declares none")
     } else {
@@ -964,7 +955,12 @@ pub fn choose_bindings(
             let pick = report
                 .default_set
                 .clone()
-                .or_else(|| project.default_set.clone().filter(|d| names.contains(d)))
+                .or_else(|| {
+                    project
+                        .default_set()
+                        .map(str::to_string)
+                        .filter(|d| names.contains(d))
+                })
                 .or_else(|| match names.as_slice() {
                     [only] => Some(only.clone()),
                     _ => None,
@@ -999,7 +995,7 @@ pub fn choose_bindings(
 fn ad_hoc(project: &Project, report: &Report, name: &str) -> Binding {
     let mut b = report.base.clone();
     b.set = Some(name.to_string());
-    if let Some(reg) = project.sets.get(name) {
+    if let Some(reg) = project.set(name) {
         if let Some(p) = &reg.profile {
             b.profile = Some(p.clone());
             b.profile_at = Some(crate::project::ProfileAt {
@@ -1212,10 +1208,7 @@ impl<'a> BindingRun<'a> {
         ui: Events,
         store: &'a RunStore,
     ) -> Self {
-        let schedule = opts
-            .schedule
-            .as_ref()
-            .and_then(|n| project.schedules.iter().find(|e| &e.name == n));
+        let schedule = opts.schedule.as_ref().and_then(|n| project.schedule(n));
         let schedule_vars = schedule.map(|e| e.vars.clone());
         // Names were checked when the project and the command line were read.
         let calendar: Calendar = crate::parse::calendar(
@@ -1265,7 +1258,7 @@ impl<'a> BindingRun<'a> {
             run_id,
             becomes_current: true,
             schema_dir: store.schema_dir(&report.name, b.dir_name()),
-            target: project.target_name.clone(),
+            target: project.target_name().to_string(),
             parsed: ParsedBinding::default(),
             pool: None,
             renderers: BTreeMap::new(),
@@ -1286,9 +1279,9 @@ impl<'a> BindingRun<'a> {
     fn connections(&self) -> Arc<ProfileConnections> {
         Arc::new(ProfileConnections {
             ctx: self.ctx.clone(),
-            profiles: self.project.profiles.clone(),
-            root: self.project.root.clone(),
-            plugins: self.project.plugins.clone(),
+            profiles: self.project.profiles().clone(),
+            root: self.project.root().to_path_buf(),
+            plugins: self.project.plugins().to_vec(),
             log: self.ui.plugin_log(),
         })
     }
@@ -1318,8 +1311,9 @@ impl<'a> BindingRun<'a> {
             &self.ctx,
         ));
         let r = Renderer::new(RendererConfig {
-            root: &self.project.root,
-            macros: &self.project.macros,
+            root: self.project.root(),
+            project_name: self.project.name(),
+            templates: self.project.templates(),
             context,
             vars: self.vars.clone(),
             cli_vars: self.opts.vars.clone(),
@@ -1334,13 +1328,6 @@ impl<'a> BindingRun<'a> {
             connection: name,
             source_type,
             sources: crate::parse::resolver(self.project, limited),
-            run_query_max_rows: self.project.run_query_max_rows,
-            sql: self.project.sql.clone(),
-            lookups: self.project.lookups.clone(),
-            lookup_inline_max_rows: self.project.lookup_inline_max_rows,
-            packages: self.project.packages.clone(),
-            project_name: self.project.name.clone(),
-            dispatch: self.project.dispatch.clone(),
             process: self.ctx.clone(),
         })
         .map_err(|e| e.to_string())?;
@@ -1543,12 +1530,12 @@ impl<'a> BindingRun<'a> {
                 self.ui.warn(&format!(
                     "{}: a run for a later instant is current, so this one doesn't replace it; its files are in {}",
                     self.label(),
-                    rel(&self.project.root, &self.run_dir).display()
+                    rel(self.project.root(), &self.run_dir).display()
                 ));
             }
             for id in self
                 .runs
-                .prune(self.opts.keep_runs.unwrap_or(self.project.keep_runs))
+                .prune(self.opts.keep_runs.unwrap_or(self.project.keep_runs()))
             {
                 self.ui.step(Level::Debug, "Removed", &format!("run {id}"), None);
             }
@@ -1581,7 +1568,7 @@ impl<'a> BindingRun<'a> {
         // whose templates don't query it works without the plugin or credentials.
         let pool = Arc::new(Pool::new(
             self.connections(),
-            self.project.root.clone(),
+            self.project.root().to_path_buf(),
             self.ui.plugin_log(),
             !self.report.managed,
         ));
@@ -1741,7 +1728,7 @@ impl<'a> BindingRun<'a> {
         if let Some(dir) = &self.opts.output_json {
             let dir = self
                 .project
-                .root
+                .root()
                 .join(dir)
                 .join(&self.report.name)
                 .join(self.b.dir_name());
@@ -1834,7 +1821,7 @@ impl<'a> BindingRun<'a> {
                     return Err(format!(
                         "schema drift since the last successful run: {}; the output is in {} but was not delivered — pass --accept-schema-change to deliver it and accept the new schema",
                         self.drift.join("; "),
-                        rel(&self.project.root, &self.run_dir).display()
+                        rel(self.project.root(), &self.run_dir).display()
                     ).into());
                 }
             }
@@ -1885,7 +1872,7 @@ impl<'a> BindingRun<'a> {
             }
         }
         if preview {
-            let dir = rel(&self.project.root, &self.run_dir);
+            let dir = rel(self.project.root(), &self.run_dir);
             self.ui.step(
                 Level::Info,
                 "Preview",
@@ -2077,7 +2064,7 @@ impl<'a> BindingRun<'a> {
                 .render_with(&file, &t, ctx.clone(), true)
                 .map_err(|e| e.message)?,
             (None, Some(f)) => {
-                let root = &self.project.root;
+                let root = &self.project.root();
                 let path = crate::project::find_template(root, &f)
                     .ok_or_else(|| format!("message file `{f}` doesn't exist"))?;
                 let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -2152,7 +2139,7 @@ impl<'a> BindingRun<'a> {
         let mut out = Vec::new();
         let Some(pool) = &self.pool else { return out };
         for d in &self.outs[oi].dests {
-            let Some(t) = self.project.profiles.target(Role::Destination, &d.profile) else {
+            let Some(t) = self.project.profiles().target(Role::Destination, &d.profile) else {
                 out.push(format!("{}: delivers nowhere on this target", d.profile));
                 continue;
             };
@@ -2201,7 +2188,7 @@ impl<'a> BindingRun<'a> {
         two_tabs: &mut Option<String>,
     ) -> Result<Vec<Statement>, Fail> {
         let mut out = Vec::new();
-        let src = std::fs::read_to_string(self.project.root.join(&q.path))
+        let src = std::fs::read_to_string(self.project.root().join(&q.path))
             .map_err(|e| format!("{}: {e}", q.path.display()))?;
         let _ = renderer.take_sources();
         let sql = renderer
@@ -2418,7 +2405,7 @@ impl<'a> BindingRun<'a> {
         let shown = dir.display().to_string();
         let dir = self
             .project
-            .root
+            .root()
             .join(dir)
             .join(&self.report.name)
             .join(self.b.dir_name());
@@ -2549,7 +2536,7 @@ impl<'a> BindingRun<'a> {
                 .ok_or_else(|| format!("destination `{}` has no profile", d.profile))?;
             // Nothing is delivered, so there's no path or options to render.
             if matches!(
-                self.project.profiles.entry(Role::Destination, &profile),
+                self.project.profiles().entry(Role::Destination, &profile),
                 Entry::Nowhere
             ) {
                 self.outs[oi].dests.push(RenderedDest {
@@ -2645,7 +2632,7 @@ impl<'a> BindingRun<'a> {
             .iter()
             .map(|q| {
                 rel(
-                    &self.project.root,
+                    self.project.root(),
                     &self.compiled_dir.join(format!("{}.sql", q.query)),
                 )
             })
@@ -2658,11 +2645,11 @@ impl<'a> BindingRun<'a> {
                 .dests
                 .iter()
                 .map(|d| {
-                    let out = self.project.profiles.target(Role::Destination, &d.profile);
+                    let out = self.project.profiles().target(Role::Destination, &d.profile);
                     PlannedDestination {
                         profile: d.profile.clone(),
                         kind: out.map(|o| o.kind.clone()),
-                        target: Some(self.project.profiles.target_of(Role::Destination, &d.profile)),
+                        target: Some(self.project.profiles().target_of(Role::Destination, &d.profile)),
                         path: d.path.clone(),
                         delivers: out.is_some(),
                     }
@@ -2671,7 +2658,7 @@ impl<'a> BindingRun<'a> {
             outputs.push(PlannedOutput {
                 name: o.name.clone(),
                 format: o.format.clone(),
-                output: rel(&self.project.root, &self.run_dir.join(file)),
+                output: rel(self.project.root(), &self.run_dir.join(file)),
                 destinations,
             });
         }
@@ -2686,7 +2673,7 @@ impl<'a> BindingRun<'a> {
                 PlannedQuery {
                     query: q.query.clone(),
                     kind: pool.kind(&connection).unwrap_or_default(),
-                    target: self.project.profiles.target_of(Role::Connection, &connection),
+                    target: self.project.profiles().target_of(Role::Connection, &connection),
                     connection,
                     sources: q.sources.clone(),
                 }
@@ -2737,7 +2724,7 @@ impl<'a> BindingRun<'a> {
             .iter()
             .filter(|d| d.zip.is_none())
             .filter_map(|d| d.path.as_deref());
-        Files::of(o).base_name(stem, output_name.as_deref(), paths)
+        o.files().base_name(stem, output_name.as_deref(), paths)
     }
 
     /// Write output `oi`'s files from the result sets of its queries.
@@ -2761,7 +2748,8 @@ impl<'a> BindingRun<'a> {
             return Ok(());
         }
         let tabs: Vec<&str> = mine.iter().map(|&i| self.produced[i].name.as_str()).collect();
-        let groups: Vec<(String, Vec<usize>)> = Files::of(out)
+        let groups: Vec<(String, Vec<usize>)> = out
+            .files()
             .plan(filename, &tabs)?
             .into_iter()
             .map(|(name, of)| (name, of.into_iter().map(|t| mine[t]).collect()))
@@ -2783,7 +2771,7 @@ impl<'a> BindingRun<'a> {
         let mut p = self
             .ctx
             .host()
-            .start(&plugin, self.ui.plugin_log(), Some(&self.project.root))
+            .start(&plugin, self.ui.plugin_log(), Some(self.project.root()))
             .map_err(|e| e.to_string())?;
         let template = match &out.template {
             _ if Format::new(&out.format).is_document() => {
@@ -2860,7 +2848,7 @@ impl<'a> BindingRun<'a> {
             for f in files {
                 let f = PathBuf::from(f);
                 let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
-                let shown = rel(&self.project.root, &f);
+                let shown = rel(self.project.root(), &f);
                 self.ui.step(
                     Level::Debug,
                     "Wrote",
@@ -2875,7 +2863,7 @@ impl<'a> BindingRun<'a> {
     }
 
     fn template_payload(&mut self, t: &crate::project::Template) -> Result<Json, Fail> {
-        let file = crate::project::resolve_template(&self.project.root, &self.report.file, &t.file)?;
+        let file = crate::project::resolve_template(self.project.root(), &self.report.file, &t.file)?;
         let renderer = self.renderer(None)?;
         let mut values = JsonMap::new();
         for b in &t.bindings {
@@ -2894,7 +2882,7 @@ impl<'a> BindingRun<'a> {
     fn document_payload(&mut self, t: Option<&crate::project::Template>) -> Result<Json, Fail> {
         let file = match t {
             Some(t) => Some(crate::project::resolve_template(
-                &self.project.root,
+                self.project.root(),
                 &self.report.file,
                 &t.file,
             )?),
@@ -2904,7 +2892,7 @@ impl<'a> BindingRun<'a> {
             crate::parse::run_context(self.project, self.report, self.b, &self.inputs(), self.started_at);
         let ctx = crate::document::Context::new(
             file.as_deref(),
-            &self.project.root,
+            self.project.root(),
             &run,
             self.vars.clone(),
             self.opts.vars.clone(),
@@ -2930,7 +2918,7 @@ impl<'a> BindingRun<'a> {
     fn deliver_output(&mut self, oi: usize) -> Result<(), Fail> {
         if self.outs[oi].dests.is_empty() {
             self.outs[oi].delivery_note = Some("no destination declared; output stays in target/".into());
-            let dir = rel(&self.project.root, &self.run_dir);
+            let dir = rel(self.project.root(), &self.run_dir);
             self.ui.step(
                 Level::Debug,
                 "Kept",
@@ -2958,7 +2946,7 @@ impl<'a> BindingRun<'a> {
             Deliverer::new(&self.ctx, self.project, self.ui.plugin_log()).with_steps(self.ui.clone())
         });
         for d in &dests {
-            let profiles = &self.project.profiles;
+            let profiles = self.project.profiles();
             let target = profiles.target_of(Role::Destination, &d.profile);
             // `None` for an entry that delivers nowhere.
             let kind = profiles
@@ -3078,7 +3066,7 @@ impl<'a> BindingRun<'a> {
             &format!(
                 "{} file(s) into {}",
                 files.len(),
-                rel(&self.project.root, &to).display()
+                rel(self.project.root(), &to).display()
             ),
             Some(t.elapsed()),
         );
@@ -3381,7 +3369,7 @@ impl<'a> BindingRun<'a> {
                     query: p.query.clone(),
                     connection: p.connection.clone(),
                     rows: p.rows,
-                    columns: p.schema.fields().iter().map(|f| f.name().clone()).collect(),
+                    columns: p.schema.fields().iter().map(|f| f.name().to_string()).collect(),
                 })
                 .collect(),
             outputs,
@@ -3389,8 +3377,8 @@ impl<'a> BindingRun<'a> {
             delivery,
             deliveries,
             schema_drift: self.drift.clone(),
-            target_path: self.project.target_dir.clone(),
-            settings: self.project.settings.clone(),
+            target_path: self.project.target_dir().to_path_buf(),
+            settings: self.project.settings().clone(),
             manifest_checksum: self.opts.manifest_checksum.clone(),
             retry_of: self.retry.as_ref().map(|r| r.original.clone()),
             release_of: None,
@@ -3491,7 +3479,7 @@ impl<'a> BindingRun<'a> {
                 };
                 let Some(declared) = self
                     .project
-                    .sources
+                    .sources()
                     .get(&r.source)
                     .and_then(|s| s.table(&r.table))
                     .map(|t| t.columns.clone())
@@ -3500,10 +3488,10 @@ impl<'a> BindingRun<'a> {
                     continue;
                 };
                 let id = (
-                    self.project.root.clone(),
+                    self.project.root().to_path_buf(),
                     key.clone(),
                     conn.clone(),
-                    self.project.profiles.target_of(Role::Connection, &conn),
+                    self.project.profiles().target_of(Role::Connection, &conn),
                 );
                 if !self.ctx.first_check(id) {
                     continue;
@@ -3799,7 +3787,7 @@ impl QueryRunner for PoolRunner {
         let exec = p
             .execute(sql, Some(max_rows + 1), &mut |schema, batch| {
                 if out.columns.is_empty() {
-                    out.columns = schema.fields().iter().map(|f| f.name().clone()).collect();
+                    out.columns = schema.fields().iter().map(|f| f.name().to_string()).collect();
                 }
                 if out.rows.len() as u64 + batch.num_rows() as u64 > max_rows {
                     too_many = true;
@@ -3822,7 +3810,7 @@ impl QueryRunner for PoolRunner {
         if let Execution::Result { schema, .. } = exec
             && out.columns.is_empty()
         {
-            out.columns = schema.fields().iter().map(|f| f.name().clone()).collect();
+            out.columns = schema.fields().iter().map(|f| f.name().to_string()).collect();
         }
         Ok(out)
     }
@@ -3848,7 +3836,7 @@ impl QueryRunner for PoolRunner {
             .fields()
             .iter()
             .map(|f| Column {
-                name: f.name().clone(),
+                name: f.name().to_string(),
                 data_type: f.data_type().to_string(),
             })
             .collect())
@@ -3940,8 +3928,8 @@ pub fn find_plugin(
     name: &str,
 ) -> Result<crate::plugins::Located, crate::plugins::LocateError> {
     ctx.host().locate(
-        &project.root,
-        &project.plugins,
+        project.root(),
+        project.plugins(),
         &crate::project::PluginId::new(kind, name),
     )
 }
@@ -4106,9 +4094,9 @@ pub fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {
 /// it's inside it, else relative to the target path, so moving the target folder doesn't
 /// change what's recorded.
 fn record_path(project: &Project, p: &Path) -> PathBuf {
-    match p.strip_prefix(&project.root) {
+    match p.strip_prefix(project.root()) {
         Ok(r) => crate::slash(r),
-        Err(_) => rel(&project.target_dir, p),
+        Err(_) => rel(project.target_dir(), p),
     }
 }
 

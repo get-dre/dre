@@ -779,16 +779,16 @@ pub fn sync(
     resolve: bool,
     mut log: impl FnMut(&str),
 ) -> Result<Vec<Synced>, Vec<String>> {
-    let dir = crate::plugins::plugins_dir(ctx.env(), Some(&project.root));
-    let mut lock = Lock::load(&project.root).map_err(|e| vec![e])?;
+    let dir = crate::plugins::plugins_dir(ctx.env(), Some(project.root()));
+    let mut lock = Lock::load(project.root()).map_err(|e| vec![e])?;
     let mut indexes: std::collections::BTreeMap<String, Index> = std::collections::BTreeMap::new();
     let mut out = Vec::new();
     let mut errors = Vec::new();
     let mut lock_changed = false;
-    for req in &project.plugins {
+    for req in project.plugins() {
         let name = &req.name;
         if let PluginSource::Local(p) = &req.source {
-            if !project.root.join(p).is_file() {
+            if !project.root().join(p).is_file() {
                 errors.push(format!(
                     "the plugin package `{name}` is declared `local: {p}`, but there's no file there"
                 ));
@@ -917,7 +917,7 @@ pub fn sync(
             Err(e) => errors.push(e),
         }
     }
-    if lock_changed && let Err(e) = lock.save(&project.root) {
+    if lock_changed && let Err(e) = lock.save(project.root()) {
         errors.push(e);
     }
     if errors.is_empty() { Ok(out) } else { Err(errors) }

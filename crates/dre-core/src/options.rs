@@ -65,7 +65,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
             .2
             .push(u);
     };
-    for (format, options) in &project.format_options {
+    for (format, options) in project.format_options() {
         let u = Use {
             ctx: format!("`format_options.{format}`"),
             file: PathBuf::from(crate::project::PROJECT_FILE),
@@ -73,7 +73,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
         };
         add(PluginKind::Format, format, options, None, u);
     }
-    for r in &project.reports {
+    for r in project.reports() {
         for b in &r.bindings {
             let ctx = match &b.set {
                 Some(s) => format!("report `{}`, Set `{s}`", r.name),
@@ -87,10 +87,9 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
             for o in b.outputs.iter().filter(|o| !o.is_message()) {
                 let template = crate::formats::Format::new(&o.format).is_document().then(|| {
                     // A file that can't be resolved is reported by the template checks.
-                    let file = o
-                        .template
-                        .as_ref()
-                        .and_then(|t| crate::project::resolve_template(&project.root, &r.file, &t.file).ok());
+                    let file = o.template.as_ref().and_then(|t| {
+                        crate::project::resolve_template(project.root(), &r.file, &t.file).ok()
+                    });
                     let queries: Vec<String> = b
                         .queries
                         .iter()
@@ -105,7 +104,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
                     };
                     serde_json::to_value(crate::document::Check {
                         file: file.as_deref().map(abs),
-                        project_root: abs(&project.root),
+                        project_root: abs(project.root()),
                         queries,
                     })
                     .unwrap_or_default()
@@ -122,10 +121,10 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
                 // The profile as the parse pass rendered it (a Jinja `profile:`).
                 let rendered = b.parsed.as_ref().and_then(|p| p.destination(key));
                 let profile = rendered.unwrap_or(&d.profile);
-                let kind = if project.profiles.is_builtin_local(profile) {
+                let kind = if project.profiles().is_builtin_local(profile) {
                     LOCAL_TYPE
                 } else {
-                    match project.profiles.target(Role::Destination, profile) {
+                    match project.profiles().target(Role::Destination, profile) {
                         Some(t) => t.kind.as_str(),
                         // A missing profile or entry is reported elsewhere; `deliver: false` takes no options.
                         None => continue,
@@ -198,7 +197,7 @@ pub fn check(ctx: &crate::Context, project: &Project, offline: bool, diags: &mut
                 continue;
             }
         };
-        let mut p = match ctx.host().start(&plugin, log.clone(), Some(&project.root)) {
+        let mut p = match ctx.host().start(&plugin, log.clone(), Some(project.root())) {
             Ok(p) => p,
             Err(e) => {
                 diags.warning(
@@ -300,8 +299,8 @@ pub type EntryRef = (Role, String, String);
 pub fn all_entries(project: &Project) -> Vec<EntryRef> {
     let mut out = Vec::new();
     for (role, profiles) in [
-        (Role::Connection, &project.profiles.connections),
-        (Role::Destination, &project.profiles.destinations),
+        (Role::Connection, &project.profiles().connections),
+        (Role::Destination, &project.profiles().destinations),
     ] {
         for (name, p) in profiles {
             for target in p.targets.keys() {
@@ -323,14 +322,14 @@ pub fn check_connections(
     diags: &mut Diagnostics,
 ) {
     let log: LogSink = Arc::new(|_, _| {});
-    let file = project.profiles.file.clone();
+    let file = project.profiles().file.clone();
     let mut unset_reported = std::collections::BTreeSet::new();
     // Plugin -> the entries it checks, so each plugin starts once.
     let mut by_plugin: BTreeMap<(PluginKind, String), Vec<(&EntryRef, &ProfileTarget)>> = BTreeMap::new();
     for e in entries {
         let (role, profile, target) = e;
         let Some(t) = project
-            .profiles
+            .profiles()
             .get(*role, profile)
             .and_then(|p| p.targets.get(target))
         else {
@@ -350,7 +349,7 @@ pub fn check_connections(
         let Ok(plugin) = find_plugin(ctx, project, kind, &name) else {
             continue;
         };
-        let mut p = match ctx.host().start(&plugin, log.clone(), Some(&project.root)) {
+        let mut p = match ctx.host().start(&plugin, log.clone(), Some(project.root())) {
             Ok(p) => p,
             Err(e) => {
                 diags.warning(
@@ -363,7 +362,7 @@ pub fn check_connections(
             }
         };
         for ((role, profile, target), t) in entries {
-            let line = project.profiles.line_of(*role, profile);
+            let line = project.profiles().line_of(*role, profile);
             let at = format!("{} `{profile}` (entry `{target}`)", role.as_str());
             // Values with an unset `env_var()` go unresolved; the rest are rendered as for a run.
             let mut known = t.clone();

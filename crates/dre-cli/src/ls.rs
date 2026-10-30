@@ -73,6 +73,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
         scheduled_at: dre_core::settings::run_at(env).ok().flatten(),
         timezone: env.setting(dre_core::settings::TIMEZONE),
         settings: dre_core::settings::run_settings(env, None),
+        select: None,
     };
     let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
     let Some(project) = project else {
@@ -81,7 +82,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
         }
         return crate::exit::not_started();
     };
-    ctx.secrets().set_enabled(project.mask_secrets);
+    ctx.secrets().set_enabled(project.mask_secrets());
     if a.resource_type == ResourceType::Source {
         return sources(ctx, &project, &a);
     }
@@ -107,11 +108,11 @@ type Selected<'a> = (Vec<(&'a Report, Vec<&'a Binding>)>, Vec<String>);
 
 fn select<'a>(project: &'a Project, a: &LsArgs) -> Result<Selected<'a>, String> {
     if let Some(name) = &a.schedule {
-        if !project.schedules.iter().any(|e| &e.name == name) {
+        if !project.schedule(name).is_some() {
             return Err(dre_core::run::unknown_schedule(project, name));
         }
         let reports = project
-            .reports
+            .reports()
             .iter()
             .map(|r| {
                 (
@@ -132,10 +133,10 @@ fn select<'a>(project: &'a Project, a: &LsArgs) -> Result<Selected<'a>, String> 
         &a.select
     };
     let chosen: Vec<&Report> = if all.is_empty() {
-        project.reports.iter().collect()
+        project.reports().iter().collect()
     } else {
         let s = all.join(" ");
-        match dre_core::selector::resolve(project, &s) {
+        match project.select(&s) {
             Ok(r) if r.is_empty() => return Err(format!("selector `{s}` matches no report")),
             Ok(r) => r,
             Err(e) => return Err(e.to_string()),
@@ -186,7 +187,7 @@ fn sources(ctx: &dre_core::Context, project: &Project, a: &LsArgs) -> ExitCode {
             Some((s, tb)) => (s.to_string(), Some(tb.to_string())),
             None => (sel.to_string(), None),
         };
-        match project.sources.get(&s) {
+        match project.source(&s) {
             None => {
                 eprintln!("error: no source `{s}`");
                 return crate::exit::not_started();

@@ -218,9 +218,31 @@ pub struct Renderer {
     macro_files: BTreeMap<String, Vec<(usize, PathBuf, usize)>>,
 }
 
+/// What every renderer of a project reads: its macro files, what `ref()` and `lookup()` can
+/// name, its macro packages and `dispatch:` orders, and the limits on `run_query()` and inlined
+/// lookups. The project builds it once at load ([`crate::project::Project::templates`]).
+#[derive(Debug, Clone, Default)]
+pub struct ProjectTemplates {
+    /// Macro files under `macros/`, relative to the root.
+    pub macros: Vec<PathBuf>,
+    /// Every `.sql` file `ref()` can name, by basename, relative to the root.
+    pub sql: BTreeMap<String, PathBuf>,
+    /// Lookups `ref()` and `lookup()` can name.
+    pub lookups: BTreeMap<String, Lookup>,
+    /// A lookup with more rows than this is loaded into a temp table rather than inlined.
+    pub lookup_inline_max_rows: u64,
+    pub run_query_max_rows: u64,
+    /// Macro packages, imported under their names.
+    pub packages: Vec<Package>,
+    /// `dispatch:` search orders, by macro namespace.
+    pub dispatch: DispatchOrder,
+}
+
 pub struct RendererConfig<'a> {
     pub root: &'a Path,
-    pub macros: &'a [PathBuf],
+    /// The project's name: the root namespace in `dispatch()` search orders.
+    pub project_name: &'a str,
+    pub templates: &'a ProjectTemplates,
     pub context: RunContext,
     /// The Binding's merged vars.
     pub vars: JsonMap<String, Json>,
@@ -237,17 +259,6 @@ pub struct RendererConfig<'a> {
     pub source_type: String,
     /// `source()`; `None`: the project declares no sources.
     pub sources: Option<SourceResolver>,
-    pub run_query_max_rows: u64,
-    /// Every `.sql` file `ref()` can name, by basename, relative to `root`.
-    pub sql: BTreeMap<String, PathBuf>,
-    /// Lookups `ref()` and `lookup()` can name.
-    pub lookups: BTreeMap<String, Lookup>,
-    pub lookup_inline_max_rows: u64,
-    /// Macro packages, imported under their names.
-    pub packages: Vec<Package>,
-    /// The project's name: the root namespace in `dispatch()` search orders.
-    pub project_name: String,
-    pub dispatch: DispatchOrder,
     /// The command's context: what `env_var()` reads and what error messages mask.
     pub process: crate::Context,
 }
@@ -414,8 +425,8 @@ impl Renderer {
             kind: cfg.source_type.clone(),
             style: std::sync::OnceLock::new(),
             root: cfg.root.to_path_buf(),
-            defs: cfg.lookups,
-            inline_max: cfg.lookup_inline_max_rows,
+            defs: cfg.templates.lookups.clone(),
+            inline_max: cfg.templates.lookup_inline_max_rows,
             runner: runner.clone(),
             tables: Mutex::default(),
             loaded: Mutex::default(),
@@ -434,7 +445,7 @@ impl Renderer {
             };
             Ok(Value::from_object(QueryResult::new(rows)))
         });
-        let default_max = cfg.run_query_max_rows;
+        let default_max = cfg.templates.run_query_max_rows;
         let runner_c = runner.clone();
         let secrets = cfg.process.secrets().clone();
         let rels = relations.clone();
@@ -514,7 +525,12 @@ impl Renderer {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|_| p.to_path_buf())
         };
-        let own: Vec<(PathBuf, PathBuf)> = cfg.macros.iter().map(|m| (cfg.root.join(m), m.clone())).collect();
+        let own: Vec<(PathBuf, PathBuf)> = cfg
+            .templates
+            .macros
+            .iter()
+            .map(|m| (cfg.root.join(m), m.clone()))
+            .collect();
         let (combined, names, spans) = combine(&own)?;
         let mut import = if names.is_empty() {
             String::new()
@@ -522,20 +538,20 @@ impl Renderer {
             format!("{{% from \"{MACROS}\" import {} %}}", names.join(", "))
         };
         let mut templates = vec![(MACROS.to_string(), combined, spans, !names.is_empty())];
-        for p in &cfg.packages {
+        for p in &cfg.templates.packages {
             let files: Vec<(PathBuf, PathBuf)> = p.macros.iter().map(|m| (m.clone(), display(m))).collect();
             let (src, _, spans) = combine(&files)?;
             let t = package_template(&p.name);
             import.push_str(&format!("{{% import \"{t}\" as {} %}}", p.name));
             templates.push((t, src, spans, true));
         }
-        add_ref(&mut env, cfg.root, cfg.sql, lookups, &import);
+        add_ref(&mut env, cfg.root, cfg.templates.sql.clone(), lookups, &import);
         add_dispatch(
             &mut env,
-            &cfg.project_name,
+            cfg.project_name,
             !names.is_empty(),
-            &cfg.packages,
-            cfg.dispatch,
+            &cfg.templates.packages,
+            cfg.templates.dispatch.clone(),
             source_type,
             parse,
         );
@@ -901,9 +917,6 @@ fn package_template(name: &str) -> String {
 fn combine(
     files: &[(PathBuf, PathBuf)],
 ) -> Result<(String, Vec<String>, Vec<(usize, PathBuf, usize)>), RenderError> {
-    static MACRO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"\{%-?\s*macro\s+([A-Za-z_]\w*)").expect("the pattern is a valid regex")
-    });
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();
@@ -914,7 +927,12 @@ fn combine(
             message: format!("can't read macro file: {e}"),
         })?;
         let start = combined.matches('\n').count() + 1;
-        names.extend(MACRO.captures_iter(&src).map(|c| c[1].to_string()));
+        names.extend(
+            crate::preflight::Scan::new(&src)
+                .macros()
+                .iter()
+                .map(|d| d.name.clone()),
+        );
         combined.push_str(&src);
         if !combined.ends_with('\n') {
             combined.push('\n');
@@ -1634,7 +1652,13 @@ mod tests {
         }
         let r = Renderer::new(RendererConfig {
             root: dir.path(),
-            macros: &files,
+            project_name: "acme",
+            templates: &ProjectTemplates {
+                macros: files.clone(),
+                run_query_max_rows: 10_000,
+                lookup_inline_max_rows: 200,
+                ..Default::default()
+            },
             context: RunContext {
                 report: "monthly".into(),
                 set: Some("client_a".into()),
@@ -1654,13 +1678,6 @@ mod tests {
             connection: None,
             source_type: "duckdb".into(),
             sources: None,
-            run_query_max_rows: 10_000,
-            sql: BTreeMap::new(),
-            lookups: BTreeMap::new(),
-            lookup_inline_max_rows: 200,
-            packages: Vec::new(),
-            project_name: "acme".into(),
-            dispatch: DispatchOrder::new(),
             process: crate::Context::new(
                 crate::Env::from_vars([("PATH", "/usr/bin:/bin")]),
                 Arc::new(crate::plugin_host::memory::MemoryHost::new()),
@@ -1990,7 +2007,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = Renderer::new(RendererConfig {
             root: dir.path(),
-            macros: &[],
+            project_name: "acme",
+            templates: &ProjectTemplates {
+                run_query_max_rows: 10_000,
+                lookup_inline_max_rows: 200,
+                ..Default::default()
+            },
             context: RunContext {
                 report: "r".into(),
                 set: None,
@@ -2010,13 +2032,6 @@ mod tests {
             connection: None,
             source_type: "duckdb".into(),
             sources: None,
-            run_query_max_rows: 10_000,
-            sql: BTreeMap::new(),
-            lookups: BTreeMap::new(),
-            lookup_inline_max_rows: 200,
-            packages: Vec::new(),
-            project_name: "acme".into(),
-            dispatch: DispatchOrder::new(),
             process: crate::Context::new(
                 crate::Env::from_vars([("PATH", "/usr/bin:/bin")]),
                 Arc::new(crate::plugin_host::memory::MemoryHost::new()),

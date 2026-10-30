@@ -32,7 +32,7 @@ pub struct ProjectFile {
     /// The output every report starts from (the built-in default is `format: csv`). A report's own `output` is merged on top.
     #[schemars(schema_with = "output_ref")]
     #[serde(default)]
-    pub default_output: Option<IgnoredAny>,
+    pub default_output: Option<Loose<super::report::Output>>,
     /// Default options per output format, under every output of that format. A report's own keys win.
     #[schemars(schema_with = "format_options")]
     #[serde(default)]
@@ -139,7 +139,7 @@ pub struct Folder {
     #[serde(rename = "+output")]
     #[serde(default)]
     #[schemars(schema_with = "output_ref")]
-    pub output: Option<Located<Loose<JsonMap>>>,
+    pub output: Option<Located<Loose<super::report::Output>>>,
     /// The connection for reports in the folder. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`.
     #[serde(rename = "+profile")]
     pub profile: Option<Located<Loose<String>>>,

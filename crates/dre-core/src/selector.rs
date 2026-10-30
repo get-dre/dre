@@ -81,7 +81,7 @@ pub fn resolve<'p>(project: &'p Project, selection: &str) -> Result<Vec<&'p Repo
             }
         }
     }
-    picked.sort_by_key(|r| project.reports.iter().position(|x| x.name == r.name));
+    picked.sort_by_key(|r| project.reports().iter().position(|x| x.name == r.name));
     Ok(picked)
 }
 
@@ -89,7 +89,7 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
     let token = token.trim();
     let under = |folder: &[String]| -> Vec<&'p Report> {
         project
-            .reports
+            .reports()
             .iter()
             .filter(|r| r.folder.starts_with(folder))
             .collect()
@@ -99,7 +99,7 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
     }
     if let Some(tag) = token.strip_prefix("tag:") {
         return Ok(project
-            .reports
+            .reports()
             .iter()
             .filter(|r| r.tags.iter().any(|t| t == tag))
             .collect());
@@ -112,7 +112,7 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
         return Ok(under(&path));
     }
     let tagged: Vec<&Report> = project
-        .reports
+        .reports()
         .iter()
         .filter(|r| r.tags.iter().any(|t| t == token))
         .collect();
@@ -120,7 +120,7 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
         return Ok(tagged);
     }
     let folders: Vec<&Vec<String>> = project
-        .folders
+        .folders()
         .iter()
         .filter(|f| f.last().is_some_and(|l| l == token))
         .collect();
@@ -146,8 +146,8 @@ fn by_source<'p>(project: &'p Project, token: &str, sel: &str) -> Result<Vec<&'p
         Some((s, t)) => (s, Some(t)),
         None => (sel, None),
     };
-    let Some(def) = project.sources.get(source) else {
-        let known: Vec<&str> = project.sources.keys().map(String::as_str).collect();
+    let Some(def) = project.source(source) else {
+        let known: Vec<&str> = project.sources().keys().map(String::as_str).collect();
         return Err(unknown(if known.is_empty() {
             format!("no source `{source}`: the project declares no `sources:`")
         } else {
@@ -171,7 +171,7 @@ fn by_source<'p>(project: &'p Project, token: &str, sel: &str) -> Result<Vec<&'p
         None => key.split_once('.').is_some_and(|(s, _)| s == source),
     };
     Ok(project
-        .reports
+        .reports()
         .iter()
         .filter(|r| {
             r.bindings

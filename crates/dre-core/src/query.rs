@@ -23,7 +23,7 @@ pub fn execute(
     if max_rows == 0 || max_rows > 100_000 {
         return Err("max_rows must be between 1 and 100000".into());
     }
-    let Entry::Use(target) = project.profiles.entry(Role::Connection, profile) else {
+    let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` has no entry for this target"));
     };
     let dialect: Box<dyn sqlparser::dialect::Dialect> = match target.kind.as_str() {
@@ -121,12 +121,20 @@ pub fn execute(
         Arc::new(move |name, message| eprintln!("{name}: {}", secrets.mask_source_error(message, false)));
     let process = ctx
         .host()
-        .start(&plugin, log, Some(&project.root))
+        .start(&plugin, log, Some(project.root()))
         .map_err(|e| e.to_string())?;
     // The session and its result live inside one inner call, so the single `close()` afterwards
     // runs on every error and return path after `start()`. A panic skips it: dropping the process
     // then stops it without a protocol `close`.
-    run_session(ctx, process, target, sql, max_rows, profile, &project.target_name)
+    run_session(
+        ctx,
+        process,
+        target,
+        sql,
+        max_rows,
+        profile,
+        project.target_name(),
+    )
 }
 
 /// The steps after the plugin has started: open a session, stream the query, build the result.

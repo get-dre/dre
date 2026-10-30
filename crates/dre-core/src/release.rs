@@ -135,7 +135,7 @@ pub fn release(
     opts: &ReleaseOptions,
     events: &Events,
 ) -> Result<ReleaseOutcome, Fail> {
-    let store = crate::engine::RunStore::new(&project.target_dir, ctx.secrets());
+    let store = crate::engine::RunStore::new(project.target_dir(), ctx.secrets());
     let runs = BindingRuns::new(&store.run_dir(&opts.report, &opts.binding));
     let run_dir = runs.run_dir(&opts.run_id);
     let held_path = run_dir.join(HELD);
@@ -220,7 +220,7 @@ pub fn release(
             continue;
         }
         // Addresses and paths in messages are masked, as for a per-row run.
-        let mask = if project.mask_row_values {
+        let mask = if project.mask_row_values() {
             let mut values: JsonMap<String, Json> = e.options.clone();
             if let Some(p) = &e.path {
                 values.insert("$path".into(), Json::from(p.clone()));
