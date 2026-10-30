@@ -131,3 +131,65 @@ fn a_relative_project_dir_works() {
             .contains("<h1>Acme</h1>")
     );
 }
+
+const PER_ROW_JA: &str = "queries: [members, total, holdings]\noutput:\n  name: letter\n  format: pdf\n  queries: [members]\n  template: {file: letter.html}\n  for_each: {query: members, key: member_id}\n";
+
+fn offline_letters(options: &str) -> (TestProject, common::Run) {
+    let report = format!("{PER_ROW_JA}{options}");
+    let p = project(
+        &report,
+        &[
+            (
+                "reports/clients/statement/members.sql",
+                "select id as member_id from range(1, 4) t(id) order by id",
+            ),
+            (
+                "reports/clients/statement/letter.html",
+                "<html lang=\"ja\"><body><p>東京 {{ each.member_id }}</p></body></html>",
+            ),
+        ],
+    );
+    // Offline, nothing cached: the registry copy it points at isn't there.
+    let missing = p.path("no-registry/packages.json");
+    let run = p.dre_env(
+        "run",
+        &["statement"],
+        &[("DRE_REGISTRY_URL", missing.to_str().unwrap())],
+    );
+    (p, run)
+}
+
+#[test]
+fn an_offline_per_row_pdf_warns_once_per_script_for_the_run() {
+    let (p, run) = offline_letters("");
+    run.ok();
+    for key in 1..=3 {
+        let pdf = std::fs::read(p.path(&format!("target/run/statement/default/letter/{key}.pdf")));
+        assert!(pdf.is_ok_and(|b| b.starts_with(b"%PDF-")), "row {key}");
+    }
+    let all = format!("{}{}", run.stdout, run.stderr);
+    assert_eq!(all.matches("no Japanese font for this PDF").count(), 1, "{all}");
+    assert!(all.contains("dre fonts install ja"), "{all}");
+}
+
+#[test]
+fn missing_fonts_error_fails_every_row_instead() {
+    let (p, run) = offline_letters("  missing_fonts: error\n");
+    run.failed();
+    let all = format!("{}{}", run.stdout, run.stderr);
+    assert!(all.contains("`missing_fonts: error`"), "{all}");
+    assert!(!p.path("target/run/statement/default/letter/1.pdf").exists());
+}
+
+#[test]
+fn validate_rejects_a_bad_missing_fonts_value() {
+    let p = project(
+        "queries: [total, holdings]\nvars: {client: Acme, terms: Net 30 days}\noutput: {format: pdf, template: {file: statement.html}, missing_fonts: maybe}\n",
+        &[],
+    );
+    p.dre("validate", &[])
+        .failed()
+        .says("missing_fonts")
+        .says("`missing_fonts` must be `warn` or `error`")
+        .lacks("undeclared-plugin");
+}

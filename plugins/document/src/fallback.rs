@@ -44,6 +44,20 @@ impl Noto {
         }
     }
 
+    /// The code `dre fonts install` takes for it.
+    pub fn code(self) -> &'static str {
+        match self {
+            Noto::Japanese => "ja",
+            Noto::SimplifiedChinese => "zh-Hans",
+            Noto::TraditionalChinese => "zh-Hant",
+            Noto::Korean => "ko",
+            Noto::Arabic => "ar",
+            Noto::Hebrew => "he",
+            Noto::Devanagari => "hi",
+            Noto::Thai => "th",
+        }
+    }
+
     /// The script's name, for warnings.
     pub fn label(self) -> &'static str {
         match self {
@@ -355,6 +369,35 @@ fn decode_entities(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_install_code_names_its_packages_registry_script() {
+        // The registry's `scripts` for each package, as published.
+        let registry = [
+            ("noto_sans_jp", "ja"),
+            ("noto_sans_sc", "zh-Hans"),
+            ("noto_sans_tc", "zh-Hant"),
+            ("noto_sans_kr", "ko"),
+            ("noto_sans_arabic", "Arab"),
+            ("noto_sans_hebrew", "Hebr"),
+            ("noto_sans_devanagari", "Deva"),
+            ("noto_sans_thai", "Thai"),
+        ];
+        for noto in [
+            Noto::Japanese,
+            Noto::SimplifiedChinese,
+            Noto::TraditionalChinese,
+            Noto::Korean,
+            Noto::Arabic,
+            Noto::Hebrew,
+            Noto::Devanagari,
+            Noto::Thai,
+        ] {
+            let (name, _) = noto.package();
+            let script = registry.iter().find(|(n, _)| *n == name).unwrap().1;
+            assert_eq!(dre_core::fonts::script_for(noto.code()), script, "{noto:?}");
+        }
+    }
 
     fn fonts(html: &str) -> Vec<Noto> {
         plan(html, &[]).fonts.into_iter().collect()

@@ -205,6 +205,8 @@ pub struct SubprocessHost {
     /// Where plugins are installed (`DRE_PLUGINS_DIR`, `~/.dre`).
     env: Env,
     project_http_timeout: Arc<OnceLock<u64>>,
+    /// The fonts this host's processes asked for, answered once each.
+    fonts: Arc<crate::fonts::RunFonts>,
     running: Arc<Running>,
     prober: Prober,
 }
@@ -279,6 +281,7 @@ impl SubprocessHost {
         SubprocessHost {
             env: env.clone(),
             project_http_timeout: Arc::default(),
+            fonts: Arc::default(),
             prober: Prober {
                 asked: Mutex::default(),
                 host: Some((env.clone(), running.clone())),
@@ -320,6 +323,7 @@ impl PluginHost for SubprocessHost {
             process: Some(process),
             font_context: crate::context::Context::subprocess(self.env.clone()),
             project_http_timeout: self.project_http_timeout.clone(),
+            fonts: self.fonts.clone(),
             _registration: registration,
         }))
     }
@@ -346,6 +350,7 @@ struct Subprocess {
     process: Option<PluginProcess>,
     font_context: crate::context::Context,
     project_http_timeout: Arc<OnceLock<u64>>,
+    fonts: Arc<crate::fonts::RunFonts>,
     _registration: Registration,
 }
 
@@ -433,9 +438,10 @@ impl Plugin for Subprocess {
             self.font_context.set_project_http_timeout(*secs);
         }
         let ctx = self.font_context.clone();
+        let fonts = self.fonts.clone();
         let (files, warnings) = self
             .process()
-            .write_finish_with_fonts(&mut |font| crate::fonts::resolve(&ctx, font))?;
+            .write_finish_with_fonts(&mut |font| fonts.resolve(&ctx, font))?;
         Ok(Written { files, warnings })
     }
 

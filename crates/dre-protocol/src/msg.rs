@@ -96,10 +96,14 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         template: Option<Value>,
     },
-    /// Reply to a font request within a write; retains the write request id.
+    /// Reply to a font request within a write; retains the write request id. `repeated` is set
+    /// when core already gave this font's `error` earlier in the run, so the person has been
+    /// told once and the format needn't warn again.
     Fonts {
         paths: Vec<String>,
         error: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        repeated: bool,
     },
     ResultSetEnd {},
     Finish {},
@@ -514,6 +518,35 @@ mod font_tests {
                 .get("font_requests")
                 .is_none()
         );
+    }
+}
+
+/// Why core couldn't supply a requested font: `message` for the person, and whether core already
+/// gave it for this font earlier in the run (`repeated`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontError {
+    pub message: String,
+    pub repeated: bool,
+}
+
+impl From<String> for FontError {
+    fn from(message: String) -> FontError {
+        FontError {
+            message,
+            repeated: false,
+        }
+    }
+}
+
+impl From<&str> for FontError {
+    fn from(message: &str) -> FontError {
+        message.to_string().into()
+    }
+}
+
+impl std::fmt::Display for FontError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
     }
 }
 

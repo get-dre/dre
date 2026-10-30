@@ -27,6 +27,16 @@ static LANG: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// The page options, used where the template's CSS sets no `@page`.
+/// What a PDF does when a script's fallback font can't be had (`missing_fonts`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MissingFonts {
+    /// Make the PDF, with boxes for the script's characters, and warn once per script per run.
+    #[default]
+    Warn,
+    /// Fail the PDF.
+    Error,
+}
+
 pub struct PageOptions {
     pub size: String,
     pub landscape: bool,
@@ -45,11 +55,16 @@ pub fn render_pdf(
     ctx: &Context,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, String> {
-    render_pdf_with_fonts(html, root, base, page, ctx, warnings, None)
+    render_pdf_with_fonts(html, root, base, page, ctx, warnings, MissingFonts::Warn, None)
 }
 
+/// The font exchange's answer to a request: the font's file paths, or why core couldn't supply it.
+pub type FontAnswer = Result<Vec<String>, dre_protocol::msg::FontError>;
+
 /// Lay out a PDF, asking the host for the Noto fonts its uncovered scripts need before layout.
-/// Without a resolver (older cores), keep the previous offline rendering behavior.
+/// Without a resolver (older cores), keep the previous offline rendering behavior, unless
+/// `missing` is [`MissingFonts::Error`] and the PDF needs a fallback font.
+#[allow(clippy::too_many_arguments)]
 pub fn render_pdf_with_fonts(
     html: &str,
     root: &Path,
@@ -57,32 +72,60 @@ pub fn render_pdf_with_fonts(
     page: &PageOptions,
     ctx: &Context,
     warnings: &mut Vec<String>,
-    resolver: Option<&mut dyn FnMut(dre_protocol::msg::FontRequest) -> Result<Vec<String>, String>>,
+    missing: MissingFonts,
+    resolver: Option<&mut dyn FnMut(dre_protocol::msg::FontRequest) -> FontAnswer>,
 ) -> Result<Vec<u8>, String> {
     let (html, files) = assets::for_pdf(html, root, base)?;
     let (mut html, project_fonts) = fonts::prepare(&html, &files, warnings)?;
     let mut fallback_fonts = Vec::new();
-    if let Some(resolve) = resolver {
-        let plan = fallback::plan(&html, &project_fonts);
-        if let Some(note) = &plan.note {
-            warnings.push(note.clone());
-        }
-        let mut families = BTreeMap::new();
-        for &noto in &plan.fonts {
-            let (name, version) = noto.package();
-            let request = dre_protocol::msg::FontRequest {
-                name: name.into(),
-                version: version.into(),
-            };
-            match resolve(request).and_then(|paths| load_fallback(&paths)) {
-                Ok((family, files)) => {
-                    families.insert(noto, family);
-                    fallback_fonts.extend(files);
+    match resolver {
+        Some(resolve) => {
+            let plan = fallback::plan(&html, &project_fonts);
+            if let Some(note) = &plan.note {
+                warnings.push(note.clone());
+            }
+            let mut families = BTreeMap::new();
+            let mut unavailable = Vec::new();
+            for &noto in &plan.fonts {
+                let (name, version) = noto.package();
+                let request = dre_protocol::msg::FontRequest {
+                    name: name.into(),
+                    version: version.into(),
+                };
+                // A font that downloaded but can't be read is new each time: never `repeated`.
+                let loaded = resolve(request).and_then(|paths| load_fallback(&paths).map_err(Into::into));
+                match loaded {
+                    Ok((family, files)) => {
+                        families.insert(noto, family);
+                        fallback_fonts.extend(files);
+                    }
+                    Err(e) => unavailable.push((noto, e)),
                 }
-                Err(e) => warnings.push(format!("{} PDF fallback font unavailable: {e}", noto.label())),
+            }
+            if missing == MissingFonts::Error && !unavailable.is_empty() {
+                return Err(missing_fonts_error(&unavailable));
+            }
+            for (noto, e) in unavailable.iter().filter(|(_, e)| !e.repeated) {
+                warnings.push(missing_font_warning(*noto, &e.message));
+            }
+            html = fallback::apply(&html, &plan, &families);
+        }
+        None if missing == MissingFonts::Error => {
+            let plan = fallback::plan(&html, &project_fonts);
+            if !plan.fonts.is_empty() {
+                let scripts: Vec<_> = plan.fonts.iter().map(|n| n.label()).collect();
+                let which = if scripts.len() == 1 {
+                    scripts[0]
+                } else {
+                    "those scripts"
+                };
+                return Err(format!(
+                    "no {} font for this PDF, so it isn't made (`missing_fonts: error`): fetching fonts needs DRE 0.9.0 or later; or add a font covering {which} to the project with `@font-face`",
+                    or_list(&scripts)
+                ));
             }
         }
-        html = fallback::apply(&html, &plan, &families);
+        None => {}
     }
     let mut bundle = AssetBundle::new();
     for f in fonts::BUNDLED {
@@ -154,6 +197,52 @@ pub fn render_pdf_with_fonts(
 }
 
 /// A fetched package's files and the family inside them. Any unreadable file fails the package,
+/// The ways to get a missing font, for `codes` (`dre fonts install` codes, space-separated) and
+/// `which` (the script, or "those scripts").
+fn fixes(codes: &str, which: &str) -> String {
+    format!(
+        "To fix it, set `DRE_REGISTRY_URL` to an offline copy of the registry, run `dre fonts install {codes}` on a connected machine and copy its `~/.dre/fonts` here, or add a font covering {which} to the project with `@font-face`"
+    )
+}
+
+/// The warning for a script whose font core couldn't supply (`missing_fonts: warn`).
+fn missing_font_warning(noto: fallback::Noto, reason: &str) -> String {
+    let label = noto.label();
+    format!(
+        "no {label} font for this PDF, so its {label} text shows as boxes ({reason}). {}",
+        fixes(noto.code(), label)
+    )
+}
+
+/// The error for `missing_fonts: error`, naming every script without a font.
+fn missing_fonts_error(unavailable: &[(fallback::Noto, dre_protocol::msg::FontError)]) -> String {
+    let labels: Vec<_> = unavailable.iter().map(|(n, _)| n.label()).collect();
+    let reasons: Vec<_> = unavailable
+        .iter()
+        .map(|(n, e)| format!("{}: {}", n.label(), e.message))
+        .collect();
+    let codes: Vec<_> = unavailable.iter().map(|(n, _)| n.code()).collect();
+    let which = match labels.as_slice() {
+        [one] => (*one).to_string(),
+        _ => "those scripts".into(),
+    };
+    format!(
+        "no {} font for this PDF ({}), so it isn't made (`missing_fonts: error`). {}",
+        or_list(&labels),
+        reasons.join("; "),
+        fixes(&codes.join(" "), &which)
+    )
+}
+
+/// "A", "A or B", "A, B or C".
+fn or_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+    }
+}
+
 /// which becomes a warning: a fallback font never fails the PDF.
 fn load_fallback(paths: &[String]) -> Result<(String, Vec<Vec<u8>>), String> {
     let mut family = None;

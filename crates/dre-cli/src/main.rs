@@ -2,6 +2,7 @@
 mod cli_reference;
 mod exit;
 mod extensions;
+mod fonts;
 mod history;
 mod init;
 mod ls;
@@ -94,6 +95,9 @@ enum Command {
     /// Commands about DRE itself rather than a project.
     #[command(subcommand)]
     System(system::SystemCommand),
+    /// Install or list the fallback fonts PDFs use for other scripts (offline servers, images).
+    #[command(subcommand, long_about = fonts::ABOUT)]
+    Fonts(fonts::FontsCommand),
     /// Explain an error code (`dre explain unknown-key`): what it means and how to fix it.
     Explain(ExplainArgs),
     /// A report's runs in the target path, newest first, and which is current (the latest
@@ -502,6 +506,8 @@ fn main() -> ExitCode {
         Command::Ls(a) => ls::ls(&ctx, a),
         Command::Schedule(schedule::ScheduleCommand::Ls(a)) => schedule::ls(&ctx, a),
         Command::System(system::SystemCommand::Update(a)) => system::update(&ctx, a, &printer),
+        Command::Fonts(fonts::FontsCommand::Install(a)) => fonts::install(&ctx, &a, &printer),
+        Command::Fonts(fonts::FontsCommand::Ls) => fonts::ls(&ctx),
         Command::Deps(a) => deps(&ctx, a, &printer),
         Command::Init(a) => init::init(&ctx, a.profiles_dir.as_deref(), &printer),
         Command::New(a) => init::new(&a.dir, a.profile, a.plugin, &printer),
