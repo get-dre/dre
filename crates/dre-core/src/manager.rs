@@ -5,8 +5,7 @@
 //! URL, a `file://` URL or a plain path. Format: `docs/registry.md`.
 
 use crate::context::{Context, Env};
-use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dre_protocol::{
@@ -16,7 +15,7 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
 use crate::lock::{Checksums, Lock, Locked};
-use crate::plugins::{Manifest, version_dir};
+use crate::plugins::{Manifest, read_manifest, version_dir};
 use crate::project::{PluginRequirement, PluginSource, Project};
 
 pub const DEFAULT_REGISTRY: &str = "https://github.com/get-dre/dre/releases/download/registry/packages.json";
@@ -679,24 +678,33 @@ pub fn install(
             "checksum mismatch for {what} (expected {want}, got {got}); the download was discarded"
         ));
     }
-    let (exe_name, exe) = if art.url.ends_with(".tar.gz") || art.url.ends_with(".tgz") {
-        extract_tar_gz(&bytes, &package.name)?
+    let vdir = version_dir(dir, &package.name, &v.version);
+    let parent = vdir
+        .parent()
+        .ok_or_else(|| format!("{} has no parent folder", vdir.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("can't create {}: {e}", parent.display()))?;
+    let staging = tempfile::Builder::new()
+        .prefix(&format!(".{}-", v.version))
+        .tempdir_in(parent)
+        .map_err(|e| format!("can't create a staging folder in {}: {e}", parent.display()))?;
+    let (exe_name, dst, version_root) = if art.url.ends_with(".tar.gz") || art.url.ends_with(".tgz") {
+        extract_tar_gz(&bytes, &package.name, staging.path())?
     } else {
         let name = crate::plugins::legacy_executable(&package.provides)
             .unwrap_or_else(|| package_executable_name(&package.name));
-        (name, bytes)
+        let dst = staging.path().join(&name);
+        let mut tmp = tempfile::NamedTempFile::new_in(staging.path()).map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut tmp, &bytes).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tmp.as_file()
+                .set_permissions(std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
+        tmp.persist(&dst).map_err(|e| e.to_string())?;
+        (name, dst, staging.path().to_path_buf())
     };
-    let vdir = version_dir(dir, &package.name, &v.version);
-    std::fs::create_dir_all(&vdir).map_err(|e| format!("can't create {}: {e}", vdir.display()))?;
-    let dst = vdir.join(&exe_name);
-    let tmp = vdir.join(format!(".download-{}", std::process::id()));
-    std::fs::write(&tmp, &exe).map_err(|e| format!("can't write {}: {e}", tmp.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    }
-    std::fs::rename(&tmp, &dst).map_err(|e| format!("can't install {}: {e}", dst.display()))?;
     // A source that doesn't list what the package provides: ask the executable.
     let provides = if package.provides.is_empty() {
         crate::plugins::Prober::default().probe(&dst)?
@@ -704,7 +712,7 @@ pub fn install(
         package.provides.clone()
     };
     crate::plugins::write_manifest(
-        &vdir,
+        &version_root,
         &Manifest {
             executable: exe_name,
             provides: provides.clone(),
@@ -715,6 +723,7 @@ pub fn install(
         sha256.merge(p);
     }
     sha256.insert(&plat, &got);
+    crate::fs::replace_dir(&version_root, &vdir)?;
     Ok(Locked {
         version: v.version.clone(),
         sha256,
@@ -734,28 +743,175 @@ fn published_checksums(v: &IndexVersion) -> Checksums {
     c
 }
 
-/// The package's executable in an archive: `dre-plugin-<package>`, or a single plugin's
-/// `dre-<kind>-<package>`. Returns its file name and bytes.
-fn extract_tar_gz(bytes: &[u8], package: &str) -> Result<(String, Vec<u8>), String> {
+/// Extract a package archive into `staging`. A single leading folder is its version directory;
+/// a legacy archive writes the executable at the top. Returns the manifest's executable and path.
+fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String, PathBuf, PathBuf), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut roots = std::collections::BTreeSet::new();
+    let mut top_level_file = false;
+    let mut files: Vec<PathBuf> = Vec::new();
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
     for entry in archive.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path().map_err(|e| e.to_string())?.to_path_buf();
-        let Some(file) = path.file_name().map(|f| f.to_string_lossy().to_string()) else {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let kind = entry.header().entry_type();
+        if !matches!(kind, tar::EntryType::Regular | tar::EntryType::Directory) {
+            return Err(format!("the archive contains an unsafe {kind:?} entry"));
+        }
+        let raw = entry.path().map_err(|e| e.to_string())?.to_path_buf();
+        if raw.to_str().is_none() {
+            return Err("the archive contains a path that is not UTF-8".into());
+        }
+        let mut path = PathBuf::new();
+        for part in raw.components() {
+            match part {
+                std::path::Component::Normal(part) => path.push(part),
+                std::path::Component::CurDir => {}
+                _ => return Err(format!("the archive contains unsafe path {}", raw.display())),
+            }
+        }
+        let _kind = kind;
+        let Some(first) = path.components().next() else {
             continue;
         };
-        let ours = parse_package_executable_name(&file).is_some_and(|n| n == package)
-            || parse_executable_name(&file).is_some_and(|(_, n)| n == package);
-        if ours {
-            let mut out = Vec::new();
-            entry.read_to_end(&mut out).map_err(|e| e.to_string())?;
-            return Ok((file, out));
+        let std::path::Component::Normal(first) = first else {
+            continue;
+        };
+        roots.insert(first.to_string_lossy().to_string());
+        top_level_file |= !kind.is_dir() && path.components().count() == 1;
+        if !seen.insert(path.clone()) {
+            return Err(format!("the archive contains duplicate entry {}", path.display()));
+        }
+        if files.iter().any(|file| crate::fs::is_below(&path, file)) {
+            return Err(format!("the archive has conflicting path {}", path.display()));
+        }
+        if !kind.is_dir() {
+            files.push(path);
         }
     }
-    Err(format!(
-        "the archive doesn't contain `{}`",
-        package_executable_name(package)
-    ))
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    let mut executable_files = Vec::new();
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry = entry.map_err(|e| e.to_string())?;
+        let kind = entry.header().entry_type();
+        let raw = entry.path().map_err(|e| e.to_string())?.to_path_buf();
+        if raw.to_str().is_none() {
+            return Err("the archive contains a path that is not UTF-8".into());
+        }
+        let mut path = PathBuf::new();
+        for part in raw.components() {
+            match part {
+                std::path::Component::Normal(part) => path.push(part),
+                std::path::Component::CurDir => {}
+                _ => return Err(format!("the archive contains unsafe path {}", raw.display())),
+            }
+        }
+        let _kind = kind;
+        if path.components().next().is_none() {
+            continue;
+        }
+        let dst = staging.join(&path);
+        if kind.is_dir() {
+            std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        entry
+            .unpack(&dst)
+            .map_err(|e| format!("can't extract {}: {e}", path.display()))?;
+        if entry_is_executable(&dst) {
+            executable_files.push(path);
+        }
+    }
+    let root = match (roots.len(), top_level_file) {
+        (1, false) => roots.into_iter().next(),
+        _ => None,
+    };
+    let base = root
+        .as_ref()
+        .map(|root| staging.join(root))
+        .unwrap_or_else(|| staging.to_path_buf());
+    let manifest_path = base.join(crate::plugins::MANIFEST);
+    let manifest = if manifest_path.exists() {
+        Some(
+            read_manifest(&base)
+                .ok_or_else(|| format!("the archive has an invalid {}", manifest_path.display()))?,
+        )
+    } else {
+        None
+    };
+    if let Some(manifest) = manifest {
+        let relative = Path::new(&manifest.executable);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(format!(
+                "the archive's executable `{}` is outside the version directory",
+                manifest.executable
+            ));
+        }
+        let executable = base.join(&manifest.executable);
+        if !executable.is_file() {
+            return Err(format!(
+                "the archive's manifest names missing `{}`",
+                manifest.executable
+            ));
+        }
+        if !entry_is_executable(&executable) {
+            return Err(format!(
+                "the archive's executable `{}` is not executable",
+                manifest.executable
+            ));
+        }
+        return Ok((manifest.executable, executable, base));
+    }
+    let exe_name = package_executable_name(package);
+    let matches: Vec<PathBuf> = executable_files
+        .into_iter()
+        .filter(|path| {
+            let file = path.file_name().unwrap_or_default().to_string_lossy();
+            file == exe_name
+                || parse_package_executable_name(&file).is_some_and(|name| name == package)
+                || parse_executable_name(&file).is_some_and(|(_, name)| name == package)
+        })
+        .filter(|path| root.as_ref().is_none_or(|root| path.starts_with(root)))
+        .collect();
+    match matches.as_slice() {
+        [one] => {
+            let relative = match &root {
+                Some(root) => one
+                    .strip_prefix(root)
+                    .map_err(|_| "the package executable is outside the version directory".to_string())?,
+                None if one.components().count() == 1 => one.as_path(),
+                None => return Err("the package executable is outside the version directory".into()),
+            };
+            Ok((
+                relative.to_string_lossy().replace('\\', "/"),
+                staging.join(one),
+                base,
+            ))
+        }
+        [] => Err(format!(
+            "the archive doesn't contain `{}`",
+            package_executable_name(package)
+        )),
+        _ => Err("the archive contains more than one package executable".into()),
+    }
+}
+
+fn entry_is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::metadata(path).is_ok_and(|m| m.is_file())
+    }
 }
 
 /// What `sync` did for one package.
@@ -854,14 +1010,20 @@ pub fn sync(
             && dir != crate::plugins::cache_dir(ctx.env())
         {
             let cached = version_dir(&crate::plugins::cache_dir(ctx.env()), name, &l.version);
-            if crate::plugins::read_manifest(&cached).is_some()
-                && crate::plugins::link_version(&cached, &version_dir(&dir, name, &l.version)).is_ok()
-            {
-                out.push(Synced::AlreadyInstalled {
-                    name: name.clone(),
-                    version: Some(l.version.clone()),
-                });
-                continue;
+            if crate::plugins::read_manifest(&cached).is_some() {
+                match crate::plugins::link_version(&cached, &version_dir(&dir, name, &l.version)) {
+                    Ok(()) => {
+                        out.push(Synced::AlreadyInstalled {
+                            name: name.clone(),
+                            version: Some(l.version.clone()),
+                        });
+                        continue;
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        continue;
+                    }
+                }
             }
         }
         if !install_missing {
@@ -1094,6 +1256,44 @@ mod tests {
         assert!(e.contains("HTTP 404") && !e.contains("tries"), "{e}");
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+
+    fn tar(entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::none(),
+        ));
+        for (path, body, mode) in entries {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(*mode);
+            h.set_cksum();
+            b.append_data(&mut h, *path, *body).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn rooted_archive_with_unnamed_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = tar(&[
+            ("jdbc/dre-plugin-jdbc", b"#!/bin/sh\nexit 0\n", 0o755),
+            ("jdbc/dre-plugin-jdbc.jar", b"jar", 0o644),
+            ("jdbc/runtime/bin/java", b"runtime", 0o755),
+        ]);
+        let (exe, _, root) = extract_tar_gz(&bytes, "jdbc", dir.path()).unwrap();
+        assert_eq!(exe, "dre-plugin-jdbc");
+        assert!(root.join("runtime/bin/java").is_file());
+    }
+}
+
+#[cfg(test)]
+mod after_tests {
+    use super::*;
 
     #[test]
     fn default_registry_lives_under_get_dre() {

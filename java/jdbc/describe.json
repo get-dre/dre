@@ -1,0 +1,40 @@
+{
+  "source/jdbc": {
+    "capabilities": [
+      "catalog",
+      "sessions",
+      "validate"
+    ],
+    "connection_fields": [
+      {
+        "name": "url",
+        "description": "complete JDBC URL or minimal vendor URL; may contain credentials",
+        "required": true,
+        "secret": true,
+        "kind": "string"
+      },
+      {
+        "name": "driver_jars",
+        "description": "local driver JAR path, or a list of paths; vendor drivers are user-supplied",
+        "required": true,
+        "secret": false
+      },
+      {
+        "name": "driver_class",
+        "description": "optional fully qualified JDBC driver class instead of service discovery",
+        "required": false,
+        "secret": false,
+        "kind": "string"
+      },
+      {
+        "name": "properties",
+        "description": "arbitrary case-sensitive vendor settings with string, boolean or numeric values",
+        "required": false,
+        "secret": true,
+        "kind": "map"
+      }
+    ],
+    "option_fields": [],
+    "identifier_quote": "\""
+  }
+}

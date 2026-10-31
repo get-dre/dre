@@ -1,4 +1,5 @@
 alter session set nls_date_format = 'YYYY/MM/DD';
+alter session set time_zone = '+10:00';
 
 delete from dre_fixture.dre_fixture_data;
 

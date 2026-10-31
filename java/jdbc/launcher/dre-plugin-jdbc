@@ -1,0 +1,24 @@
+#!/bin/sh
+# The operator owns Java installation and updates; this package contains no runtime.
+set -eu
+case "$0" in
+  */*) base=${0%/*};;
+  *) base=.;;
+esac
+base=$(CDPATH= cd -- "$base" && pwd)
+java=${JAVA_HOME:+$JAVA_HOME/bin/}java
+fail() {
+  printf '%s\n' 'JDBC requires Java 17 or newer. Install a compatible runtime and set JAVA_HOME or put java on PATH.' >&2
+  exit 1
+}
+version=$("$java" -version 2>&1) || fail
+case "$version" in
+  *'version "'*) version=${version#*version \"}; version=${version%%\"*};;
+  *) fail;;
+esac
+major=${version%%.*}
+major=${major%%-*}
+major=${major%%+*}
+case "$major" in ''|*[!0-9]*) fail;; esac
+[ "$major" -ge 17 ] || fail
+exec "$java" --add-opens=java.base/java.nio=ALL-UNNAMED -jar "$base/dre-plugin-jdbc.jar" "$@"

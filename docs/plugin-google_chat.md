@@ -74,4 +74,4 @@ See [messages](messages.md), [destination keys](reference-report.md#outputdestin
 
 ---
 
-**Previous:** [Microsoft Teams](plugin-teams.md) · **Next:** [JDBC (development build)](plugin-jdbc.md)
+**Previous:** [Microsoft Teams](plugin-teams.md) · **Next:** [JDBC](plugin-jdbc.md)

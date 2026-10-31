@@ -6,10 +6,12 @@
 `v<version>` releases DRE itself (the `dre` CLI); `<package>-v<version>` releases one plugin
 package, e.g. `duckdb-v1.0.0` or `object_store-v1.2.0-rc.1`. The tag's version must be the one
 in the source: the workspace version for DRE, the package's own `Cargo.toml` version for a Rust
-plugin, the VERSION file in its folder for a Go one (packages.json names it under `go`).
+plugin, the VERSION file in its folder for a Go one (packages.json names it under `go`), or
+`pom.xml` for a Java one (names it under `java`).
 
 Prints `key=value` lines for $GITHUB_OUTPUT: kind (core or plugin), package, version, prerelease
-(true or false), and go (the Go package's folder, empty for Rust).
+(true or false), lang (rust, go or java), and the package folder for go and java (empty for
+the others).
 """
 
 import io
@@ -40,6 +42,14 @@ def metadata(crate):
 
 def cargo_version(crate):
     return metadata(crate)["version"]
+
+
+def pom_version(path):
+    text = (ROOT / path / "pom.xml").read_text()
+    m = re.search(r"<version>([^<]+)</version>", text)
+    if not m:
+        sys.exit(f"{path}/pom.xml has no version")
+    return m.group(1)
 
 
 def crates_io(path):
@@ -106,9 +116,12 @@ def plan(tag):
         kind, (package, version) = "plugin", m.groups()
         if package not in PACKAGES:
             sys.exit(f"tag {tag}: `{package}` isn't a plugin package (.github/scripts/packages.json)")
-        go = PACKAGES[package].get("go")
+        about = PACKAGES[package]
+        go, java = about.get("go"), about.get("java")
         if go:
             source, where = (ROOT / go / "VERSION").read_text().strip(), f"{go}/VERSION"
+        elif java:
+            source, where = pom_version(java), f"{java}/pom.xml"
         else:
             source = cargo_version(f"dre-plugin-{package}")
             where = f"plugins/{package}/Cargo.toml"
@@ -135,6 +148,9 @@ def plan(tag):
         "version": version,
         "prerelease": str("-" in version).lower(),
         "go": PACKAGES.get(package, {}).get("go", ""),
+        "lang": ("go" if PACKAGES.get(package, {}).get("go")
+                 else "java" if PACKAGES.get(package, {}).get("java") else "rust"),
+        "java": PACKAGES.get(package, {}).get("java", ""),
     }
 
 

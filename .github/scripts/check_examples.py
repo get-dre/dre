@@ -158,6 +158,12 @@ def pdf_text(path):
     return "\n".join(pages)
 
 
+def pdf_font_names(path):
+    """The embedded font names, with or without a six-letter subset prefix."""
+    fonts = re.findall(rb"/BaseFont /(?:[A-Z]{6}\+)?([\w-]+)", Path(path).read_bytes())
+    return {font.decode().split("-")[0] for font in fonts}
+
+
 def assert_cell(sheet, cell, expected):
     actual = sheet[cell][0]
     assert actual == expected, (cell, actual, expected)
@@ -301,8 +307,7 @@ def check(dre, plugins):
             shaped = ("القاهرة", "मुंबई")  # joined or reordered glyphs: the text map is partial
             for row, city in enumerate(cities, start=2):
                 pdf = letters / (city + ".pdf")
-                fonts = set(re.findall(rb"/BaseFont /[A-Z]{6}\+([\w-]+)", pdf.read_bytes()))
-                names = {f.decode().split("-")[0] for f in fonts}
+                names = pdf_font_names(pdf)
                 assert (noto[city] in names) if city in noto else not any(
                     n.startswith("Noto") for n in names), (city, names)
                 staff = workbook(offices / "offices" / (city + ".xlsx"))["staff"]

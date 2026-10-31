@@ -72,7 +72,7 @@ Installing plugins, the registry, and every first-party plugin.
 - [Slack](plugin-slack.md): Post report files and headline messages to Slack with the slack destination: bot tokens, channels and direct messages, and the headline example project.
 - [Microsoft Teams](plugin-teams.md): Post report headline messages to Microsoft Teams with the teams destination: Workflows webhooks, notes, and adapting a headline to Teams.
 - [Google Chat](plugin-google_chat.md): Post report headline messages to Google Chat spaces with the google_chat destination: space webhooks, notes, and adapting a headline to Google Chat.
-- [JDBC (development build)](plugin-jdbc.md): Connect an optional JDBC source with user-supplied drivers: development setup, tested Oracle and SQL Server reporting and catalog discovery, supported types and limits.
+- [JDBC](plugin-jdbc.md): Connect an optional JDBC source with user-supplied drivers and Java; tested Oracle and SQL Server reporting and catalog discovery, supported types and limits.
 
 ## Reference
 

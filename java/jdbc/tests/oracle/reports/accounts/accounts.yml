@@ -1,6 +1,7 @@
 queries:
   - {query: setup, tab: false}
   - {query: accounts, tab_name: Accounts}
+  - {query: session_check, tab_name: Session}
 output:
   format: xlsx
   columns:

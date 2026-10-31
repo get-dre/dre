@@ -5,6 +5,8 @@ select account_id as "account_id",
        opened as "opened",
        prepared as "prepared",
        bytes as "bytes",
-       optional_amount as "optional"
+       optional_amount as "optional",
+       sessiontimezone as "session_setting",
+       sys_context('USERENV', 'SID') as "session_id"
 from dre_fixture.dre_fixture_data
 order by account_id;
