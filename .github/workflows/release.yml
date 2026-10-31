@@ -212,6 +212,7 @@ jobs:
           - {platform: linux-aarch64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu}
           - {platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       JAVA_DIR: ${{ needs.plan.outputs.java }}
@@ -219,19 +220,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Use the runner's Java 17 to build
-        shell: bash
-        run: |
-          case "$RUNNER_ARCH" in
-            X64) java_home="JAVA_HOME_17_X64";;
-            ARM64) java_home="JAVA_HOME_17_ARM64";;
-            *) echo "unsupported runner architecture: $RUNNER_ARCH" >&2; exit 1;;
-          esac
-          test -n "${!java_home}" || { echo "$java_home is not set" >&2; exit 1; }
-          echo "JAVA_HOME=${!java_home}" >> "$GITHUB_ENV"
-          echo "${!java_home}/bin" >> "$GITHUB_PATH"
-          echo "BUILD_JAVA_HOME=${!java_home}" >> "$GITHUB_ENV"
 
       - name: Install Maven 3.9.11
         shell: bash
@@ -242,7 +230,7 @@ jobs:
           echo "4b7195b6a4f5c81af4c0212677a32ee8143643401bc6e1e8412e6b06ea82beac  $RUNNER_TEMP/maven.tar.gz" \
             | sha256sum --check -
           mkdir -p "$RUNNER_TEMP/maven"
-          tar -xzf "$RUNNER_TEMP/maven.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/maven"
+          (cd "$RUNNER_TEMP" && tar -xzf maven.tar.gz --strip-components=1 -C maven)
 
       - name: Install Rust for the Windows launcher
         if: runner.os == 'Windows'
@@ -275,7 +263,6 @@ jobs:
               jdk_sum="e53a79c3c3d86865bd7e787903884331068e71321714ffd44f145785affc7cb0";;
             *) echo "unsupported JDBC platform: $PLATFORM" >&2; exit 1;;
           esac
-          "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
           archive="$RUNNER_TEMP/${jdk_url##*/}"
           curl --fail --silent --show-error --location "$jdk_url" -o "$archive"
           if [[ "$RUNNER_OS" == Windows ]]; then
@@ -286,7 +273,7 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/temurin" "$RUNNER_TEMP/jdk"
           if [[ "$archive" == *.zip ]]; then
-            7z x "$archive" -o"$RUNNER_TEMP/temurin" >/dev/null
+            (cd "$RUNNER_TEMP" && 7z x "${archive##*/}" -o"temurin" >/dev/null)
           else
             tar -xzf "$archive" -C "$RUNNER_TEMP/temurin"
           fi
@@ -294,7 +281,13 @@ jobs:
           test -n "$release_file"
           jdk="$(dirname "$release_file")"
           grep -q '^JAVA_VERSION="17\.0\.20\.1"$' "$release_file"
-          "$jdk/bin/java" -version
+          expected_arch="${PLATFORM#*-}"
+          actual_arch="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *os\.arch = //p')"
+          [[ "$expected_arch" == x86_64 ]] && expected_arch=amd64
+          test "$actual_arch" = "$expected_arch"
+          java_home="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.home = //p')"
+          test -n "$java_home"
+          JAVA_HOME="$java_home" "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
           "$jdk/bin/jdeps" --ignore-missing-deps --multi-release 17 --print-module-deps \
             "$JAVA_DIR/target/dre-plugin-jdbc.jar" > "$RUNNER_TEMP/modules"
           test "$(cat "$RUNNER_TEMP/modules")" = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
