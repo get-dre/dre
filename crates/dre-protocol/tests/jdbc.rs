@@ -357,7 +357,7 @@ fn preparation_and_typed_results_share_one_session() {
     plugin.open(config.as_object().unwrap().clone(), false).unwrap();
     let query = match db {
         Database::Oracle => {
-            "select account_id, wide_id, amount, wide_amount, opened, prepared, bytes, optional_amount as optional from dre_fixture.dre_fixture_data order by account_id"
+            "select account_id as \"account_id\", wide_id as \"wide_id\", amount as \"amount\", wide_amount as \"wide_amount\", opened as \"opened\", prepared as \"prepared\", bytes as \"bytes\", optional_amount as \"optional\" from dre_fixture.dre_fixture_data order by account_id"
         }
         Database::SqlServer => {
             "select account_id, wide_id, amount, wide_amount, opened, prepared, bytes, optional from #dre_fixture order by account_id"
