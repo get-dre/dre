@@ -20,13 +20,8 @@ The shaded JAR includes the license and notice material those components
 distribute. Vendor JDBC drivers supplied by users are not part of this package
 and keep their own licenses.
 
-## Bundled Java runtime
-
-The package includes an Eclipse Temurin JDK subset, version 17.0.20.1+1
-(OpenJDK 17.0.20+101), produced with `jlink`. Its `legal/` directory contains
-the per-module licenses and notices from that exact Temurin build, including
-the GNU General Public License version 2 with the Classpath Exception and
-other component notices. Those files are authoritative for the runtime.
+Java runtimes are not included, downloaded or updated by this package. Operators
+supply a compatible Java 17 or newer runtime under its own license.
 
 No copyright owner is claimed here for third-party material. Names and
 trademarks belong to their respective owners.

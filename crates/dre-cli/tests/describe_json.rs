@@ -4,8 +4,8 @@
 //! are authored once, in the plugin's code; this test fails when a built plugin's reply differs
 //! from its file. `DRE_UPDATE_DESCRIBE=1` rewrites the files. Go packages are checked when
 //! `DRE_TEST_GO_PLUGINS` names their built programs. The Java package is checked when
-//! `DRE_TEST_JDBC_JAR` names its built shaded JAR; the test launches it with the bundled
-//! runtime contract through a small test launcher.
+//! `DRE_TEST_JDBC_JAR` names its built shaded JAR; the test uses the packaged launcher and
+//! the environment's installed Java.
 
 mod common;
 
@@ -23,61 +23,24 @@ fn root() -> PathBuf {
 fn java_launcher(jar: &Path) -> PathBuf {
     let dir = jar.parent().expect("the JDBC JAR has a parent");
     let exe = dir.join(format!("dre-plugin-jdbc{}", std::env::consts::EXE_SUFFIX));
-    let java = if cfg!(windows) {
-        dir.join("runtime/bin/java.exe")
-    } else {
-        dir.join("runtime/bin/java")
-    };
-    assert!(
-        java.is_file(),
-        "DRE_TEST_JDBC_JAR must have runtime/bin/java beside it"
-    );
+    let source = root().join("java/jdbc/launcher/dre-plugin-jdbc");
     if cfg!(windows) {
-        return write_windows_launcher(dir, jar, &java);
+        let build = std::process::Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(source.with_extension("rs"))
+            .arg("-o")
+            .arg(&exe)
+            .status()
+            .unwrap();
+        assert!(build.success());
+        return exe;
     }
-    let script = format!(
-        "#!/bin/sh\nexec '{}' --add-opens=java.base/java.nio=ALL-UNNAMED -jar '{}' \"$@\"\n",
-        java.display(),
-        jar.display()
-    );
-    std::fs::write(&exe, script).unwrap();
+    std::fs::copy(source, &exe).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    exe
-}
-
-fn write_windows_launcher(dir: &Path, jar: &Path, java: &Path) -> PathBuf {
-    let source = dir.join("launcher.rs");
-    std::fs::write(
-        &source,
-        format!(
-            r#"
-use std::process::Command;
-fn main() {{
-    let status = Command::new(r"{}").arg("--add-opens=java.base/java.nio=ALL-UNNAMED")
-        .arg("-jar").arg(r"{}").args(std::env::args_os().skip(1)).status().unwrap();
-    std::process::exit(status.code().unwrap_or(1));
-}}
-"#,
-            java.display(),
-            jar.display()
-        ),
-    )
-    .unwrap();
-    let exe = dir.join("dre-plugin-jdbc.exe");
-    let build = std::process::Command::new("rustc")
-        .args([
-            "--edition=2021",
-            source.to_str().unwrap(),
-            "-o",
-            exe.to_str().unwrap(),
-        ])
-        .status()
-        .unwrap();
-    assert!(build.success());
     exe
 }
 

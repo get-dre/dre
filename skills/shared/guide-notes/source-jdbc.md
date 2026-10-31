@@ -1,7 +1,9 @@
-- Declare `jdbc` under `plugins:` and run `dre deps`. The package carries Eclipse Temurin Java
-  17, so don't ask the user to install Java or set `JAVA_HOME`.
+- Declare `jdbc` under `plugins:` and run `dre deps`. The user supplies Java 17 or newer;
+  `JAVA_HOME/bin/java` wins when set, otherwise the launcher uses `java` from `PATH`. There is
+  no upper-version cap, but the vendor driver must support that Java version. The plugin does
+  not install, download or update Java. Missing/older Java produces setup guidance.
 - Supported release packages: macOS and Linux on x86_64 or aarch64, and Windows x64. The JDBC
-  download is much larger than other plugins. There is no Windows ARM64 package for 1.0.0.
+  package contains the launcher, JAR and notices. There is no Windows ARM64 package for 1.0.0.
 - `driver_jars` is required and always user-supplied: a local path or list of paths. Keep it
   outside the project's generated target files and use `env_var()` for a machine-specific path.
 - Put the vendor URL in `url` and credentials or vendor settings in `properties`, all from

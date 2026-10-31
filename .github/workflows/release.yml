@@ -201,7 +201,7 @@ jobs:
     name: Build jdbc (${{ matrix.platform }})
     needs: [plan, security]
     if: needs.plan.outputs.lang == 'java'
-    # Every JDK below is the exact Temurin release, checked before any build step uses it.
+    # Java is a build/test prerequisite, never part of the distributed plugin.
     strategy:
       fail-fast: false
       matrix:
@@ -239,64 +239,16 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: rustup toolchain install stable --profile minimal --target "$TARGET" && rustup default stable
 
-      - name: Build, jlink and package
+      - name: Build and package using the runner's Java
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          case "$PLATFORM" in
-            macos-aarch64)
-              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_aarch64_mac_hotspot_17.0.20.1_1.tar.gz"
-              jdk_sum="196d13ba5f10414bef7f6a05a9b3f00edacb18ebacef2b99485db9e2ee18f0e8";;
-            macos-x86_64)
-              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_mac_hotspot_17.0.20.1_1.tar.gz"
-              jdk_sum="c01975da12ed4235250ff891fe8bba73a9e73037d444b269c9d0922b5dbc8e0a";;
-            linux-x86_64)
-              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz"
-              jdk_sum="3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e";;
-            linux-aarch64)
-              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.20.1_1.tar.gz"
-              jdk_sum="457b57af8f9c93ec39080bb8c764f559dc8c89a6da1a39d718a400b7890d3e41";;
-            windows-x86_64)
-              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_windows_hotspot_17.0.20.1_1.zip"
-              jdk_sum="e53a79c3c3d86865bd7e787903884331068e71321714ffd44f145785affc7cb0";;
-            *) echo "unsupported JDBC platform: $PLATFORM" >&2; exit 1;;
-          esac
-          archive="$RUNNER_TEMP/${jdk_url##*/}"
-          curl --fail --silent --show-error --location "$jdk_url" -o "$archive"
-          actual="$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$archive")"
-          [[ "$actual" == "$jdk_sum" ]] || { echo "checksum mismatch for $archive: $actual != $jdk_sum" >&2; exit 1; }
-          mkdir -p "$RUNNER_TEMP/temurin" "$RUNNER_TEMP/jdk"
-          if [[ "$archive" == *.zip ]]; then
-            (cd "$RUNNER_TEMP" && 7z x "${archive##*/}" -o"temurin" >/dev/null)
-          else
-            tar -xzf "$archive" -C "$RUNNER_TEMP/temurin"
-          fi
-          release_file="$(find "$RUNNER_TEMP/temurin" -type f -name release | head -1)"
-          test -n "$release_file"
-          jdk="$(dirname "$release_file")"
-          grep -q '^JAVA_VERSION="17\.0\.20\.1"$' "$release_file"
-          expected_arch="${PLATFORM#*-}"
-          actual_arch="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *os\.arch = //p')"
-          case "$expected_arch:$actual_arch" in
-            x86_64:amd64|x86_64:x86_64|aarch64:aarch64) ;;
-            *)
-            echo "runtime architecture mismatch: $actual_arch != $expected_arch" >&2
-            exit 1;;
-          esac
-          java_home="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.home = //p')"
-          test -n "$java_home"
+          java_home="${JAVA_HOME_17_ARM64:-${JAVA_HOME_17_X64:-$JAVA_HOME}}"
           echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
-          echo "RUNNER_JDK=$jdk" >> "$GITHUB_ENV"
+          "$java_home/bin/java" -version
           JAVA_HOME="$java_home" "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
-          "$jdk/bin/jdeps" --ignore-missing-deps --multi-release 17 --print-module-deps \
-            "$JAVA_DIR/target/dre-plugin-jdbc.jar" > "$RUNNER_TEMP/modules"
-          test "$(cat "$RUNNER_TEMP/modules")" = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
-          "$jdk/bin/jlink" --add-modules java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported,java.naming,java.management \
-            --strip-debug --no-header-files --no-man-pages --compress=2 --output "$RUNNER_TEMP/jdk/runtime"
-          cp "$jdk/NOTICE" "$RUNNER_TEMP/jdk/runtime/NOTICE"
-          cp "$jdk/legal/java.base/LICENSE" "$RUNNER_TEMP/jdk/runtime/LICENSE"
           launcher=java/jdbc/launcher/dre-plugin-jdbc
           if [[ "$PLATFORM" == windows-* ]]; then
             rustc --edition=2021 --target "$TARGET" java/jdbc/launcher/dre-plugin-jdbc.rs \
@@ -306,9 +258,9 @@ jobs:
           mkdir -p dist
           python3 .github/scripts/package_jdbc.py \
             --output "dist/dre-plugin-jdbc-$VERSION-$PLATFORM.tar.gz" \
-            --version "$VERSION" --platform "$PLATFORM" \
+            --platform "$PLATFORM" \
             --jar "$JAVA_DIR/target/dre-plugin-jdbc.jar" \
-            --runtime "$RUNNER_TEMP/jdk/runtime" --launcher "$launcher"
+            --launcher "$launcher"
 
       - name: Smoke test the packaged launcher
         shell: bash
@@ -318,6 +270,11 @@ jobs:
           archive="$(find dist -name '*.tar.gz' -print -quit)"
           test -n "$archive"
           DRE_TEST_JDBC_ARCHIVE="$archive" python3 java/jdbc/test_package.py
+          java_home="${JAVA_HOME_21_ARM64:-$JAVA_HOME_21_X64}"
+          test -n "$java_home"
+          "$java_home/bin/java" -version
+          JAVA_HOME="$java_home" DRE_TEST_JDBC_ARCHIVE="$archive" \
+            python3 java/jdbc/test_package.py Package.test_release_archive_launches_with_installed_java
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -326,7 +283,7 @@ jobs:
           if-no-files-found: error
 
   jdbc-install:
-    name: Install JDBC archive and run a report without system Java
+    name: Install JDBC archive and run using installed Java
     needs: [plan, build-jdbc]
     if: needs.plan.outputs.lang == 'java'
     runs-on: ubuntu-latest
@@ -350,7 +307,7 @@ jobs:
           DRE_TEST_JDBC_ARCHIVE="$(find dist -name '*.tar.gz' -print -quit)" \
           DRE_TEST_PACKAGE_PLATFORM=linux-x86_64 DRE_BIN="$PWD/target/debug/dre" \
           DRE_TEST_CSV_BIN="$PWD/target/debug/dre-plugin-csv" DRE_TEST_H2_JAR="$RUNNER_TEMP/h2.jar" \
-            python3 java/jdbc/test_package.py Package.test_install_update_and_report_without_system_java
+            python3 java/jdbc/test_package.py Package.test_install_update_and_report_with_installed_java
 
   # A CycloneDX SBOM for every archive, and signed build provenance (GitHub artifact attestations,
   # through Sigstore) for the archives and their SBOMs. Its own job, so only it can sign.
@@ -387,7 +344,7 @@ jobs:
           done
           ls -l dist
 
-      - name: Scan JDBC dependencies and bundled runtimes
+      - name: Scan JDBC dependencies
         if: needs.plan.outputs.lang == 'java'
         run: |
           curl -fsSL -o "$RUNNER_TEMP/grype.tar.gz" https://github.com/anchore/grype/releases/download/v0.121.0/grype_0.121.0_linux_amd64.tar.gz

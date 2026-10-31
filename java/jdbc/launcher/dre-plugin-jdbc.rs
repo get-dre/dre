@@ -1,4 +1,4 @@
-use std::{env, process::Command};
+use std::{env, path::PathBuf, process::Command};
 
 #[cfg(windows)]
 fn runtime_job() -> std::io::Result<std::os::windows::io::OwnedHandle> {
@@ -65,7 +65,7 @@ fn runtime_job() -> std::io::Result<std::os::windows::io::OwnedHandle> {
 fn main() {
     #[cfg(windows)]
     let _job = runtime_job().unwrap_or_else(|error| {
-        eprintln!("can't manage the bundled JDBC runtime process: {error}");
+        eprintln!("can't manage the JDBC runtime process: {error}");
         std::process::exit(1);
     });
     let Ok(executable) = env::current_exe() else {
@@ -76,18 +76,44 @@ fn main() {
         eprintln!("the JDBC launcher has no parent directory");
         std::process::exit(1);
     };
-    let mut child = Command::new(directory.join("runtime").join("bin").join("java.exe"))
+    let java = env::var_os("JAVA_HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| PathBuf::from(home).join("bin/java.exe"))
+        .unwrap_or_else(|| PathBuf::from("java.exe"));
+    let compatible = Command::new(&java)
+        .arg("-version")
+        .output()
+        .ok()
+        .is_some_and(|output| {
+            let version = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            );
+            output.status.success()
+                && version
+                    .split("version \"")
+                    .nth(1)
+                    .and_then(|value| value.split(['.', '-', '+', '"']).next())
+                    .and_then(|major| major.parse::<u32>().ok())
+                    .is_some_and(|major| major >= 17)
+        });
+    if !compatible {
+        eprintln!("JDBC requires Java 17 or newer. Install a compatible runtime and set JAVA_HOME or put java on PATH.");
+        std::process::exit(1);
+    }
+    let mut child = Command::new(java)
         .arg("--add-opens=java.base/java.nio=ALL-UNNAMED")
         .arg("-jar")
         .arg(directory.join("dre-plugin-jdbc.jar"))
         .args(env::args_os().skip(1))
         .spawn()
         .unwrap_or_else(|error| {
-            eprintln!("can't start the bundled JDBC runtime: {error}");
+            eprintln!("can't start the JDBC runtime: {error}");
             std::process::exit(1);
         });
     let status = child.wait().unwrap_or_else(|error| {
-        eprintln!("can't wait for the bundled JDBC runtime: {error}");
+        eprintln!("can't wait for the JDBC runtime: {error}");
         std::process::exit(1);
     });
     std::process::exit(status.code().unwrap_or(1));

@@ -1,7 +1,7 @@
 # JDBC source
 
 An optional Java subprocess source using DRE's existing protocol and Apache Arrow's JDBC
-adapter. The installable package bundles Eclipse Temurin Java 17; no JVM runs inside DRE core.
+adapter. The user supplies Java 17 or newer; no JVM runs inside DRE core.
 See [the JDBC guide](../../docs/plugin-jdbc.md) for installation, configuration, supported scope
 and the tested Oracle and SQL Server fixtures.
 
@@ -15,9 +15,11 @@ plugins: [jdbc]
 dre deps
 ```
 
-The release packages support macOS and Linux on x86_64 or aarch64, and Windows x64. They include
-a `jlink` runtime built from Eclipse Temurin JDK 17.0.20.1+1 (OpenJDK 17.0.20+101). Windows ARM64
-has no runtime package for this release. The package is larger than other DRE plugins.
+The release packages support macOS and Linux on x86_64 or aarch64, and Windows x64. They contain
+the launcher, plugin JAR and notices. Windows ARM64 has no package for this release.
+`JAVA_HOME/bin/java` wins when set, otherwise the launcher uses `java` from `PATH`. Compatible
+Java versions from 17 upward are accepted without an upper cap; check the vendor driver's own
+Java requirements. The operator installs and patches Java; the plugin never downloads it.
 
 Vendor JDBC driver JARs are always supplied by the user. See the guide for the exact profile
 fields and tested dialect examples.
@@ -34,18 +36,17 @@ python3 java/jdbc/test_protocol.py
 The POSIX development launcher is `java/jdbc/dre-plugin-jdbc`. It uses `JAVA_HOME/bin/java`
 when set, otherwise `java` from `PATH`, and reads `target/dre-plugin-jdbc.jar` beside itself.
 It can be copied with that JAR into a development plugins directory. The packaged launcher is
-`java/jdbc/launcher/dre-plugin-jdbc`: it only resolves `runtime/bin/java` relative to itself and
-never `JAVA_HOME` or `PATH`. Windows uses the minimal native launcher in the same directory.
+`java/jdbc/launcher/dre-plugin-jdbc`: it selects installed Java the same way, checks the minimum
+version, and reads `dre-plugin-jdbc.jar` beside itself. Windows uses the native launcher in
+the same directory.
 
 Release packaging is `.github/scripts/package_jdbc.py`; run `python3 java/jdbc/test_package.py`
 to check the deterministic archive and launcher contract without a database. The release job
-downloads the exact Temurin archive for each platform, checks its SHA-256, builds with Maven
-3.9.11, verifies `jdeps`, creates the `jlink` runtime, and packages the complete version directory
-with the project and runtime legal files.
-Release checks unpack and launch each final archive with system Java unavailable. A Linux
+uses the runner's Java to build with Maven 3.9.11 and packages the launcher, JAR and notices.
+Release checks unpack and launch each final archive using installed Java. A Linux
 install/update test runs a report using a test-only H2 driver through the normal registry and
-lock workflow. Grype scans the final archives' SBOMs, including bundled OpenJDK and shaded
-Java dependencies, before publication. Windows ties Java to the launcher's job so forced
+lock workflow. Grype scans the shaded Java dependencies in final archive SBOMs before
+publication. Windows ties Java to the launcher's job so forced
 termination also ends the runtime and its database connections.
 
 `test_protocol.py` builds a synthetic driver and exercises the subprocess boundary without a
@@ -62,8 +63,8 @@ and SQL Server's date settings.
 
 Code is GPL-3.0-only, as with every DRE plugin. Apache Arrow and Jackson use Apache-2.0;
 SLF4J uses MIT. Other bundled component notices are in
-[`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md). The downloaded JVM's own legal files
-remain under `runtime/legal`. Supply appropriately licensed vendor drivers yourself.
+[`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md). Supply appropriately licensed Java
+runtimes and vendor drivers yourself.
 
 ## Release preparation
 

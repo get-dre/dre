@@ -1,6 +1,14 @@
 use std::{env, fs::File, io::Write, path::PathBuf};
 
 fn main() {
+    if env::args().nth(1).as_deref() == Some("-version") {
+        eprintln!("Picked up JAVA_TOOL_OPTIONS: -Dexample=\"quoted value\"");
+        eprintln!(
+            "openjdk version \"{}\"",
+            env::var("DRE_FAKE_VERSION").unwrap_or_else(|_| "17.0.1".into())
+        );
+        return;
+    }
     let output = env::var_os("DRE_FAKE_ARGS").expect("DRE_FAKE_ARGS");
     let mut file = File::create(PathBuf::from(output)).expect("create argument log");
     for argument in env::args_os().skip(1) {

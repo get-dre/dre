@@ -1,6 +1,6 @@
 ---
 title: "JDBC"
-description: "Connect an optional JDBC source with user-supplied drivers and bundled Java; tested Oracle and SQL Server reporting and catalog discovery, supported types and limits."
+description: "Connect an optional JDBC source with user-supplied drivers and Java; tested Oracle and SQL Server reporting and catalog discovery, supported types and limits."
 section: plugins
 position: 100
 ---
@@ -35,10 +35,11 @@ batches to DRE. Preparation and result queries share one database connection. Th
 source is exercised end to end with Oracle and SQL Server; it does not translate SQL dialects
 or contain vendor-specific query paths.
 
-The `jdbc` package installs with `dre deps` and includes Eclipse Temurin Java 17, so the host
-needs no Java. Supported packages are macOS and Linux on x86_64 or aarch64, and Windows x64; the
-download is larger than the other plugins because it carries the runtime. There is no Windows
-ARM64 package for this release.
+The `jdbc` package installs with `dre deps`. Supply a compatible Java 17 or newer runtime on
+the host, selected through `JAVA_HOME` or `PATH`. There is no upper-version cap; a vendor
+driver may require a newer Java version. The plugin does not install, download or update Java.
+Supported packages are macOS and Linux on x86_64 or aarch64, and Windows x64. There is no
+Windows ARM64 package for this release.
 
 Supply the vendor driver yourself. The plugin does not redistribute or download drivers, and its
 reach depends on a compatible driver accepting the configured URL and properties.
@@ -55,9 +56,15 @@ plugins: [jdbc, xlsx]
 dre deps
 ```
 
-The package installs into the normal versioned plugin directory. Its launcher starts the bundled
-runtime beside itself; it never uses a host `java`, `PATH` entry or `JAVA_HOME`. Updates keep
-using `dre deps` or the ordinary plugin update command.
+The package installs into the normal versioned plugin directory. Its launcher uses
+`JAVA_HOME/bin/java` (`java.exe` on Windows) when `JAVA_HOME` is nonempty, otherwise `java`
+from `PATH`. A missing or older runtime fails with setup guidance before a connection opens.
+If `JAVA_HOME` is set incorrectly, correct it or unset it to use `PATH`.
+
+Install a maintained Java runtime through your organization's usual software management or
+the [Temurin installation guide](https://adoptium.net/installation). Confirm the selected runtime
+with `java -version`; keep security updates under your normal Java patch policy. DRE updates
+only the plugin and its Java libraries through `dre deps` or the ordinary plugin update command.
 
 ## Build and run
 

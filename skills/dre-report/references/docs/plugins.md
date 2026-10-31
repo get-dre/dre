@@ -25,7 +25,7 @@ secrets can use `env_var()`.
 | `bigquery` | the [`bigquery`](plugin-bigquery.md) source (alpha: 1.0.0 pre-releases) |
 | `snowflake` | the [`snowflake`](plugin-snowflake.md) source (alpha: 1.0.0 pre-releases) |
 | `clickhouse` | the [`clickhouse`](plugin-clickhouse.md) source, self-hosted or ClickHouse Cloud |
-| `jdbc` | the [`jdbc`](plugin-jdbc.md) source, with bundled Java and user-supplied drivers |
+| `jdbc` | the [`jdbc`](plugin-jdbc.md) source, using user-supplied Java 17+ and drivers |
 | `csv` | the [`csv`](plugin-csv.md) and [`delimited`](plugin-csv.md) formats |
 | `fixed_width` | the [`fixed_width`](plugin-fixed_width.md) format |
 | `parquet` | the [`parquet`](plugin-parquet.md) format |
