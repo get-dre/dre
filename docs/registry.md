@@ -105,8 +105,11 @@ updated any more.)
   DRE skips versions it can't talk to.
 - Artifacts are keyed by platform, `<os>-<arch>`, using Rust's names: `macos`, `linux` or
   `windows`, and `x86_64` or `aarch64`.
-- An artifact is either the package's executable itself, or a `.tar.gz` containing it as
-  `dre-plugin-<package>` (plus `.exe` on Windows).
+- An artifact is either the package's executable itself, or a `.tar.gz`. An archive can have the
+  executable at its top level (the legacy form), or one leading version directory such as
+  `jdbc/dre-plugin-jdbc` plus any runtime files beside it. The installer rejects absolute paths,
+  `..`, links, duplicate entries, path conflicts and more than one package executable. It writes
+  `plugin.json` and launches only the manifest's executable.
 - `sha256` is the hex SHA-256 of the downloaded file. A download that doesn't match is discarded
   and the install fails. Signatures come after V1.
 

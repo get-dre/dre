@@ -9,17 +9,19 @@ fn main() {
         eprintln!("the JDBC launcher has no parent directory");
         std::process::exit(1);
     };
-    let status = Command::new(directory.join("runtime").join("bin").join("java.exe"))
+    let mut child = Command::new(directory.join("runtime").join("bin").join("java.exe"))
         .arg("--add-opens=java.base/java.nio=ALL-UNNAMED")
         .arg("-jar")
         .arg(directory.join("dre-plugin-jdbc.jar"))
         .args(env::args_os().skip(1))
-        .status();
-    match status {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-        Err(error) => {
+        .spawn()
+        .unwrap_or_else(|error| {
             eprintln!("can't start the bundled JDBC runtime: {error}");
             std::process::exit(1);
-        }
-    }
+        });
+    let status = child.wait().unwrap_or_else(|error| {
+        eprintln!("can't wait for the bundled JDBC runtime: {error}");
+        std::process::exit(1);
+    });
+    std::process::exit(status.code().unwrap_or(1));
 }

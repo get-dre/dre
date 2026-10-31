@@ -298,8 +298,10 @@ jobs:
           "$jdk/bin/jdeps" --ignore-missing-deps --multi-release 17 --print-module-deps \
             "$JAVA_DIR/target/dre-plugin-jdbc.jar" > "$RUNNER_TEMP/modules"
           test "$(cat "$RUNNER_TEMP/modules")" = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
-          "$jdk/bin/jlink" --add-modules java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported \
+          "$jdk/bin/jlink" --add-modules java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported,java.naming,java.management \
             --strip-debug --no-header-files --no-man-pages --compress=2 --output "$RUNNER_TEMP/jdk/runtime"
+          cp "$jdk/NOTICE" "$RUNNER_TEMP/jdk/runtime/NOTICE"
+          cp "$jdk/legal/java.base/LICENSE" "$RUNNER_TEMP/jdk/runtime/LICENSE"
           launcher=java/jdbc/launcher/dre-plugin-jdbc
           if [[ "$PLATFORM" == windows-* ]]; then
             rustc --edition=2021 --target "$TARGET" java/jdbc/launcher/dre-plugin-jdbc.rs \
