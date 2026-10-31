@@ -78,13 +78,12 @@ jobs:
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
       - run: mvn -B -f java/jdbc/pom.xml package
       - run: python3 java/jdbc/test_protocol.py
-      - name: Prepare database fixtures and pinned user-supplied drivers
       - run: python3 java/jdbc/test_package.py
       - name: Check the committed Java describe.json
         env:
           DRE_TEST_JDBC_JAR: ${{ github.workspace }}/java/jdbc/target/dre-plugin-jdbc.jar
         run: cargo test -p dre-cli --test describe_json
-      - name: Prepare the synthetic Oracle account and user-supplied test driver
+      - name: Prepare database fixtures and pinned user-supplied drivers
         env:
           ORACLE_CONTAINER: ${{ job.services.oracle.id }}
           SQLSERVER_CONTAINER: ${{ job.services.sqlserver.id }}
