@@ -132,6 +132,9 @@ pub trait Plugin: Send {
     /// Check a statement without running it (`check` capability).
     fn check(&mut self, sql: &str) -> HostResult<()>;
 
+    /// Discover accessible relations (`catalog` capability).
+    fn catalog(&mut self, tables: Vec<String>, schemas: Vec<String>) -> HostResult<Value>;
+
     /// Run one statement, handing every batch to `on_batch` as it arrives.
     fn execute(
         &mut self,
@@ -398,6 +401,10 @@ impl Plugin for Subprocess {
 
     fn check(&mut self, sql: &str) -> HostResult<()> {
         self.process().check(sql)
+    }
+
+    fn catalog(&mut self, tables: Vec<String>, schemas: Vec<String>) -> HostResult<Value> {
+        self.process().catalog(tables, schemas)
     }
 
     fn execute(

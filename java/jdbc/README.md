@@ -17,7 +17,8 @@ It can be copied with that JAR into a development plugins directory. Windows pac
 bundled Java and registry installation are separate work; this is not an installable release.
 
 `test_protocol.py` builds a synthetic driver and exercises the subprocess boundary without a
-database. The shared Oracle and SQL Server protocol tests live in
+database, including catalog metadata and diagnostics. The shared Oracle and SQL Server protocol
+tests live in
 [`crates/dre-protocol/tests/jdbc.rs`](../../crates/dre-protocol/tests/jdbc.rs). Set
 `DRE_TEST_JDBC_DATABASE=oracle|sqlserver` with `DRE_TEST_JDBC_URL`, `DRE_TEST_JDBC_JAR`,
 `DRE_TEST_JDBC_USER` and `DRE_TEST_JDBC_PASSWORD` to run them. CI runs both against pinned

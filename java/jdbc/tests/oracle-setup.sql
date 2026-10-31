@@ -12,4 +12,13 @@ create global temporary table dre_fixture.dre_fixture_data (
   bytes raw(3),
   optional_amount number(18,2)
 ) on commit preserve rows;
+comment on table dre_fixture.dre_fixture_data is 'visible fixture table';
+comment on column dre_fixture.dre_fixture_data.amount is 'fixture amount';
+create table dre_fixture."Order Items" (
+  "Order ID" number(18,0),
+  amount number(18,2)
+);
+comment on table dre_fixture."Order Items" is 'mixed case table';
+comment on column dre_fixture."Order Items".amount is 'mixed case amount';
+create view dre_fixture."Order View" as select "Order ID" from dre_fixture."Order Items";
 exit

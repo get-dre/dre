@@ -115,6 +115,10 @@ jobs:
           DRE_TEST_JDBC_USER: dre_fixture
           DRE_TEST_JDBC_PASSWORD: DreFixture39_x!
       - run: cargo build -p dre-cli -p dre-plugin-xlsx
+      - name: Run catalog through the existing CLI contract
+        run: |
+          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
+          python3 java/jdbc/test_catalog.py
       - name: Run Oracle SQL through the CLI into a checked workbook
         run: |
           DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
