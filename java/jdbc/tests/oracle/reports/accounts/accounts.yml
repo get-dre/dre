@@ -1,0 +1,8 @@
+queries:
+  - {query: setup, tab: false}
+  - {query: accounts, tab_name: Accounts}
+output:
+  format: xlsx
+  columns:
+    amount: {format: '#,##0.00'}
+    optional: {format: '#,##0.00'}

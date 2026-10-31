@@ -1,5 +1,5 @@
 connections:
-  oracle_fixture:
+  jdbc_fixture:
     targets:
       dev:
         type: jdbc
@@ -8,5 +8,7 @@ connections:
         properties:
           user: "{{ env_var('DRE_TEST_JDBC_USER', 'dre_fixture') }}"
           password: "{{ env_var('DRE_TEST_JDBC_PASSWORD') }}"
-          oracle.jdbc.fanEnabled: false
+          databaseName: master
+          encrypt: false
+          trustServerCertificate: true
           arbitraryVendorCredential: "{{ env_var('DRE_TEST_JDBC_VENDOR_SECRET', 'VENDOR_PROPERTY_SENTINEL') }}"

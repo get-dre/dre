@@ -1,6 +1,0 @@
-queries:
-  - {query: accounts, tab_name: Accounts}
-output:
-  format: xlsx
-  columns:
-    balance: {format: '#,##0.00'}
