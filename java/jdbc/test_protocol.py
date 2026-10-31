@@ -18,7 +18,8 @@ class Plugin:
         self.process = subprocess.Popen([str(ROOT / 'dre-plugin-jdbc')], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         self.send(type='hello', min_version=1, max_version=1, plugin='source/jdbc')
-        assert self.receive()['type'] == 'hello'
+        self.info = self.receive()
+        assert self.info['type'] == 'hello'
 
     def send(self, **message):
         self.send_json(json.dumps(message))
@@ -93,6 +94,16 @@ class ProtocolTests(unittest.TestCase):
 
     def test_scalar_properties_keep_case_and_driver_discovery_uses_supplied_jars(self):
         self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+
+    def test_committed_descriptor_matches_protocol(self):
+        description = self.request(type='describe')
+        self.assertEqual(description.pop('type'), 'describe')
+        description.pop('id')
+        actual = {'source/jdbc': {'capabilities': sorted(self.plugin.info['capabilities']), **description}}
+        path = ROOT / 'describe.json'
+        if os.environ.get('DRE_UPDATE_DESCRIBE'):
+            path.write_text(json.dumps(actual, indent=2) + '\n')
+        self.assertEqual(actual, json.loads(path.read_text()))
 
     def test_explicit_driver_class_and_single_jar_path(self):
         self.config.update(driver_class='fixture.FixtureDriver', driver_jars=str(self.jar))

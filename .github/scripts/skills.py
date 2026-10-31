@@ -464,7 +464,7 @@ def plugins():
 
 def describe_files(root=ROOT):
     """Every first-party plugin's `describe` reply, from its package's committed describe.json
-    (written from the built plugins and checked by the `describe_json` test)."""
+    (written from the built plugins and checked by their protocol tests)."""
     out = {}
     for package, about in PACKAGES.items():
         directory = about.get("go") or about.get("java") or f"plugins/{package}"
@@ -472,7 +472,7 @@ def describe_files(root=ROOT):
         replies = json.loads(path.read_text())
         for plugin in about["provides"]:
             if plugin not in replies:
-                raise SystemExit(f"{path} has no `{plugin}`: run the describe_json test with DRE_UPDATE_DESCRIBE=1")
+                raise SystemExit(f"{path} has no `{plugin}`: regenerate the package's metadata from its built plugin")
             out[plugin] = replies[plugin]
     return out
 

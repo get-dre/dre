@@ -102,12 +102,19 @@ python3 .github/scripts/skills.py check
 ```
 
 A plugin's fields and options reach the references through its package's `describe.json`
-(`plugins/<package>/describe.json`, `go/<package>/describe.json`). After changing them in the
-plugin's code, rewrite the file from the built plugins and commit it; CI's `describe_json` test
-fails while it's stale:
+(`plugins/<package>/describe.json`, `go/<package>/describe.json`, `java/jdbc/describe.json`).
+After changing them in the plugin's code, rewrite the file from the built plugins and commit it.
+The Rust/Go `describe_json` test and Java's direct protocol test fail while their metadata is stale:
 
 ```bash
 DRE_UPDATE_DESCRIBE=1 DRE_TEST_GO_PLUGINS=<dir of built Go plugins> cargo test -p dre-cli --test describe_json
+```
+
+For JDBC, build the current JAR first, then regenerate only its metadata:
+
+```bash
+mvn -B -f java/jdbc/pom.xml package
+DRE_UPDATE_DESCRIBE=1 python3 java/jdbc/test_protocol.py ProtocolTests.test_committed_descriptor_matches_protocol
 ```
 
 The Skills workflow runs `check` on every change to the skills, the plugin docs, the CLI or a

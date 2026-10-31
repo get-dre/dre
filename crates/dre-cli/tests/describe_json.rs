@@ -3,9 +3,8 @@
 //! references) read a file instead of building and starting the plugins. The fields and options
 //! are authored once, in the plugin's code; this test fails when a built plugin's reply differs
 //! from its file. `DRE_UPDATE_DESCRIBE=1` rewrites the files. Go packages are checked when
-//! `DRE_TEST_GO_PLUGINS` names their built programs. The Java package is checked when
-//! `DRE_TEST_JDBC_JAR` names its built shaded JAR; the test uses the packaged launcher and
-//! the environment's installed Java.
+//! `DRE_TEST_GO_PLUGINS` names their built programs. The Java package is checked directly
+//! through its protocol in `java/jdbc/test_protocol.py`.
 
 mod common;
 
@@ -18,30 +17,6 @@ use serde_json::{Map, Value, json};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn java_launcher(jar: &Path) -> PathBuf {
-    let dir = jar.parent().expect("the JDBC JAR has a parent");
-    let exe = dir.join(format!("dre-plugin-jdbc{}", std::env::consts::EXE_SUFFIX));
-    let source = root().join("java/jdbc/launcher/dre-plugin-jdbc");
-    if cfg!(windows) {
-        let build = std::process::Command::new("rustc")
-            .arg("--edition=2021")
-            .arg(source.with_extension("rs"))
-            .arg("-o")
-            .arg(&exe)
-            .status()
-            .unwrap();
-        assert!(build.success());
-        return exe;
-    }
-    std::fs::copy(source, &exe).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    exe
 }
 
 /// What `describe.json` holds for one plugin: its reply, without the plugin version (which
@@ -79,6 +54,9 @@ fn each_package_describe_json_matches_its_plugins() {
     let go_dir = std::env::var_os("DRE_TEST_GO_PLUGINS").map(PathBuf::from);
     let mut stale = Vec::new();
     for (package, about) in &packages {
+        if about.get("java").is_some() {
+            continue;
+        }
         let (exe, dir) = match about.get("go").and_then(Value::as_str) {
             Some(go) => {
                 let Some(d) = &go_dir else {
@@ -90,20 +68,10 @@ fn each_package_describe_json_matches_its_plugins() {
                     root().join(go),
                 )
             }
-            None => match about.get("java").and_then(Value::as_str) {
-                Some(java) => {
-                    let Some(jar) = std::env::var_os("DRE_TEST_JDBC_JAR") else {
-                        eprintln!("skipped {package}: set DRE_TEST_JDBC_JAR");
-                        continue;
-                    };
-                    let jar = PathBuf::from(jar);
-                    (java_launcher(&jar), root().join(java))
-                }
-                None => (
-                    common::workspace_bin(&format!("dre-plugin-{package}")),
-                    root().join("plugins").join(package),
-                ),
-            },
+            None => (
+                common::workspace_bin(&format!("dre-plugin-{package}")),
+                root().join("plugins").join(package),
+            ),
         };
         let mut want = Map::new();
         for id in about["provides"].as_array().unwrap() {
