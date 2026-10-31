@@ -8,8 +8,8 @@ own Java code with the components below. Each remains under its own license.
 | Component | Version | License |
 |---|---|---|
 | Apache Arrow Java (JDBC adapter, vector, memory, format) | 19.0.0 | Apache-2.0 |
-| Jackson databind | 2.22.4 | Apache-2.0 |
-| Jackson core, annotations and JSR-310 | 2.21.x | Apache-2.0 |
+| Jackson core, databind and JSR-310 | 2.22.4 | Apache-2.0 |
+| Jackson annotations | 2.22 | Apache-2.0 |
 | SLF4J API and NOP provider | 2.0.20 | MIT |
 | Netty (buffer and common) | 4.2.9.Final | Apache-2.0 |
 | FlatBuffers Java | 25.2.10 | Apache-2.0 |

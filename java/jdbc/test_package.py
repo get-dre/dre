@@ -15,6 +15,7 @@ import tempfile
 import time
 import threading
 import unittest
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGER = ROOT / ".github/scripts/package_jdbc.py"
@@ -24,6 +25,17 @@ spec.loader.exec_module(package_jdbc)
 
 
 class Package(unittest.TestCase):
+    def test_shaded_jar_keeps_overlapping_dependency_notices(self):
+        jar = ROOT / "java/jdbc/target/dre-plugin-jdbc.jar"
+        if not jar.is_file():
+            self.skipTest("build the JDBC JAR first")
+        with ZipFile(jar) as archive:
+            self.assertIn(b"Copyright (c) 2004-2023 QOS.ch", archive.read("META-INF/LICENSE.txt"))
+            notice = archive.read("META-INF/NOTICE")
+            self.assertIn(b"Arrow JDBC Adapter", notice)
+            self.assertIn(b"Arrow Memory - Core", notice)
+            self.assertIn(b"Jackson JSON processor", notice)
+
     def test_install_update_and_report_without_system_java(self):
         artifact = os.environ.get("DRE_TEST_JDBC_ARCHIVE")
         cli = os.environ.get("DRE_BIN")
