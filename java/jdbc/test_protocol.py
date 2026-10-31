@@ -99,8 +99,7 @@ class ProtocolTests(unittest.TestCase):
         description = self.request(type='describe')
         self.assertEqual(description.pop('type'), 'describe')
         description.pop('id')
-        description['capabilities'] = sorted(self.plugin.info['capabilities'])
-        actual = {'source/jdbc': description}
+        actual = {'source/jdbc': {'capabilities': sorted(self.plugin.info['capabilities']), **description}}
         path = ROOT / 'describe.json'
         if os.environ.get('DRE_UPDATE_DESCRIBE'):
             path.write_text(json.dumps(actual, indent=2) + '\n')
