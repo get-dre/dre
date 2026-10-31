@@ -689,6 +689,10 @@ def sync(root):
             guide.parent.mkdir(parents=True, exist_ok=True)
             guide.write_text(_relink(strip_nav((root / "docs/ai-ready-reports.md").read_text()), "ai-ready-reports.md"))
     copy_topics(skills_root)
+    for source in sorted((skills_root / "shared" / "port").rglob("*.md")):
+        target = skills_root / "dre-port" / "references" / source.relative_to(skills_root / "shared" / "port")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, target)
     bundle_docs(root)
 
 

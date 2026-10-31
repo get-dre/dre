@@ -15,7 +15,7 @@ undo; and never ask for, repeat or store a password, token or key.
 | `dre-ai` | Prepares report descriptions, questions, declared inputs and pipeline context; leaves exposure to the owner. |
 | `dre-report` | Designs and writes a report around your goal: SQL, tabs, variables, format, PDF and HTML documents, one copy per member or client, what happens with no data, destinations and schedules. Also changes existing reports. |
 | `dre-run` | Validates, previews, runs and delivers, confirming before production runs and real deliveries; retries failed rows, releases held deliveries, and explains failures. |
-| `dre-port` | Moves reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts, and proves each one with a parity check against the old report's export. Lists a folder of reports first, with an effort estimate and an order. |
+| `dre-port` | Moves reporting from SAS source, SSRS, Power BI paginated, Crystal Reports or SQL scripts. Checks business rules and optional old CSV/XLSX outputs; inventories missing dependencies and semantic gaps. Lists a folder of reports first, with an effort estimate and an order. |
 | `dre-explain` | Explains what DRE can do for your goal, what a report's YAML will do when it runs, and what an option does, with its choices and a recommendation. Changes nothing. |
 | `dre-upgrade` | Checks for updates to `dre` and to these skills, and applies the ones you choose. The only skill that uses the network. |
 
@@ -89,6 +89,7 @@ only its own folder. Content shared between skills is therefore written once and
 | `docs/sections.json` and each page's title, description and inline terms/options | `<skill>/references/docs-index.md`, generated |
 | `docs/*.md` and `docs/sections.json` | `<skill>/references/docs/`, generated; local page links stay offline |
 | [`docs/practices.md`](../docs/practices.md) | `<skill>/references/practices.md` |
+| `shared/port/**/*.md` | `dre-port/references/` (mapping, inventory, parity, SAS and worked migration guidance) |
 | `shared/topics/*.md` (formats, documents, per-row outputs, no data, delivery) | `<skill>/references/topics/`, for the skills `COPIES` in `skills.py` lists |
 | each plugin's `describe` reply (its package's `describe.json`), its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
 

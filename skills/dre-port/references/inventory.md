@@ -66,3 +66,13 @@ schedule ("Monthly 6am"); ask for its exact recurrence and time zone when portin
 
 A Crystal Server or BusinessObjects estate: ask for the schedules and publications as a list or
 screenshots; the csv columns above are the shape to fill.
+
+## SAS programs
+
+The XML inventory script does not parse `.sas` files. Inventory them by reading the programs
+and referenced source, following `sas.md`, "Inventory before translation". Include program,
+inputs/outputs, includes/macros, scalar parameters, formats, WORK/local datasets and dependency
+status in the estate table. Flag dynamic references as unresolved, and show missing files and
+unsupported constructs as blockers rather than inventing behavior or excluding them silently.
+Rank complete row-local/SQL jobs before jobs with stateful steps or unavailable inputs; qualify
+all effort estimates. SSRS subscriptions are relevant only to the SSRS part of a mixed estate.

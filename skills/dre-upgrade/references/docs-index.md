@@ -35,7 +35,7 @@ Search this index for the question's terms, then open the linked page. These loc
 - [Project configuration](docs/project-configuration.md): Share defaults, override reports and Sets, and bound template queries.
   Terms/options: `--set`, `--var`, `default_output`, `default_profile`, `default_set`, `dependencies.yml`, `dev`, `dispatch`, `dre_project.yml`, `exclude`, `exclude-and-queries`, `false`, `format_options`, `github`, `http_timeout`, `keep_runs`, `local`, `lookup_inline_max_rows`, `mask_secrets`, `name`, `no-connection`, `output`, `plugins`, `prod`, `profile`, `profile-and-sets`, `queries`, `registry`, `reports/`, `reports:`, `run.date`, `run.now`, `run_query_max_rows`, `run_timeout`, `sets.yml`, `tab_names`, `tags`, `target_path`, `unknown-default-set`, `unknown-folder`, `unknown-key`, `unknown-query`, `version`, `week_numbering`, `week_start`.
 - [Tested examples](docs/examples.md): Complete, copyable projects with checked output: Excel, bank files, Sets, Slack, SFTP and password-protected statements.
-- [Moving from SSRS or Crystal](docs/moving-from-ssrs-or-crystal.md): Port reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts with the dre-port agent skill, and prove each one matches with a parity check.
+- [Moving from SAS, SSRS or Crystal](docs/moving-from-ssrs-or-crystal.md): Migrate reporting from SAS, SSRS, Crystal or SQL with dre-port: dependency assessment, database SQL, business-rule validation and optional output parity.
   Terms/options: `Format`, `IIf`, `ROLLUP`, `dre-port`, `for_each`, `on_empty`, `run.date`, `schedules.yml`, `var_schema`.
 
 ## Connect

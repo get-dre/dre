@@ -1,7 +1,22 @@
 # The parity check
 
-A port ends by showing that the DRE report gives the same answer as the old one, for the same
-parameters (PORT-2). `scripts/parity.py` compares the rows; the user compares the layout.
+A port ends with explicit validation evidence (PORT-2). When a comparable old output exists,
+`scripts/parity.py` compares its rows with DRE for matching inputs, parameters and dates; the
+user reviews the layout. Otherwise use business-rule checks below.
+
+## No reference output, or unexecuted SAS
+
+An old output is optional. Without one, validate against the report specification: expected
+keyed records, classifications, counts, totals, nulls, date boundaries, deduplication and
+rounding. Save the checks and expected/actual results. Say "business-rule validation passed;
+SAS equivalence unverified" when appropriate. Missing rules/dependencies remain explicit
+blockers even if configuration validates. Use `sas.md` and `examples/sas-overdue.md` for SAS.
+
+With a supplied SAS CSV/XLSX output, confirm that the source snapshot, parameters and reporting
+dates match before using the existing comparison below. For xlsx use `--sheet` for the intended
+tab and compare data values; formulas without cached results are not independent evidence.
+A synthetic expected output tests business rules; label it accordingly rather than claiming a
+SAS execution. Record keys, totals, tolerance and accepted differences in the handover.
 
 ## 1. The old report's export
 
@@ -18,6 +33,7 @@ parameter at its usual selection. Ask the user to export the old report with the
 - **Crystal Reports:** File > Export > Character-separated values (CSV), or Microsoft Excel
   Workbook Data-only. A Crystal XML *data* export works too once saved as csv; the
   definition export doesn't hold rows.
+- **SAS:** reuse an existing CSV or XLSX export if available; SAS installation or re-execution is not required. Confirm inputs, parameters and reporting dates first.
 - **SQL plus a spreadsheet:** the spreadsheet they send today is the export.
 
 Exports often add things that aren't rows: title lines (skip them with `--skip-rows N`), a grand
