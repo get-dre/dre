@@ -168,6 +168,7 @@ impl Env {
             .env("DRE_GITHUB_API_URL", &self.server.base)
             .env("DRE_PROFILES_DIR", self.p("profiles"))
             .env("HOME", self.p("home"))
+            .env("USERPROFILE", self.p("home"))
             .env_remove("GITHUB_TOKEN");
         let out = c.output().unwrap();
         Run {
@@ -412,7 +413,8 @@ fn a_run_notices_a_changed_source_without_dre_deps() {
         .current_dir(e.p("project"))
         .env("DRE_PLUGINS_DIR", e.p("plugins"))
         .env("DRE_REGISTRY_URL", reg.join("index.json"))
-        .env("HOME", e.p("home"));
+        .env("HOME", e.p("home"))
+        .env("USERPROFILE", e.p("home"));
     assert!(c.output().unwrap().status.success());
     assert!(!e.lock().contains("from:"), "{}", e.lock());
 

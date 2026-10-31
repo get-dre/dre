@@ -98,7 +98,8 @@ impl Env {
             .env("DRE_PLUGINS_DIR", self.p("plugins"))
             .env("DRE_REGISTRY_URL", self.p("registry/index.json"))
             .env("DRE_PROFILES_DIR", self.p("profiles"))
-            .env("HOME", self.p("home"));
+            .env("HOME", self.p("home"))
+            .env("USERPROFILE", self.p("home"));
         let out = c.output().unwrap();
         Run {
             code: out.status.code().unwrap_or(-1),

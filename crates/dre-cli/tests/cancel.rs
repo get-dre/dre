@@ -55,6 +55,7 @@ fn spawn(p: &TestProject, pid_file: &Path) -> Child {
         .env("DRE_PLUGINS_DIR", &p.plugins)
         .env("DRE_FIXTURE_PID_FILE", pid_file)
         .env("HOME", p.dir.path().join("home"))
+        .env("USERPROFILE", p.dir.path().join("home"))
         .env_remove("DRE_PROFILES_DIR")
         .env_remove("DRE_TARGET")
         .stdout(Stdio::piped())
@@ -215,6 +216,7 @@ fn a_run_past_its_timeout_is_stopped_and_exits_124() {
         .env("DRE_PLUGINS_DIR", &p.plugins)
         .env("DRE_FIXTURE_PID_FILE", &pid_file)
         .env("HOME", p.dir.path().join("home"))
+        .env("USERPROFILE", p.dir.path().join("home"))
         .env_remove("DRE_RUN_TIMEOUT")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

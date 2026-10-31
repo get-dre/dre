@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-/// `dre fonts <args>` with `home` as HOME and `registry` as the registry: exit code and output.
+/// `dre fonts <args>` with HOME/USERPROFILE and the registry isolated: exit code and output.
 /// Not `TestProject::dre_env`: `dre fonts` takes no project, so no `--project-dir`.
 fn dre_fonts(home: &std::path::Path, registry: &std::path::Path, args: &[&str]) -> (i32, String) {
     let out = assert_cmd::Command::cargo_bin("dre")
@@ -10,6 +10,7 @@ fn dre_fonts(home: &std::path::Path, registry: &std::path::Path, args: &[&str]) 
         .arg("fonts")
         .args(args)
         .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("DRE_REGISTRY_URL", registry)
         .output()
         .unwrap();
@@ -46,6 +47,10 @@ fn install_then_ls_shows_the_cached_font_and_its_scripts() {
     let (code, out) = dre_fonts(&home, &registry, &["install", "ar"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("Installed  noto_sans_arabic 2.13.0 (Arab)"), "{out}");
+    assert!(
+        out.contains(&home.display().to_string()),
+        "the font cache escaped the test home: {out}"
+    );
 
     let (code, out) = dre_fonts(&home, &registry, &["ls"]);
     assert_eq!(code, 0, "{out}");

@@ -208,6 +208,7 @@ impl TestProject {
         c.env("DRE_PLUGINS_DIR", &self.plugins)
             .env("DRE_RUN_DATE", "2026-01-25")
             .env("HOME", self.dir.path().join("home"))
+            .env("USERPROFILE", self.dir.path().join("home"))
             .env_remove("DRE_PROFILES_DIR")
             .env_remove("DRE_TARGET")
             .envs(env.iter().copied());

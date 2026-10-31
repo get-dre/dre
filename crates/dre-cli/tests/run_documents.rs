@@ -121,6 +121,7 @@ fn a_relative_project_dir_works() {
         .arg(p.dir.path().join("profiles"))
         .env("DRE_PLUGINS_DIR", &p.plugins)
         .env("HOME", p.dir.path().join("home"))
+        .env("USERPROFILE", p.dir.path().join("home"))
         .env_remove("DRE_PROFILES_DIR")
         .env_remove("DRE_TARGET")
         .env("DRE_RUN_DATE", "2026-09-30");

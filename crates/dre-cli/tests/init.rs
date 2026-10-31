@@ -38,6 +38,7 @@ fn dre_in(dir: &Path, cwd: &Path, args: &[&str], stdin: &str) -> common::Run {
         .env("DRE_REGISTRY_URL", dir.join("registry/index.json"))
         .env("DRE_PROFILES_DIR", dir.join("dot-dre"))
         .env("HOME", dir.join("home"))
+        .env("USERPROFILE", dir.join("home"))
         .write_stdin(stdin)
         .output()
         .unwrap();
