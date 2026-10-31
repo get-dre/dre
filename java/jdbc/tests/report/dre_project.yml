@@ -1,0 +1,2 @@
+name: jdbc_oracle_fixture
+default_profile: oracle_fixture

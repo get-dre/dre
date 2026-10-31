@@ -104,6 +104,8 @@ Search this index for the question's terms, then open the linked page. These loc
   Terms/options: `attach`, `attach:`, `connect_timeout`, `delivery-failed`, `dependencies.yml`, `destinations:`, `invalid-destination-option`, `max_retry_wait`, `profiles.yml`, `retries`, `retry_wait`, `run_results.json`, `teams`, `timeout`, `webhook_url`.
 - [Google Chat](docs/plugin-google_chat.md): Post report headline messages to Google Chat spaces with the google_chat destination: space webhooks, notes, and adapting a headline to Google Chat.
   Terms/options: `attach`, `connect_timeout`, `delivery-failed`, `dependencies.yml`, `destinations:`, `google_chat`, `invalid-destination-option`, `max_retry_wait`, `ops_chat`, `profiles.yml`, `retries`, `retry_wait`, `target/run/`, `teams`, `timeout`, `webhook_url`.
+- [JDBC (development build)](docs/plugin-jdbc.md): Connect an optional JDBC source with user-supplied drivers: development setup, Oracle reporting evidence, supported types and limits.
+  Terms/options: `DATE`, `DRE_PLUGINS_DIR`, `JDBC_URL`, `NUMBER`, `RAW`, `TIME`, `TIMESTAMP`, `check`, `dependencies.yml`, `driver_class`, `driver_jars`, `false`, `java.sql.Driver`, `jdbc`, `load`, `ojdbc11`, `properties`, `row_limit`, `sessions`, `target/`, `true`, `url`, `validate`.
 
 ## Reference
 

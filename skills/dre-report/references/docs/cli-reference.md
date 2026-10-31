@@ -650,4 +650,4 @@ dre release statements --run 20261017T060000Z-k3f9 --by jane
 
 ---
 
-**Previous:** [Google Chat](plugin-google_chat.md) · **Next:** [YAML reference](yaml-reference.md)
+**Previous:** [JDBC (development build)](plugin-jdbc.md) · **Next:** [YAML reference](yaml-reference.md)

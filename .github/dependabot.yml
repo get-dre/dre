@@ -3,6 +3,15 @@ version: 2
 # Weekly dependency updates. Minor and patch bumps are grouped into one PR per
 # ecosystem; major bumps stay separate so a breaking change is reviewed alone.
 updates:
+  - package-ecosystem: maven
+    directory: /java/jdbc
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      maven:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

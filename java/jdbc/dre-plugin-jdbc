@@ -1,0 +1,6 @@
+#!/bin/sh
+# Development launcher. The installable package supplies its runtime separately.
+set -eu
+base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+java=${JAVA_HOME:+$JAVA_HOME/bin/}java
+exec "$java" --add-opens=java.base/java.nio=ALL-UNNAMED -jar "$base/target/dre-plugin-jdbc.jar"
