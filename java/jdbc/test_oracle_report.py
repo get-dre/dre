@@ -45,6 +45,8 @@ class OracleReport(unittest.TestCase):
             self.assertEqual(cells['D3'][0], '2026/01/31')
             self.assertIsInstance(cells['C2'][0], float)
             self.assertEqual(cells['C2'][0], 46053.0)
+            self.assertEqual(cells['E2'][0].lower(), '002aff')
+            self.assertEqual(cells['F2'][0], 46053.5)
             env['DRE_TEST_JDBC_PASSWORD'] = 'CLI_JDBC_PASSWORD_SENTINEL'
             env['DRE_TEST_JDBC_VENDOR_SECRET'] = 'VENDOR_PROPERTY_SENTINEL'
             for complete_url in [False, True]:
@@ -64,6 +66,15 @@ class OracleReport(unittest.TestCase):
             manifests = list((project / 'target').rglob('run_results.json'))
             self.assertTrue(manifests)
             self.assertTrue(any(json.loads(path.read_text()) for path in manifests))
+            shutil.copy2(ROOT / 'tests/report/profiles.yml', project / 'profiles.yml')
+            env['DRE_TEST_JDBC_URL'] = os.environ['DRE_TEST_JDBC_URL']
+            env['DRE_TEST_JDBC_PASSWORD'] = os.environ['DRE_TEST_JDBC_PASSWORD']
+            (project / 'reports/accounts/accounts.sql').write_text(
+                "select timestamp '2026-01-31 01:02:03.123456' as precise from dual;\n")
+            unsupported = subprocess.run([cli, 'run', 'accounts', '--preview'], cwd=project,
+                                         env=env, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(unsupported.returncode, 0)
+            self.assertIn('cast', unsupported.stdout + unsupported.stderr)
 
 
 if __name__ == '__main__':

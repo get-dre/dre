@@ -105,6 +105,13 @@ in a timezone-free Arrow timestamp; the isolated JVM uses UTC to make transport 
 the host's timezone. Timezone-bearing vendor types and broader type fidelity need separate evidence.
 Unsupported JDBC conversions fail; cast the column to a supported representation in SQL.
 
+Oracle `DATE` includes time-of-day. The driver's default timestamp mapping preserves it.
+If a driver setting such as `oracle.jdbc.mapDateToTimestamp: false` exposes it as JDBC `DATE`,
+the source refuses that date-only mapping and asks for an explicit `TIMESTAMP(3)` or text cast.
+This avoids silently dropping the clock fields. Oracle `RAW` bytes have Arrow/workbook coverage;
+xlsx renders binary values as hexadecimal text. Other databases' `DATE`/`TIME` behavior needs
+its own type-fidelity checks.
+
 Only `sessions` and `validate` are advertised. There is no `check`, temporary lookup `load`,
 catalog metadata integration or restricted-query capability. An explicit `read_only: true`
 protocol request is refused. JDBC read-only hints are not an authorization boundary; configure

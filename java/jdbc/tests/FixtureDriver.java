@@ -26,6 +26,14 @@ public final class FixtureDriver implements Driver {
     return (Connection) Proxy.newProxyInstance(FixtureDriver.class.getClassLoader(), new Class<?>[]{Connection.class},
         (proxy, method, arguments) -> switch (method.getName()) {
           case "setAutoCommit", "close" -> null;
+          case "createStatement" -> Proxy.newProxyInstance(FixtureDriver.class.getClassLoader(), new Class<?>[]{Statement.class},
+              (statement, operation, values) -> switch (operation.getName()) {
+                case "setFetchSize" -> null;
+                case "execute" -> false;
+                case "getLargeUpdateCount" -> 0L;
+                case "close" -> throw new SQLException("close failed " + secret, "HY000", 999);
+                default -> throw new SQLFeatureNotSupportedException("not used by this fixture");
+              });
           default -> throw new SQLFeatureNotSupportedException("not used by this fixture");
         });
   }

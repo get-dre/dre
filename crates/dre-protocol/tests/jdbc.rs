@@ -21,13 +21,20 @@ fn binary() -> Option<PathBuf> {
 }
 
 fn connection() -> Option<Value> {
-    let url = std::env::var("DRE_TEST_JDBC_URL").ok()?;
+    let names = ["DRE_TEST_JDBC_URL", "DRE_TEST_JDBC_JAR", "DRE_TEST_JDBC_PASSWORD"];
+    let set = names.map(|name| std::env::var(name).ok());
+    if set.iter().all(Option::is_none) {
+        return None;
+    }
+    let [Some(url), Some(jar), Some(password)] = set else {
+        panic!("set DRE_TEST_JDBC_URL, DRE_TEST_JDBC_JAR and DRE_TEST_JDBC_PASSWORD together");
+    };
     Some(json!({
         "url": url,
-        "driver_jars": [std::env::var("DRE_TEST_JDBC_JAR").expect("Oracle fixture needs its driver JAR")],
+        "driver_jars": [jar],
         "properties": {
             "user": std::env::var("DRE_TEST_JDBC_USER").unwrap_or_else(|_| "dre_fixture".into()),
-            "password": std::env::var("DRE_TEST_JDBC_PASSWORD").expect("Oracle fixture needs a password"),
+            "password": password,
             "oracle.jdbc.fanEnabled": false,
         },
     }))
@@ -119,7 +126,11 @@ fn oracle_preparation_and_typed_results_share_one_session() {
         batch.column(2).data_type(),
         &DataType::Timestamp(TimeUnit::Millisecond, None)
     );
-    let opened = batch.column(2).as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
+    let opened = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<TimestampMillisecondArray>()
+        .unwrap();
     assert_eq!(opened.value(0), 1_769_817_600_000);
     plugin.close().unwrap();
 }
@@ -247,5 +258,41 @@ fn cancelling_an_oracle_statement_leaves_the_session_usable() {
         plugin.execute(ROWS, Some(1), |_, _| Ok(())).unwrap(),
         Execution::Result { rows: 1, .. }
     ));
+    plugin.close().unwrap();
+}
+
+#[test]
+fn oracle_date_mapping_cannot_silently_discard_time_of_day() {
+    let (Some(path), Some(mut config)) = (binary(), connection()) else {
+        return;
+    };
+    config["properties"]["oracle.jdbc.mapDateToTimestamp"] = json!(false);
+    let mut plugin = start(&path);
+    plugin.open(config.as_object().unwrap().clone(), false).unwrap();
+    let error = plugin
+        .execute(
+            "select to_date('2026-01-31 12:34:56', 'YYYY-MM-DD HH24:MI:SS') as \"opened\" from dual",
+            None,
+            |_, _| Ok(()),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("TIMESTAMP(3)"), "{error}");
+    let mut opened = None;
+    plugin
+        .execute(
+            "select cast(to_date('2026-01-31 12:34:56', 'YYYY-MM-DD HH24:MI:SS') as timestamp(3)) as \"opened\" from dual",
+            None,
+            |_, batch| {
+                opened = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<TimestampMillisecondArray>()
+                    .map(|values| values.value(0));
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(opened, Some(1_769_862_896_000));
     plugin.close().unwrap();
 }

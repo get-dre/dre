@@ -136,6 +136,11 @@ class ProtocolTests(unittest.TestCase):
         reply = self.request(type='open', connection=self.config, read_only=True)
         self.assertEqual(reply['kind'], 'refused')
 
+    def test_statement_cleanup_failure_has_one_error_reply_not_success_then_error(self):
+        self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+        self.assertEqual(self.request(type='execute', sql='synthetic update')['type'], 'error')
+        self.assertEqual(self.request(type='describe')['type'], 'describe')
+
     def test_eof_ends_process(self):
         self.plugin.process.stdin.close()
         self.assertEqual(self.plugin.process.wait(timeout=10), 0)

@@ -406,21 +406,25 @@ public final class Main {
       throw new Failure("config", "`row_limit` must be a nonnegative whole number");
     }
     long remaining = limit == null ? Long.MAX_VALUE : limit.asLong();
+    boolean resultStarted = false;
+    long rows = 0;
     try (Statement statement = connection.createStatement()) {
       request.statement = statement;
       checkCancelled(request);
       statement.setFetchSize(8192);
       if (!statement.execute(message.path("sql").asText())) {
         checkCancelled(request);
-        send(message, "no_result", "rows_affected", Math.max(0, statement.getLargeUpdateCount()));
-        return;
-      }
-      try (ResultSet result = statement.getResultSet(); RootAllocator allocator = new RootAllocator(512L << 20)) {
+        rows = Math.max(0, statement.getLargeUpdateCount());
+      } else try (ResultSet result = statement.getResultSet(); RootAllocator allocator = new RootAllocator(512L << 20)) {
         ResultSetMetaData metadata = result.getMetaData();
+        boolean oracle = connection.getMetaData().getDatabaseProductName().equalsIgnoreCase("Oracle");
         List<String> columns = new ArrayList<>();
         for (int column = 1; column <= metadata.getColumnCount(); column++) {
           columns.add(metadata.getColumnLabel(column));
           int type = metadata.getColumnType(column);
+          if (oracle && type == Types.DATE) {
+            throw new Failure("query", "Oracle DATE can contain time-of-day; cast to TIMESTAMP(3) or exact text instead of the driver's date-only mapping");
+          }
           if ((type == Types.NUMERIC || type == Types.DECIMAL)
               && (metadata.getPrecision(column) < 1 || metadata.getPrecision(column) > 38
                   || metadata.getScale(column) < 0 || metadata.getScale(column) > metadata.getPrecision(column))) {
@@ -434,7 +438,7 @@ public final class Main {
             .setTargetBatchSize(8192).setBigDecimalRoundingMode(RoundingMode.UNNECESSARY).build();
         Schema schema = JdbcToArrowUtils.jdbcToArrowSchema(metadata, config);
         send(message, "result", "columns", columns);
-        long rows = 0;
+        resultStarted = true;
         boolean sent = false;
         try (ArrowVectorIterator batches = JdbcToArrow.sqlToArrowVectorIterator(result, config)) {
           while (remaining > 0 && batches.hasNext()) {
@@ -456,13 +460,17 @@ public final class Main {
           }
         }
         checkCancelled(request);
-        send(message, "result_end", "rows", rows);
       }
     } finally {
       // Finish cancellation before another statement can use this database connection.
       synchronized (request) {
         request.statement = null;
       }
+    }
+    if (resultStarted) {
+      send(message, "result_end", "rows", rows);
+    } else {
+      send(message, "no_result", "rows_affected", rows);
     }
   }
 
