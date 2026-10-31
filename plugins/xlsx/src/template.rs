@@ -155,7 +155,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
                 .get(&format!("{}!{cell}", b.sheet))
                 .cloned()
                 .unwrap_or_default();
-            ws.cell_mut(coord).set_value(v);
+            ws.cell_mut(coord).set_value_string(v);
         } else {
             let i = find(b)?;
             bound[i] = true;
@@ -228,7 +228,7 @@ pub fn fill(req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>
             if header {
                 for (c, n) in res.names.iter().enumerate() {
                     let cell = ws.cell_mut((c as u32 + 1, 1));
-                    cell.set_value(n.clone());
+                    cell.set_value_string(n.clone());
                     cell.style_mut().font_mut().set_bold(true);
                 }
             }
@@ -311,6 +311,21 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
         let ws = sheet(book, &b.sheet)?;
         if n > 1 {
             ws.insert_new_row(first + 1, n - 1);
+            // Inserting after a range's last row doesn't make that range include the new rows.
+            if let Some(filter) = ws.auto_filter_mut() {
+                extend_range(filter.range_mut(), first, first + n - 1);
+            }
+            let mut rules = ws.conditional_formatting_collection().to_vec();
+            for rule in &mut rules {
+                for range in rule.sequence_of_references_mut().range_collection_mut() {
+                    extend_range(range, first, first + n - 1);
+                }
+            }
+            ws.set_conditional_formatting_collection(rules);
+            let height = ws
+                .row_dimension(first)
+                .map(|row| row.height())
+                .filter(|h| *h > 0.0);
             // Copy the reserved row's formatting (every styled cell in it) onto the new rows.
             let styled: Vec<(u32, umya_spreadsheet::Style)> = ws
                 .collection_by_row(first)
@@ -326,6 +341,9 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
                 .map(|c| (c.coordinate().col_num(), c.formula().to_string()))
                 .collect();
             for row in first + 1..first + n {
+                if let Some(height) = height {
+                    ws.row_dimension_mut(row).set_height(height);
+                }
                 for (col, style) in &styled {
                     ws.cell_mut((*col, row)).set_style(style.clone());
                 }
@@ -337,7 +355,7 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
         if header {
             for (k, &ci) in cols.iter().enumerate() {
                 ws.cell_mut((u32::from(c0) + 1 + k as u32, r0 + 1))
-                    .set_value(res.names[ci].clone());
+                    .set_value_string(res.names[ci].clone());
             }
         }
         if n == 0 {
@@ -418,6 +436,25 @@ fn fill_block(book: &mut Spreadsheet, b: &Binding, r0: u32, c0: u16, res: &Colle
         }
     }
     Ok(())
+}
+
+fn extend_range(range: &mut umya_spreadsheet::Range, reserved: u32, last: u32) {
+    let Some(end) = range
+        .coordinate_end_row()
+        .or_else(|| range.coordinate_start_row())
+    else {
+        return;
+    };
+    if end.num() != reserved {
+        return;
+    }
+    if range.coordinate_end_row().is_none() {
+        let cell = range.range();
+        range.set_range(format!("{cell}:{cell}"));
+    }
+    if let Some(end) = range.coordinate_end_row_mut() {
+        end.set_num(last);
+    }
 }
 
 static RANGE: LazyLock<Regex> = LazyLock::new(|| {
@@ -577,7 +614,7 @@ fn write_value(
             if let Some(e) = crate::cells::too_long(sheet, coord.1 - 1, coord.0 - 1, column, &t) {
                 return Err(e);
             }
-            cell.set_value(t);
+            cell.set_value_string(t);
             if Kind::of(a.data_type()) == Kind::Other {
                 apply(cell);
             } else if fmt.is_explicit() {

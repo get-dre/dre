@@ -418,3 +418,130 @@ fn a_column_style_applies_to_its_cells_in_a_template() {
         );
     }
 }
+
+#[test]
+fn reporting_template_ranges_include_every_inserted_data_row() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reporting.xlsx");
+    for n in [0, 1, 3, 50] {
+        let (_dir, book) = fill_from(
+            &path,
+            vec![
+                (meta("accounts", "Accounts"), accounts(n)),
+                (meta("count_q", "Count"), count(n as i64)),
+            ],
+            standard_bindings(),
+            json!({}),
+        )
+        .unwrap();
+        let sheet = book.sheet_by_name("Summary").unwrap();
+        let last = 4 + n.max(1);
+        assert_eq!(
+            sheet.auto_filter().unwrap().range().range(),
+            format!("A4:C{last}")
+        );
+        assert_eq!(
+            sheet.conditional_formatting_collection()[0]
+                .sequence_of_references()
+                .get_sqref(),
+            if n > 1 { format!("C5:C{last}") } else { "C5".into() },
+        );
+        assert_eq!(value(&book, "Summary", "A1"), "Acme Corp Monthly");
+        assert_eq!(sheet.image_collection().len(), 1);
+        assert_eq!(sheet.merge_cells()[0].range(), "A1:C1");
+        let pane = sheet.sheets_views().sheet_view_list()[0].pane().unwrap();
+        assert_eq!(pane.horizontal_split(), 1.0);
+        assert_eq!(pane.vertical_split(), 4.0);
+        assert!(matches!(
+            sheet.page_setup().orientation(),
+            umya_spreadsheet::OrientationValues::Landscape
+        ));
+        assert_eq!(sheet.page_setup().paper_size(), 9);
+        assert_eq!(sheet.page_setup().fit_to_height(), 0);
+        let print_area = sheet
+            .defined_names()
+            .iter()
+            .find(|name| name.name() == "_xlnm.Print_Area")
+            .unwrap();
+        assert_eq!(print_area.address(), format!("Summary!$A$1:$D${}", last + 3));
+        for row in 5..=last {
+            assert_eq!(sheet.row_dimension(row as u32).unwrap().height(), 32.0);
+            assert_eq!(formula(&book, "Summary", &format!("D{row}")), format!("C{row}*2"));
+            assert!(sheet.style((2, row as u32)).alignment().unwrap().wrap_text());
+        }
+        assert_eq!(
+            formula(&book, "Summary", &format!("C{}", last + 1)),
+            format!("SUM(C5:C{last})")
+        );
+        assert_eq!(
+            value(&book, "Summary", &format!("B{last}")),
+            if n == 0 {
+                String::new()
+            } else {
+                format!("Client {}", n - 1)
+            }
+        );
+    }
+}
+
+#[test]
+fn template_growth_keeps_unrelated_highlighting_ranges_and_extends_spanning_ranges_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ranges.xlsx");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/reporting.xlsx");
+    let mut template = umya_spreadsheet::reader::xlsx::read(fixture).unwrap();
+    let sheet = template.sheet_by_name_mut("Summary").unwrap();
+    let mut rules = sheet.conditional_formatting_collection().to_vec();
+    rules[0]
+        .sequence_of_references_mut()
+        .remove_range_collection()
+        .set_sqref("C5 E2 E9:E10 C4:C6");
+    sheet.set_conditional_formatting_collection(rules);
+    umya_spreadsheet::writer::xlsx::write(&template, &path).unwrap();
+    let mut bindings = standard_bindings();
+    bindings[0]["anchor"] = json!("A4");
+    bindings[0]["header"] = json!(true);
+    let (_dir, book) = fill_from(
+        &path,
+        vec![
+            (meta("accounts", "Accounts"), accounts(3)),
+            (meta("count_q", "Count"), count(3)),
+        ],
+        bindings,
+        json!({}),
+    )
+    .unwrap();
+    let sheet = book.sheet_by_name("Summary").unwrap();
+    assert_eq!(sheet.auto_filter().unwrap().range().range(), "A4:C7");
+    assert_eq!(
+        sheet.conditional_formatting_collection()[0]
+            .sequence_of_references()
+            .get_sqref(),
+        "C5:C7 E2 E11:E12 C4:C8",
+    );
+}
+
+#[test]
+fn template_text_keeps_leading_zeroes_long_identifiers_and_formula_like_values() {
+    let values = ["000019", "12345678901234567890", "=1+1", "TRUE"];
+    let batch =
+        RecordBatch::try_from_iter([("id", Arc::new(StringArray::from(values.to_vec())) as ArrayRef)])
+            .unwrap();
+    let (_dir, book) = fill(
+        vec![(meta("ids", "IDs"), batch)],
+        json!([{"sheet": "Summary", "query": "ids", "anchor": "A5", "header": false}]),
+    )
+    .unwrap();
+    for (i, expected) in values.iter().enumerate() {
+        let address = format!("A{}", i + 5);
+        assert_eq!(value(&book, "Summary", &address), *expected);
+        assert_eq!(formula(&book, "Summary", &address), "");
+        assert_eq!(
+            book.sheet_by_name("Summary")
+                .unwrap()
+                .cell(address.as_str())
+                .unwrap()
+                .data_type(),
+            "s"
+        );
+    }
+}
