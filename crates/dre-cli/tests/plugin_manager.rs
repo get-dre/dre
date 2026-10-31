@@ -723,6 +723,23 @@ fn a_rooted_archive_keeps_its_own_plugin_manifest() {
 }
 
 #[test]
+fn an_archived_manifest_must_agree_with_registry_capabilities() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"{exe}","provides":[]}}"#);
+    let tgz = gzip_tar_with_root([
+        (format!("fixture/{exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("archive capabilities disagree");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
+}
+
+#[test]
 fn a_single_nested_root_directory_need_not_have_its_own_tar_entry() {
     let e = Env::new(DECLARED);
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);

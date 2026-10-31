@@ -1,4 +1,6 @@
 set nocount on;
+set datefirst 1;
+set dateformat dmy;
 if object_id('tempdb..#dre_fixture') is not null drop table #dre_fixture;
 create table #dre_fixture (
   account_id varchar(20) not null,

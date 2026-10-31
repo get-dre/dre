@@ -2,14 +2,18 @@
 """Package seam: deterministic archives and a launcher independent of system Java."""
 
 import hashlib
+import csv
 import importlib.util
 import json
 import os
 from pathlib import Path
+import queue
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +24,102 @@ spec.loader.exec_module(package_jdbc)
 
 
 class Package(unittest.TestCase):
+    def test_install_update_and_report_without_system_java(self):
+        artifact = os.environ.get("DRE_TEST_JDBC_ARCHIVE")
+        cli = os.environ.get("DRE_BIN")
+        driver = os.environ.get("DRE_TEST_H2_JAR")
+        csv_plugin = os.environ.get("DRE_TEST_CSV_BIN")
+        if not all((artifact, cli, driver, csv_plugin)):
+            self.skipTest("set archive, DRE_BIN, DRE_TEST_H2_JAR and DRE_TEST_CSV_BIN for install/report")
+        artifact = Path(artifact).resolve()
+        with tempfile.TemporaryDirectory(prefix="dre jdbc installed report ") as temporary:
+            base = Path(temporary)
+            project = base / "project"
+            project.mkdir()
+            (project / "dre_project.yml").write_text("name: packaged\ndefault_profile: fixture\n")
+            (project / "dependencies.yml").write_text("plugins: [jdbc, csv]\n")
+            (project / "profiles.yml").write_text(
+                "connections:\n  fixture:\n    targets:\n      dev:\n        type: jdbc\n"
+                "        url: 'jdbc:h2:mem:packaged'\n"
+                f"        driver_jars: {json.dumps(str(Path(driver).resolve()))}\n")
+            reports = project / "reports/check"
+            reports.mkdir(parents=True)
+            (reports / "check.yml").write_text(
+                "queries:\n  - {query: prepare, tab: false}\n  - rows\noutput: {format: csv}\n")
+            (reports / "prepare.sql").write_text("set @report_value = 42;\n")
+            (reports / "rows.sql").write_text("select @report_value as \"value\";\n")
+            platform = os.environ["DRE_TEST_PACKAGE_PLATFORM"]
+            index = base / "registry.json"
+            index.write_text(json.dumps({"schema": 2, "plugins": [{
+                "name": "jdbc", "provides": ["source/jdbc"], "versions": [{
+                    "version": "1.0.0", "protocol": 1, "artifacts": {platform: {
+                        "url": str(artifact), "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                    }},
+                }],
+            }]}))
+            plugins = base / "plugins with spaces"
+            plugins.mkdir()
+            shutil.copy2(csv_plugin, plugins / Path(csv_plugin).name)
+            env = os.environ | {
+                "DRE_REGISTRY_URL": str(index), "DRE_PLUGINS_DIR": str(plugins),
+                "HOME": str(base / "home"), "USERPROFILE": str(base / "home"),
+                "JAVA_HOME": str(base / "no system java"), "PATH": str(base),
+            }
+
+            def run(*args):
+                command = [str(Path(cli).resolve()), *args]
+                if args[0] == "run":
+                    command.extend(["--profiles-dir", str(project)])
+                result = subprocess.run(command,
+                                        cwd=project, env=env, capture_output=True, text=True, timeout=90)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            run("plugin", "install", "jdbc")
+            lock = (project / "dre.lock").read_bytes()
+            run("plugin", "update", "jdbc")
+            self.assertEqual((project / "dre.lock").read_bytes(), lock)
+            run("run", "check", "--preview")
+            output, = project.glob("target/run/**/check.csv")
+            with output.open(newline="") as stream:
+                self.assertEqual(list(csv.reader(stream)), [["value"], ["42"]])
+
+    def test_release_archive_launches_without_system_java(self):
+        artifact = os.environ.get("DRE_TEST_JDBC_ARCHIVE")
+        if not artifact:
+            self.skipTest("set DRE_TEST_JDBC_ARCHIVE to the prepared release archive")
+        with tempfile.TemporaryDirectory(prefix="dre jdbc real archive ") as temporary:
+            base = Path(temporary)
+            with tarfile.open(artifact) as archive:
+                archive.extractall(base, filter="data")
+            package = base / "jdbc"
+            executable = package / ("dre-plugin-jdbc.exe" if os.name == "nt" else "dre-plugin-jdbc")
+            env = os.environ | {"JAVA_HOME": str(base / "no system java"), "PATH": str(base)}
+            process = subprocess.Popen([executable], env=env, stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            replies = queue.Queue()
+
+            def read_hello():
+                header = process.stdout.read(4)
+                replies.put(process.stdout.read(int.from_bytes(header, "big")) if header else b"")
+
+            threading.Thread(target=read_hello, daemon=True).start()
+            try:
+                body = b'J{"type":"hello","min_version":1,"max_version":1,"plugin":"source/jdbc"}'
+                process.stdin.write(len(body).to_bytes(4, "big") + body)
+                process.stdin.flush()
+                reply = replies.get(timeout=30)
+                self.assertEqual(reply[:1], b"J", reply)
+                self.assertEqual(json.loads(reply[1:])["type"], "hello")
+                process.stdin.close()
+                self.assertEqual(process.wait(timeout=10), 0)
+                self.assertEqual(process.stderr.read(), b"")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    stream.close()
+
     def test_archive_is_complete_version_directory_and_reproducible(self):
         with tempfile.TemporaryDirectory(prefix="dre-jdbc-package-") as temporary:
             base = Path(temporary)
@@ -117,8 +217,9 @@ class Package(unittest.TestCase):
 
     def test_jlink_runtime_starts_the_built_jar(self):
         java_home = os.environ.get("JAVA_HOME")
+        suffix = ".exe" if os.name == "nt" else ""
         jar = ROOT / "java/jdbc/target/dre-plugin-jdbc.jar"
-        if not java_home or not (Path(java_home) / "bin/jlink").is_file() or not jar.is_file():
+        if not java_home or not (Path(java_home) / f"bin/jlink{suffix}").is_file() or not jar.is_file():
             self.skipTest("set JAVA_HOME to JDK 17 and build the JDBC JAR first")
         # Leave the runtime beside the JAR for the describe.json check that follows in CI.
         runtime = jar.parent / "runtime"
@@ -126,12 +227,12 @@ class Package(unittest.TestCase):
             shutil.rmtree(runtime)
         modules = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
         subprocess.run([
-            str(Path(java_home) / "bin/jlink"), f"--add-modules={modules}",
+            str(Path(java_home) / f"bin/jlink{suffix}"), f"--add-modules={modules}",
             "--strip-debug", "--no-header-files", "--no-man-pages", f"--compress=2",
             "--output", str(runtime),
         ], check=True)
         launch = subprocess.Popen(
-            [str(runtime / "bin/java"), "--add-opens=java.base/java.nio=ALL-UNNAMED", "-jar", str(jar)],
+            [str(runtime / f"bin/java{suffix}"), "--add-opens=java.base/java.nio=ALL-UNNAMED", "-jar", str(jar)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
         )
         body = b"J" + b'{"type":"hello","min_version":0,"max_version":1,"plugin":"source/jdbc"}'
@@ -180,6 +281,37 @@ class Package(unittest.TestCase):
                 "--add-opens=java.base/java.nio=ALL-UNNAMED",
                 "-jar", str(base / "dre-plugin-jdbc.jar"), "protocol", "argument",
             ])
+
+            # A forced host kill must stop an unresponsive runtime, not only its launcher.
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+            pid = base / "runtime.pid"
+            process = subprocess.Popen([launcher], env=env | {"DRE_FAKE_PID": str(pid)})
+            handle = None
+            try:
+                deadline = time.monotonic() + 10
+                while not pid.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(pid.exists(), "fake runtime did not start")
+                handle = kernel.OpenProcess(0x00100001, False, int(pid.read_text()))
+                self.assertTrue(handle, "can't watch the fake runtime")
+                process.kill()
+                process.wait(timeout=10)
+                self.assertEqual(kernel.WaitForSingleObject(handle, 10000), 0,
+                                 "runtime survived forced launcher termination")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+                if handle:
+                    kernel.TerminateProcess(handle, 1)
+                    kernel.CloseHandle(handle)
 
 
 if __name__ == "__main__":

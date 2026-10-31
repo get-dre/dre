@@ -5,6 +5,8 @@ select account_id,
        opened,
        prepared,
        bytes,
-       optional
+       optional,
+       @@datefirst as session_setting,
+       cast(@@spid as varchar(20)) as session_id
 from #dre_fixture
 order by account_id;

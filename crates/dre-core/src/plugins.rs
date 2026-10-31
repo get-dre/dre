@@ -156,7 +156,13 @@ pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
 }
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
-    if read_manifest(version_dir).is_some() {
+    if let Some(archived) = read_manifest(version_dir) {
+        if archived.executable != m.executable
+            || archived.provides.len() != m.provides.len()
+            || !archived.provides.iter().all(|id| m.provides.contains(id))
+        {
+            return Err("archive capabilities disagree with the registry or executable probe".into());
+        }
         return Ok(());
     }
     let p = version_dir.join(MANIFEST);

@@ -1256,32 +1256,6 @@ mod tests {
         assert!(e.contains("HTTP 404") && !e.contains("tries"), "{e}");
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
-
-    #[test]
-    fn a_jdbc_named_package_archive_keeps_its_nested_root() {
-        let dir = tempfile::tempdir().unwrap();
-        let bytes = {
-            let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
-                Vec::new(),
-                flate2::Compression::none(),
-            ));
-            for (path, body, mode) in [
-                ("jdbc/dre-plugin-jdbc", b"#!/bin/sh\nexit 0\n".as_slice(), 0o755),
-                ("jdbc/dre-plugin-jdbc.jar", b"jar".as_slice(), 0o644),
-                ("jdbc/runtime/bin/java", b"runtime".as_slice(), 0o755),
-            ] {
-                let mut h = tar::Header::new_gnu();
-                h.set_size(body.len() as u64);
-                h.set_mode(mode);
-                h.set_cksum();
-                b.append_data(&mut h, path, body).unwrap();
-            }
-            b.into_inner().unwrap().finish().unwrap()
-        };
-        let (exe, _, root) = extract_tar_gz(&bytes, "jdbc", dir.path()).unwrap();
-        assert_eq!(exe, "dre-plugin-jdbc");
-        assert!(root.join("runtime/bin/java").is_file());
-    }
 }
 
 #[cfg(test)]

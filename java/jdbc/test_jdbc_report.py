@@ -67,7 +67,8 @@ class JdbcReport(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         outputs = list(project.glob("target/run/**/accounts.xlsx"))
         self.assertEqual(len(outputs), 1)
-        cells = check_examples.workbook(outputs[0])["Accounts"]
+        book = check_examples.workbook(outputs[0])
+        cells = book["Accounts"]
         for cell, expected in EXPECTED.items():
             actual = cells[cell][0]
             if isinstance(expected, str) and cell.startswith(("G",)):
@@ -77,6 +78,14 @@ class JdbcReport(unittest.TestCase):
         self.assertNotIn("H2", cells)
         self.assertEqual(cells["C2"][1], "#,##0.00")
         self.assertEqual(cells["H3"][1], "#,##0.00")
+        # Preparation and both later queries must share session settings and the same connection.
+        setting = "+10:00" if self.database == "oracle" else 1
+        session = book["Session"]
+        self.assertEqual(session["A2"][0], setting)
+        self.assertEqual(session["C2"][0], "2026/01/31")
+        for row in (2, 3):
+            self.assertEqual(cells[f"I{row}"][0], setting)
+            self.assertEqual(cells[f"J{row}"][0], session["B2"][0])
 
     def test_shared_typed_rows_through_cli(self):
         project = self.project()

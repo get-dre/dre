@@ -6,4 +6,10 @@ fn main() {
     for argument in env::args_os().skip(1) {
         writeln!(file, "{}", argument.to_string_lossy()).expect("write argument log");
     }
+    if let Some(path) = env::var_os("DRE_FAKE_PID") {
+        std::fs::write(path, std::process::id().to_string()).expect("write runtime pid");
+        loop {
+            std::thread::park();
+        }
+    }
 }
