@@ -1,0 +1,27 @@
+{
+  "detail": [
+    ["000001", "00001", "Ada Sample", "North", "Home", "2026-01-31", 28, "1-30", 100.01],
+    ["000002", "00001", "Ada Sample", "North", "Home", "2026-01-30", 29, "1-30", 75.00],
+    ["000003", "00002", null, "North", "Personal", "2026-01-01", 58, "31-60", 300.00],
+    ["000004", "00003", "O'Brien Synthetic", "South", "Home", "2025-12-31", 59, "31-60", 400.00],
+    ["000005", "00001", "Ada Sample", "South", "Home", "2025-12-02", 88, "61-90", 500.00],
+    ["000006", "00001", "Ada Sample", "South", "Personal", "2025-12-01", 89, "61-90", 600.00],
+    ["000007", "00001", "Ada Sample", "South", "Personal", "2025-11-02", 118, "Over 90", 700.00],
+    ["000009", "00001", "Ada Sample", "North", "Home", "2026-02-15", 13, "1-30", 900.00],
+    ["123456789012345678901234567890", "00003", "O'Brien Synthetic", "North", "Home", "2025-11-01", 119, "Over 90", 800.00]
+  ],
+  "summary": [
+    ["North / Home / 1-30", 3, 1075.01],
+    ["North / Home / Over 90", 1, 800.00],
+    ["North / Personal / 31-60", 1, 300.00],
+    ["South / Home / 31-60", 1, 400.00],
+    ["South / Home / 61-90", 1, 500.00],
+    ["South / Personal / 61-90", 1, 600.00],
+    ["South / Personal / Over 90", 1, 700.00]
+  ],
+  "exceptions": [["000011", "MISSING_DUE"], ["000012", "MISSING_BRANCH"],
+                 ["000013", "MISSING_CUSTOMER"], ["000014", "MISSING_PRINCIPAL"],
+                 ["000015", "NEGATIVE_PRINCIPAL"]],
+  "count": 9,
+  "balance": 4375.01
+}
