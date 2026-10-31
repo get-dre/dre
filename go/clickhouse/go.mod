@@ -3,7 +3,7 @@ module github.com/get-dre/dre/go/clickhouse
 go 1.27
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.50.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/get-dre/dre/go/plugin v0.0.0
 	github.com/google/uuid v1.6.0
@@ -25,8 +25,8 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.29 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
-	go.opentelemetry.io/otel v1.46.0 // indirect
-	go.opentelemetry.io/otel/trace v1.46.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 )
