@@ -8,11 +8,13 @@ own Java code with the components below. Each remains under its own license.
 | Component | Version | License |
 |---|---|---|
 | Apache Arrow Java (JDBC adapter, vector, memory, format) | 19.0.0 | Apache-2.0 |
-| Jackson (databind, core, annotations, JSR-310) | 2.21.x | Apache-2.0 |
-| SLF4J API and NOP provider | 2.0.17 | MIT |
+| Jackson databind | 2.22.4 | Apache-2.0 |
+| Jackson core, annotations and JSR-310 | 2.21.x | Apache-2.0 |
+| SLF4J API and NOP provider | 2.0.20 | MIT |
 | Netty (buffer and common) | 4.2.9.Final | Apache-2.0 |
 | FlatBuffers Java | 25.2.10 | Apache-2.0 |
 | Apache Commons Codec | 1.21.0 | Apache-2.0 |
+| JCTools | 4.0.5 | Apache-2.0 |
 
 The shaded JAR includes the license and notice material those components
 distribute. Vendor JDBC drivers supplied by users are not part of this package
