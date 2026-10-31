@@ -202,10 +202,7 @@ pub fn package_executable_name(package: &str) -> String {
 
 /// Parse `dre-plugin-<package>[.exe]` into the package name.
 pub fn parse_package_executable_name(file: &str) -> Option<String> {
-    let stem = file.strip_suffix(std::env::consts::EXE_SUFFIX).unwrap_or(file);
-    if !std::env::consts::EXE_SUFFIX.is_empty() && stem == file {
-        return None;
-    }
+    let stem = file.strip_suffix(".exe").unwrap_or(file);
     let name = stem.strip_prefix("dre-plugin-")?;
     valid_name(name).then(|| name.to_string())
 }
@@ -217,10 +214,7 @@ pub fn executable_name(kind: Kind, name: &str) -> String {
 
 /// Parse `dre-<kind>-<name>[.exe]` into its kind and name. Names are `[a-z0-9_]+`.
 pub fn parse_executable_name(file: &str) -> Option<(Kind, String)> {
-    let stem = file.strip_suffix(std::env::consts::EXE_SUFFIX).unwrap_or(file);
-    if !std::env::consts::EXE_SUFFIX.is_empty() && stem == file {
-        return None;
-    }
+    let stem = file.strip_suffix(".exe").unwrap_or(file);
     let rest = stem.strip_prefix("dre-")?;
     let (kind, name) = rest.split_once('-')?;
     let kind = Kind::parse(kind)?;
@@ -243,6 +237,11 @@ mod tests {
             Some((Kind::Destination, "azure_blob".into()))
         );
         assert_eq!(parse_executable_name(&exe("dre-format-csv.d")), None);
+        assert_eq!(parse_executable_name("dre-source-fixture").unwrap().1, "fixture");
+        assert_eq!(
+            parse_executable_name("dre-source-fixture.exe").unwrap().1,
+            "fixture"
+        );
         assert_eq!(parse_executable_name(&exe("dre-widget-x")), None);
         assert_eq!(parse_executable_name(&exe("dre")), None);
         assert_eq!(parse_executable_name(&exe("dre-plugin-csv")), None);
@@ -257,6 +256,14 @@ mod tests {
         );
         assert_eq!(parse_package_executable_name(&exe("dre-source-duckdb")), None);
         assert_eq!(parse_package_executable_name(&exe("dre-plugin-")), None);
+        assert_eq!(
+            parse_package_executable_name("dre-plugin-fixture").as_deref(),
+            Some("fixture")
+        );
+        assert_eq!(
+            parse_package_executable_name("dre-plugin-fixture.exe").as_deref(),
+            Some("fixture")
+        );
     }
 
     #[test]
