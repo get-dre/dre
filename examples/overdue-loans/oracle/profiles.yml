@@ -1,0 +1,11 @@
+connections:
+  reporting:
+    targets:
+      dev:
+        type: jdbc
+        url: "{{ env_var('DRE_TEST_JDBC_URL') }}"
+        driver_jars: "{{ env_var('DRE_TEST_JDBC_JAR') }}"
+        properties:
+          user: "{{ env_var('DRE_TEST_JDBC_USER') }}"
+          password: "{{ env_var('DRE_TEST_JDBC_PASSWORD') }}"
+          oracle.jdbc.fanEnabled: false
