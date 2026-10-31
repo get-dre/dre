@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -84,7 +85,7 @@ class Package(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "the packaged POSIX launcher is not used on Windows")
     def test_packaged_launcher_ignores_java_home_and_path(self):
-        with tempfile.TemporaryDirectory(prefix="dre-jdbc-launch-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="dre jdbc launch ") as temporary:
             base = Path(temporary)
             package = base / "jdbc/1.0.0"
             (package / "runtime/bin").mkdir(parents=True)
@@ -119,31 +120,33 @@ class Package(unittest.TestCase):
         jar = ROOT / "java/jdbc/target/dre-plugin-jdbc.jar"
         if not java_home or not (Path(java_home) / "bin/jlink").is_file() or not jar.is_file():
             self.skipTest("set JAVA_HOME to JDK 17 and build the JDBC JAR first")
-        with tempfile.TemporaryDirectory(prefix="dre-jdbc-jlink-") as temporary:
-            runtime = Path(temporary) / "runtime"
-            modules = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
-            subprocess.run([
-                str(Path(java_home) / "bin/jlink"), f"--add-modules={modules}",
-                "--strip-debug", "--no-header-files", "--no-man-pages", f"--compress=2",
-                "--output", str(runtime),
-            ], check=True)
-            launch = subprocess.Popen(
-                [str(runtime / "bin/java"), "--add-opens=java.base/java.nio=ALL-UNNAMED", "-jar", str(jar)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
-            )
-            body = b"J" + b'{"type":"hello","min_version":0,"max_version":1,"plugin":"source/jdbc"}'
-            launch.stdin.write(len(body).to_bytes(4, "big") + body)
-            launch.stdin.flush()
-            length = int.from_bytes(launch.stdout.read(4), "big")
-            reply = launch.stdout.read(length)
-            self.assertEqual(reply[:1], b"J")
-            self.assertEqual(json.loads(reply[1:])["type"], "hello")
-            launch.stdin.close()
-            self.assertEqual(launch.wait(timeout=10), 0, launch.stderr.read().decode())
+        # Leave the runtime beside the JAR for the describe.json check that follows in CI.
+        runtime = jar.parent / "runtime"
+        if runtime.exists():
+            shutil.rmtree(runtime)
+        modules = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
+        subprocess.run([
+            str(Path(java_home) / "bin/jlink"), f"--add-modules={modules}",
+            "--strip-debug", "--no-header-files", "--no-man-pages", f"--compress=2",
+            "--output", str(runtime),
+        ], check=True)
+        launch = subprocess.Popen(
+            [str(runtime / "bin/java"), "--add-opens=java.base/java.nio=ALL-UNNAMED", "-jar", str(jar)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+        )
+        body = b"J" + b'{"type":"hello","min_version":0,"max_version":1,"plugin":"source/jdbc"}'
+        launch.stdin.write(len(body).to_bytes(4, "big") + body)
+        launch.stdin.flush()
+        length = int.from_bytes(launch.stdout.read(4), "big")
+        reply = launch.stdout.read(length)
+        self.assertEqual(reply[:1], b"J")
+        self.assertEqual(json.loads(reply[1:])["type"], "hello")
+        launch.stdin.close()
+        self.assertEqual(launch.wait(timeout=10), 0, launch.stderr.read().decode())
 
     @unittest.skipUnless(os.name == "nt", "the native launcher is Windows-only")
     def test_windows_launcher_uses_adjacent_java_exe_only(self):
-        with tempfile.TemporaryDirectory(prefix="dre-jdbc-windows-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="dre jdbc windows ") as temporary:
             base = Path(temporary)
             launcher = base / "dre-plugin-jdbc.exe"
             subprocess.run([

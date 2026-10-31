@@ -11,20 +11,26 @@ pub fn replace_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), S
         let parent = to
             .parent()
             .ok_or_else(|| format!("{} has no parent folder", to.display()))?;
+        // Windows can't rename to an existing directory, even an empty temporary one.
         let old = tempfile::Builder::new()
             .prefix(".old-")
             .tempdir_in(parent)
-            .map_err(|e| format!("can't create a staging folder in {}: {e}", parent.display()))?;
-        std::fs::rename(to, old.path()).map_err(|e| format!("can't replace {}: {e}", to.display()))?;
+            .map_err(|e| format!("can't create a staging folder in {}: {e}", parent.display()))?
+            .keep();
+        std::fs::remove_dir(&old).map_err(|e| format!("can't replace {}: {e}", to.display()))?;
+        std::fs::rename(to, &old).map_err(|e| format!("can't replace {}: {e}", to.display()))?;
         Some(old)
     } else {
         None
     };
     if let Err(e) = std::fs::rename(from, to) {
         if let Some(old) = &old {
-            let _ = std::fs::rename(old.path(), to);
+            let _ = std::fs::rename(old, to);
         }
         return Err(e.to_string());
+    }
+    if let Some(old) = old {
+        let _ = std::fs::remove_dir_all(old);
     }
     Ok(())
 }
@@ -36,6 +42,28 @@ pub fn is_below(path: &std::path::Path, parent: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replacing_a_directory_keeps_the_old_copy_until_the_swap_is_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let from = root.path().join("new");
+        let to = root.path().join("installed");
+        std::fs::create_dir(&from).unwrap();
+        std::fs::create_dir(&to).unwrap();
+        std::fs::write(from.join("value"), "new").unwrap();
+        std::fs::write(to.join("old"), "old").unwrap();
+
+        super::replace_dir(&from, &to).unwrap();
+
+        assert_eq!(std::fs::read_to_string(to.join("value")).unwrap(), "new");
+        assert!(!to.join("old").exists());
+        assert!(!from.exists());
+        assert!(
+            !std::fs::read_dir(root.path())
+                .unwrap()
+                .any(|e| { e.unwrap().file_name().to_string_lossy().starts_with(".old-") })
+        );
+    }
+
     /// The modules that write durable state use [`super::write_atomic`], never a plain write.
     #[test]
     fn durable_state_is_only_written_atomically() {
