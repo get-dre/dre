@@ -1,4 +1,5 @@
 /target/
+/java/*/target/
 .DS_Store
 
 # Go plugin build outputs: `go build` in go/<plugin>/ writes the plugin binary there.
