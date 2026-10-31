@@ -1,6 +1,7 @@
 {
   "source/jdbc": {
     "capabilities": [
+      "catalog",
       "sessions",
       "validate"
     ],
