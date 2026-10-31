@@ -1,0 +1,4 @@
+name: overdue_loans
+default_profile: reporting
+vars:
+  report_date: '2026-01-31'

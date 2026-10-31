@@ -131,6 +131,14 @@ jobs:
           DRE_TEST_JDBC_USER=dre_fixture \
           DRE_TEST_JDBC_PASSWORD=DreFixture39_x \
           python3 java/jdbc/test_jdbc_report.py
+          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
+          DRE_TEST_XLSX_BIN="$GITHUB_WORKSPACE/target/debug/dre-plugin-xlsx" \
+          DRE_TEST_JDBC_DATABASE=oracle \
+          DRE_TEST_JDBC_URL='jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1' \
+          DRE_TEST_JDBC_JAR="$RUNNER_TEMP/ojdbc11.jar" \
+          DRE_TEST_JDBC_USER=dre_fixture \
+          DRE_TEST_JDBC_PASSWORD=DreFixture39_x \
+          python3 java/jdbc/test_overdue_example.py
       - name: Run SQL Server SQL through the CLI into a checked workbook
         run: |
           DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
@@ -141,6 +149,14 @@ jobs:
           DRE_TEST_JDBC_USER=dre_fixture \
           DRE_TEST_JDBC_PASSWORD='DreFixture39_x!' \
           python3 java/jdbc/test_jdbc_report.py
+          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
+          DRE_TEST_XLSX_BIN="$GITHUB_WORKSPACE/target/debug/dre-plugin-xlsx" \
+          DRE_TEST_JDBC_DATABASE=sqlserver \
+          DRE_TEST_JDBC_URL='jdbc:sqlserver://127.0.0.1:1433' \
+          DRE_TEST_JDBC_JAR="$RUNNER_TEMP/mssql-jdbc.jar" \
+          DRE_TEST_JDBC_USER=dre_fixture \
+          DRE_TEST_JDBC_PASSWORD='DreFixture39_x!' \
+          python3 java/jdbc/test_overdue_example.py
 
   plugin-versions:
     # A warning, never a failure, for a plugin whose code changed without a version bump.

@@ -1,7 +1,7 @@
 # Public DRE examples
 
-Small, complete projects using synthetic Acme Corp data. No database server or account is
-needed for local runs. Install [DRE](../docs/install.md), then copy an example folder and
+Small, complete projects using synthetic Acme Corp data. Most need no database server or account;
+the overdue-loan example uses your Oracle or SQL Server test database. Install [DRE](../docs/install.md), then copy an example folder and
 run commands from that folder. Dependencies install on demand; network access is needed
 the first time.
 
@@ -9,6 +9,7 @@ the first time.
 |---|---|
 | [Tutorial](tutorial/) | One workbook, a variable, another tab, formats, Sets, a schedule and local delivery |
 | [Monthly finance](monthly-finance/) | Source declarations, a typed account lookup, two tabs, formulas, totals and an Excel template |
+| [Overdue loans](overdue-loans/) | Oracle/SQL Server JDBC preparation, independent business checks, ordinary/template workbooks and unexecuted SAS reference |
 | [Bank file](bank-file/) | Fixed-width layout, zero padding, implied decimals and CRLF records |
 | [Regional reports](regional-reports/) | The same report with two Sets and separate scheduled files |
 | [Slack headline](slack-headline/) | A result-driven message and a `when:` threshold |
@@ -33,6 +34,8 @@ values, runs every example in the development target, and checks the saved workb
 formats, formulas, template expansion, text record bytes and skipped message branch.
 It also creates a new project with `dre new` and tests each tutorial step.
 Scratch projects use the system temporary directory and are removed, including on failure.
+The overdue-loan project has its own clean-run checker and runs against the pinned database
+services in JDBC CI; see its README for credentials, Java and user-supplied driver requirements.
 
 To check a local build with prebuilt plugins:
 

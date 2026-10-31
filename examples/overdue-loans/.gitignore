@@ -1,0 +1,8 @@
+/oracle/reports/overdue/seed.sql
+/sqlserver/reports/overdue/seed.sql
+/oracle/out/
+/sqlserver/out/
+/oracle/target/
+/sqlserver/target/
+/oracle/dre.lock
+/sqlserver/dre.lock
