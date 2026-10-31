@@ -62,7 +62,7 @@ class Package(unittest.TestCase):
             base = Path(temporary)
             runtime = base / "runtime"
             (runtime / "legal/java.base").mkdir(parents=True)
-            (runtime / "legal/java.base/LICENSE").write_text("license\n")
+            (runtime / "legal/java.base/LICENSE").write_bytes(b"license\n")
             (runtime / "legal/java.sql").mkdir()
             (runtime / "legal/java.sql/LICENSE").symlink_to("../java.base/LICENSE")
             (runtime / "bin").mkdir()

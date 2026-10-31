@@ -20,9 +20,10 @@ def add_tree(archive, source, destination):
     for path in sorted(source.rglob("*")):
         if path.is_symlink():
             target = path.resolve()
-            target.relative_to(root)
             if not target.is_file():
                 raise ValueError(f"unsafe runtime link: {path} -> {path.readlink()}")
+            if not any(os.path.samefile(parent, root) for parent in target.parents):
+                raise ValueError(f"runtime link points outside the runtime: {path} -> {path.readlink()}")
             add_file(archive, target, destination / path.relative_to(source), executable=os.access(target, os.X_OK))
         elif path.is_file():
             add_file(archive, path, destination / path.relative_to(source), executable=os.access(path, os.X_OK))
@@ -50,10 +51,6 @@ def package(output, *, version, platform, jar, runtime, launcher, license, notic
             add_file(archive, Path(launcher), root / launcher_name, executable=True)
             add_file(archive, Path(jar), root / "dre-plugin-jdbc.jar")
             add_tree(archive, Path(runtime), root / "runtime")
-            for name in ("LICENSE", "NOTICE"):
-                source = Path(runtime) / name
-                if source.is_file():
-                    add_file(archive, source, root / "runtime" / name)
             add_file(archive, Path(license), root / "LICENSE")
             add_file(archive, Path(notice), root / "NOTICE")
             add_file(archive, Path(third_party), root / "THIRD_PARTY_NOTICES.md")
