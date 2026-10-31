@@ -73,6 +73,8 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
       go: ${{ steps.plan.outputs.go }}
+      lang: ${{ steps.plan.outputs.lang }}
+      java: ${{ steps.plan.outputs.java }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,6 +97,7 @@ jobs:
   build:
     name: Build ${{ needs.plan.outputs.package }} (${{ matrix.platform }})
     needs: [plan, security]
+    if: needs.plan.outputs.lang != 'java'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -194,11 +197,143 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  build-jdbc:
+    name: Build jdbc (${{ matrix.platform }})
+    needs: [plan, security]
+    if: needs.plan.outputs.lang == 'java'
+    # Every JDK below is the exact Temurin release, checked before any build step uses it.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin}
+          - {platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin}
+          - {platform: linux-x86_64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu}
+          - {platform: linux-aarch64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu}
+          - {platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      JAVA_DIR: ${{ needs.plan.outputs.java }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the runner's Java 17 to build
+        shell: bash
+        run: |
+          case "$RUNNER_ARCH" in
+            X64) java_home="JAVA_HOME_17_X64";;
+            ARM64) java_home="JAVA_HOME_17_ARM64";;
+            *) echo "unsupported runner architecture: $RUNNER_ARCH" >&2; exit 1;;
+          esac
+          test -n "${!java_home}" || { echo "$java_home is not set" >&2; exit 1; }
+          echo "JAVA_HOME=${!java_home}" >> "$GITHUB_ENV"
+          echo "${!java_home}/bin" >> "$GITHUB_PATH"
+          echo "BUILD_JAVA_HOME=${!java_home}" >> "$GITHUB_ENV"
+
+      - name: Install Maven 3.9.11
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location \
+            https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz \
+            -o "$RUNNER_TEMP/maven.tar.gz"
+          echo "4b7195b6a4f5c81af4c0212677a32ee8143643401bc6e1e8412e6b06ea82beac  $RUNNER_TEMP/maven.tar.gz" \
+            | sha256sum --check -
+          mkdir -p "$RUNNER_TEMP/maven"
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/maven"
+
+      - name: Install Rust for the Windows launcher
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: rustup toolchain install stable --profile minimal --target "$TARGET" && rustup default stable
+
+      - name: Build, jlink and package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$PLATFORM" in
+            macos-aarch64)
+              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_aarch64_mac_hotspot_17.0.20.1_1.tar.gz"
+              jdk_sum="196d13ba5f10414bef7f6a05a9b3f00edacb18ebacef2b99485db9e2ee18f0e8";;
+            macos-x86_64)
+              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_mac_hotspot_17.0.20.1_1.tar.gz"
+              jdk_sum="c01975da12ed4235250ff891fe8bba73a9e73037d444b269c9d0922b5dbc8e0a";;
+            linux-x86_64)
+              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz"
+              jdk_sum="3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e";;
+            linux-aarch64)
+              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.20.1_1.tar.gz"
+              jdk_sum="457b57af8f9c93ec39080bb8c764f559dc8c89a6da1a39d718a400b7890d3e41";;
+            windows-x86_64)
+              jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_windows_hotspot_17.0.20.1_1.zip"
+              jdk_sum="e53a79c3c3d86865bd7e787903884331068e71321714ffd44f145785affc7cb0";;
+            *) echo "unsupported JDBC platform: $PLATFORM" >&2; exit 1;;
+          esac
+          "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
+          archive="$RUNNER_TEMP/${jdk_url##*/}"
+          curl --fail --silent --show-error --location "$jdk_url" -o "$archive"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+            [[ "$actual" == "$jdk_sum" ]] || { echo "checksum mismatch for $archive" >&2; exit 1; }
+          else
+            echo "$jdk_sum  $archive" | sha256sum --check -
+          fi
+          mkdir -p "$RUNNER_TEMP/temurin" "$RUNNER_TEMP/jdk"
+          if [[ "$archive" == *.zip ]]; then
+            7z x "$archive" -o"$RUNNER_TEMP/temurin" >/dev/null
+          else
+            tar -xzf "$archive" -C "$RUNNER_TEMP/temurin"
+          fi
+          release_file="$(find "$RUNNER_TEMP/temurin" -maxdepth 3 -type f -name release | head -1)"
+          test -n "$release_file"
+          jdk="$(dirname "$release_file")"
+          grep -q '^JAVA_VERSION="17\.0\.20\.1"$' "$release_file"
+          "$jdk/bin/java" -version
+          "$jdk/bin/jdeps" --ignore-missing-deps --multi-release 17 --print-module-deps \
+            "$JAVA_DIR/target/dre-plugin-jdbc.jar" > "$RUNNER_TEMP/modules"
+          test "$(cat "$RUNNER_TEMP/modules")" = "java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported"
+          "$jdk/bin/jlink" --add-modules java.base,java.desktop,java.sql,jdk.jfr,jdk.unsupported \
+            --strip-debug --no-header-files --no-man-pages --compress=2 --output "$RUNNER_TEMP/jdk/runtime"
+          launcher=java/jdbc/launcher/dre-plugin-jdbc
+          if [[ "$PLATFORM" == windows-* ]]; then
+            rustc --edition=2021 --target "$TARGET" java/jdbc/launcher/dre-plugin-jdbc.rs \
+              -o "$RUNNER_TEMP/dre-plugin-jdbc.exe"
+            launcher="$RUNNER_TEMP/dre-plugin-jdbc.exe"
+          fi
+          mkdir -p dist
+          python3 .github/scripts/package_jdbc.py \
+            --output "dist/dre-plugin-jdbc-$VERSION-$PLATFORM.tar.gz" \
+            --version "$VERSION" --platform "$PLATFORM" \
+            --jar "$JAVA_DIR/target/dre-plugin-jdbc.jar" \
+            --runtime "$RUNNER_TEMP/jdk/runtime" --launcher "$launcher"
+
+      - name: Smoke test the packaged launcher
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: python3 java/jdbc/test_package.py
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-jdbc-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
   # A CycloneDX SBOM for every archive, and signed build provenance (GitHub artifact attestations,
   # through Sigstore) for the archives and their SBOMs. Its own job, so only it can sign.
   attest:
     name: SBOMs and provenance
-    needs: [plan, build]
+    needs: [plan, build, build-jdbc]
+    if: >-
+      always() && (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.build-jdbc.result == 'success' || needs.build-jdbc.result == 'skipped') &&
+      !(needs.build.result == 'skipped' && needs.build-jdbc.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -243,9 +378,10 @@ jobs:
     name: Publish the release
     # After crates.io (DRE releases): a publish there can't be undone, so if it fails, no GitHub
     # release points people at crates that don't exist.
-    needs: [plan, build, attest, crates]
+    needs: [plan, build, build-jdbc, attest, crates]
     if: >-
-      always() && needs.build.result == 'success' && needs.attest.result == 'success' &&
+      always() && (needs.build.result == 'success' || needs.build-jdbc.result == 'success') &&
+      needs.attest.result == 'success' &&
       (needs.crates.result == 'success' || needs.crates.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:

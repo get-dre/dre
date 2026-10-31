@@ -414,5 +414,13 @@ class Topics(unittest.TestCase):
             self.assertIn("plugin-xlsx.md", problems[0])
 
 
+class JavaPackage(unittest.TestCase):
+    def test_version_and_describe_metadata_come_from_the_java_directory(self):
+        self.assertEqual(skills.package_version("jdbc"), "1.0.0")
+        replies = skills.describe_files()
+        self.assertIn("source/jdbc", replies)
+        self.assertEqual(replies["source/jdbc"]["connection_fields"][0]["name"], "url")
+
+
 if __name__ == "__main__":
     unittest.main()

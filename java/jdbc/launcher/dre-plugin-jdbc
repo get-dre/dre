@@ -1,0 +1,9 @@
+#!/bin/sh
+# Packaged launcher: the runtime is part of the version directory, never the host's Java.
+set -eu
+case "$0" in
+  */*) base=${0%/*};;
+  *) base=.;;
+esac
+base=$(CDPATH= cd -- "$base" && pwd)
+exec "$base/runtime/bin/java" --add-opens=java.base/java.nio=ALL-UNNAMED -jar "$base/dre-plugin-jdbc.jar" "$@"

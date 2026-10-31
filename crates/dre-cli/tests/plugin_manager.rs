@@ -117,6 +117,74 @@ impl Env {
     }
 }
 
+fn gzip_tar(entries: impl IntoIterator<Item = (String, Vec<u8>, u32)>) -> Vec<u8> {
+    let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::none(),
+    ));
+    for (path, bytes, mode) in entries {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(bytes.len() as u64);
+        h.set_mode(mode);
+        h.set_cksum();
+        b.append_data(&mut h, path, bytes.as_slice()).unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap()
+}
+
+fn gzip_tar_with_root(entries: impl IntoIterator<Item = (String, Vec<u8>, u32)>) -> Vec<u8> {
+    let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::none(),
+    ));
+    let mut root = tar::Header::new_gnu();
+    root.set_entry_type(tar::EntryType::Directory);
+    root.set_size(0);
+    root.set_mode(0o755);
+    b.append_data(&mut root, "fixture", std::io::empty()).unwrap();
+    for (path, bytes, mode) in entries {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(bytes.len() as u64);
+        h.set_mode(mode);
+        h.set_cksum();
+        b.append_data(&mut h, path, bytes.as_slice()).unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap()
+}
+
+fn publish_1_1_archive(e: &Env, bytes: &[u8]) {
+    let file = "fixture-1.1.0.tar.gz";
+    std::fs::write(e.p("registry").join(file), bytes).unwrap();
+    let mut index: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(e.p("registry/index.json")).unwrap()).unwrap();
+    index["plugins"][0]["versions"][1]["artifacts"][platform()] = serde_json::json!({
+        "url": e.p("registry").join(file).to_string_lossy(),
+        "sha256": sha(bytes),
+    });
+    std::fs::write(e.p("registry/index.json"), index.to_string()).unwrap();
+}
+
+fn publish_rooted_1_1(e: &Env) {
+    let fixture_exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&fixture_exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"{fixture_exe}","provides":["source/fixture"]}}"#);
+    let tgz = gzip_tar_with_root([
+        (format!("fixture/{fixture_exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+        (
+            "fixture/runtime/bin/java".into(),
+            b"fixture java\n".to_vec(),
+            0o755,
+        ),
+        (
+            "fixture/runtime/LICENSE".into(),
+            b"fixture license\n".to_vec(),
+            0o644,
+        ),
+    ]);
+    publish_1_1_archive(e, &tgz);
+}
+
 const DECLARED: &str = "plugins:\n  - fixture: \">=1.0\"\n  - csv\n";
 
 #[test]
@@ -441,6 +509,7 @@ impl Env {
 #[test]
 fn plugins_install_into_dre_deps_linked_from_the_shared_cache() {
     let e = Env::new(DECLARED);
+    publish_rooted_1_1(&e);
     // The hand-placed csv plugin goes in the project's own plugins folder.
     let csv = format!("dre-plugin-csv{}", std::env::consts::EXE_SUFFIX);
     std::fs::create_dir_all(e.p("project/dre_deps/plugins")).unwrap();
@@ -454,15 +523,34 @@ fn plugins_install_into_dre_deps_linked_from_the_shared_cache() {
         .ok()
         .says("plugin package `fixture` 1.1.0");
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
-    let in_project = e.p("project/dre_deps/plugins/fixture/1.1.0").join(&exe);
-    let in_cache = e.p("home/.dre/plugins/fixture/1.1.0").join(&exe);
-    assert!(in_project.is_file() && in_cache.is_file());
+    let project_version = e.p("project/dre_deps/plugins/fixture/1.1.0");
+    let cache_version = e.p("home/.dre/plugins/fixture/1.1.0");
+    for version in [&cache_version, &project_version] {
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(version.join("plugin.json")).unwrap()).unwrap();
+        assert_eq!(manifest["executable"], exe);
+        let exe = version.join(&exe);
+        assert!(exe.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(std::fs::metadata(&exe).unwrap().permissions().mode() & 0o111 != 0);
+        }
+        assert_eq!(
+            std::fs::read(version.join("runtime/bin/java")).unwrap(),
+            b"fixture java\n"
+        );
+        assert_eq!(
+            std::fs::read(version.join("runtime/LICENSE")).unwrap(),
+            b"fixture license\n"
+        );
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let (a, b) = (
-            std::fs::metadata(&in_project).unwrap(),
-            std::fs::metadata(&in_cache).unwrap(),
+            std::fs::metadata(project_version.join("runtime/bin/java")).unwrap(),
+            std::fs::metadata(cache_version.join("runtime/bin/java")).unwrap(),
         );
         assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()), "hard-linked, not copied");
     }
@@ -472,7 +560,308 @@ fn plugins_install_into_dre_deps_linked_from_the_shared_cache() {
     // registry at all.
     std::fs::remove_dir_all(e.p("project/dre_deps/plugins/fixture")).unwrap();
     e.dre_in_project(&["deps"], "no-registry/index.json").ok();
-    assert!(in_project.is_file());
+    assert_eq!(
+        std::fs::read(project_version.join("runtime/bin/java")).unwrap(),
+        b"fixture java\n"
+    );
+}
+
+#[test]
+fn a_plugin_archive_cannot_escape_its_version_directory() {
+    let e = Env::new(DECLARED);
+    let tgz = {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::none(),
+        ));
+        let bytes = b"fixture";
+        let mut h = tar::Header::new_gnu();
+        h.set_size(bytes.len() as u64);
+        h.set_mode(0o755);
+        h.set_path("safe").unwrap();
+        h.as_mut_bytes()[..100].fill(0);
+        h.as_mut_bytes()[..9].copy_from_slice(b"../escape");
+        h.set_cksum();
+        b.append(&h, bytes.as_slice()).unwrap();
+        b.into_inner().unwrap().finish().unwrap()
+    };
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre_in_project(&["deps"], "registry/index.json")
+        .failed()
+        .says("unsafe path");
+    assert!(!e.p("home/.dre/plugins/fixture/1.1.0").exists());
+    assert!(!e.p("project/dre_deps/plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_plugin_archive_cannot_have_an_absolute_path() {
+    let e = Env::new(DECLARED);
+    let tgz = {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::none(),
+        ));
+        let bytes = b"fixture";
+        let mut h = tar::Header::new_gnu();
+        h.set_size(bytes.len() as u64);
+        h.set_mode(0o755);
+        h.set_path("safe").unwrap();
+        h.as_mut_bytes()[..100].fill(0);
+        h.as_mut_bytes()[..7].copy_from_slice(b"/escape");
+        h.set_cksum();
+        b.append(&h, bytes.as_slice()).unwrap();
+        b.into_inner().unwrap().finish().unwrap()
+    };
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre_in_project(&["deps"], "registry/index.json")
+        .failed()
+        .says("unsafe path");
+    assert!(!e.p("home/.dre/plugins/fixture/1.1.0").exists());
+    assert!(!e.p("project/dre_deps/plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_plugin_archive_cannot_contain_a_link() {
+    let e = Env::new(DECLARED);
+    let tgz = {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::none(),
+        ));
+        let mut h = tar::Header::new_gnu();
+        h.set_size(0);
+        h.set_mode(0o755);
+        h.set_entry_type(tar::EntryType::Link);
+        h.set_cksum();
+        b.append_link(&mut h, "fixture/link", "fixture/dre-source-fixture")
+            .unwrap();
+        b.into_inner().unwrap().finish().unwrap()
+    };
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre_in_project(&["deps"], "registry/index.json")
+        .failed()
+        .says("unsafe");
+    assert!(!e.p("home/.dre/plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_plugin_archive_cannot_contain_a_duplicate_file() {
+    let e = Env::new(DECLARED);
+    let tgz = {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::none(),
+        ));
+        for bytes in [b"first".as_slice(), b"second".as_slice()] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(bytes.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, "fixture/duplicate", bytes).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap()
+    };
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre_in_project(&["deps"], "registry/index.json")
+        .failed()
+        .says("duplicate entry");
+    assert!(!e.p("home/.dre/plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_legacy_bare_executable_still_installs() {
+    let e = Env::new(DECLARED);
+    e.dre(&["plugin", "install", "fixture@=1.0.0"])
+        .ok()
+        .says("plugin package `fixture` 1.0.0");
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let version = e.p("plugins/fixture/1.0.0");
+    assert_eq!(
+        std::fs::read(version.join(&exe)).unwrap(),
+        std::fs::read(e.p("registry/fixture-1.0.0")).unwrap()
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(version.join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["executable"], exe);
+}
+
+#[test]
+fn a_legacy_archive_with_the_executable_at_the_top_still_installs() {
+    let e = Env::new(DECLARED);
+    e.dre(&["plugin", "install", "fixture@=1.2.0-rc.1"])
+        .ok()
+        .says("plugin package `fixture` 1.2.0-rc.1");
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let version = e.p("plugins/fixture/1.2.0-rc.1");
+    assert!(version.join(&exe).is_file());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(version.join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["executable"], exe);
+}
+
+#[test]
+fn a_rooted_archive_keeps_its_own_plugin_manifest() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"{exe}","provides":["source/fixture"]}}"#);
+    let tgz = gzip_tar_with_root([
+        (format!("fixture/{exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.as_bytes().to_vec(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
+    assert_eq!(
+        std::fs::read(e.p("plugins/fixture/1.1.0/plugin.json")).unwrap(),
+        manifest.as_bytes()
+    );
+}
+
+#[test]
+fn a_single_nested_root_directory_need_not_have_its_own_tar_entry() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"{exe}","provides":["source/fixture"]}}"#);
+    let tgz = gzip_tar([
+        (format!("fixture/{exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+        ("fixture/runtime/LICENSE".into(), b"license".to_vec(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
+    assert!(e.p("plugins/fixture/1.1.0").join(&exe).is_file());
+    assert!(e.p("plugins/fixture/1.1.0/runtime/LICENSE").is_file());
+}
+
+#[test]
+fn a_rooted_archive_uses_the_manifest_executable_path() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"bin/{exe}","provides":["source/fixture"]}}"#);
+    let tgz = gzip_tar_with_root([
+        (format!("fixture/bin/{exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
+    let located = e.p("plugins/fixture/1.1.0/bin").join(&exe);
+    assert!(located.is_file());
+    e.dre(&["run", "f"]).ok().says("Succeeded");
+}
+
+#[test]
+fn a_packaged_manifest_must_be_valid() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let tgz = gzip_tar_with_root([
+        (
+            format!("fixture/{exe}"),
+            std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap(),
+            0o755,
+        ),
+        ("fixture/plugin.json".into(), b"not json".to_vec(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("invalid");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_packaged_manifest_cannot_escape_the_version_directory() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let manifest = format!(r#"{{"executable":"../{exe}","provides":["source/fixture"]}}"#);
+    let tgz = gzip_tar_with_root([
+        (
+            format!("fixture/{exe}"),
+            std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap(),
+            0o755,
+        ),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("outside the version directory");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
+}
+
+#[test]
+fn a_plugin_archive_cannot_contain_two_package_executables() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let tgz = gzip_tar([
+        (format!("fixture/{exe}"), bin.clone(), 0o755),
+        (format!("fixture/nested/{exe}"), bin, 0o755),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("more than one package executable");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_version_with_a_link_is_not_copied_into_the_project() {
+    use std::os::unix::fs::symlink;
+
+    let e = Env::new("plugins:\n  - fixture: \">=1.0\"\n");
+    publish_rooted_1_1(&e);
+    e.dre_in_project(&["plugin", "install", "fixture@=1.1.0"], "registry/index.json")
+        .ok();
+    let cache_runtime = e.p("home/.dre/plugins/fixture/1.1.0/runtime/bin/java");
+    std::fs::remove_file(&cache_runtime).unwrap();
+    symlink("/tmp/outside", &cache_runtime).unwrap();
+    let project_fixture = e.p("project/dre_deps/plugins/fixture");
+    std::fs::remove_dir_all(&project_fixture).unwrap();
+
+    e.dre_in_project(&["deps"], "no-registry/index.json")
+        .failed()
+        .says("unsafe source entry");
+    assert!(!project_fixture.join("1.1.0/runtime/bin/java").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_install_keeps_the_previous_version() {
+    let e = Env::new("plugins:\n  - fixture: \">=1.0\"\n");
+    e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
+    let previous = e.p("plugins/fixture/1.1.0");
+    std::fs::write(previous.join("keep"), b"old").unwrap();
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    std::fs::write(previous.join(&exe), b"old executable").unwrap();
+    let tgz = gzip_tar([
+        (
+            format!("fixture/{exe}"),
+            std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap(),
+            0o755,
+        ),
+        ("fixture/conflict".into(), b"file".to_vec(), 0o644),
+        ("fixture/conflict/child".into(), b"child".to_vec(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("conflicting path");
+    assert_eq!(std::fs::read(previous.join("keep")).unwrap(), b"old");
+    assert_eq!(std::fs::read(previous.join(&exe)).unwrap(), b"old executable");
 }
 
 /// A package of several plugins, in the current index schema: one download, one lock entry, and

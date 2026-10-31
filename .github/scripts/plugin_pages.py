@@ -29,6 +29,7 @@ PAGES = {
     "bigquery": ["source/bigquery"],
     "snowflake": ["source/snowflake"],
     "clickhouse": ["source/clickhouse"],
+    "jdbc": ["source/jdbc"],
     "csv": ["format/csv", "format/delimited"],
     "fixed_width": ["format/fixed_width"],
     "parquet": ["format/parquet"],
@@ -56,8 +57,13 @@ def package_of(plugin):
 
 def describe(plugin):
     about = PACKAGES[package_of(plugin)]
-    path = ROOT / about.get("go", f"plugins/{package_of(plugin)}") / "describe.json"
+    path = ROOT / package_dir(package_of(plugin)) / "describe.json"
     return json.loads(path.read_text())[plugin]
+
+
+def package_dir(package):
+    about = PACKAGES[package]
+    return about.get("go") or about.get("java") or f"plugins/{package}"
 
 
 def cell(text):

@@ -21,6 +21,11 @@
     "provides": ["source/clickhouse"],
     "go": "go/clickhouse"
   },
+  "jdbc": {
+    "description": "JDBC databases using user-supplied drivers",
+    "provides": ["source/jdbc"],
+    "java": "java/jdbc"
+  },
   "csv": {"description": "Comma-separated and other delimited text", "provides": ["format/csv", "format/delimited"]},
   "fixed_width": {"description": "Fixed-width text", "provides": ["format/fixed_width"]},
   "parquet": {"description": "Parquet", "provides": ["format/parquet"]},

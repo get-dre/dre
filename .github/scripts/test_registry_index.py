@@ -13,6 +13,22 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 class RegistryExtensions(unittest.TestCase):
+    def test_jdbc_archives_enter_the_plugin_registry(self):
+        archive = 'dre-plugin-jdbc-1.0.0-linux-x86_64.tar.gz'
+        release = {'tag_name': 'jdbc-v1.0.0', 'assets': [
+            {'name': archive, 'browser_download_url': 'https://example.test/' + archive},
+            {'name': 'SHA256SUMS', 'browser_download_url': 'https://example.test/SHA256SUMS'}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            old = Path(temporary) / 'packages.json'
+            output = io.StringIO()
+            with patch.object(registry, 'releases', return_value=iter([release])), \
+                 patch.object(registry, 'get', return_value=('a' * 64 + '  ' + archive + '\n').encode()), \
+                 contextlib.redirect_stdout(output):
+                registry.main(old, 'get-dre/dre')
+        jdbc = next(p for p in json.loads(output.getvalue())['plugins'] if p['name'] == 'jdbc')
+        self.assertEqual(jdbc['provides'], ['source/jdbc'])
+        self.assertEqual(jdbc['versions'][0]['artifacts']['linux-x86_64']['sha256'], 'a' * 64)
+
     def test_companion_release_is_separate_and_preserves_plugins(self):
         archive = 'dre-mcp-0.1.0-rc.1-linux-x86_64.tar.gz'
         release = {'tag_name': 'dre-mcp-v0.1.0-rc.1', 'assets': [

@@ -73,6 +73,7 @@ DOC_SECTIONS = {
     "source/bigquery": [("page", "bigquery")] + _WAREHOUSE,
     "source/snowflake": [("page", "snowflake")] + _WAREHOUSE,
     "source/clickhouse": [("page", "clickhouse")] + _WAREHOUSE,
+    "source/jdbc": [("page", "jdbc")],
     "format/csv": [("page", "csv")] + _FORMAT,
     "format/delimited": [("page", "csv")] + _FORMAT,
     "format/fixed_width": [("page", "fixed_width")] + _FORMAT,
@@ -178,6 +179,9 @@ def package_version(package):
     about = PACKAGES[package]
     if about.get("go"):
         return (ROOT / about["go"] / "VERSION").read_text().strip()
+    if about.get("java"):
+        text = (ROOT / about["java"] / "pom.xml").read_text()
+        return re.search(r"<version>([^<]+)</version>", text).group(1)
     text = (ROOT / "plugins" / package / "Cargo.toml").read_text()
     return re.search(r'^version = "([^"]+)"', text, re.M).group(1)
 
@@ -463,7 +467,8 @@ def describe_files(root=ROOT):
     (written from the built plugins and checked by the `describe_json` test)."""
     out = {}
     for package, about in PACKAGES.items():
-        path = root / about.get("go", f"plugins/{package}") / "describe.json"
+        directory = about.get("go") or about.get("java") or f"plugins/{package}"
+        path = root / directory / "describe.json"
         replies = json.loads(path.read_text())
         for plugin in about["provides"]:
             if plugin not in replies:

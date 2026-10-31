@@ -69,37 +69,96 @@ pub fn plugins_dir(env: &Env, project: Option<&Path>) -> PathBuf {
 
 /// Put `src` at `dst` without a second copy on disk where possible.
 pub fn link_or_copy(src: &Path, dst: &Path) -> Result<(), String> {
+    let kind = std::fs::symlink_metadata(src)
+        .map_err(|e| format!("can't inspect {}: {e}", src.display()))?
+        .file_type();
+    if !kind.is_file() {
+        return Err(format!("{} is not a regular file", src.display()));
+    }
     let parent = dst
         .parent()
         .ok_or_else(|| format!("{} has no parent folder", dst.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| format!("can't create {}: {e}", parent.display()))?;
     let _ = std::fs::remove_file(dst);
     if std::fs::hard_link(src, dst).is_ok() {
+        preserve_mode(src, dst)?;
         return Ok(());
     }
     std::fs::copy(src, dst).map_err(|e| format!("can't copy {} to {}: {e}", src.display(), dst.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    preserve_mode(src, dst)?;
+    Ok(())
+}
+
+fn preserve_mode(src: &Path, dst: &Path) -> Result<(), String> {
+    let mode = std::fs::metadata(src).map_err(|e| e.to_string())?.permissions();
+    std::fs::set_permissions(dst, mode).map_err(|e| format!("can't preserve mode for {}: {e}", dst.display()))
+}
+
+/// Link (or copy) an installed version directory from one plugins directory to another.
+pub fn link_version(from: &Path, to: &Path) -> Result<(), String> {
+    let kind = std::fs::symlink_metadata(from)
+        .map_err(|e| format!("can't inspect {}: {e}", from.display()))?
+        .file_type();
+    if !kind.is_dir() {
+        return Err(format!("{} is not a directory", from.display()));
+    }
+    read_manifest(from).ok_or_else(|| format!("{} has no {MANIFEST}", from.display()))?;
+    let parent = to
+        .parent()
+        .ok_or_else(|| format!("{} has no parent folder", to.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("can't create {}: {e}", parent.display()))?;
+    let tmp = tempfile::Builder::new()
+        .prefix(&format!(
+            ".{}-",
+            to.file_name().unwrap_or_default().to_string_lossy()
+        ))
+        .tempdir_in(parent)
+        .map_err(|e| format!("can't create a staging folder in {}: {e}", parent.display()))?;
+    link_tree(from, tmp.path())?;
+    crate::fs::replace_dir(tmp.path(), to)
+        .map_err(|e| format!("can't link {} to {}: {e}", from.display(), to.display()))
+}
+
+fn link_tree(from: &Path, to: &Path) -> Result<(), String> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(from).map_err(|e| format!("can't read {}: {e}", from.display()))? {
+        entries.push(entry.map_err(|e| format!("can't read an entry in {}: {e}", from.display()))?);
+    }
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .map_err(|e| format!("can't inspect {}: {e}", src.display()))?;
+        if kind.is_dir() {
+            std::fs::create_dir(&dst).map_err(|e| format!("can't create {}: {e}", dst.display()))?;
+            link_tree(&src, &dst)?;
+            preserve_mode(&src, &dst)?;
+        } else if kind.is_file() {
+            link_or_copy(&src, &dst)?;
+        } else {
+            return Err(format!("{} contains an unsafe source entry", src.display()));
+        }
     }
     Ok(())
 }
 
-/// Link (or copy) an installed version's directory, executable and manifest, from one plugins
-/// directory to another.
-pub fn link_version(from: &Path, to: &Path) -> Result<(), String> {
-    let m = read_manifest(from).ok_or_else(|| format!("{} has no {MANIFEST}", from.display()))?;
-    link_or_copy(&from.join(&m.executable), &to.join(&m.executable))?;
-    link_or_copy(&from.join(MANIFEST), &to.join(MANIFEST))
-}
-
 pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
+    let kind = std::fs::symlink_metadata(version_dir.join(MANIFEST))
+        .ok()?
+        .file_type();
+    if !kind.is_file() {
+        return None;
+    }
     let text = std::fs::read_to_string(version_dir.join(MANIFEST)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
+    if read_manifest(version_dir).is_some() {
+        return Ok(());
+    }
     let p = version_dir.join(MANIFEST);
     let text = serde_json::to_string_pretty(m).map_err(|e| format!("can't write {}: {e}", p.display()))?;
     crate::fs::write_atomic(&p, text.as_bytes()).map_err(|e| format!("can't write {}: {e}", p.display()))

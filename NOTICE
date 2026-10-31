@@ -1,0 +1,9 @@
+DRE
+Copyright (C) 2026 DRE contributors
+
+This product is licensed under the GNU General Public License, version 3 only
+(GPL-3.0-only). See LICENSE.
+
+The first-party JDBC plugin also includes third-party components under their
+own licenses. See THIRD_PARTY_NOTICES.md and the bundled Java runtime's legal
+directory.

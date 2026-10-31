@@ -46,7 +46,7 @@ permissions:
 
 jobs:
   jdbc:
-    # The development Java package; runtime bundling and registry releases are separate.
+    # The development Java package; release packaging is checked in release.yml.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -79,6 +79,12 @@ jobs:
       - run: mvn -B -f java/jdbc/pom.xml package
       - run: python3 java/jdbc/test_protocol.py
       - name: Prepare database fixtures and pinned user-supplied drivers
+      - run: python3 java/jdbc/test_package.py
+      - name: Check the committed Java describe.json
+        env:
+          DRE_TEST_JDBC_JAR: ${{ github.workspace }}/java/jdbc/target/dre-plugin-jdbc.jar
+        run: cargo test -p dre-cli --test describe_json
+      - name: Prepare the synthetic Oracle account and user-supplied test driver
         env:
           ORACLE_CONTAINER: ${{ job.services.oracle.id }}
           SQLSERVER_CONTAINER: ${{ job.services.sqlserver.id }}

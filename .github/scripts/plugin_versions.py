@@ -3,9 +3,9 @@
 
     plugin_versions.py <base ref>
 
-Each plugin package has its own version (plugins/<package>/Cargo.toml, go/<package>/VERSION)
-and is released by tagging `<package>-v<version>`. A Go package's code includes the shared protocol
-module in go/plugin. A change to a package's code since <base ref>
+Each plugin package has its own version (plugins/<package>/Cargo.toml, go/<package>/VERSION or
+java/<package>/pom.xml) and is released by tagging `<package>-v<version>`. A Go package's code
+includes the shared protocol module in go/plugin. A change to a package's code since <base ref>
 without a version bump is reported as a GitHub Actions warning, so a fix doesn't sit unreleased
 by accident. The same goes for the dre-protocol crate, which has its own version and is published
 to crates.io only when that version is new. Tests and Markdown don't count. It never fails:
@@ -31,6 +31,8 @@ def sources():
     for package, about in PACKAGES.items():
         if about.get("go"):
             yield package, [about["go"], "go/plugin"], f"{about['go']}/VERSION", f"tag {package}-v<version>"
+        elif about.get("java"):
+            yield package, [about["java"]], f"{about['java']}/pom.xml", f"tag {package}-v<version>"
         else:
             yield package, [f"plugins/{package}"], f"plugins/{package}/Cargo.toml", f"tag {package}-v<version>"
     yield "dre-protocol", ["crates/dre-protocol"], "crates/dre-protocol/Cargo.toml", "published with the next DRE release"
@@ -39,6 +41,9 @@ def sources():
 def version(text, path):
     if path.endswith("VERSION"):
         return text.strip() or None
+    if path.endswith("pom.xml"):
+        m = re.search(r"<version>([^<]+)</version>", text)
+        return m.group(1) if m else None
     m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
     return m.group(1) if m else None
 

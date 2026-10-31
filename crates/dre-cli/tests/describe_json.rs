@@ -3,7 +3,9 @@
 //! references) read a file instead of building and starting the plugins. The fields and options
 //! are authored once, in the plugin's code; this test fails when a built plugin's reply differs
 //! from its file. `DRE_UPDATE_DESCRIBE=1` rewrites the files. Go packages are checked when
-//! `DRE_TEST_GO_PLUGINS` names their built programs.
+//! `DRE_TEST_GO_PLUGINS` names their built programs. The Java package is checked when
+//! `DRE_TEST_JDBC_JAR` names its built shaded JAR; the test launches it with the bundled
+//! runtime contract through a small test launcher.
 
 mod common;
 
@@ -16,6 +18,67 @@ use serde_json::{Map, Value, json};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn java_launcher(jar: &Path) -> PathBuf {
+    let dir = jar.parent().expect("the JDBC JAR has a parent");
+    let exe = dir.join(format!("dre-plugin-jdbc{}", std::env::consts::EXE_SUFFIX));
+    let java = if cfg!(windows) {
+        dir.join("runtime/bin/java.exe")
+    } else {
+        dir.join("runtime/bin/java")
+    };
+    assert!(
+        java.is_file(),
+        "DRE_TEST_JDBC_JAR must have runtime/bin/java beside it"
+    );
+    if cfg!(windows) {
+        return write_windows_launcher(dir, jar, &java);
+    }
+    let script = format!(
+        "#!/bin/sh\nexec '{}' --add-opens=java.base/java.nio=ALL-UNNAMED -jar '{}' \"$@\"\n",
+        java.display(),
+        jar.display()
+    );
+    std::fs::write(&exe, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    exe
+}
+
+fn write_windows_launcher(dir: &Path, jar: &Path, java: &Path) -> PathBuf {
+    let source = dir.join("launcher.rs");
+    std::fs::write(
+        &source,
+        format!(
+            r#"
+use std::process::Command;
+fn main() {{
+    let status = Command::new(r"{}").arg("--add-opens=java.base/java.nio=ALL-UNNAMED")
+        .arg("-jar").arg(r"{}").args(std::env::args_os().skip(1)).status().unwrap();
+    std::process::exit(status.code().unwrap_or(1));
+}}
+"#,
+            java.display(),
+            jar.display()
+        ),
+    )
+    .unwrap();
+    let exe = dir.join("dre-plugin-jdbc.exe");
+    let build = std::process::Command::new("rustc")
+        .args([
+            "--edition=2021",
+            source.to_str().unwrap(),
+            "-o",
+            exe.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(build.success());
+    exe
 }
 
 /// What `describe.json` holds for one plugin: its reply, without the plugin version (which
@@ -64,10 +127,20 @@ fn each_package_describe_json_matches_its_plugins() {
                     root().join(go),
                 )
             }
-            None => (
-                common::workspace_bin(&format!("dre-plugin-{package}")),
-                root().join("plugins").join(package),
-            ),
+            None => match about.get("java").and_then(Value::as_str) {
+                Some(java) => {
+                    let Some(jar) = std::env::var_os("DRE_TEST_JDBC_JAR") else {
+                        eprintln!("skipped {package}: set DRE_TEST_JDBC_JAR");
+                        continue;
+                    };
+                    let jar = PathBuf::from(jar);
+                    (java_launcher(&jar), root().join(java))
+                }
+                None => (
+                    common::workspace_bin(&format!("dre-plugin-{package}")),
+                    root().join("plugins").join(package),
+                ),
+            },
         };
         let mut want = Map::new();
         for id in about["provides"].as_array().unwrap() {

@@ -5,6 +5,35 @@
 
 pub use dre_protocol::util::{write_atomic, write_atomic_mode};
 
+/// Swap a prepared directory into place, restoring the old one if the final rename fails.
+pub fn replace_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    let old = if to.exists() {
+        let parent = to
+            .parent()
+            .ok_or_else(|| format!("{} has no parent folder", to.display()))?;
+        let old = tempfile::Builder::new()
+            .prefix(".old-")
+            .tempdir_in(parent)
+            .map_err(|e| format!("can't create a staging folder in {}: {e}", parent.display()))?;
+        std::fs::rename(to, old.path()).map_err(|e| format!("can't replace {}: {e}", to.display()))?;
+        Some(old)
+    } else {
+        None
+    };
+    if let Err(e) = std::fs::rename(from, to) {
+        if let Some(old) = &old {
+            let _ = std::fs::rename(old.path(), to);
+        }
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
+/// Whether `path` is a strict descendant of `parent` by path component.
+pub fn is_below(path: &std::path::Path, parent: &std::path::Path) -> bool {
+    path != parent && path.starts_with(parent)
+}
+
 #[cfg(test)]
 mod tests {
     /// The modules that write durable state use [`super::write_atomic`], never a plain write.
