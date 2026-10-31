@@ -292,7 +292,7 @@ jobs:
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: nextest
       # Build the plugins first: otherwise each test process builds them (DuckDB from C++
@@ -356,7 +356,7 @@ jobs:
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
       # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
       # test even after a failure, so one failure can't hide others.
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: nextest
       - run: cargo nextest run --workspace --no-fail-fast
