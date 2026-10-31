@@ -4,6 +4,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import tempfile
@@ -144,6 +145,74 @@ class JdbcReport(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("cast explicitly to millisecond precision", output)
         self.assertNotIn("SENTINEL", output)
+
+    def test_existing_catalog_cli_discovers_scoped_mixed_case_metadata(self):
+        project = self.project("catalog")
+        schema = "DRE_FIXTURE" if self.database == "oracle" else "Sales Schema"
+        request = {
+            "tables": [f'"{schema}"."Order Items"', f'"{schema}"."Order View"'],
+            "schemas": [],
+        }
+        (project / "tables.json").write_text(json.dumps(request))
+        run = subprocess.run(
+            [self.cli, "catalog", "--profile", "jdbc_fixture",
+             "--tables-file", "tables.json", "--output-file", "catalog.json"],
+            cwd=project, env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        catalog = json.loads((project / "catalog.json").read_text())
+        self.assertEqual(catalog["schema_version"], "dre/catalog/v1")
+        self.assertEqual(catalog["source_type"], "jdbc")
+        self.assertEqual(catalog["connection"], "jdbc_fixture")
+        self.assertEqual(
+            catalog["current_schema"],
+            "DRE_FIXTURE" if self.database == "oracle" else "dbo")
+        self.assertEqual(catalog["identifier_quote"], '"')
+        self.assertEqual(catalog["dialect"]["literal_style"], "doubling")
+        if self.database == "oracle":
+            self.assertEqual(catalog["dialect"]["identifier_case"], "upper_unless_quoted")
+        else:
+            self.assertEqual(catalog["dialect"]["identifier_case"], "insensitive")
+        self.assertEqual([t["name"] for t in catalog["tables"]], ["Order Items", "Order View"])
+        table = catalog["tables"][0]
+        self.assertEqual(table["qualified_name"], [catalog["current_catalog"], schema, "Order Items"])
+        self.assertEqual(table["requested"], [f'"{schema}"."Order Items"'])
+        self.assertEqual([c["name"] for c in table["columns"]], ["Order ID", "AMOUNT" if self.database == "oracle" else "amount"])
+        expected = "NUMBER(18,2)" if self.database == "oracle" else "decimal(18,2)"
+        self.assertEqual(table["columns"][1]["type"].lower(), expected.lower())
+        if table["description"] is None and table["columns"][1]["description"] is None:
+            self.assertIn("descriptions are unavailable", catalog["warnings"][0])
+        else:
+            self.assertEqual(table["description"], "mixed case table")
+            self.assertEqual(table["columns"][1]["description"], "mixed case amount")
+
+        unquoted = (
+            ["dre_fixture.dre_fixture_data"]
+            if self.database == "oracle" else ["[Sales Schema].[Order Items]"]
+        )
+        expected_name = "DRE_FIXTURE_DATA" if self.database == "oracle" else "Order Items"
+        (project / "tables.json").write_text(json.dumps({"tables": unquoted, "schemas": []}))
+        run = subprocess.run(
+            [self.cli, "catalog", "--profile", "jdbc_fixture",
+             "--tables-file", "tables.json", "--output-file", "catalog-unquoted.json"],
+            cwd=project, env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        catalog = json.loads((project / "catalog-unquoted.json").read_text())
+        self.assertEqual(len(catalog["tables"]), 1)
+        self.assertEqual(catalog["tables"][0]["name"], expected_name)
+        self.assertEqual(catalog["tables"][0]["requested"], unquoted)
+
+        (project / "tables.json").write_text(
+            json.dumps({"tables": [f'"{schema}"."Missing Object"'], "schemas": []}))
+        failed = subprocess.run(
+            [self.cli, "catalog", "--profile", "jdbc_fixture",
+             "--tables-file", "tables.json", "--output-file", "missing.json"],
+            cwd=project, env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertNotEqual(failed.returncode, 0)
+        output = failed.stdout + failed.stderr
+        self.assertIn("Missing Object", output)
+        self.assertIn("missing or not visible", output)
+        self.assertNotIn("DRE_TEST_JDBC_PASSWORD", output)
+        self.assertNotIn(self.env["DRE_TEST_JDBC_PASSWORD"], output)
 
 
 if __name__ == "__main__":

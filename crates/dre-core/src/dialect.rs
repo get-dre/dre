@@ -25,6 +25,8 @@ pub enum IdentifierCase {
     Insensitive,
     /// Unquoted names fold to lowercase; quoted names are exact.
     LowerUnlessQuoted,
+    /// Unquoted names fold to uppercase; quoted names are exact.
+    UpperUnlessQuoted,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,6 +169,7 @@ impl Dialect {
         match self.identifier_case {
             IdentifierCase::Insensitive => written.eq_ignore_ascii_case(actual),
             IdentifierCase::LowerUnlessQuoted => written == actual,
+            IdentifierCase::UpperUnlessQuoted => written.to_ascii_uppercase() == actual,
         }
     }
 

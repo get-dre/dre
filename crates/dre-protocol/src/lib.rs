@@ -63,6 +63,8 @@ pub const CAP_MESSAGE: &str = "message";
 pub const CAP_MESSAGE_ONLY: &str = "message_only";
 /// Source: loads rows into a temporary table on the session (`load`), for large lookups.
 pub const CAP_LOAD: &str = "load";
+/// Source: discovers accessible relations through the connection's native metadata.
+pub const CAP_CATALOG: &str = "catalog";
 /// Answers `validate` (checks a config block of options). The Rust SDK always advertises it.
 pub const CAP_VALIDATE: &str = "validate";
 
@@ -75,6 +77,7 @@ pub const CAPABILITIES: &[&str] = &[
     CAP_MESSAGE,
     CAP_MESSAGE_ONLY,
     CAP_LOAD,
+    CAP_CATALOG,
     CAP_VALIDATE,
 ];
 

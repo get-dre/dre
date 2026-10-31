@@ -105,7 +105,7 @@ public final class Main {
       throw new IOException("unknown plugin");
     }
     send(null, "hello", "protocol_version", Math.min(max, 1), "kind", "source", "name", "jdbc",
-        "version", Main.class.getPackage().getImplementationVersion(), "capabilities", List.of("sessions", "validate"), "provides", List.of("source/jdbc"));
+        "version", Main.class.getPackage().getImplementationVersion(), "capabilities", List.of("sessions", "catalog", "validate"), "provides", List.of("source/jdbc"));
     JsonNode message;
     while ((message = read()) != null) {
       long id = message.path("id").asLong(0);
@@ -196,6 +196,7 @@ public final class Main {
           send(message, "ok");
         }
         case "execute" -> execute(request);
+        case "catalog" -> catalog(message);
         case "close" -> {
           closeSession();
           send(message, "ok");
@@ -391,6 +392,246 @@ public final class Main {
     if (request.cancelled.get()) {
       throw new Failure("cancelled", "JDBC request cancelled");
     }
+  }
+
+  private record Relation(String catalog, String schema, String name, String type, String description) {}
+
+  private record Column(String name, String type, String description) {}
+
+  private static <T> List<T> all(ResultSet rows, RowMapper<T> mapper) throws SQLException {
+    List<T> out = new ArrayList<>();
+    try (rows) {
+      while (rows.next()) {
+        out.add(mapper.map(rows));
+      }
+    }
+    return out;
+  }
+
+  private interface RowMapper<T> {
+    T map(ResultSet row) throws SQLException;
+  }
+
+  private static Failure metadataFailure(String what, SQLException error) {
+    String state = error.getSQLState();
+    state = state != null && state.matches("[A-Z0-9]{5}") ? state : "unknown";
+    return new Failure("query", what + " unavailable from JDBC metadata (SQLSTATE " + state
+        + ", vendor code " + error.getErrorCode() + "); check database permissions and driver support");
+  }
+
+  private static String typeName(ResultSet column) throws SQLException {
+    String name = column.getString(6);
+    int size = column.getInt(7);
+    int scale = column.getInt(9);
+    int jdbc = column.getInt(5);
+    if ((jdbc == Types.NUMERIC || jdbc == Types.DECIMAL) && size > 0) {
+      return name + "(" + size + "," + Math.max(0, scale) + ")";
+    }
+    return name;
+  }
+
+  private static String unquote(String name) {
+    if (name.length() > 1 && ((name.startsWith("\"") && name.endsWith("\""))
+        || (name.startsWith("`") && name.endsWith("`"))
+        || (name.startsWith("[") && name.endsWith("]")))) {
+      return name.substring(1, name.length() - 1).replace("\"\"", "\"");
+    }
+    return name;
+  }
+
+  private static boolean sameName(String written, String actual, boolean foldUpper) {
+    String name = unquote(written.trim());
+    boolean quoted = !name.equals(written.trim());
+    return foldUpper && !quoted ? name.toUpperCase(Locale.ROOT).equals(actual) : name.equalsIgnoreCase(actual);
+  }
+
+  private static List<String> parts(String name) {
+    List<String> parts = new ArrayList<>();
+    StringBuilder part = new StringBuilder();
+    char quote = 0;
+    for (char c : name.toCharArray()) {
+      if (quote != 0) {
+        part.append(c);
+        if (c == quote) {
+          quote = 0;
+        }
+      } else if (c == '"' || c == '`') {
+        quote = c;
+        part.append(c);
+      } else if (c == '[') {
+        quote = ']';
+        part.append(c);
+      } else if (c == '.') {
+        parts.add(part.toString());
+        part.setLength(0);
+      } else {
+        part.append(c);
+      }
+    }
+    parts.add(part.toString());
+    return parts;
+  }
+
+  private static boolean matchesTable(String wanted, Relation relation, String currentSchema, boolean foldUpper) {
+    List<String> names = parts(wanted);
+    String name = names.get(names.size() - 1);
+    if (!sameName(name, relation.name(), foldUpper)) {
+      return false;
+    }
+    if (names.size() < 2) {
+      return sameName(currentSchema, relation.schema(), foldUpper);
+    }
+    String schema = names.get(names.size() - 2);
+    if (!sameName(schema, relation.schema(), foldUpper)) {
+      return false;
+    }
+    if (names.size() < 3) {
+      return true;
+    }
+    String catalog = names.get(names.size() - 3);
+    return sameName(catalog, relation.catalog() == null ? "" : relation.catalog(), foldUpper);
+  }
+
+  private static String currentSchema(DatabaseMetaData metadata) throws SQLException {
+    try {
+      String schema = metadata.getConnection().getSchema();
+      if (schema != null && !schema.isBlank()) {
+        return schema;
+      }
+    } catch (SQLException | UnsupportedOperationException | AbstractMethodError ignored) {
+      // Fall back to the driver's current user below.
+    }
+    String user = metadata.getUserName();
+    return user == null ? "" : user;
+  }
+
+  private void catalog(JsonNode message) throws Exception {
+    if (connection == null) {
+      throw new Failure("connection", "open a JDBC connection before discovering catalog metadata");
+    }
+    JsonNode requestedTables = message.path("tables");
+    JsonNode requestedSchemas = message.path("schemas");
+    if (!requestedTables.isArray() || !requestedSchemas.isArray()) {
+      throw new Failure("config", "`tables` and `schemas` must be arrays");
+    }
+    DatabaseMetaData metadata = connection.getMetaData();
+    String product = metadata.getDatabaseProductName();
+    String catalog;
+    String currentSchema;
+    String quote;
+    boolean upper;
+    boolean lower;
+    boolean mixedCaseQuoted;
+    int maxSchemaLength;
+    int maxTableLength;
+    int maxColumnLength;
+    List<String> schemas;
+    List<Relation> relations;
+    try {
+      catalog = connection.getCatalog();
+      if (catalog == null || catalog.isBlank()) {
+        catalog = metadata.getUserName();
+      }
+      currentSchema = currentSchema(metadata);
+      quote = metadata.getIdentifierQuoteString();
+      upper = metadata.storesUpperCaseIdentifiers();
+      lower = metadata.storesLowerCaseIdentifiers();
+      mixedCaseQuoted = metadata.storesMixedCaseQuotedIdentifiers();
+      maxSchemaLength = metadata.getMaxSchemaNameLength();
+      maxTableLength = metadata.getMaxTableNameLength();
+      maxColumnLength = metadata.getMaxColumnNameLength();
+      try {
+        schemas = all(metadata.getSchemas(), row -> row.getString(1));
+      } catch (SQLException error) {
+        throw metadataFailure("schema metadata", error);
+      }
+      relations = all(metadata.getTables(catalog, null, "%", new String[]{"TABLE", "VIEW"}), row -> new Relation(
+          row.getString(1), row.getString(2), row.getString(3), row.getString(4), row.getString(5)));
+    } catch (SQLException error) {
+      throw metadataFailure("schema/table metadata", error);
+    } catch (RuntimeException error) {
+      throw error;
+    }
+    catalog = catalog == null ? "" : catalog;
+    quote = quote == null || quote.isBlank() ? "\"" : quote;
+    final boolean foldUpper = upper && !lower;
+    List<String> wantedSchemas = new ArrayList<>();
+    requestedSchemas.forEach(name -> wantedSchemas.add(name.asText()));
+    List<String> wantedTables = new ArrayList<>();
+    requestedTables.forEach(name -> wantedTables.add(name.asText()));
+    List<Relation> selected = new ArrayList<>();
+    for (Relation relation : relations) {
+      boolean bySchema = wantedSchemas.stream().anyMatch(name -> sameName(name, relation.schema(), foldUpper));
+      boolean byTable = wantedTables.stream().anyMatch(
+          name -> matchesTable(name, relation, currentSchema, foldUpper));
+      if (bySchema || byTable) {
+        selected.add(relation);
+      }
+    }
+    selected.sort(Comparator.comparing(Relation::schema).thenComparing(Relation::name));
+    for (String wanted : wantedTables) {
+      if (selected.stream().noneMatch(relation -> matchesTable(wanted, relation, currentSchema, foldUpper))) {
+        throw new Failure("query", "table `" + wanted + "` is missing or not visible through JDBC metadata");
+      }
+    }
+    List<Map<String, Object>> tables = new ArrayList<>();
+    boolean descriptionsAvailable = false;
+    for (Relation relation : selected) {
+      List<Column> columns;
+      try {
+        columns = all(metadata.getColumns(catalog, relation.schema(), relation.name(), "%"), row ->
+            new Column(row.getString(4), typeName(row), row.getString(12)));
+      } catch (SQLException error) {
+        throw metadataFailure("column metadata", error);
+      }
+      descriptionsAvailable |= relation.description() != null;
+      descriptionsAvailable |= columns.stream().anyMatch(column -> column.description() != null);
+      List<String> requested = wantedTables.stream().filter(
+          name -> matchesTable(name, relation, currentSchema, foldUpper)).toList();
+      Map<String, Object> table = new LinkedHashMap<>();
+      table.put("catalog", relation.catalog() == null ? catalog : relation.catalog());
+      table.put("schema", relation.schema());
+      table.put("name", relation.name());
+      table.put("qualified_name", List.of(relation.catalog() == null ? catalog : relation.catalog(), relation.schema(), relation.name()));
+      table.put("description", relation.description());
+      table.put("description_source", "database");
+      table.put("columns", columns.stream().map(column -> {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("name", column.name());
+        value.put("type", column.type());
+        value.put("description", column.description());
+        return value;
+      }).toList());
+      table.put("requested", requested);
+      tables.add(table);
+    }
+    Map<String, Object> dialect = new LinkedHashMap<>();
+    dialect.put("identifier_quote", quote);
+    dialect.put("identifier_case", foldUpper ? "upper_unless_quoted" : lower ? "lower_unless_quoted" : "insensitive");
+    dialect.put("literal_style", "doubling");
+    dialect.put("hex_literal", null);
+    Map<String, Object> identifier = new LinkedHashMap<>();
+    identifier.put("stores_upper_case", upper);
+    identifier.put("stores_lower_case", lower);
+    identifier.put("stores_mixed_case_quoted", mixedCaseQuoted);
+    identifier.put("max_schema_name_length", maxSchemaLength);
+    identifier.put("max_table_name_length", maxTableLength);
+    identifier.put("max_column_name_length", maxColumnLength);
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("schema_version", "dre/catalog/v1");
+    response.put("connection", "jdbc");
+    response.put("target", "");
+    response.put("source_type", "jdbc");
+    response.put("database_product", product);
+    response.put("identifier_quote", quote);
+    response.put("identifier_metadata", identifier);
+    response.put("dialect", dialect);
+    response.put("current_catalog", catalog);
+    response.put("current_schema", currentSchema);
+    response.put("available_schemas", schemas);
+    response.put("tables", tables);
+    response.put("warnings", descriptionsAvailable ? List.of() : List.of("table and column descriptions are unavailable from JDBC metadata"));
+    send(message, "catalog", "catalog", response);
   }
 
   private void execute(Request request) throws Exception {

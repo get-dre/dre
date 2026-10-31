@@ -29,6 +29,7 @@ pub enum Call {
     Start,
     Open,
     Execute,
+    Catalog,
     Write,
     Deliver,
 }
@@ -354,6 +355,14 @@ impl Plugin for Scripted {
 
     fn check(&mut self, _sql: &str) -> HostResult<()> {
         Ok(())
+    }
+
+    fn catalog(&mut self, _tables: Vec<String>, _schemas: Vec<String>) -> HostResult<Value> {
+        self.call(Call::Catalog, "")?;
+        Ok(serde_json::json!({
+            "schema_version": "dre/catalog/v1",
+            "tables": []
+        }))
     }
 
     fn execute(

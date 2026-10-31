@@ -391,6 +391,11 @@ pub trait Source {
     fn load(&mut self, _name: &str, _data: &mut ResultSet<'_>) -> Result<Loaded> {
         Err("this source can't load rows".into())
     }
+    /// Discover accessible relations through native metadata. Only called when the plugin
+    /// advertises `catalog`; both lists use the existing `dre catalog` request.
+    fn catalog(&mut self, _tables: &[String], _schemas: &[String]) -> Result<Value> {
+        Err("this source can't discover catalogue metadata".into())
+    }
     /// End the session cleanly (called on `close` and at end of input, before exiting).
     fn close(&mut self) {}
 }
@@ -1115,6 +1120,10 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
         (Handler::Source(s), Request::Check { sql }) => {
             s.check(&sql)?;
             out.send(&Response::Ok {});
+        }
+        (Handler::Source(s), Request::Catalog { tables, schemas }) => {
+            let catalog = s.catalog(&tables, &schemas)?;
+            out.send(&Response::Catalog { catalog })
         }
         (Handler::Source(s), Request::Execute { sql, row_limit }) => {
             let mut sink = FrameSink {

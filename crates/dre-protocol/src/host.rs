@@ -1006,6 +1006,16 @@ impl PluginProcess {
         self.call_ok(&Request::Check { sql: sql.to_string() }, "a check reply")
     }
 
+    /// Discover a source's catalogue (`catalog` capability), returning its existing
+    /// `dre/catalog/v1` document.
+    pub fn catalog(&mut self, tables: Vec<String>, schemas: Vec<String>) -> Result<Value> {
+        self.send(&Request::Catalog { tables, schemas })?;
+        match self.recv_json("a catalog reply")? {
+            Response::Catalog { catalog } => Ok(catalog),
+            other => Err(self.unexpected("a catalog reply", &Incoming::Json(other))),
+        }
+    }
+
     /// Run one statement, handing every batch to `on_batch` as it arrives.
     pub fn execute(
         &mut self,

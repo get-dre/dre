@@ -83,6 +83,13 @@ pub enum Request {
     Check {
         sql: String,
     },
+    /// Source advertising `catalog`: discover accessible relations through native metadata.
+    Catalog {
+        #[serde(default)]
+        tables: Vec<String>,
+        #[serde(default)]
+        schemas: Vec<String>,
+    },
     /// Format: write result sets to `path`. Followed, per result set, by Arrow frames (at least one,
     /// carrying the schema) and a `result_set_end`, then `finish`. Replies `written`.
     Write {
@@ -200,6 +207,10 @@ pub enum Response {
     NoResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rows_affected: Option<u64>,
+    },
+    /// A source's catalogue, using the existing `dre/catalog/v1` document shape.
+    Catalog {
+        catalog: Value,
     },
     /// A format needs a pinned registry font before completing its write.
     NeedFonts {

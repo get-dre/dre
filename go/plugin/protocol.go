@@ -18,11 +18,12 @@ const (
 	CapMessage     = "message"
 	CapMessageOnly = "message_only"
 	CapLoad        = "load"
+	CapCatalog     = "catalog"
 	CapValidate    = "validate"
 )
 
 // Capabilities is every capability, in the schema's order.
-var Capabilities = []string{CapSessions, CapReadOnly, CapCheck, CapMultiFile, CapMessage, CapMessageOnly, CapLoad, CapValidate}
+var Capabilities = []string{CapSessions, CapReadOnly, CapCheck, CapMultiFile, CapMessage, CapMessageOnly, CapLoad, CapCatalog, CapValidate}
 
 // ErrorKinds is every kind an `error` reply may give, in the schema's order.
 var ErrorKinds = []string{"config", "plugin", "refused", "connection", "auth", "query", "delivery", "internal", "cancelled", "timed_out"}

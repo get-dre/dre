@@ -24,6 +24,7 @@
       "message",
       "message_only",
       "load",
+      "catalog",
       "validate"
     ],
     "error_kinds": [
@@ -218,6 +219,33 @@
             "sql"
           ],
           "description": "Source: verify one statement without executing it. Replies `ok` or `error`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "catalog"
+            },
+            "tables": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "schemas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "description": "Source advertising `catalog`: discover accessible relations through native metadata."
         },
         {
           "type": "object",
@@ -1035,6 +1063,21 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "catalog"
+            },
+            "catalog": true
+          },
+          "required": [
+            "type",
+            "catalog"
+          ],
+          "description": "A source's catalogue, using the existing `dre/catalog/v1` document shape."
         },
         {
           "type": "object",

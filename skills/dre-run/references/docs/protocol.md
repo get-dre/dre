@@ -190,6 +190,7 @@ Capabilities:
 | `read_only` | Source: honours `read_only: true` on `open`. |
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
+| `catalog` | Source: can discover accessible relations through native database metadata. |
 | `multi_file` | Destination: takes every file of one output in a single `deliver` (`files`), e.g. one email carrying every attachment. |
 | `message` | Destination: takes a message (`deliver` with `message`), such as a chat post or an email body. |
 | `message_only` | Destination: takes only messages; core never sends it a file output. Implies `message`. |
@@ -394,6 +395,16 @@ a `{"type":"result_set_end"}`. Column types are `Utf8`, `Int64`, `Float64`, `Boo
 database has no bulk path and the load went through ordinary SQL; core shows it to the user.
 First-party plugins: DuckDB uses its appender, Postgres `COPY`, and Databricks a temporary view
 built from one `VALUES` statement, with a warning. Only sent to plugins advertising `load`.
+
+```json
+{"type": "catalog", "tables": ["orders"], "schemas": []}
+```
+
+`catalog` discovers schemas, tables/views, columns, types and available identifier metadata. It
+replies `{"type":"catalog","catalog":{…}}`, where `catalog` is the existing `dre/catalog/v1`
+document used by the CLI. Each table records the requested names that resolved to it, so core
+can reject an absent requested object. Core owns the selected connection, target and source
+type in the final document. Only sent to plugins advertising `catalog`.
 
 ### Format
 

@@ -136,6 +136,46 @@ class ProtocolTests(unittest.TestCase):
         reply = self.request(type='open', connection=self.config, read_only=True)
         self.assertEqual(reply['kind'], 'refused')
 
+    def test_catalog_returns_accessible_metadata_and_identifier_rules(self):
+        self.config['url'] = 'jdbc:fixture:catalog'
+        self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+        reply = self.request(type='catalog', tables=['sales schema.order items'],
+                             schemas=[], profile='fixture', target='dev')
+        self.assertEqual(reply['type'], 'catalog')
+        catalog = reply['catalog']
+        self.assertEqual(catalog['current_schema'], 'fixture')
+        self.assertEqual(catalog['tables'][0]['name'], 'ORDER ITEMS')
+        self.assertEqual(len(catalog['tables']), 1)
+        self.assertEqual(catalog['tables'][0]['columns'][0]['name'], 'Order ID')
+        self.assertEqual(
+            catalog['tables'][0]['columns'][0]['type'], 'NUMBER(18,0)')
+        self.assertEqual(catalog['tables'][0]['columns'][0]['description'], 'item key')
+        self.assertEqual(catalog['dialect']['identifier_case'], 'upper_unless_quoted')
+        self.assertTrue(catalog['identifier_metadata']['stores_mixed_case_quoted'])
+        self.assertEqual(catalog['warnings'], [])
+        self.assertNotIn('jdbc:fixture', json.dumps(reply))
+
+    def test_catalog_permission_denied_has_categorical_diagnostic(self):
+        self.config['url'] = 'jdbc:fixture:permission'
+        self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+        reply = self.request(type='catalog', schemas=['denied'], tables=[], profile='fixture', target='dev')
+        self.assertEqual(reply['kind'], 'query')
+        self.assertIn('schema metadata', reply['message'])
+        self.assertNotIn('jdbc:fixture', json.dumps(reply))
+
+    def test_catalog_identifier_metadata_does_not_leak_connection(self):
+        self.config['url'] = 'jdbc:fixture:catalog'
+        self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+        reply = self.request(type='catalog', tables=[], schemas=['sales schema'],
+                             profile='fixture', target='dev')
+        self.assertEqual(reply['type'], 'catalog')
+        self.assertEqual(reply['catalog']['warnings'], [])
+        self.assertEqual(
+            reply['catalog']['identifier_metadata'],
+        {'stores_upper_case': True, 'stores_lower_case': False,
+             'stores_mixed_case_quoted': True, 'max_schema_name_length': 30,
+             'max_table_name_length': 128, 'max_column_name_length': 30})
+
     def test_statement_cleanup_failure_has_one_error_reply_not_success_then_error(self):
         self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
         reply = self.request(type='execute', sql='synthetic update')

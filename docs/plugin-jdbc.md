@@ -1,6 +1,6 @@
 ---
 title: "JDBC (development build)"
-description: "Connect an optional JDBC source with user-supplied drivers: development setup, tested Oracle and SQL Server reporting, supported types and limits."
+description: "Connect an optional JDBC source with user-supplied drivers: development setup, tested Oracle and SQL Server reporting and catalog discovery, supported types and limits."
 section: plugins
 position: 100
 ---
@@ -156,11 +156,17 @@ This avoids silently dropping the clock fields. Oracle `RAW` and SQL Server `var
 have Arrow/workbook coverage; xlsx renders binary values as hexadecimal text. SQL Server `date`
 is a separate date-only type; generic Oracle `DATE` handling must not be applied to it.
 
-Only `sessions` and `validate` are advertised. There is no `check`, temporary lookup `load`,
-catalog metadata integration or restricted-query capability. An explicit `read_only: true`
-protocol request is refused. JDBC read-only hints are not an authorization boundary; configure
-a database account with appropriate permissions. Cancellation uses the running JDBC statement's
-`cancel()` and checks between batches. Actual server cancellation still depends on the driver.
+`sessions`, `validate` and `catalog` are advertised. There is no `check`, temporary lookup
+`load`, or restricted-query capability. `dre catalog` with a
+JDBC profile uses `DatabaseMetaData` to return accessible schemas, tables/views, columns, types,
+comments and identifier rules through the existing `dre/catalog/v1` output. Requested bare
+table names use the current schema; quote mixed-case names to preserve their exact spelling.
+`tables` or `schemas` in the catalog request scope the result. A missing requested object and a
+permission failure fail explicitly. If the driver supplies no comments, the result carries a
+warning. An explicit `read_only: true` protocol request is refused. JDBC read-only hints are not
+an authorization boundary; configure a database account with appropriate permissions.
+Cancellation uses the running JDBC statement's `cancel()` and checks between batches. Actual
+server cancellation still depends on the driver.
 
 ## Diagnostics and secrets
 
@@ -185,12 +191,13 @@ The [Oracle fixture](../java/jdbc/tests/oracle/) and
 dialect setup/query files. Tests check Arrow types and values through the protocol, then run the
 ordinary CLI path and inspect workbook values, formats and null cells. They also cover complete
 URLs, minimal URLs with properties, preparation in the final session, cancellation, cleanup,
-precision refusal and secret redaction. These results establish the two tested environments,
-not certification of every database or driver version.
+precision refusal, secret redaction and scoped catalog discovery of mixed-case table and view
+names. These results establish the two tested environments, not certification of every database
+or driver version.
 
 SQL Server `date`, timezone-bearing `datetimeoffset`, deprecated `timestamp`/`rowversion`, and
-further JDBC databases still need separate evidence. Schema discovery and bundled runtime
-installation are separate work. Generic JDBC reach depends on compatible user-supplied drivers.
+further JDBC databases still need separate evidence. Bundled runtime installation is separate
+work. Generic JDBC reach depends on compatible user-supplied drivers.
 
 Sources: [Apache Arrow JDBC adapter](https://arrow.apache.org/java/current/jdbc.html),
 [Java JDBC URL/property contract](https://docs.oracle.com/en/java/javase/17/docs/api/java.sql/java/sql/DriverManager.html#getConnection(java.lang.String,java.util.Properties)),
