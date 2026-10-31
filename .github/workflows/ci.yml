@@ -77,15 +77,9 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
       - run: mvn -B -f java/jdbc/pom.xml package
-      - run: python3 java/jdbc/test_protocol.py
+      - name: Check JDBC protocol and committed describe.json
+        run: python3 java/jdbc/test_protocol.py
       - run: python3 java/jdbc/test_package.py
-      - name: Check the committed Java describe.json
-        env:
-          DRE_TEST_JDBC_JAR: ${{ github.workspace }}/java/jdbc/target/dre-plugin-jdbc.jar
-          DRE_UPDATE_DESCRIBE: "1"
-        run: |
-          cargo test -p dre-cli --test describe_json
-          git diff --exit-code -- java/jdbc/describe.json
       - name: Prepare database fixtures and pinned user-supplied drivers
         env:
           ORACLE_CONTAINER: ${{ job.services.oracle.id }}

@@ -33,6 +33,12 @@ mvn -B -f java/jdbc/pom.xml package
 python3 java/jdbc/test_protocol.py
 ```
 
+The protocol suite compares every `describe` field and the sorted `hello` capabilities with
+`describe.json`, using the built JAR directly without compiling Rust plugins. After changing
+metadata, rebuild and run
+`DRE_UPDATE_DESCRIBE=1 python3 java/jdbc/test_protocol.py ProtocolTests.test_committed_descriptor_matches_protocol`,
+then commit the updated JSON. Normal checks leave the file unchanged.
+
 The POSIX development launcher is `java/jdbc/dre-plugin-jdbc`. It uses `JAVA_HOME/bin/java`
 when set, otherwise `java` from `PATH`, and reads `target/dre-plugin-jdbc.jar` beside itself.
 It can be copied with that JAR into a development plugins directory. The packaged launcher is
