@@ -157,9 +157,11 @@ pub fn read_manifest(version_dir: &Path) -> Option<Manifest> {
 
 pub fn write_manifest(version_dir: &Path, m: &Manifest) -> Result<(), String> {
     if let Some(archived) = read_manifest(version_dir) {
+        let actual: std::collections::BTreeSet<_> = archived.provides.iter().collect();
+        let expected: std::collections::BTreeSet<_> = m.provides.iter().collect();
         if archived.executable != m.executable
-            || archived.provides.len() != m.provides.len()
-            || !archived.provides.iter().all(|id| m.provides.contains(id))
+            || actual.len() != archived.provides.len()
+            || actual != expected
         {
             return Err("archive capabilities disagree with the registry or executable probe".into());
         }

@@ -740,6 +740,27 @@ fn an_archived_manifest_must_agree_with_registry_capabilities() {
 }
 
 #[test]
+fn duplicate_archive_capabilities_cannot_hide_a_missing_registry_capability() {
+    let e = Env::new(DECLARED);
+    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let manifest = format!(r#"{{"executable":"{exe}","provides":["source/fixture","source/fixture"]}}"#);
+    let tgz = gzip_tar_with_root([
+        (format!("fixture/{exe}"), bin, 0o755),
+        ("fixture/plugin.json".into(), manifest.into_bytes(), 0o644),
+    ]);
+    publish_1_1_archive(&e, &tgz);
+    let index_path = e.p("registry/index.json");
+    let mut index: serde_json::Value = serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+    index["plugins"][0]["provides"] = serde_json::json!(["source/fixture", "format/extra"]);
+    std::fs::write(index_path, index.to_string()).unwrap();
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("archive capabilities disagree");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
+}
+
+#[test]
 fn a_single_nested_root_directory_need_not_have_its_own_tar_entry() {
     let e = Env::new(DECLARED);
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);

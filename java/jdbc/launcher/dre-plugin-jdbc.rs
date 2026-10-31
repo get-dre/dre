@@ -37,6 +37,9 @@ fn runtime_job() -> std::io::Result<std::os::windows::io::OwnedHandle> {
     }
     // Assign the launcher before spawning Java: descendants inherit the job without a race.
     // The non-inherited handle closes even when the host forcibly kills this launcher.
+    // SAFETY: repr(C) structs match Win32's limits layout. Pointers reference live stack data
+    // for synchronous calls. A non-null job handle is owned exactly once; the pseudo process
+    // handle is borrowed and never closed. Null creation arguments request default security.
     unsafe {
         let raw = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         if raw.is_null() {
