@@ -207,7 +207,7 @@ jobs:
       matrix:
         include:
           - {platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin}
-          - {platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin}
+          - {platform: macos-x86_64, os: macos-15-intel, target: x86_64-apple-darwin}
           - {platform: linux-x86_64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu}
           - {platform: linux-aarch64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu}
           - {platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc}
@@ -265,19 +265,15 @@ jobs:
           esac
           archive="$RUNNER_TEMP/${jdk_url##*/}"
           curl --fail --silent --show-error --location "$jdk_url" -o "$archive"
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            actual="$(sha256sum "$archive" | cut -d' ' -f1)"
-            [[ "$actual" == "$jdk_sum" ]] || { echo "checksum mismatch for $archive" >&2; exit 1; }
-          else
-            echo "$jdk_sum  $archive" | sha256sum --check -
-          fi
+          actual="$(sha256sum "$archive" | cut -d' ' -f1 | tr -d '\r')"
+          [[ "$actual" == "$jdk_sum" ]] || { echo "checksum mismatch for $archive: $actual != $jdk_sum" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/temurin" "$RUNNER_TEMP/jdk"
           if [[ "$archive" == *.zip ]]; then
             (cd "$RUNNER_TEMP" && 7z x "${archive##*/}" -o"temurin" >/dev/null)
           else
             tar -xzf "$archive" -C "$RUNNER_TEMP/temurin"
           fi
-          release_file="$(find "$RUNNER_TEMP/temurin" -maxdepth 3 -type f -name release | head -1)"
+          release_file="$(find "$RUNNER_TEMP/temurin" -type f -name release | head -1)"
           test -n "$release_file"
           jdk="$(dirname "$release_file")"
           grep -q '^JAVA_VERSION="17\.0\.20\.1"$' "$release_file"

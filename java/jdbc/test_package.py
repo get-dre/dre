@@ -137,7 +137,12 @@ class Package(unittest.TestCase):
         body = b"J" + b'{"type":"hello","min_version":0,"max_version":1,"plugin":"source/jdbc"}'
         launch.stdin.write(len(body).to_bytes(4, "big") + body)
         launch.stdin.flush()
-        length = int.from_bytes(launch.stdout.read(4), "big")
+        header = launch.stdout.read(4)
+        if len(header) != 4:
+            status = launch.wait(timeout=10)
+            diagnostic = launch.stderr.read().decode(errors="replace")
+            self.fail(f"bundled runtime exited before replying: {status}: {diagnostic}")
+        length = int.from_bytes(header, "big")
         reply = launch.stdout.read(length)
         self.assertEqual(reply[:1], b"J")
         self.assertEqual(json.loads(reply[1:])["type"], "hello")
