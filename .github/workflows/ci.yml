@@ -82,7 +82,10 @@ jobs:
       - name: Check the committed Java describe.json
         env:
           DRE_TEST_JDBC_JAR: ${{ github.workspace }}/java/jdbc/target/dre-plugin-jdbc.jar
-        run: cargo test -p dre-cli --test describe_json
+          DRE_UPDATE_DESCRIBE: "1"
+        run: |
+          cargo test -p dre-cli --test describe_json
+          git diff --exit-code -- java/jdbc/describe.json
       - name: Prepare database fixtures and pinned user-supplied drivers
         env:
           ORACLE_CONTAINER: ${{ job.services.oracle.id }}
