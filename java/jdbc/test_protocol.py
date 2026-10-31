@@ -138,7 +138,11 @@ class ProtocolTests(unittest.TestCase):
 
     def test_statement_cleanup_failure_has_one_error_reply_not_success_then_error(self):
         self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
-        self.assertEqual(self.request(type='execute', sql='synthetic update')['type'], 'error')
+        reply = self.request(type='execute', sql='synthetic update')
+        self.assertEqual(reply['type'], 'error')
+        self.assertEqual(reply['kind'], 'query')
+        self.assertIn('SQLSTATE HY000', reply['message'])
+        self.assertIn('vendor code 999', reply['message'])
         self.assertEqual(self.request(type='describe')['type'], 'describe')
 
     def test_eof_ends_process(self):

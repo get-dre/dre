@@ -1,0 +1,2 @@
+name: jdbc_sqlserver_fixture
+default_profile: jdbc_fixture

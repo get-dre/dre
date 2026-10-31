@@ -48,7 +48,7 @@ jobs:
   jdbc:
     # The development Java package; runtime bundling and registry releases are separate.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       oracle:
         image: container-registry.oracle.com/database/free:23.26.3.0-lite@sha256:cf540c3fa190d7cffad08c491652ac07fc70314e510f6b87890449517d565e94
@@ -56,10 +56,18 @@ jobs:
           ORACLE_PWD: DreFixture39_x
         ports: ["1521:1521"]
         options: --shm-size=1g --health-interval=10s --health-retries=30 --health-start-period=30s
-    env:
-      DRE_TEST_JDBC_URL: jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1
-      DRE_TEST_JDBC_USER: dre_fixture
-      DRE_TEST_JDBC_PASSWORD: DreFixture39_x
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: DreFixture39_x!
+        ports: ["1433:1433"]
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -b -C -S localhost -U sa -P 'DreFixture39_x!' -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-retries 30
+          --health-start-period 30s
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,24 +78,63 @@ jobs:
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
       - run: mvn -B -f java/jdbc/pom.xml package
       - run: python3 java/jdbc/test_protocol.py
-      - name: Prepare the synthetic Oracle account and user-supplied test driver
+      - name: Prepare database fixtures and pinned user-supplied drivers
         env:
           ORACLE_CONTAINER: ${{ job.services.oracle.id }}
+          SQLSERVER_CONTAINER: ${{ job.services.sqlserver.id }}
         run: |
           docker exec -i "$ORACLE_CONTAINER" sqlplus -s / as sysdba < java/jdbc/tests/oracle-setup.sql
-          curl --fail --silent --show-error --location https://repo.maven.apache.org/maven2/com/oracle/database/jdbc/ojdbc11/23.26.3.0.0/ojdbc11-23.26.3.0.0.jar -o "$RUNNER_TEMP/ojdbc11.jar"
-          echo "DRE_TEST_JDBC_JAR=$RUNNER_TEMP/ojdbc11.jar" >> "$GITHUB_ENV"
+          docker exec -i "$SQLSERVER_CONTAINER" /opt/mssql-tools18/bin/sqlcmd -b -C -S localhost -U sa -P 'DreFixture39_x!' < java/jdbc/tests/sqlserver-setup.sql
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/oracle/database/jdbc/ojdbc11/23.26.3.0.0/ojdbc11-23.26.3.0.0.jar \
+            -o "$RUNNER_TEMP/ojdbc11.jar"
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/microsoft/sqlserver/mssql-jdbc/13.6.1.jre11/mssql-jdbc-13.6.1.jre11.jar \
+            -o "$RUNNER_TEMP/mssql-jdbc.jar"
+          echo "4f470d23dfdf187ece2d1f9feb33d9dbd2230051b9c9676456727692a1b97d5e  $RUNNER_TEMP/mssql-jdbc.jar" | sha256sum --check
           echo "DRE_TEST_JDBC_BIN=$GITHUB_WORKSPACE/java/jdbc/dre-plugin-jdbc" >> "$GITHUB_ENV"
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - run: cargo test -p dre-protocol --test jdbc
+      - name: Run Oracle protocol conformance and typed fixture
+        run: cargo test -p dre-protocol --test jdbc
+        env:
+          DRE_TEST_JDBC_DATABASE: oracle
+          DRE_TEST_JDBC_URL: jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1
+          DRE_TEST_JDBC_JAR: ${{ runner.temp }}/ojdbc11.jar
+          DRE_TEST_JDBC_USER: dre_fixture
+          DRE_TEST_JDBC_PASSWORD: DreFixture39_x
+      - name: Run SQL Server protocol conformance and typed fixture
+        run: cargo test -p dre-protocol --test jdbc
+        env:
+          DRE_TEST_JDBC_DATABASE: sqlserver
+          DRE_TEST_JDBC_URL: jdbc:sqlserver://127.0.0.1:1433
+          DRE_TEST_JDBC_JAR: ${{ runner.temp }}/mssql-jdbc.jar
+          DRE_TEST_JDBC_USER: dre_fixture
+          DRE_TEST_JDBC_PASSWORD: DreFixture39_x!
       - run: cargo build -p dre-cli -p dre-plugin-xlsx
       - name: Run Oracle SQL through the CLI into a checked workbook
         run: |
-          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" DRE_TEST_XLSX_BIN="$GITHUB_WORKSPACE/target/debug/dre-plugin-xlsx" python3 java/jdbc/test_oracle_report.py
+          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
+          DRE_TEST_XLSX_BIN="$GITHUB_WORKSPACE/target/debug/dre-plugin-xlsx" \
+          DRE_TEST_JDBC_DATABASE=oracle \
+          DRE_TEST_JDBC_URL='jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1' \
+          DRE_TEST_JDBC_JAR="$RUNNER_TEMP/ojdbc11.jar" \
+          DRE_TEST_JDBC_USER=dre_fixture \
+          DRE_TEST_JDBC_PASSWORD=DreFixture39_x \
+          python3 java/jdbc/test_jdbc_report.py
+      - name: Run SQL Server SQL through the CLI into a checked workbook
+        run: |
+          DRE_BIN="$GITHUB_WORKSPACE/target/debug/dre" \
+          DRE_TEST_XLSX_BIN="$GITHUB_WORKSPACE/target/debug/dre-plugin-xlsx" \
+          DRE_TEST_JDBC_DATABASE=sqlserver \
+          DRE_TEST_JDBC_URL='jdbc:sqlserver://127.0.0.1:1433' \
+          DRE_TEST_JDBC_JAR="$RUNNER_TEMP/mssql-jdbc.jar" \
+          DRE_TEST_JDBC_USER=dre_fixture \
+          DRE_TEST_JDBC_PASSWORD='DreFixture39_x!' \
+          python3 java/jdbc/test_jdbc_report.py
 
   plugin-versions:
     # A warning, never a failure, for a plugin whose code changed without a version bump.

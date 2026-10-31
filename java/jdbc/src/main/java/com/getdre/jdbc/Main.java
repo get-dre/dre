@@ -406,15 +406,14 @@ public final class Main {
       throw new Failure("config", "`row_limit` must be a nonnegative whole number");
     }
     long remaining = limit == null ? Long.MAX_VALUE : limit.asLong();
-    boolean resultStarted = false;
-    long rows = 0;
+    ExecutionResult execution;
     try (Statement statement = connection.createStatement()) {
       request.statement = statement;
       checkCancelled(request);
       statement.setFetchSize(8192);
       if (!statement.execute(message.path("sql").asText())) {
         checkCancelled(request);
-        rows = Math.max(0, statement.getLargeUpdateCount());
+        execution = ExecutionResult.noResult(Math.max(0, statement.getLargeUpdateCount()));
       } else try (ResultSet result = statement.getResultSet(); RootAllocator allocator = new RootAllocator(512L << 20)) {
         ResultSetMetaData metadata = result.getMetaData();
         boolean oracle = connection.getMetaData().getDatabaseProductName().equalsIgnoreCase("Oracle");
@@ -438,7 +437,7 @@ public final class Main {
             .setTargetBatchSize(8192).setBigDecimalRoundingMode(RoundingMode.UNNECESSARY).build();
         Schema schema = JdbcToArrowUtils.jdbcToArrowSchema(metadata, config);
         send(message, "result", "columns", columns);
-        resultStarted = true;
+        long rows = 0;
         boolean sent = false;
         try (ArrowVectorIterator batches = JdbcToArrow.sqlToArrowVectorIterator(result, config)) {
           while (remaining > 0 && batches.hasNext()) {
@@ -460,6 +459,7 @@ public final class Main {
           }
         }
         checkCancelled(request);
+        execution = ExecutionResult.result(rows);
       }
     } finally {
       // Finish cancellation before another statement can use this database connection.
@@ -467,10 +467,20 @@ public final class Main {
         request.statement = null;
       }
     }
-    if (resultStarted) {
-      send(message, "result_end", "rows", rows);
+    if (execution.resultStarted()) {
+      send(message, "result_end", "rows", execution.rows());
     } else {
-      send(message, "no_result", "rows_affected", rows);
+      send(message, "no_result", "rows_affected", execution.rows());
+    }
+  }
+
+  private record ExecutionResult(boolean resultStarted, long rows) {
+    static ExecutionResult result(long rows) {
+      return new ExecutionResult(true, rows);
+    }
+
+    static ExecutionResult noResult(long rows) {
+      return new ExecutionResult(false, rows);
     }
   }
 
