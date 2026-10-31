@@ -514,7 +514,7 @@ DST), and a rule without an anchor fires on dates that depend on when you look.
 
 ## Porting reports from other tools
 
-For moving reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts (the `dre-port`
+For moving reports from SAS, SSRS, Power BI paginated, Crystal Reports or SQL scripts (the `dre-port`
 skill).
 
 ### PORT-1: Port the logic to SQL, not to templates
@@ -533,10 +533,14 @@ old reports drifted from what anyone could check.
 
 **Level:** warn
 
-A port is done when its parity check against an export of the old report, for the same
-parameters, matches (or every remaining difference is explained and accepted), and the owner has
-compared the layout. Keep the old report and its subscriptions running until one full cycle of
-both has matched.
+Validate keyed records, classifications, counts and totals against explicit business rules.
+Old CSV/XLSX outputs are optional: compare them only when inputs, parameters and reporting dates
+match, with deliberate tolerances and explained differences. Without reference outputs, label
+results as business-rule validation, with source-system equivalence unverified. An unexecuted
+SAS reference is not parity evidence. Missing dependencies and unresolved semantics remain
+blockers; a valid configuration alone does not complete a port. The owner reviews the layout.
+Keep existing subscriptions until the owner accepts the validation evidence and cutover plan;
+where both systems can run, compare one full cycle before switching over.
 
 *Why:* a port that "looks right" can still drop rows at a period's edge, round differently or
 read another time zone; readers notice weeks later, when the old report is gone and nothing is
@@ -546,8 +550,8 @@ left to compare with.
 
 **Level:** advise
 
-Port an estate one report at a time, starting with the simplest, and finish each one, parity
-check included, before the next. Near-duplicates (a copy per region or client) become one report
+Port an estate one report at a time, starting with the simplest, and finish each one, validation
+assessment included, before the next. Near-duplicates (a copy per region or client) become one report
 with Sets (REP-4).
 
 *Why:* the first, simple port settles the connection, folders and conventions every later one
@@ -572,6 +576,20 @@ Put the old report's path or name in the ported report's `meta` (`ported_from:`)
 
 *Why:* during a migration people ask "which DRE report replaced /Finance/Invoice summary?", and
 the answer should be in the project, not in someone's memory.
+
+### PORT-6: Resolve source dependencies and semantics before claiming a port
+
+**Level:** warn
+
+Read source programs and referenced includes, macros, inputs and schema definitions. Record
+missing dependencies and unsupported constructs instead of inventing behavior. Translate only
+logic whose missing-value, date, ordering, deduplication, merge and rounding rules can be
+explained and checked. Stateful DATA steps and complex macros need explicit business rules
+and review. Use live catalog metadata when available or supplied schemas otherwise. Explain
+and review generated data-changing SQL before execution, including temporary preparation.
+
+*Why:* a plausible translation can change who appears in a report or double a balance while
+still producing a valid workbook.
 
 ## AI context and owner decisions
 

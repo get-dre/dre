@@ -1,8 +1,15 @@
-# Mapping reference: SSRS, Power BI paginated and Crystal to DRE
+# Mapping reference: SAS, SSRS, Power BI paginated and Crystal to DRE
 
 Read the part for the report's tool, then the shared parts (parameters, layout, delivery). Where
 a row says "ask", the old report doesn't decide it: ask the user, with the recommendation given.
 The practice IDs are in `practices.md`.
+
+## SAS reporting (`.sas`)
+
+Read `sas.md` before translating: dependency inventory, bounded mappings, Oracle/SQL Server
+semantics and completion evidence live there. Use `examples/sas-overdue.md` for a worked
+migration from unexecuted reference source to runnable DRE projects. CSV/XLSX outputs are
+optional; `parity.md` covers supplied-reference checks and no-reference validation.
 
 ## SSRS and Power BI paginated (`.rdl`, `.rdlc`)
 
@@ -118,7 +125,10 @@ few fixed selections can instead be Sets (REP-4).
 
 ## T-SQL to the warehouse
 
-DRE has no SQL Server source: the SQL runs on the warehouse the user names. Translate:
+Oracle and SQL Server can remain the source through JDBC (`plugins/source-jdbc.md`).
+Keep native T-SQL when the target is SQL Server; review its report-date defaults, permissions
+and temporary preparation. For Oracle use the reviewed dialect patterns in `sas.md` and the
+overdue-loan example. When moving to another warehouse, translate using this table:
 
 | T-SQL | Postgres, DuckDB | Databricks | Snowflake | BigQuery | ClickHouse |
 |---|---|---|---|---|---|
