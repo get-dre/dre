@@ -256,6 +256,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Free disk space for emulators and the Rust cache
+        # These preinstalled SDKs are unused here; restoring the Rust cache can otherwise fill the runner.
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
       - name: Start emulators that need arguments
         if: env.RUN_TESTS == 'true'
         run: |
