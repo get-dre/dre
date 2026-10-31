@@ -265,7 +265,7 @@ jobs:
           esac
           archive="$RUNNER_TEMP/${jdk_url##*/}"
           curl --fail --silent --show-error --location "$jdk_url" -o "$archive"
-          actual="$(sha256sum "$archive" | cut -d' ' -f1 | tr -d '\r')"
+          actual="$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$archive")"
           [[ "$actual" == "$jdk_sum" ]] || { echo "checksum mismatch for $archive: $actual != $jdk_sum" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/temurin" "$RUNNER_TEMP/jdk"
           if [[ "$archive" == *.zip ]]; then
@@ -279,10 +279,16 @@ jobs:
           grep -q '^JAVA_VERSION="17\.0\.20\.1"$' "$release_file"
           expected_arch="${PLATFORM#*-}"
           actual_arch="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *os\.arch = //p')"
-          [[ "$expected_arch" == x86_64 ]] && expected_arch=amd64
-          test "$actual_arch" = "$expected_arch"
+          case "$expected_arch:$actual_arch" in
+            x86_64:amd64|x86_64:x86_64|aarch64:aarch64) ;;
+            *)
+            echo "runtime architecture mismatch: $actual_arch != $expected_arch" >&2
+            exit 1;;
+          esac
           java_home="$("$jdk/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.home = //p')"
           test -n "$java_home"
+          echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
+          echo "RUNNER_JDK=$jdk" >> "$GITHUB_ENV"
           JAVA_HOME="$java_home" "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
           "$jdk/bin/jdeps" --ignore-missing-deps --multi-release 17 --print-module-deps \
             "$JAVA_DIR/target/dre-plugin-jdbc.jar" > "$RUNNER_TEMP/modules"
