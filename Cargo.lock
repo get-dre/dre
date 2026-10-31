@@ -1398,7 +1398,7 @@ dependencies = [
  "log",
  "quick-xml 0.42.0",
  "serde",
- "zip 9.1.0",
+ "zip 9.1.3",
 ]
 
 [[package]]
@@ -1890,7 +1890,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -2256,7 +2256,7 @@ dependencies = [
  "tempfile",
  "umya-spreadsheet",
  "windows-sys 0.61.2",
- "zip 9.1.0",
+ "zip 9.1.3",
 ]
 
 [[package]]
@@ -2272,7 +2272,7 @@ dependencies = [
  "dre-protocol",
  "flate2",
  "libc",
- "minijinja 3.0.3",
+ "minijinja 3.0.5",
  "minijinja-contrib",
  "regex",
  "rrule",
@@ -2290,7 +2290,7 @@ dependencies = [
  "ureq",
  "walkdir",
  "windows-sys 0.61.2",
- "zip 9.1.0",
+ "zip 9.1.3",
 ]
 
 [[package]]
@@ -2316,7 +2316,7 @@ dependencies = [
  "fulgur",
  "getrandom 0.4.3",
  "lopdf 0.46.0",
- "minijinja 3.0.3",
+ "minijinja 3.0.5",
  "regex",
  "serde_json",
  "tempfile",
@@ -3614,7 +3614,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -4035,9 +4035,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.60.1"
+version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65de752665c4a06528af6759955eecf60ba73ae7442d35349963a09c8031cd71"
+checksum = "a42a11b47492e6a2cc76e9c7bcc8077776cb31dac444e0795d7f61bcc6441c08"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4574,9 +4574,9 @@ dependencies = [
 
 [[package]]
 name = "minijinja"
-version = "3.0.3"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90086695417a271bc96e6cb50618555614ca48fa3bb0d9aa96e3468b0f84431e"
+checksum = "00f5a04892e86ddb4fc254e9160835370b63a0d44042d3ab4725bc2dbcbab136"
 dependencies = [
  "indexmap",
  "serde",
@@ -4584,11 +4584,11 @@ dependencies = [
 
 [[package]]
 name = "minijinja-contrib"
-version = "3.0.3"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c8e63b8c511fbb281cc19a1f731acd0903886ab6fbaf8399240ca68e5626568"
+checksum = "f804cfd81c146ff898cbf3455071c417e8745907c77f3d5058bd9691b9ace3b8"
 dependencies = [
- "minijinja 3.0.3",
+ "minijinja 3.0.5",
 ]
 
 [[package]]
@@ -6236,7 +6236,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49aa1d1558e9465f5053bf9fb5361fe75db827c6a4423d5e5fe72096622f8908"
 dependencies = [
  "tempfile",
- "zip 9.1.0",
+ "zip 9.1.3",
 ]
 
 [[package]]
@@ -6580,7 +6580,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -7426,7 +7426,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
@@ -8919,9 +8919,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.1.0"
+version = "9.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2886b00003a72c4ccee3f42cfc34908d33b2508a74d827dc2a4244706475c704"
+checksum = "1156b39d142a34b999c2310a50455e0cb3760bf7efad0122f796d813bee26ccb"
 dependencies = [
  "aes",
  "constant_time_eq",
