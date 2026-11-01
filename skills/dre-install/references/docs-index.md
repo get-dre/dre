@@ -55,6 +55,8 @@ Search this index for the question's terms, then open the linked page. These loc
   Terms/options: `--split`, `DRE_RUN_AT`, `DRE_RUN_DATE`, `DRE_SCHEDULER_DB`, `MERGE`, `argv`, `cancelled`, `connect_timeout`, `dre`, `dre_project.yml`, `env`, `load-occurrences.sql`, `pending`, `read_files`, `refresh.sh`, `run-cancelled`, `run-timed-out`, `run_due.py`, `run_results.json`, `timed_out`, `timeout`.
 - [The target path](docs/target-path.md): The target path: where DRE writes compiled SQL, outputs, snapshots and the project manifest, how overlapping runs are kept apart, and how to clean it.
   Terms/options: `--binding`, `--latest`, `--path`, `--target`, `--target-path`, `--yes`, `DRE_KEEP_RUNS`, `DRE_RUN_AT`, `DRE_TARGET_PATH`, `abfss://`, `clean`, `compile`, `current`, `default`, `dre.lock`, `dre.log`, `dre_deps/`, `dre_project.yml`, `gs://`, `lock`, `lookups/`, `ls`, `macros/`, `reports/`, `run`, `run-in-progress`, `run_results.json`, `s3://`, `target-path-unwritable`, `target/`, `target_path:`, `validate`.
+- [Data handling and local files](docs/data-handling.md): What DRE writes to disk, where it keeps generated files and caches, how long runs are retained, and how to clean them safely.
+  Terms/options: `--keep-runs`, `--profiles-dir`, `--target-path`, `DRE_KEEP_RUNS`, `DRE_PROFILES_DIR`, `DRE_TARGET_PATH`, `dre.log`, `keep_runs`, `oauth_sessions.json`, `profiles.yml`, `run_results.json`, `target/`, `target/compiled/`, `target/manifest.json`, `target_path:`.
 
 ## Plugins
 
