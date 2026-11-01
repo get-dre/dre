@@ -1,17 +1,18 @@
 ---
-title: "Moving from SSRS or Crystal"
-description: "Port reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts with the dre-port agent skill, and prove each one matches with a parity check."
+title: "Moving from SAS, SSRS or Crystal"
+description: "Migrate reporting from SAS, SSRS, Crystal or SQL with dre-port: dependency assessment, database SQL, business-rule validation and optional output parity."
 section: build-reports
 position: 11
 ---
 
-# Moving from SSRS or Crystal
+# Moving from SAS, SSRS or Crystal
 
 Most teams that adopt DRE already have reports somewhere else: SQL Server Reporting Services
-(SSRS), Power BI paginated reports, Crystal Reports, or a SQL script and a spreadsheet someone
+(SSRS), SAS programs, Power BI paginated reports, Crystal Reports, or a SQL script and a spreadsheet someone
 fills in by hand. The [`dre-port` agent skill](https://github.com/get-dre/dre/blob/master/skills/README.md) moves them over with you, one
-report at a time, and finishes each one with a **parity check**: the new report's rows compared
-with an export of the old one, for the same parameters. *New in skills 4.0.*
+report at a time. It checks the report specification and, when an old output is available,
+compares keyed records and totals for matching inputs, parameters and dates. Guided SAS support
+is included in skills 5.1; SAS execution is not required.
 
 DRE has no converter command. Your coding agent reads the old report, translates it with the
 skill's mapping reference, asks you about anything the files don't say, and writes ordinary DRE
@@ -21,6 +22,8 @@ files you can read and change.
 
 | You have | What the agent reads |
 |---|---|
+| SAS `.sas` source and referenced files | programs, includes, macro definitions, inputs, parameters and formats; missing dependencies and unsupported constructs remain explicit blockers |
+| a report specification without source or old output | business rules and supplied schemas; results are business-rule validation, not verified SAS equivalence |
 | SSRS, Power BI paginated or Report Builder `.rdl` / `.rdlc` files | datasets (query text or stored procedure), parameters, groups, expressions, page header and footer |
 | SSRS subscriptions | a csv you export from the report server's catalog database (the skill has the read-only query) |
 | Crystal Reports | an XML export of the report definition, or a "Report Definition" text export. Not a binary `.rpt`: Crystal's file format needs SAP's SDK, so export it first |
@@ -28,10 +31,27 @@ files you can read and change.
 
 ## Where your data lives
 
-DRE reads DuckDB, Postgres, Databricks, Snowflake, BigQuery and ClickHouse, and **has no SQL
-Server source**. A report that reads SQL Server can be ported when the same tables are in one of
-those (replicated, or moved): the agent translates the T-SQL to that warehouse's dialect. When the
-data is only in SQL Server, the agent says so and moves on to the next report.
+DRE reads DuckDB, Postgres, Databricks, Snowflake, BigQuery and ClickHouse. Its optional
+[JDBC source](plugin-jdbc.md) also connects Oracle and SQL Server with a user-supplied vendor
+JAR and operator-maintained Java 17+. Preparation runs inside the source database. The agent
+uses authorized live catalog metadata or supplied schema definitions, and marks unknown names,
+types and relationships as unresolved. It explains generated statements and obtains review
+before executing data-changing SQL, including temporary preparation.
+
+## SAS scope and worked example
+
+The bounded reporting path covers PROC SQL selection/joins/aggregation, simple row-local
+filters and derived columns, scalar parameters, deterministic sorting/deduplication, basic
+summaries and tabular output. The agent reviews missing values, dates, ordering, merge
+cardinality and rounding explicitly. Stateful DATA steps, complex macro execution, local SAS
+datasets and specialist procedures need supplied business rules or remain unsupported; DRE is
+not a SAS interpreter or a replacement for the full SAS suite.
+
+The [synthetic overdue-loan project](https://github.com/get-dre/dre/blob/master/examples/overdue-loans/README.md) shows an unexecuted SAS
+reference beside runnable Oracle and SQL Server variants, independent expected results and both
+ordinary and template-designed workbooks. Its checks establish DRE business-rule results, not
+executed SAS parity. Use it without a SAS installation or company data. Layout changes and
+unsupported logic are part of the migration assessment, not silently accepted equivalence.
 
 ## How a report maps
 
@@ -50,9 +70,9 @@ data is only in SQL Server, the agent says so and moves on to the next report.
 | one copy of a report per region or client | one report with [Sets](building-reports.md) |
 | interactive sort, drill-through, toggles, charts | no direct equivalent: DRE makes files. The agent asks what to do instead |
 
-## The parity check
+## Validation and optional parity
 
-For each report you export the old one for one set of parameter values (the last complete
+When an old output is available, export the old report for one set of parameter values (the last complete
 month, say) as csv or xlsx. The agent runs the DRE report with the same values, writing its rows
 with `dre run <report> --no-deliver --output-json parity`, and compares the two with a small
 script bundled with the skill. It reports:
@@ -64,6 +84,11 @@ script bundled with the skill. It reports:
   written another way) or *order*;
 - rows only on one side, and duplicate keys.
 
+With no reference output, the agent instead checks explicit expected keyed records, boundary
+dates, classifications, counts, totals and rounding from the business specification. It reports
+expected versus actual values and labels SAS equivalence unverified. Missing dependencies and
+unresolved semantics keep a migration partial, even if its DRE configuration validates.
+
 Real differences are fixed (or one of the two reports is shown to be wrong) and the check runs
 again, until it matches. For a PDF or a styled workbook you also compare the old and new files
 side by side.
@@ -74,14 +99,15 @@ Pointed at a folder of `.rdl` files and Crystal exports, the skill first lists e
 sources, parameters, subscriptions and an effort estimate (S to XL, with the reasons, such as
 stored procedures, custom code or charts). It groups near-duplicates (a copy per region) as
 candidates for one report with Sets, and suggests an order, simplest first. Then reports are
-ported one at a time.
+ported one at a time. SAS estates include a source/dependency inventory by reading the programs;
+the bundled XML inventory script does not parse SAS.
 
 ## Practices
 
 The skill follows the porting rules in [DRE practices](practices.md#porting-reports-from-other-tools):
-logic in SQL, not templates (PORT-1); parity before switching over, with the old report running
-for one more cycle (PORT-2); one report at a time, simplest first (PORT-3); first deliveries held
-or on dev (PORT-4); and a record of where each report came from (PORT-5).
+logic in SQL, not templates (PORT-1); explicit validation evidence before switching over (PORT-2); one report at a time, simplest first (PORT-3); first deliveries held
+or on dev (PORT-4); a record of where each report came from (PORT-5); and dependency/semantic
+review before a complete-port claim (PORT-6).
 
 ## Try it
 

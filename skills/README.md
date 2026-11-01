@@ -15,7 +15,7 @@ undo; and never ask for, repeat or store a password, token or key.
 | `dre-ai` | Prepares report descriptions, questions, declared inputs and pipeline context; leaves exposure to the owner. |
 | `dre-report` | Designs and writes a report around your goal: SQL, tabs, variables, format, PDF and HTML documents, one copy per member or client, what happens with no data, destinations and schedules. Also changes existing reports. |
 | `dre-run` | Validates, previews, runs and delivers, confirming before production runs and real deliveries; retries failed rows, releases held deliveries, and explains failures. |
-| `dre-port` | Moves reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts, and proves each one with a parity check against the old report's export. Lists a folder of reports first, with an effort estimate and an order. |
+| `dre-port` | Moves reporting from SAS source, SSRS, Power BI paginated, Crystal Reports or SQL scripts. Checks business rules and optional old CSV/XLSX outputs; inventories missing dependencies and semantic gaps. Lists a folder of reports first, with an effort estimate and an order. |
 | `dre-explain` | Explains what DRE can do for your goal, what a report's YAML will do when it runs, and what an option does, with its choices and a recommendation. Changes nothing. |
 | `dre-upgrade` | Checks for updates to `dre` and to these skills, and applies the ones you choose. The only skill that uses the network. |
 
@@ -69,7 +69,8 @@ the plugins'. Each release supports a range of DRE minor versions (every `SKILL.
 | 2.3 and later 2.x | 0.2.1 and later; messages and the other 0.3 features need 0.3 |
 | 3.x | 0.4.1 and later 0.4, 0.5 and 0.6 |
 | 4.x | 0.6.x through 0.8.x |
-| 5.x | 0.9.x |
+| 5.0.x | 0.9.x |
+| 5.1.0 | 0.9.x and 0.10.x |
 
 A new DRE minor gets a skills release that supports it. Dropping support for an older DRE minor
 is a new major skills version, so if you stay on an older DRE, pin the skills release that
@@ -89,6 +90,7 @@ only its own folder. Content shared between skills is therefore written once and
 | `docs/sections.json` and each page's title, description and inline terms/options | `<skill>/references/docs-index.md`, generated |
 | `docs/*.md` and `docs/sections.json` | `<skill>/references/docs/`, generated; local page links stay offline |
 | [`docs/practices.md`](../docs/practices.md) | `<skill>/references/practices.md` |
+| `shared/port/**/*.md` | `dre-port/references/` (mapping, inventory, parity, SAS and worked migration guidance) |
 | `shared/topics/*.md` (formats, documents, per-row outputs, no data, delivery) | `<skill>/references/topics/`, for the skills `COPIES` in `skills.py` lists |
 | each plugin's `describe` reply (its package's `describe.json`), its sections of [`docs/plugins.md`](../docs/plugins.md), and `shared/guide-notes/<kind>-<name>.md` | `<skill>/references/plugins/<kind>-<name>.md`, generated |
 
@@ -102,12 +104,19 @@ python3 .github/scripts/skills.py check
 ```
 
 A plugin's fields and options reach the references through its package's `describe.json`
-(`plugins/<package>/describe.json`, `go/<package>/describe.json`). After changing them in the
-plugin's code, rewrite the file from the built plugins and commit it; CI's `describe_json` test
-fails while it's stale:
+(`plugins/<package>/describe.json`, `go/<package>/describe.json`, `java/jdbc/describe.json`).
+After changing them in the plugin's code, rewrite the file from the built plugins and commit it.
+The Rust/Go `describe_json` test and Java's direct protocol test fail while their metadata is stale:
 
 ```bash
 DRE_UPDATE_DESCRIBE=1 DRE_TEST_GO_PLUGINS=<dir of built Go plugins> cargo test -p dre-cli --test describe_json
+```
+
+For JDBC, build the current JAR first, then regenerate only its metadata:
+
+```bash
+mvn -B -f java/jdbc/pom.xml package
+DRE_UPDATE_DESCRIBE=1 python3 java/jdbc/test_protocol.py ProtocolTests.test_committed_descriptor_matches_protocol
 ```
 
 The Skills workflow runs `check` on every change to the skills, the plugin docs, the CLI or a

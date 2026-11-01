@@ -1,24 +1,25 @@
 ---
 name: dre-port
-description: Move reports from another tool to DRE, guided - SSRS and Power BI paginated (.rdl), Crystal Reports (XML or text exports; not binary .rpt), or SQL plus a screenshot or description. Reads the report, asks about the gaps one question at a time, writes the SQL, report YAML, document template, schedules and destinations, validates, then proves the port with a parity check against an export of the old report (row counts, column totals, a keyed cell diff). For a folder of reports, lists them first with an effort score, groups near-duplicates into Sets and suggests an order. Use when the user wants to port, migrate, convert, move or replace SSRS, Crystal, Power BI paginated or other legacy reports, or check that a DRE report matches the old one. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Guided migration of reporting to DRE from SAS source (.sas and dependencies), SSRS/Power BI paginated (.rdl), Crystal definition exports or SQL. Inventories dependencies and semantic gaps, translates supported logic to database SQL and tabular outputs, and validates against business expectations or optional CSV/XLSX reference outputs. Use when porting legacy reports, assessing a folder, or checking output differences. SAS execution and binary Crystal .rpt import are outside this workflow. If the user pastes a password, token or key, never write it to a file or command; explain the leak, give rotate steps, and use an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.0.0"
-  dre: ">=0.9.0, <0.10.0"
+  version: "5.1.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Port a report to DRE
 
 You move a report from another tool into DRE: you read it, translate it with the mapping
 reference, ask the user only what the files don't say, write the DRE files, and finish with a
-parity check that shows the new report matches the old one. DRE has no import command: you do
+validation assessment: business-rule checks, and reference parity when suitable outputs exist. DRE has no import command: you do
 the translation, and the user decides.
 
 Your references, in this skill's folder:
 
-- `references/mapping.md`: every SSRS, Power BI paginated and Crystal concept with its DRE
+- `references/mapping.md`: SAS, SSRS, Power BI paginated and Crystal concepts with its DRE
   equivalent, expressions and T-SQL included. Read it before translating anything.
-- `references/examples/`: worked ports, from the source file to the DRE files.
+- `references/sas.md`: SAS dependency inventory, bounded translations and semantic review. Read it for `.sas` inputs.
+- `references/examples/`: worked ports, including the synthetic overdue-loan SAS migration.
 - `references/parity.md`: getting the old report's export, and reading the parity check.
 - `references/inventory.md`: listing a folder of reports, and exporting SSRS subscriptions.
 - `references/topics/`: formats, documents (pdf/html), per-row outputs, no data, delivery.
@@ -162,12 +163,16 @@ Work it out from the files; ask only what they don't show:
 | a Crystal XML export of the report definition (`<Report>` root, with `Database` and `DataDefinition`) | step 5 |
 | a Crystal "Report Definition" text export (`.txt`) | step 5: read it yourself; it lists tables, formulas, groups and sections |
 | a binary Crystal `.rpt` | ask for an export: File > Export > Report Definition (text), or an XML export of the definition, plus a PDF of a run; DRE can't read `.rpt` (it needs SAP's SDK) |
+| SAS `.sas` source, includes and macros | step 5 with `references/sas.md`; inventory referenced files and inputs first |
+| a report specification without SAS source or old output | step 5, generic path; validate business rules in step 9 |
 | SQL plus a screenshot, a PDF or a description | step 5, the generic path |
 | another tool (Jasper `.jrxml`, Oracle BI Publisher, Cognos, Business Objects, Access, an Excel macro) | say you don't know that tool's files well enough to read them reliably, and take the generic path: ask for the SQL, a screenshot or PDF of its output, its parameters, and who gets it when |
 
 ### Step 4: the inventory (a folder of reports)
 
-1. Ask whether they can export the SSRS subscriptions (they're in the report server's catalog
+For SAS estates, read `references/inventory.md`, "SAS programs", and inventory the source/dependency graph by reading files. The XML inventory script does not parse SAS.
+
+1. For SSRS, ask whether they can export the SSRS subscriptions (they're in the report server's catalog
    database, not the `.rdl` files). Recommend yes: they become schedules and destinations. The
    read-only query is in `references/inventory.md`; the user or their DBA runs it and saves a
    csv. Don't run it against their server yourself.
@@ -178,7 +183,7 @@ Work it out from the files; ask only what they don't show:
    which look like one report with Sets (REP-4), and anything that can't be read (`.rpt`, a data
    export). Say the effort is an estimate from the file, not a promise.
 4. Ask which report to port first, recommending the first in the suggested order (PORT-3). Port
-   one at a time: finish each with its parity check before the next.
+   one at a time: finish each with its validation assessment before the next.
 
 ### Step 5: read the report, and say back what you found
 
@@ -186,8 +191,10 @@ Work it out from the files; ask only what they don't show:
    structure (datasets with their SQL, parameters, groups, expressions, formulas, page header
    and footer). Read the file itself for the layout: the data regions, which columns show, the
    textbox expressions, sorting, page breaks.
-2. For the generic path: read the SQL, look at the screenshot or PDF, and ask for what's missing,
-   one question at a time.
+2. For SAS, read the supplied source and dependencies using `references/sas.md`. Show the
+   dependency inventory and supported/needs-review/blocked assessment, including schema evidence
+   still needed and the review gate before executing data-changing SQL. For the generic path,
+   read the SQL and screenshot/PDF, then ask for missing facts one question at a time.
 3. Translate each part with `references/mapping.md`, and find the closest worked example in
    `references/examples/`.
 4. Tell the user what you found and how you'd port it, as a short table: each part of the old
@@ -196,17 +203,20 @@ Work it out from the files; ask only what they don't show:
 
 ### Step 6: where the data lives
 
-DRE reads DuckDB, Postgres, Databricks, Snowflake, BigQuery and ClickHouse. It has **no SQL
-Server source**, and most SSRS reports read SQL Server. Ask where the same tables live in one of
-those, recommending the project's existing connection when it has one.
+DRE reads DuckDB, Postgres, Databricks, Snowflake, BigQuery and ClickHouse, plus Oracle and
+SQL Server through the optional JDBC source. Read `references/plugins/source-jdbc.md` for
+user-supplied vendor JARs, operator-maintained Java 17+, profiles, supported types and limits.
+Keep preparation in the existing database, on the same report connection.
 
-- **The tables are in a supported warehouse** (replicated, or the warehouse is the source of
-  truth): translate the SQL to its dialect (`references/mapping.md`, "T-SQL to the warehouse").
-  Table and column names may differ there; offer to check them with `dre catalog` or a query the
-  user approves, rather than guessing.
-- **The data is only in SQL Server:** say plainly that DRE can't read it yet, so this report
-  can't be ported until the data is in a supported source. Stop here for this report and offer
-  the next one.
+Use authorized live `dre catalog` context when available to check accessible names, types and
+identifier quoting. Otherwise read supplied DDL/schema definitions. Mark unknown names, keys,
+cardinalities and types as unresolved; connection absence does not prevent a reviewed draft.
+Translate to the actual source dialect (`references/mapping.md` and, for SAS,
+`references/sas.md`), rather than assuming Oracle and SQL Server syntax is interchangeable.
+Explain each generated statement, including intermediate relations and cleanup. Obtain the
+ordinary workflow's review before executing SQL that creates or changes data, even temporary
+tables; validate-only is not execution approval. JDBC read-only hints do not replace database
+permissions. Defer production runs and delivery to `dre-run`.
 
 ### Step 7: ask the gaps, one at a time
 
@@ -246,13 +256,20 @@ only after a yes:
 
 Then run `dre validate -s <report>` and fix every error until it passes.
 
-### Step 9: the parity check
+### Step 9: validate business rules and optional reference parity
 
-The port isn't done until it matches (PORT-2). Follow `references/parity.md`:
+Follow `references/parity.md` (PORT-2). First establish whether a comparable old output exists.
+For SAS, neither an installation nor an old output is required. Without reference outputs,
+run checks from the supplied specification: keyed records, counts, classifications, boundary
+and missing-value cases, totals and rounding. Record expected and actual values. Say
+"business-rule validation passed; SAS equivalence unverified" when those checks pass. Unresolved
+logic or dependencies keep the migration partial/blocked even if `dre validate` passes.
 
-1. **The old export:** ask the user for an export of the old report for one set of parameter
-   values (recommend the last complete period), as csv (best) or xlsx, plus its PDF if the layout
-   matters. `references/parity.md` says how to export from SSRS and Crystal.
+When a reference exists, confirm matching inputs, parameters and reporting dates before comparing:
+
+1. **The optional old export:** use a supplied export, or ask whether a CSV/XLSX export is
+   available for one set of parameters (recommend the last complete period), plus its PDF
+   when layout matters. `references/parity.md` says how to export from SSRS and Crystal.
 2. **DRE's run, the same parameters:** `dre run <report> --var <name>=<value> --no-deliver
    --output-json parity`. It writes each query's rows to
    `parity/<report>/<binding>/<query>.json` and delivers nothing. Don't use `--preview`: its row
@@ -271,10 +288,12 @@ The port isn't done until it matches (PORT-2). Follow `references/parity.md`:
 
 ### Step 10: hand over
 
-Summarise: the files written, the parity result (rows, totals, differences and why), what had no
-equivalent and what you did instead, and the next steps: a first real run held for review with
-`dre-run` (RUN-9), running both reports in parallel for one cycle, and only then switching the
-old subscription off (PORT-2). If decisions are still open (a difference to accept, a timezone,
+Summarise the files written, validation mode and evidence: expected/actual keyed records,
+counts, totals and explained differences. List unsupported work, assumptions and blockers.
+Distinguish business-rule checks, supplied-reference comparison and verified SAS execution;
+label unexecuted source explicitly. A reviewed partial migration is not a completed port.
+Next steps are a first real run held for review with `dre-run` (RUN-9), parallel comparison
+where available and owner-approved cutover (PORT-2). If decisions remain open (a difference, a timezone,
 a profile to set up), list them, and ask only the first. With an inventory, offer the next
 report in the order.
 

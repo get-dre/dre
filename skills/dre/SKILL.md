@@ -1,10 +1,10 @@
 ---
 name: dre
-description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port (moving reports from SSRS, Crystal or SQL scripts), dre-explain (what DRE or a report's YAML does), dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port (moving reports from SAS, SSRS, Crystal or SQL scripts), dre-explain (what DRE or a report's YAML does), dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.0.0"
-  dre: ">=0.9.0, <0.10.0"
+  version: "5.1.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # DRE guide
@@ -23,7 +23,7 @@ This skill finds out where the user is and hands off to the skill for what they 
 | `dre-setup` | a connection (profile), its plugin, and a starter project |
 | `dre-report` | creating or changing a report: SQL, tabs, variables, format, documents, per-row outputs, destinations, schedules |
 | `dre-run` | validating, compiling, running, previewing, delivering, retrying failed rows, releasing held deliveries |
-| `dre-port` | moving reports from SSRS, Power BI paginated, Crystal or SQL scripts, with a parity check |
+| `dre-port` | moving reports from SAS, SSRS, Power BI paginated, Crystal or SQL scripts, with business-rule checks and optional reference parity |
 | `dre-explain` | "what can dre do?", "what does this report do?", "what does this option mean?" |
 | `dre-ai` | descriptions, questions and inputs for MCP discovery |
 | `dre-upgrade` | "is there an update?", for dre and for these skills |
@@ -169,7 +169,7 @@ just the nouns: users rarely name the skill.
 | "connect to our database", "set up a profile", "start a project" | `dre-setup` |
 | "a report of...", "add a tab / column / recipient", "make it a PDF", "send one per client", "schedule it every 2nd Tuesday" | `dre-report` |
 | "run it", "send it", "why did it fail?", "rerun the 1 September run", "retry the failed rows", "release the held emails", "wire it into Airflow" | `dre-run` |
-| "we have SSRS / Crystal / Power BI paginated reports", "migrate", "port", "replace our old reports", "does it match the old one?", a `.rdl`, `.rpt` or Crystal export | `dre-port` |
+| "we have SAS / SSRS / Crystal / Power BI paginated reports", "migrate", "port", "replace our old reports", "does it match the old one?", a `.sas`, `.rdl`, `.rpt` or Crystal export | `dre-port` |
 | "what can dre do?", "what does this report do?", "what happens if I run it?", "what does `hold` / `for_each` / `on_empty` mean?", "which should I pick?" | `dre-explain` |
 | "make it available to AI", "MCP", "questions for the agent" | `dre-ai` |
 | "is there an update?" | `dre-upgrade` |

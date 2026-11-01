@@ -27,7 +27,7 @@ Queries, outputs, templates, lookups and messages.
 - [AI-ready reports](ai-ready-reports.md): Turn reviewed report logic and upstream documentation into trustworthy context for AI.
 - [Project configuration](project-configuration.md): Share defaults, override reports and Sets, and bound template queries.
 - [Tested examples](examples.md): Complete, copyable projects with checked output: Excel, bank files, Sets, Slack, SFTP and password-protected statements.
-- [Moving from SSRS or Crystal](moving-from-ssrs-or-crystal.md): Port reports from SSRS, Power BI paginated, Crystal Reports or SQL scripts with the dre-port agent skill, and prove each one matches with a parity check.
+- [Moving from SAS, SSRS or Crystal](moving-from-ssrs-or-crystal.md): Migrate reporting from SAS, SSRS, Crystal or SQL with dre-port: dependency assessment, database SQL, business-rule validation and optional output parity.
 
 ## Connect
 
@@ -72,6 +72,7 @@ Installing plugins, the registry, and every first-party plugin.
 - [Slack](plugin-slack.md): Post report files and headline messages to Slack with the slack destination: bot tokens, channels and direct messages, and the headline example project.
 - [Microsoft Teams](plugin-teams.md): Post report headline messages to Microsoft Teams with the teams destination: Workflows webhooks, notes, and adapting a headline to Teams.
 - [Google Chat](plugin-google_chat.md): Post report headline messages to Google Chat spaces with the google_chat destination: space webhooks, notes, and adapting a headline to Google Chat.
+- [JDBC](plugin-jdbc.md): Connect an optional JDBC source with user-supplied drivers and Java; tested Oracle and SQL Server reporting and catalog discovery, supported types and limits.
 
 ## Reference
 
@@ -99,6 +100,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
+- [New in 0.10](new-in-0.10.md): JDBC sources use operator-managed Java, and MiniJinja updates change several template results.
 - [New in 0.9](new-in-0.9.md): Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects.
 - [New in 0.8](new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.

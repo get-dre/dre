@@ -25,6 +25,7 @@ secrets can use `env_var()`.
 | `bigquery` | the [`bigquery`](plugin-bigquery.md) source (alpha: 1.0.0 pre-releases) |
 | `snowflake` | the [`snowflake`](plugin-snowflake.md) source (alpha: 1.0.0 pre-releases) |
 | `clickhouse` | the [`clickhouse`](plugin-clickhouse.md) source, self-hosted or ClickHouse Cloud |
+| `jdbc` | the [`jdbc`](plugin-jdbc.md) source, using user-supplied Java 17+ and drivers |
 | `csv` | the [`csv`](plugin-csv.md) and [`delimited`](plugin-csv.md) formats |
 | `fixed_width` | the [`fixed_width`](plugin-fixed_width.md) format |
 | `parquet` | the [`parquet`](plugin-parquet.md) format |
@@ -51,6 +52,7 @@ Each plugin has its own page, with its profile fields, options and notes:
 - Sources: [duckdb](plugin-duckdb.md), [postgres](plugin-postgres.md),
   [databricks](plugin-databricks.md), [bigquery](plugin-bigquery.md),
   [snowflake](plugin-snowflake.md), [clickhouse](plugin-clickhouse.md).
+- More via [JDBC](plugin-jdbc.md), with a user-supplied vendor driver.
 - Formats: [csv and delimited](plugin-csv.md), [fixed_width](plugin-fixed_width.md),
   [parquet](plugin-parquet.md), [xlsx](plugin-xlsx.md), [html and pdf](plugin-document.md), and the built-in
   [`message`](#the-message-format).

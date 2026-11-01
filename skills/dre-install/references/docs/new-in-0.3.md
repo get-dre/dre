@@ -2,7 +2,7 @@
 title: "New in 0.3"
 description: "Messages, several outputs per report, when:, number filters and locale:, and the teams and google_chat destinations."
 section: upgrading
-position: 8
+position: 9
 ---
 
 # New in 0.3
