@@ -2,7 +2,7 @@
 title: "New in 0.9"
 description: "Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects."
 section: upgrading
-position: 2
+position: 3
 ---
 
 # New in 0.9
@@ -113,4 +113,4 @@ minors.
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.8](new-in-0.8.md)
+**Previous:** [New in 0.10](new-in-0.10.md) · **Next:** [New in 0.8](new-in-0.8.md)

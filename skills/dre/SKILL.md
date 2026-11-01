@@ -4,7 +4,7 @@ description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted 
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # DRE guide

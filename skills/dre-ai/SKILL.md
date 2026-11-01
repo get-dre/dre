@@ -4,7 +4,7 @@ description: "Prepare AI context for DRE reports: descriptions, business questio
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Prepare AI context for DRE reports

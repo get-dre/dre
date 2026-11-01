@@ -4,7 +4,7 @@ description: Set up DRE step by step - pick and install the database plugin (Duc
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Set up a DRE connection and project

@@ -2229,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "dre-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "dre-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "arrow 59.3.0",
  "calamine",
@@ -2306,7 +2306,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-document"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-postgres"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "arrow 59.3.0",
  "bytes",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-sftp"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "dre-protocol",
  "dre-ssh",
@@ -2482,7 +2482,7 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "arrow 59.3.0",
  "libc",

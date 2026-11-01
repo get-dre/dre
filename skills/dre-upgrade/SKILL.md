@@ -4,7 +4,7 @@ description: Check for and apply updates to DRE (the `dre` CLI) and to these DRE
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Update DRE and its skills

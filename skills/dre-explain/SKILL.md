@@ -4,7 +4,7 @@ description: Explain DRE in plain words - what it can do for the user's goal, wh
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Explain DRE

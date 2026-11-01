@@ -4,7 +4,7 @@ description: Validate, compile, run and preview DRE reports, check the output fi
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Run, check and deliver DRE reports
