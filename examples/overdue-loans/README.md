@@ -13,10 +13,9 @@ regulatory arrears model, statistical modelling or replacement of the full SAS s
 
 ## Requirements and connection
 
-- DRE, the optional JDBC package, and XLSX **1.1.3 or newer**. Earlier template versions can
-  alter text identifiers or expansion ranges. This source example targets the development
-  packages until their releases are published; it is not a promise they are already available
-  through the public registry. See the [JDBC installation/development guide](https://github.com/get-dre/dre/blob/master/docs/plugin-jdbc.md).
+- DRE **0.10.0 or newer**, JDBC **1.0.0 or newer**, and XLSX **1.1.3 or newer**. Earlier XLSX
+  template versions can alter text identifiers or expansion ranges. See the [JDBC plugin
+  guide](../../docs/plugin-jdbc.md) for installation and configuration.
 - User-installed and maintained **Java 17+**, selected through `JAVA_HOME/bin/java`, otherwise
   `java` on `PATH`. A compatible vendor driver may impose its own minimum. The plugin does
   not bundle, download, install, patch or update Java.
