@@ -27,6 +27,17 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PACKAGES = json.loads((ROOT / ".github/scripts/packages.json").read_text())
 SEMVER = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+SCHEMA_FILES = (
+    "project.schema.json",
+    "report.schema.json",
+    "sets.schema.json",
+    "schedules.schema.json",
+    "timings.schema.json",
+    "profiles.schema.json",
+    "dependencies.schema.json",
+    "lookup.schema.json",
+    "sources.schema.json",
+)
 
 
 def metadata(crate):
@@ -104,6 +115,30 @@ def protocol_changes():
     return changes
 
 
+def schema_version_problems(version, directory=None):
+    """Check every committed YAML schema carries the candidate core minor version."""
+    minor = ".".join(version.split(".")[:2])
+    directory = directory or ROOT / "docs" / "schemas"
+    problems = []
+    for name in SCHEMA_FILES:
+        path = directory / name
+        if not path.is_file():
+            problems.append(f"{name} is missing")
+            continue
+        try:
+            document = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            problems.append(f"{name} is invalid JSON: {error}")
+            continue
+        actual = document.get("x-dre-schema-version") if isinstance(document, dict) else None
+        if actual != minor:
+            rendered = json.dumps(actual) if actual is not None else "missing"
+            problems.append(
+                f'{name} has x-dre-schema-version {rendered}; expected "{minor}"'
+            )
+    return problems
+
+
 def plan(tag):
     if tag.startswith("v"):
         kind, package, version = "core", "dre", tag[1:]
@@ -130,6 +165,18 @@ def plan(tag):
     if version != source:
         sys.exit(f"tag {tag} is version {version}, but {where} says {source}")
     if kind == "core":
+        schema_problems = schema_version_problems(version)
+        if schema_problems:
+            sys.exit(
+                f"tag {tag}: committed JSON schemas do not match DRE {'.'.join(version.split('.')[:2])}:\n  "
+                + "\n  ".join(schema_problems)
+                + "\nRegenerate the schemas and their reference copies with:\n"
+                "  DRE_UPDATE_SCHEMAS=1 cargo test -p dre-cli --test schemas the_generated_schemas_are_committed -- --exact\n"
+                "  python3 .github/scripts/schema_docs.py generate\n"
+                "  python3 .github/scripts/skills.py sync\n"
+                "  python3 .github/scripts/skills.py generate\n"
+                "Then verify both focused schema tests before release CI."
+            )
         # dre-cli, as published to crates.io, must depend on the dre-core of the same release.
         req = next(d["req"] for d in cli["dependencies"] if d["name"] == "dre-core")
         if req != f"={version}":

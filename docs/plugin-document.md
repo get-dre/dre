@@ -48,6 +48,14 @@ the report's query results, written as an `.html` file or laid out into a `.pdf`
 inside the plugin: no browser, no Playwright, no conversion service and no network call. *New in
 DRE 0.6.* The package needs DRE 0.6.0 or later.
 
+## Template changes in document 1.4.0
+
+Document 1.4.0 uses MiniJinja 3.0.5 through the shared core template environment. Float formatting
+can change in both HTML and PDF templates: `'{}'.format(0.0)` renders `0.0` instead of `0`, and
+`"%s"|format(value)` uses Python-style float formatting. See [New in 0.10](new-in-0.10.md) for
+all affected template behavior and migration guidance. Pin document 1.3.0 to keep the earlier
+document rendering behavior.
+
 ## A statement
 
 ```yaml

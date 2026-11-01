@@ -4,7 +4,7 @@ description: Create or change a DRE report, guided - the SQL and report YAML, ta
 license: GPL-3.0-only
 metadata:
   version: "5.1.0"
-  dre: ">=0.9.0, <0.10.0"
+  dre: ">=0.9.0, <0.11.0"
 ---
 
 # Write or change a DRE report

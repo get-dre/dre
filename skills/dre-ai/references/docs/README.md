@@ -100,6 +100,7 @@ The command line, every YAML file, error codes, environment variables and the ma
 Updating DRE and what changed in each release.
 
 - [Updating DRE](updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
+- [New in 0.10](new-in-0.10.md): JDBC sources use operator-managed Java, and MiniJinja updates change several template results.
 - [New in 0.9](new-in-0.9.md): Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects.
 - [New in 0.8](new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
 - [New in 0.7](new-in-0.7.md): Password-protected PDFs, zip report packs with AES-256 passwords on any destination, and secret_columns to keep passwords out of logs and results.
