@@ -147,7 +147,7 @@ Search this index for the question's terms, then open the linked page. These loc
 - [Updating DRE](docs/updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
   Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `dre`, `dre-cli`.
 - [New in 0.10](docs/new-in-0.10.md): JDBC sources use operator-managed Java, and MiniJinja updates change several template results.
-  Terms/options: `JAVA_HOME`, `PATH`, `dre-protocol`, `str.find`, `str.format`, `str.rfind`.
+  Terms/options: `JAVA_HOME`, `PATH`, `document`, `dre-protocol`, `str.find`, `str.format`, `str.rfind`.
 - [New in 0.9](docs/new-in-0.9.md): Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects.
   Terms/options: `--all`, `-s`, `DRE_REGISTRY_URL`, `Error`, `Error::hint`, `Level`, `ResultSets::request_fonts`, `RunOptions`, `RunSummary::error`, `code`, `delimited`, `describe`, `dre-protocol`, `each.x`, `engine`, `engine::EventSink`, `engine::dispatch`, `find_plugin`, `fixed_width`, `for_each.max_population_rows`, `lang`, `local/file-exists`, `manifest_checksum`, `max_rows`, `message`, `null`, `path`, `plugin_host`, `profiles`, `project_errors`, `render_connection`, `repeated`, `role`, `run-failed`, `run.now`, `run::Ui`, `run_results.json`, `single_writer`, `target/`, `unstable_machinery`, `warn`.
 - [New in 0.8](docs/new-in-0.8.md): A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse.
