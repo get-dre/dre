@@ -144,6 +144,28 @@ exports and Jinja `test` blocks are not supported yet. Unsupported settings fail
 `dre validate` checks declaration shape and existing macro syntax; data-dependent SQL checks
 run only under `dre test`.
 
+### Retain failure examples
+
+Set `config: {store_failures: true, failure_limit: 1000}` on a test to retain CSV
+examples. Storage is off by default. `failure_limit` is an integer from 1 to
+9223372036854775807 and caps only CSV rows; the check executes once and counts all
+failures. Both engines write under the configured Target path, isolated by run,
+Binding, query and declaration order. Diagnostics and `run_results.json` record
+`failure_path`, `stored_failures` and `failures_truncated` when a CSV exists. Passing
+tests create no CSV. Evidence survives failed or cancelled runs and disposable
+workspace cleanup. `dre clean` removes it with other Target artifacts. Evidence
+never joins report outputs, attachments or deliveries. Local CSV storage requires
+no source write permissions.
+
+The [evidence sink](https://github.com/get-dre/dre/blob/master/crates/dre-core/src/run/data_tests.rs) uses Arrow's existing
+CSV writer: UTF-8 text, a header, comma separators, doubled quotes inside quoted
+fields, and LF line endings. Nulls become empty fields, losing the distinction from
+empty strings. Scalars become text without Arrow type or precision metadata;
+unsupported nested types cause a test execution error. Without SQL ordering,
+examples can differ between runs. Spreadsheets may infer dates, round identifiers
+or interpret values beginning with `=` as formulas. Import evidence as text when
+investigating untrusted values or exact identifiers.
+
 ## Run a selection when another report is broken
 
 `dre run monthly` loads project-wide configuration and dependencies, then parses and checks the

@@ -515,6 +515,29 @@
             "null"
           ]
         },
+        "failure_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local diagnostic CSV, excluded from report outputs and deliveries."
+        },
+        "stored_failures": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of CSV example rows; absent if execution/export failed and the file may be partial.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failures_truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the full failure count exceeds the retained examples."
+        },
         "duration_ms": {
           "type": "integer",
           "format": "uint64",

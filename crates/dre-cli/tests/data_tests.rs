@@ -69,6 +69,7 @@ fn data_failures_collect_current_query_checks_and_stop_before_next_query() {
         assert_eq!(result["tests"][1]["status"], "pass");
         assert!(!p.run_logs().contains("LATER_SHOULD_NOT_RUN"));
         assert!(!p.path("target/run/r/default/.spool").exists());
+        assert!(!p.path("target/run/r/default/test_failures").exists());
     }
 }
 
@@ -96,7 +97,16 @@ fn execution_error_stops_immediately_and_has_no_invented_failure_count() {
 
 #[test]
 fn unsupported_options_fail_clearly_without_opening_the_source() {
-    for config in ["execution: invalid", "severity: invalid", "store_failures: true"] {
+    for config in [
+        "execution: invalid",
+        "severity: invalid",
+        "store_failures: yes_please",
+        "failure_limit: 0",
+        "failure_limit: -1",
+        "failure_limit: 1.5",
+        "failure_limit: many",
+        "failure_limit: 18446744073709551615",
+    ] {
         let p = project(
             &format!(
                 "queries:\n  - query: data\n    data_tests:\n      - positive:\n          config: {{{config}}}\noutput: {{format: message}}\n"
@@ -745,5 +755,216 @@ fn saved_result_relations_are_isolated_between_bindings() {
         let result = p.json(&format!("target/run/r/{binding}/run_results.json"));
         assert_eq!(result["tests"][0]["status"], "pass");
         assert_eq!(result["result_sets"][0]["rows"], rows);
+    }
+}
+
+#[test]
+fn failure_storage_is_opt_in_capped_and_excluded_from_outputs() {
+    for command in ["test", "build"] {
+        let record = tempfile::tempdir().unwrap();
+        let p = production_project(
+            &format!(
+                "queries:\n  - query: data\n    data_tests:\n      - invalid: {{config: {{severity: warn, store_failures: true, failure_limit: 2}}}}\n      - invalid: {{config: {{severity: warn, store_failures: true}}}}\n      - invalid: {{config: {{severity: warn}}}}\n      - positive: {{config: {{store_failures: true}}}}\n{DELIVER}"
+            ),
+            &format!("{BAD_DATA}\n{POSITIVE}"),
+            record.path(),
+        );
+        let run = p.dre(command, &["r", "--target-path", "evidence-target"]);
+        run.ok().says("truncated").says("test_failures");
+        let result_file = common::current_run_file(
+            &p.root().join("evidence-target"),
+            "r",
+            "default",
+            "run_results.json",
+        );
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&result_file).unwrap()).unwrap();
+        let tests = result["tests"].as_array().unwrap();
+        for (i, stored) in [(0, 2), (1, 7)] {
+            assert_eq!(tests[i]["failures"], 7);
+            assert_eq!(tests[i]["stored_failures"], stored);
+            assert_eq!(tests[i]["failures_truncated"], i == 0);
+            let path = tests[i]["failure_path"].as_str().unwrap();
+            run.says(path);
+            let text = std::fs::read_to_string(path).unwrap();
+            assert_eq!(text.lines().count(), stored as usize + 1);
+            assert!(text.starts_with("n\n"));
+            assert!(!result["outputs"].to_string().contains("test_failures"));
+            assert!(!result["deliveries"].to_string().contains("test_failures"));
+        }
+        assert_ne!(tests[0]["failure_path"], tests[1]["failure_path"]);
+        for test in &tests[2..] {
+            assert!(test.get("failure_path").is_none());
+            assert!(test.get("stored_failures").is_none());
+        }
+        assert!(!result_file.parent().unwrap().join(".spool").exists());
+        p.dre("clean", &["--target-path", "evidence-target"]).ok();
+        assert!(!std::path::Path::new(tests[0]["failure_path"].as_str().unwrap()).exists());
+    }
+}
+
+#[test]
+fn source_failure_csv_counts_all_rows_and_preserves_the_original_query_and_session() {
+    let p = source_project(
+        "check: {arguments: {relation: checked}, config: {execution: source, store_failures: true, failure_limit: 2}}",
+        "{% test check(relation) %}select nextval('checks') as call, * from {{ relation }}{% endtest %}",
+    );
+    p.duckdb(
+        "source.duckdb",
+        "create sequence calls start 1; create sequence checks start 1",
+    );
+    p.write("reports/r/prepare.sql", "create temp table saved as select nextval('calls') as id from range(5); create temp view checked as select * from saved");
+    p.dre("test", &["r"])
+        .failed()
+        .says("5 failure rows")
+        .says("truncated");
+    let result = p.json("target/run/r/default/run_results.json");
+    let test = &result["tests"][0];
+    assert_eq!(test["failures"], 5);
+    assert_eq!(test["stored_failures"], 2);
+    let path = test["failure_path"].as_str().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "call,id\n1,1\n2,2\n");
+    assert_eq!(result["outputs"], serde_json::json!([]));
+    p.write(
+        "reports/r/prepare.sql",
+        "select nextval('checks') as call, nextval('calls') as id",
+    );
+    p.write(
+        "reports/r/r.yml",
+        "queries: [{query: prepare, profile: actual}]\noutput: {format: message}\n",
+    );
+    p.dre("run", &["r", "--output-json", "saved"]).ok();
+    let saved: serde_json::Value = serde_json::from_str(&p.read("saved/r/default/prepare.json")).unwrap();
+    assert_eq!(saved["rows"][0], serde_json::json!([6, 6]));
+    assert!(std::path::Path::new(path).exists());
+}
+
+#[test]
+fn local_error_and_cancel_keep_completed_evidence_but_remove_disposable_workspaces() {
+    for cancel in [false, true] {
+        let p = project(
+            "queries:\n  - query: data\n    data_tests:\n      - invalid: {config: {severity: warn, store_failures: true, failure_limit: 2}}\n      - broken: {config: {severity: warn}}\noutput: {format: message}\n",
+            &format!(
+                "{{% test invalid(relation) %}}select * from {{{{ relation }}}}{{% endtest %}}\n{{% test broken(relation) %}}{}{{% endtest %}}",
+                if cancel {
+                    "select sum(a.range * b.range) from range(1000000) a, range(1000000) b"
+                } else {
+                    "select missing_column from {{ relation }}"
+                }
+            ),
+        );
+        let run = p.dre("test", &["r", "--timeout", "2s"]);
+        if cancel {
+            assert_eq!(run.code, 124, "{run:?}");
+        } else {
+            run.failed().says("missing_column");
+        }
+        let result = p.json("target/run/r/default/run_results.json");
+        let path = result["tests"][0]["failure_path"].as_str().unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "n\n0\n1\n");
+        assert!(!p.path("target/run/r/default/.spool").exists());
+    }
+}
+
+#[test]
+fn default_failure_limit_is_1000_and_storage_off_retains_no_rows() {
+    let p = project(
+        "queries:\n  - query: data\n    data_tests:\n      - invalid: {config: {severity: warn}}\n      - invalid: {config: {severity: warn, store_failures: true}}\noutput: {format: message}\n",
+        "{% test invalid(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.write("reports/r/data.sql", "rows 1005");
+    p.dre("test", &["r"]).ok();
+    let result = p.json("target/run/r/default/run_results.json");
+    assert!(result["tests"][0].get("failure_path").is_none());
+    assert_eq!(result["tests"][1]["failures"], 1005);
+    assert_eq!(result["tests"][1]["stored_failures"], 1000);
+    assert_eq!(result["tests"][1]["failures_truncated"], true);
+    assert!(!p.read("target/run/r/default/dre.log").contains("999\n"));
+}
+
+#[test]
+fn concurrent_runs_isolate_evidence_by_binding_and_run() {
+    let p = project(
+        "queries:\n  - query: data\n    data_tests: [{invalid: {config: {store_failures: true}}}]\nsets: [east, west]\noutput: {format: message}\n",
+        "{% test invalid(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.write("sets.yml", "east: {}\nwest: {}\n");
+    std::thread::scope(|scope| {
+        let east = scope.spawn(|| p.dre("test", &["r", "--set", "east"]));
+        let west = scope.spawn(|| p.dre("test", &["r", "--set", "west"]));
+        east.join().unwrap().failed();
+        west.join().unwrap().failed();
+    });
+    let paths: Vec<String> = ["east", "west"]
+        .iter()
+        .map(|binding| {
+            let result = p.json(&format!("target/run/r/{binding}/run_results.json"));
+            let path = result["tests"][0]["failure_path"].as_str().unwrap().to_owned();
+            assert!(path.contains(&format!("/{binding}/runs/")), "{path}");
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                "n\n0\n1\n2\n3\n4\n5\n6\n"
+            );
+            path
+        })
+        .collect();
+    assert_ne!(paths[0], paths[1]);
+}
+
+#[test]
+fn failure_csv_preserves_escaped_text_and_uses_documented_null_and_scalar_conversion() {
+    for execution in ["local", "source"] {
+        let p = source_project(
+            &format!(
+                "check: {{arguments: {{{}}}, config: {{execution: {execution}, store_failures: true}}}}",
+                if execution == "source" {
+                    "relation: checked"
+                } else {
+                    ""
+                }
+            ),
+            "{% test check(relation) %}select * from {{ relation }}{% endtest %}",
+        );
+        p.write("reports/r/prepare.sql", "create temp table checked as select 1234567890123456789::bigint as id, 1.25::decimal(8,2) as amount, date '2026-11-03' as day, true as enabled, NULL::varchar as missing, '=1+1' as formula, 'a,\"b\"' as quoted; select * from checked");
+        p.dre("test", &["r"]).failed();
+        let result = p.json("target/run/r/default/run_results.json");
+        let path = result["tests"][0]["failure_path"].as_str().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "id,amount,day,enabled,missing,formula,quoted\n1234567890123456789,1.25,2026-11-03,true,,=1+1,\"a,\"\"b\"\"\"\n"
+        );
+    }
+}
+
+#[test]
+fn csv_export_errors_are_execution_errors_even_with_warning_severity() {
+    for execution in ["local", "source"] {
+        let p = source_project(
+            &format!(
+                "check: {{arguments: {{{}}}, config: {{execution: {execution}, severity: warn, store_failures: true}}}}",
+                if execution == "source" {
+                    "relation: checked"
+                } else {
+                    ""
+                }
+            ),
+            "{% test check(relation) %}select [id] as unsupported from {{ relation }}{% endtest %}",
+        );
+        p.write(
+            "reports/r/prepare.sql",
+            "create temp table checked as select 1 as id; select * from checked",
+        );
+        p.dre("test", &["r"])
+            .failed()
+            .says("ERROR")
+            .says("not supported in CSV");
+        let result = p.json("target/run/r/default/run_results.json");
+        assert_eq!(result["error_code"], "data-test-error");
+        assert_eq!(result["tests"][0]["status"], "error");
+        assert_eq!(result["tests"][0]["severity"], "warn");
+        assert!(result["tests"][0].get("failures").is_none());
+        assert!(result["tests"][0].get("failures_truncated").is_none());
+        assert!(result["tests"][0].get("stored_failures").is_none());
+        assert!(!p.path("target/run/r/default/.spool").exists());
     }
 }
