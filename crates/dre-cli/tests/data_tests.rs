@@ -96,7 +96,7 @@ fn execution_error_stops_immediately_and_has_no_invented_failure_count() {
 
 #[test]
 fn unsupported_options_fail_clearly_without_opening_the_source() {
-    for config in ["execution: source", "severity: invalid", "store_failures: true"] {
+    for config in ["execution: invalid", "severity: invalid", "store_failures: true"] {
         let p = project(
             &format!(
                 "queries:\n  - query: data\n    data_tests:\n      - positive:\n          config: {{{config}}}\noutput: {{format: message}}\n"
@@ -542,4 +542,34 @@ fn source_tests_require_sessions_without_falling_back_to_local() {
     let result = p.json("target/run/r/default/run_results.json");
     assert_eq!(result["tests"][0]["status"], "error");
     assert!(result["tests"][0].get("failures").is_none());
+}
+
+#[test]
+fn source_tests_require_an_explicit_nonempty_string_relation_before_execution() {
+    for arguments in ["{}", "{relation: null}", "{relation: 123}", "{relation: ''}"] {
+        let p = project(
+            &format!(
+                "queries:\n  - query: data\n    data_tests: [{{positive: {{arguments: {arguments}, config: {{execution: source}}}}}}]\noutput: {{format: message}}\n"
+            ),
+            POSITIVE,
+        );
+        p.dre("test", &["r"])
+            .failed()
+            .says("explicit nonempty string arguments.relation");
+        assert!(!p.run_logs().contains("fixture: opened"));
+    }
+}
+
+#[test]
+fn source_warning_records_count_and_continues_to_next_query() {
+    let p = source_project(
+        "invalid: {arguments: {relation: saved}, config: {execution: source, severity: warn}}",
+        "{% test invalid(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.duckdb("source.duckdb", "create sequence calls start 1");
+    p.dre("test", &["r"]).ok().says("WARN");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["failures"], 1);
+    assert_eq!(result["tests"][0]["status"], "warn");
+    assert_eq!(result["result_sets"][0]["query"], "later");
 }

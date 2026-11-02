@@ -31,8 +31,8 @@ dre system update        # update DRE itself
 
 ## Check returned data with `dre test`
 
-Attach SQL checks to a query's saved result with `data_tests`. In this initial implementation,
-checks are `test` blocks under `macros/`, run locally using core-owned embedded DuckDB.
+Attach SQL checks to a query with `data_tests`. Define checks as `test` blocks under
+`macros/`. By default, checks inspect saved results locally using core-owned embedded DuckDB.
 The DuckDB source plugin is not needed for validation; source queries still use their configured
 plugins and execute once. Each check receives an opaque SQL `relation`, never a spool path.
 
@@ -64,7 +64,7 @@ Omit `config` for the defaults: local execution and error severity. Omit `argume
 the macro needs only `relation`, or uses argument defaults. Ordinary project macros remain
 available as helpers. A Set's query entry can replace `data_tests`; an empty list disables
 inherited checks for that Binding. Test arguments are template values; the macro remains
-responsible for quoting identifiers and constructing valid DuckDB SQL. Tests may also use explicit
+responsible for quoting identifiers and constructing SQL for the selected execution engine. Tests may also use explicit
 `test_<name>` macros. Plain macros remain helpers, and duplicate definitions are errors.
 Installed Git and local macro packages use the existing dependency declarations and `dre deps`;
 call their checks as `package.check_name`. Tests can use argument defaults, helpers and
@@ -73,6 +73,28 @@ in YAML; runtime `config()` calls are unsupported. `dre validate` resolves defin
 checks signatures and template syntax without running test SQL or introspection. Column names
 and other data-dependent SQL errors are checked only when `dre test` executes the check.
 
+For database relations, select `execution: source` and supply `arguments.relation` explicitly:
+
+```yaml
+queries:
+  - query: prepare_invoices
+    profile: warehouse
+    tab: false
+    data_tests:
+      - missing_identifier:
+          arguments: {relation: temp_invoices, column: invoice_id}
+          config: {execution: source}
+```
+
+Source checks run after the query's last statement and before the next query, through that
+query's actual connection and existing session. They can read temporary tables and views,
+including preparation queries with no returned dataset. The source plugin must support sessions.
+Macros dispatch for the source dialect and may use its native SQL functions. DRE neither infers
+a relation from preparation SQL nor uploads saved results to the source. Source checks validate
+the database state they read, not a separately returned dataset. They still consume database
+compute; a temporary view can re-evaluate its SQL. Normal connection permissions apply, and
+an error does not roll back earlier preparation side effects.
+
 A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
 the current query when checks find bad data, then stops that Binding before its next query.
 Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings
@@ -80,7 +102,7 @@ continue. Any failed Binding makes the command exit nonzero. `run_results.json` 
 query, test, execution target, severity, status, duration and full failure count; an execution
 error records its cause instead of a count. Tests do not store failure-row samples.
 
-Checks inspect unformatted Arrow values and never change the saved result. Data moves in
+Local checks inspect unformatted Arrow values and never change the saved result. Data moves in
 batches into a disposable, disk-backed DuckDB workspace under the run's spool directory,
 with a 512 MB DuckDB memory limit. Normal completion, failure and cancellation remove it.
 The first implementation accepts scalar integer, floating-point, boolean, string, binary,
