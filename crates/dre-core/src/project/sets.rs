@@ -290,6 +290,20 @@ impl Loader {
                                             if let Some(Loose::Ok(b)) = &e.tab {
                                                 q.tab = *b;
                                             }
+                                            if let Some(tests) = &e.data_tests {
+                                                match tests {
+                                                    Loose::Ok(tests) => {
+                                                        q.data_tests.clear();
+                                                        for entry in tests {
+                                                            match crate::data_tests::resolve(entry) {
+                                                                Ok(test) => q.data_tests.push(test),
+                                                                Err(message) => self.diags.error(Code::InvalidField, file.clone(), line, format!("{ctx}: query `{qn}`: data_tests: {message}")),
+                                                            }
+                                                        }
+                                                    }
+                                                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("{ctx}: query `{qn}`: data_tests must be single-name maps with arguments and config; only local/error is supported")),
+                                                }
+                                            }
                                             match &e.on_empty {
                                                 None => {}
                                                 Some(Loose::Ok(v)) => q.on_empty = Some(*v),

@@ -168,6 +168,7 @@ pub const QUERY_ENTRY_KEYS: &[&str] = &[
     "style",
     "on_empty",
     "secret_columns",
+    "data_tests",
 ];
 /// The keys of a destination entry core reads; every other key is the plugin's.
 pub const DESTINATION_KEYS: &[&str] = &["profile", "path", "attach", "hold", "rate", "burst", "zip"];
@@ -580,6 +581,9 @@ pub struct QueryEntry {
     /// `secret_columns:`: columns whose values are masked wherever DRE reports.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub secret_columns: Vec<String>,
+    /// Resolved data checks, in declaration order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub data_tests: Vec<crate::data_tests::DataTest>,
 }
 
 fn is_true(b: &bool) -> bool {

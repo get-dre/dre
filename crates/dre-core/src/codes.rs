@@ -493,6 +493,12 @@ codes! {
     ConnectionFailed = "connection-failed", Connection,
         "A connection couldn't be opened.",
         "The source plugin couldn't connect: the host is unreachable, the credentials are refused, the warehouse is unavailable. The message has the plugin's reason. Trying again can work when the cause is temporary.";
+    DataTestFailed = "data-test-failed", Query,
+        "A data test returned failure rows.",
+        "The test checked the saved query result and returned one or more failure rows. Fix the data or the test before continuing this Binding. dre run does not execute data tests.";
+    DataTestError = "data-test-error", Query,
+        "A data test could not execute.",
+        "The test definition, generated SQL or result conversion failed. The message identifies the report query and test; this is an execution error, not a data failure count.";
     QueryFailed = "query-failed", Query,
         "A query failed on the database.",
         "The database rejected or failed a statement: a syntax error, a missing table, a permission. The message names the file and line.";

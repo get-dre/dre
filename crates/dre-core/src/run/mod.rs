@@ -34,6 +34,7 @@ use crate::sqlsplit::StatementKind;
 
 mod binding;
 mod compile;
+mod data_tests;
 mod deliver;
 mod format;
 mod mode;
@@ -156,6 +157,7 @@ impl RunOptions {
             output_name: self.output_name.clone(),
             output_path: self.output_path.clone(),
             dry_run: self.mode.dry_run(),
+            command: self.mode.command(),
             preview: self.mode.preview,
             accept_schema_change: self.accept_schema_change,
         }
@@ -203,6 +205,9 @@ pub struct BindingOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<ErrorCode>,
     pub files: Vec<PathBuf>,
+    /// Data-test outcomes, including failures before report outputs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<crate::data_tests::Outcome>,
     /// One line describing what the Binding produced (result sets, rows, outputs, delivery).
     pub summary: String,
     /// The schedule this ran under (`--schedule`), and the vars it layered in.
@@ -568,6 +573,7 @@ struct BindingRun<'a> {
     started: Instant,
     started_at: chrono::DateTime<chrono::Utc>,
     produced: Vec<Produced>,
+    tests: Vec<crate::data_tests::Outcome>,
     /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
     /// (`oi`) reads both.
     outs: Vec<OutputRun>,

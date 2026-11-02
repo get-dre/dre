@@ -95,6 +95,7 @@ impl<'a> BindingRun<'a> {
             started: Instant::now(),
             started_at,
             produced: Vec::new(),
+            tests: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
             processes,
             drift: Vec::new(),
@@ -258,6 +259,7 @@ impl<'a> BindingRun<'a> {
             error_code: error.as_ref().map(|e| e.code.clone()),
             error: error.map(|e| e.message),
             files: self.files().map(|(p, _)| p.clone()).collect(),
+            tests: self.tests.clone(),
             summary: self.summary_line(),
             schedule: self.opts.schedule.clone(),
             schedule_vars: self.schedule_vars.clone(),
@@ -412,6 +414,9 @@ impl<'a> BindingRun<'a> {
             Source::Query => self.query(&per_connection)?,
         }
         pool.close_all();
+        if !self.stages.format {
+            return Ok(());
+        }
         self.results()?;
         let (file_outs, message_outs) = self.make_files()?;
         self.check_drift()?;
