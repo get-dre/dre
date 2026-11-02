@@ -33,8 +33,8 @@ dre system update        # update DRE itself
 
 Attach SQL checks to a query with `data_tests`. Define checks as `test` blocks under
 `macros/`. By default, checks inspect saved results locally using core-owned embedded DuckDB.
-The DuckDB source plugin is not needed for validation; source queries still use their configured
-plugins and execute once. Each check receives an opaque SQL `relation`, never a spool path.
+The DuckDB source plugin is not needed for local validation; source queries still use their
+configured plugins and execute once. Each local check receives an opaque SQL `relation`, never a spool path.
 
 ```yaml
 queries:
