@@ -131,7 +131,7 @@ the current query when checks find bad data, then stops that Binding before its 
 Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings
 continue. Any failed Binding makes the command exit nonzero. `run_results.json` records the
 query, test, execution target, severity, status, duration and full failure count; an execution
-error records its cause instead of a count. Tests do not store failure-row samples.
+error records its cause instead of a count. By default, tests do not retain failure-row samples.
 
 Local checks inspect unformatted Arrow values and never change the saved result. Data moves in
 batches into a disposable, disk-backed DuckDB workspace under the run's spool directory,
@@ -147,11 +147,26 @@ at most 38 and a nonnegative scale. Timezone-bearing timestamps, nested types an
 extension types are rejected. Date32 and timezone-free timestamps retain their stored units
 and precision; result spools and report output values keep their original Arrow types.
 
-This initial command supports returned tab results, local execution and error severity only.
-Source-side tests, hidden-result targets, cross-query references, warning severity, failure
-exports and Jinja `test` blocks are not supported yet. Unsupported settings fail clearly.
-`dre validate` checks declaration shape and existing macro syntax; data-dependent SQL checks
-run only under `dre test`.
+`dre validate` checks declarations and test definitions without executing report or test SQL.
+Data-dependent checks run under `dre test` and `dre build`.
+
+Diagnostics identify the Report, Set (when present), query, test declaration position,
+local/source execution, severity and elapsed time. `PASS`, `WARN`, `FAIL`, `ERROR` and `SKIP`
+remain readable without color. A failure count means rows returned by the check: a duplicate
+check can return one row per duplicated key rather than one per invalid input row.
+Execution errors show their cause without a fabricated failure count. Skipped checks have no
+failure count, and later queries are listed as skipped even when they declare no tests.
+The final `Tests` summary separates passing checks, warnings, data failures, execution errors
+and skipped checks across all selected Bindings.
+
+`--log-format json` emits a `data_test` event with `report`, `set`, `binding` and a structured
+`test` outcome. `binding_end` includes `tests` and `skipped_queries`; the final `test_summary`
+event counts each test status. Consumers can use those records without parsing text.
+`run_results.json` records the same test outcomes and skipped query names. `ordinal` is the
+one-based declaration position within its query, and `query_ordinal` identifies the query
+declaration position, so repeated query or test names remain distinct.
+`skip_reason` identifies the earlier data-test failure or execution error that blocked a check.
+Default diagnostics contain counts and causes, never failure-row samples.
 
 ### Retain failure examples
 

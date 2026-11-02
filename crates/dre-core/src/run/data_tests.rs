@@ -16,7 +16,7 @@ use serde_json::json;
 use super::{BindingRun, Fail, Statement};
 use crate::codes::Code;
 use crate::data_tests::{DataTest, Outcome, Status};
-use crate::engine::{CancelToken, Level};
+use crate::engine::{CancelToken, Level, RunEvent};
 use crate::render::{Mode, Renderer, RendererConfig};
 
 #[path = "data_tests_bridge.rs"]
@@ -28,30 +28,18 @@ impl BindingRun<'_> {
         if !self.stages.tests || !st.last {
             return Ok(());
         }
-        let tests = self
-            .b
-            .queries
-            .iter()
-            .find(|q| q.query == st.query)
-            .map(|q| q.data_tests.clone())
-            .unwrap_or_default();
+        let tests = self.b.queries[st.query_index].data_tests.clone();
         if tests.is_empty() {
             return Ok(());
         }
         let mut failed = false;
         for (ordinal, test) in tests.into_iter().enumerate() {
-            let query_ordinal = self
-                .b
-                .queries
-                .iter()
-                .position(|q| q.query == st.query)
-                .unwrap_or(0);
             let mut evidence = Evidence::new(
                 self.run_dir
                     .join("test_failures")
                     .join(format!(
                         "{}-{}",
-                        query_ordinal + 1,
+                        st.query_index + 1,
                         crate::for_each::safe_name(&st.query)
                     ))
                     .join(format!(
@@ -108,20 +96,25 @@ impl BindingRun<'_> {
                     Status::Fail => "FAIL",
                     Status::Warn => "WARN",
                     Status::Error => "ERROR",
+                    Status::Skipped => "SKIP",
                 },
                 &format!(
-                    "{}: query `{}` test `{}` ({}, {}): {detail}",
+                    "{}: query `{}` test `{}` #{} ({}, {}): {detail}",
                     self.label(),
                     st.query,
                     test.name,
+                    ordinal + 1,
                     test.config.execution,
                     test.config.severity
                 ),
                 Some(elapsed),
             );
-            self.tests.push(Outcome {
+            self.record_test(Outcome {
                 query: st.query.clone(),
                 test: test.name.clone(),
+                query_ordinal: Some(st.query_index + 1),
+                ordinal: Some(ordinal + 1),
+                skip_reason: None,
                 execution: test.config.execution.clone(),
                 severity: test.config.severity.clone(),
                 status,
@@ -149,6 +142,79 @@ impl BindingRun<'_> {
             ));
         }
         Ok(())
+    }
+
+    /// Preserve unstarted declarations even when a broken check stops its own query immediately.
+    pub(super) fn skip_after_test_failure(&mut self, reason: &str) {
+        let Some(last) = self.tests.last() else { return };
+        let Some(query_index) = last.query_ordinal.and_then(|n| n.checked_sub(1)) else {
+            return;
+        };
+        let completed = last.ordinal.unwrap_or(0);
+        let mut skipped = Vec::new();
+        for (index, query) in self.b.queries.iter().enumerate().skip(query_index) {
+            if index > query_index {
+                self.skipped_queries.push(query.query.clone());
+                self.ui.step(
+                    Level::Info,
+                    "SKIP",
+                    &format!(
+                        "{}: query `{}`: an earlier data test stopped this Binding",
+                        self.label(),
+                        query.query
+                    ),
+                    None,
+                );
+            }
+            for (ordinal, test) in query.data_tests.iter().enumerate() {
+                if index == query_index && ordinal < completed {
+                    continue;
+                }
+                skipped.push(Outcome {
+                    query: query.query.clone(),
+                    test: test.name.clone(),
+                    query_ordinal: Some(index + 1),
+                    ordinal: Some(ordinal + 1),
+                    skip_reason: Some(reason.to_string()),
+                    execution: test.config.execution.clone(),
+                    severity: test.config.severity.clone(),
+                    status: Status::Skipped,
+                    failures: None,
+                    error: None,
+                    failure_path: None,
+                    stored_failures: None,
+                    failures_truncated: None,
+                    duration_ms: 0,
+                });
+            }
+        }
+        for outcome in skipped {
+            self.ui.step(
+                Level::Info,
+                "SKIP",
+                &format!(
+                    "{}: query `{}` test `{}` #{} ({}, {}): an earlier data test stopped this Binding",
+                    self.label(),
+                    outcome.query,
+                    outcome.test,
+                    outcome.ordinal.unwrap_or(0),
+                    outcome.execution,
+                    outcome.severity
+                ),
+                None,
+            );
+            self.record_test(outcome);
+        }
+    }
+
+    fn record_test(&mut self, outcome: Outcome) {
+        self.ui.emit(RunEvent::DataTest {
+            report: self.report.name.clone(),
+            set: self.b.set.clone(),
+            binding: self.b.dir_name().to_string(),
+            outcome: outcome.clone(),
+        });
+        self.tests.push(outcome);
     }
 
     fn source_test(

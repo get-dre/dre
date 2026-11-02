@@ -65,7 +65,7 @@ enum Command {
     Validate(ValidateArgs),
     /// Run reports: render, execute, format into the target folder, and deliver.
     Run(Box<RunArgs>),
-    /// Run fresh report queries and local data tests, without report formatting or delivery.
+    /// Run fresh report queries and data tests, without report formatting or delivery.
     Test(Box<CheckedArgs>),
     /// Run fresh report queries and data tests before formatting and delivering report outputs.
     Build(Box<CheckedArgs>),

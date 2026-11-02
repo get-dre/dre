@@ -88,9 +88,13 @@ fn execution_error_stops_immediately_and_has_no_invented_failure_count() {
             .says("missing_column");
         let result = p.json("target/run/r/default/run_results.json");
         assert_eq!(result["error_code"], "data-test-error");
-        assert_eq!(result["tests"].as_array().unwrap().len(), 1);
+        assert_eq!(result["tests"].as_array().unwrap().len(), 2);
         assert_eq!(result["tests"][0]["status"], "error");
         assert!(result["tests"][0].get("failures").is_none());
+        assert_eq!(result["tests"][1]["status"], "skipped");
+        assert_eq!(result["tests"][1]["ordinal"], 2);
+        assert_eq!(result["tests"][1]["skip_reason"], "data-test-error");
+        assert!(result["tests"][1].get("failures").is_none());
         assert!(!p.path("target/run/r/default/.spool").exists());
     }
 }
@@ -224,7 +228,10 @@ fn a_set_can_override_checks_and_a_failed_binding_does_not_stop_another() {
         "queries:\n  - query: data\n    data_tests: [{invalid: {}}]\nsets:\n  - {name: bad, profile: fixture}\n  - name: good\n    profile: fixture\n    queries: [{query: data, data_tests: []}]\noutput: {format: message}\n",
         "{% test invalid(relation) %}select * from {{ relation }}{% endtest %}",
     );
-    p.dre("test", &["r", "--set", "all"]).failed();
+    p.dre("test", &["r", "--set", "all"])
+        .failed()
+        .says("r (Set bad)")
+        .says("1 total · 0 pass, 0 warn, 1 fail, 0 error, 0 skipped");
     let bad = p.json("target/run/r/bad/run_results.json");
     let good = p.json("target/run/r/good/run_results.json");
     assert_eq!(bad["status"], "error");
@@ -442,14 +449,15 @@ fn failed_build_collects_checks_skips_outputs_and_delivers_only_independent_sets
     let record = tempfile::tempdir().unwrap();
     let p = production_project(
         &format!(
-            "queries:\n  - query: data\n    data_tests: [{{invalid: {{}}}}, {{positive: {{}}}}]\n  - {{query: later, tab: false}}\nsets:\n  - {{name: bad, profile: fixture}}\n  - name: good\n    profile: fixture\n    queries: [{{query: data, data_tests: []}}]\n{DELIVER}"
+            "queries:\n  - query: data\n    data_tests: [{{invalid: {{}}}}, {{positive: {{}}}}]\n  - {{query: later, tab: false}}\nsets:\n  - {{name: bad, profile: fixture}}\n  - name: good\n    profile: fixture\n    queries: [{{query: data, data_tests: [{{positive: {{}}}}]}}]\n{DELIVER}"
         ),
         &format!("{BAD_DATA}\n{POSITIVE}"),
         record.path(),
     );
     p.dre("build", &["r", "--set", "all", "--threads", "1"])
         .failed()
-        .says("PASS");
+        .says("PASS")
+        .says("3 total · 2 pass, 0 warn, 1 fail, 0 error, 0 skipped");
     let bad = p.json("target/run/r/bad/run_results.json");
     assert_eq!(bad["tests"].as_array().unwrap().len(), 2);
     assert_eq!(bad["output_results"][0]["status"], "skipped");
@@ -529,10 +537,13 @@ fn warning_execution_errors_skip_remaining_checks_queries_and_all_report_product
     p.dre("build", &["r"]).failed().says("ERROR").lacks("PASS");
     let result = p.json("target/run/r/default/run_results.json");
     assert_eq!(result["error_code"], "data-test-error");
-    assert_eq!(result["tests"].as_array().unwrap().len(), 1);
+    assert_eq!(result["tests"].as_array().unwrap().len(), 2);
     assert_eq!(result["tests"][0]["severity"], "warn");
     assert!(result["tests"][0].get("failures").is_none());
     assert_eq!(result["output_results"][0]["status"], "skipped");
+    assert_eq!(result["skipped_queries"], serde_json::json!(["later"]));
+    assert_eq!(result["output_results"][0]["reason"], "data_test_error");
+    assert_eq!(result["tests"][1]["status"], "skipped");
     assert!(!p.run_logs().contains("LATER_QUERY_RAN"));
     assert!(!p.path("target/run/r/default/report.csv").exists());
     assert!(!record.path().join("deliveries.jsonl").exists());
@@ -609,10 +620,12 @@ fn source_failures_collect_checks_and_errors_stop_even_at_warn_severity() {
             p.write("reports/r/later.sql", "select * from LATER_SHOULD_NOT_RUN");
             p.dre(command, &["r"]).failed().lacks("LATER_SHOULD_NOT_RUN");
             let result = p.json("target/run/r/default/run_results.json");
+            assert_eq!(result["tests"].as_array().unwrap().len(), 2);
             assert_eq!(
-                result["tests"].as_array().unwrap().len(),
-                if broken { 1 } else { 2 }
+                result["tests"][1]["status"],
+                if broken { "skipped" } else { "pass" }
             );
+            assert_eq!(result["skipped_queries"], serde_json::json!(["later"]));
             assert_eq!(
                 result["tests"][0]["status"],
                 if broken { "error" } else { "fail" }
@@ -1056,5 +1069,156 @@ fn csv_export_errors_are_execution_errors_even_with_warning_severity() {
         assert!(result["tests"][0].get("failures_truncated").is_none());
         assert!(result["tests"][0].get("stored_failures").is_none());
         assert!(!p.path("target/run/r/default/.spool").exists());
+    }
+}
+
+#[test]
+fn machine_test_events_match_results_for_both_engines_and_include_skipped_work() {
+    for execution in ["local", "source"] {
+        let definitions = format!(
+            "{BAD_DATA}\n{POSITIVE}\n{{% test broken(relation) %}}select missing_column from {{{{ relation }}}}{{% endtest %}}"
+        );
+        let arguments = if execution == "source" {
+            "arguments: {relation: saved}, "
+        } else {
+            ""
+        };
+        let declarations = format!(
+            "{{invalid: {{{arguments}config: {{execution: {execution}, severity: warn, store_failures: true, failure_limit: 2}}}}}}, {{positive: {{{arguments}config: {{execution: {execution}}}}}}}, {{broken: {{{arguments}config: {{execution: {execution}, severity: warn}}}}}}, {{positive: {{{arguments}config: {{execution: {execution}}}}}}}"
+        );
+        let p = if execution == "source" {
+            let p = source_project(&declarations, &definitions);
+            p.write(
+                "reports/r/prepare.sql",
+                "create temp table saved as select * from range(3) t(n)",
+            );
+            p
+        } else {
+            let p = project(
+                &format!(
+                    "queries:\n  - query: data\n    data_tests: [{declarations}]\n  - {{query: later, tab: false}}\noutput: {{format: message}}\n"
+                ),
+                &definitions,
+            );
+            p.write("reports/r/later.sql", "log LATER_SHOULD_NOT_RUN");
+            p
+        };
+        let run = p.dre("test", &["r", "--log-format", "json"]);
+        run.failed();
+        let events: Vec<serde_json::Value> = run
+            .stdout
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let result = p.json("target/run/r/default/run_results.json");
+        let tests = result["tests"].as_array().unwrap();
+        assert_eq!(tests.len(), 4);
+        for (test, status) in tests.iter().zip(["warn", "pass", "error", "skipped"]) {
+            assert_eq!(test["status"], status);
+            assert_eq!(test["execution"], execution);
+            assert!(test["duration_ms"].is_u64());
+        }
+        assert_eq!(tests[0]["failures"], if execution == "source" { 3 } else { 7 });
+        assert_eq!(tests[0]["stored_failures"], 2);
+        assert_eq!(tests[0]["failures_truncated"], true);
+        assert!(std::path::Path::new(tests[0]["failure_path"].as_str().unwrap()).exists());
+        assert_eq!(tests[1]["test"], tests[3]["test"]);
+        assert_eq!(tests[1]["ordinal"], 2);
+        assert_eq!(tests[3]["ordinal"], 4);
+        for test in &tests[2..] {
+            assert!(test.get("failures").is_none());
+            assert!(test.get("failure_path").is_none());
+        }
+        let test_events: Vec<_> = events.iter().filter(|e| e["event"] == "data_test").collect();
+        assert_eq!(test_events.len(), 4);
+        for (event, test) in test_events.iter().zip(tests) {
+            assert_eq!(event["report"], "r");
+            assert_eq!(event["binding"], "default");
+            assert_eq!(&event["test"], test);
+        }
+        let summary = events.iter().find(|e| e["event"] == "test_summary").unwrap();
+        assert_eq!(summary["total"], 4);
+        assert_eq!(
+            summary["tests"],
+            serde_json::json!({"pass": 1, "warn": 1, "fail": 0, "error": 1, "skipped": 1})
+        );
+        let end = events.iter().find(|e| e["event"] == "binding_end").unwrap();
+        assert_eq!(end["tests"], result["tests"]);
+        assert_eq!(end["skipped_queries"], serde_json::json!(["later"]));
+    }
+}
+
+#[test]
+fn repeated_hidden_queries_keep_their_own_checks_and_skip_the_correct_declaration() {
+    let p = project(
+        "queries:\n  - {query: data, tab: false}\n  - {query: data, tab: false, data_tests: [{positive: {}}]}\n  - {query: data, tab: false, data_tests: [{invalid: {}}]}\n  - {query: data, tab: false, data_tests: [{positive: {}}]}\noutput: {format: message}\n",
+        &format!("{POSITIVE}\n{BAD_DATA}"),
+    );
+    p.dre("test", &["r"])
+        .failed()
+        .says("PASS")
+        .says("FAIL")
+        .says("SKIP");
+    let result = p.json("target/run/r/default/run_results.json");
+    let tests = result["tests"].as_array().unwrap();
+    assert_eq!(tests.len(), 3);
+    for (index, status) in ["pass", "fail", "skipped"].iter().enumerate() {
+        assert_eq!(tests[index]["query_ordinal"], index + 2);
+        assert_eq!(tests[index]["ordinal"], 1);
+        assert_eq!(tests[index]["status"], *status);
+    }
+    assert_eq!(result["skipped_queries"], serde_json::json!(["data"]));
+    assert!(tests[2].get("failures").is_none());
+}
+
+#[test]
+fn ordinary_source_query_errors_do_not_fabricate_test_outcomes() {
+    let p = source_project(
+        "positive: {arguments: {relation: saved}, config: {execution: source}}",
+        POSITIVE,
+    );
+    p.write("reports/r/prepare.sql", "select missing_column");
+    let run = p.dre("test", &["r", "--log-format", "json"]);
+    run.failed();
+    let events: Vec<serde_json::Value> = run
+        .stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(!events.iter().any(|e| e["event"] == "data_test"));
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_ne!(result["error_code"], "data-test-error");
+    assert!(result.get("tests").is_none());
+    assert!(result.get("skipped_queries").is_none());
+    assert!(result["error"].as_str().unwrap().contains("missing_column"));
+}
+
+#[test]
+fn repeated_query_declarations_keep_separate_failure_csvs_for_both_engines() {
+    for execution in ["local", "source"] {
+        let arguments = if execution == "source" {
+            "arguments: {relation: '(select * from range(3) t(n))'}, "
+        } else {
+            ""
+        };
+        let checks = format!(
+            "invalid: {{{arguments}config: {{execution: {execution}, severity: warn, store_failures: true}}}}"
+        );
+        let p = source_project(&checks, BAD_DATA);
+        p.write("reports/r/prepare.sql", "select * from range(3) t(n)");
+        p.write("reports/r/r.yml", &format!("queries:\n  - {{query: prepare, profile: actual, tab: false, data_tests: [{{{checks}}}]}}\n  - {{query: prepare, profile: actual, tab: false, data_tests: [{{{checks}}}]}}\noutput: {{format: message}}\n"));
+        p.dre("test", &["r"]).ok();
+        let result = p.json("target/run/r/default/run_results.json");
+        let tests = result["tests"].as_array().unwrap();
+        assert_eq!(tests.len(), 2);
+        assert_ne!(tests[0]["failure_path"], tests[1]["failure_path"]);
+        for (index, test) in tests.iter().enumerate() {
+            assert_eq!(test["query_ordinal"], index + 1);
+            assert_eq!(test["failures"], 3);
+            let path = test["failure_path"].as_str().unwrap();
+            assert!(std::path::Path::new(path).is_file());
+            assert!(path.contains(&format!("{}-prepare", index + 1)), "{path}");
+            assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 4);
+        }
     }
 }

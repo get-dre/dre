@@ -249,6 +249,16 @@ drift, the resolved
 `target_path`, and `manifest_checksum`: the SHA-256 of manifest bytes written by the caller,
 when supplied. A scoped CLI run sets it to null and does not hash or rebuild a stale manifest.
 
+For `dre test` and `dre build`, `tests` records each declared check that ran or was skipped:
+its query, name, one-based query declaration `query_ordinal` and test declaration `ordinal`,
+execution engine, severity, status
+(`pass`, `warn`, `fail`, `error`, `skipped`) and `duration_ms`. Executed checks record the full
+`failures` count; errors record an `error` cause, and skipped checks record `skip_reason`
+without a count. Enabled CSV evidence adds `failure_path`, `stored_failures` and
+`failures_truncated`. `skipped_queries`, when non-empty, lists later queries not started
+because a data test stopped the Binding. Both fields are omitted when empty; existing
+`dre run` behavior is unchanged.
+
 `project_errors`, when non-empty, lists the first discovered error in each report outside the
 run's selection: `{"path": "reports/other/other.yml", "code": "unknown-key", "message": "..."}`.
 Paths use forward slashes, and messages follow the normal secret masking rules. The same list

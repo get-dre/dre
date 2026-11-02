@@ -178,10 +178,19 @@ impl DataTest {
 pub struct Outcome {
     pub query: String,
     pub test: String,
+    /// One-based query declaration position, including repeated query names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_ordinal: Option<usize>,
+    /// One-based declaration position within the query, distinguishing repeated test names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<usize>,
+    /// Why a declared test did not run; absent for executed checks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
     pub execution: String,
     pub severity: String,
     pub status: Status,
-    /// Full number of failure rows; absent for execution errors.
+    /// Full number of failure rows; absent for execution errors and skipped checks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failures: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -198,7 +207,7 @@ pub struct Outcome {
     pub duration_ms: u64,
 }
 
-/// A successful check, a data failure, or a check which could not execute.
+/// A successful check, a data failure, an execution error, or an unstarted declaration.
 #[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -206,6 +215,7 @@ pub enum Status {
     Fail,
     Warn,
     Error,
+    Skipped,
 }
 
 pub(crate) fn schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {

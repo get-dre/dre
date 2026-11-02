@@ -208,6 +208,9 @@ pub struct BindingOutcome {
     /// Data-test outcomes, including failures before report outputs.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<crate::data_tests::Outcome>,
+    /// Later queries not started because a data test failed or could not execute.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_queries: Vec<String>,
     /// One line describing what the Binding produced (result sets, rows, outputs, delivery).
     pub summary: String,
     /// The schedule this ran under (`--schedule`), and the vars it layered in.
@@ -519,6 +522,8 @@ struct Statement {
     /// Final statement of the attached query, including preparation-only queries.
     last: bool,
     query: String,
+    /// Declaration position, including repeated references to the same query file.
+    query_index: usize,
     /// The connection it runs on.
     connection: String,
     file: PathBuf,
@@ -578,6 +583,7 @@ struct BindingRun<'a> {
     /// Saved final datasets, including hidden queries, isolated to this Binding.
     test_results: BTreeMap<String, PathBuf>,
     tests: Vec<crate::data_tests::Outcome>,
+    skipped_queries: Vec<String>,
     /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
     /// (`oi`) reads both.
     outs: Vec<OutputRun>,
