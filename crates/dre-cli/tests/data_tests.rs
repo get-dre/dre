@@ -900,7 +900,11 @@ fn concurrent_runs_isolate_evidence_by_binding_and_run() {
         .map(|binding| {
             let result = p.json(&format!("target/run/r/{binding}/run_results.json"));
             let path = result["tests"][0]["failure_path"].as_str().unwrap().to_owned();
-            assert!(path.contains(&format!("/{binding}/runs/")), "{path}");
+            let segments: Vec<_> = path.split(['/', '\\']).collect();
+            assert!(
+                segments.windows(2).any(|w| w == [binding, dre_core::runs::RUNS]),
+                "{path}"
+            );
             assert_eq!(
                 std::fs::read_to_string(&path).unwrap(),
                 "n\n0\n1\n2\n3\n4\n5\n6\n"
