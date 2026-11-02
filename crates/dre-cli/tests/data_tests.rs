@@ -573,3 +573,16 @@ fn source_warning_records_count_and_continues_to_next_query() {
     assert_eq!(result["tests"][0]["status"], "warn");
     assert_eq!(result["result_sets"][0]["query"], "later");
 }
+
+#[test]
+fn empty_preparation_query_does_not_silently_skip_source_checks() {
+    let p = source_project(
+        "check: {arguments: {relation: saved}, config: {execution: source}}",
+        "{% test check(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.write("reports/r/prepare.sql", "-- no statement");
+    p.dre("test", &["r"])
+        .failed()
+        .says("attached data tests but no executable statements");
+    assert!(!p.run_logs().contains("fixture: opened"));
+}
