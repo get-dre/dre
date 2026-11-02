@@ -586,3 +586,164 @@ fn empty_preparation_query_does_not_silently_skip_source_checks() {
         .says("attached data tests but no executable statements");
     assert!(!p.run_logs().contains("fixture: opened"));
 }
+
+#[test]
+fn hidden_results_are_checked_without_becoming_output_tabs() {
+    let p = TestProject::with_plugins(
+        &[
+            ("dre_project.yml", "name: checks\ndefault_profile: fixture\n"),
+            ("dependencies.yml", "plugins: [fixture, csv]\n"),
+            (
+                "reports/r/r.yml",
+                "queries:\n  - {query: hidden, tab: false, data_tests: [{positive: {}}]}\n  - data\noutput: {format: csv}\n",
+            ),
+            ("reports/r/hidden.sql", "rows 3"),
+            ("reports/r/data.sql", "rows 2"),
+            ("macros/checks.sql", POSITIVE),
+        ],
+        "connections:\n  fixture:\n    targets:\n      dev: {type: fixture}\n",
+        &["dre-source-fixture", "dre-plugin-csv"],
+    );
+    p.dre("build", &["r"]).ok().says("PASS");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["query"], "hidden");
+    assert_eq!(result["result_sets"].as_array().unwrap().len(), 1);
+    assert_eq!(result["result_sets"][0]["query"], "data");
+    assert_eq!(p.read("target/run/r/default/r.csv"), "n\r\n0\r\n1\r\n");
+}
+
+#[test]
+fn empty_typed_results_are_checked_before_empty_output_policy() {
+    for tab in [true, false] {
+        let p = project(
+            &format!(
+                "queries:\n  - query: data\n    tab: {tab}\n    data_tests: [{{not_empty: {{}}}}]\noutput: {{format: message, on_empty: skip}}\n"
+            ),
+            "{% test not_empty(relation) %}select 1 where not exists (select * from {{ relation }}){% endtest %}",
+        );
+        p.write("reports/r/data.sql", "rows 0");
+        p.dre("build", &["r"]).failed().says("1 failure rows");
+        let result = p.json("target/run/r/default/run_results.json");
+        assert_eq!(result["error_code"], "data-test-failed");
+        assert_eq!(result["tests"][0]["failures"], 1);
+    }
+}
+
+#[test]
+fn preparation_only_local_checks_explain_the_required_result_or_source_test() {
+    let p = project(
+        "queries:\n  - {query: data, tab: false, data_tests: [{positive: {}}]}\noutput: {format: message}\n",
+        POSITIVE,
+    );
+    p.write("reports/r/data.sql", "log PREPARED");
+    p.dre("test", &["r"])
+        .failed()
+        .says("returned no dataset")
+        .says("source test")
+        .says("result-producing SELECT");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["status"], "error");
+    assert!(result["tests"][0].get("failures").is_none());
+}
+
+#[test]
+fn reconciliation_reads_earlier_hidden_results_once_with_macro_tolerance() {
+    for (tolerance, passes) in [(0, false), (1, true)] {
+        let p = TestProject::with_plugins(
+            &[
+                ("dre_project.yml", "name: checks\ndefault_profile: warehouse\n"),
+                ("dependencies.yml", "plugins: [duckdb]\n"),
+                (
+                    "reports/r/r.yml",
+                    &format!(
+                        "queries:\n  - {{query: expected, tab: false}}\n  - query: actual\n    data_tests:\n      - reconcile:\n          query_results: {{expected: expected}}\n          arguments: {{tolerance: {tolerance}}}\noutput: {{format: message}}\n"
+                    ),
+                ),
+                ("reports/r/expected.sql", "select nextval('calls') as total"),
+                ("reports/r/actual.sql", "select nextval('calls') as total"),
+                (
+                    "macros/checks.sql",
+                    "{% test reconcile(relation, expected, tolerance) %}select 1 where abs((select total from {{ relation }}) - (select total from {{ expected }})) > {{ tolerance }}{% endtest %}",
+                ),
+            ],
+            "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb}\n",
+            &["dre-plugin-duckdb"],
+        );
+        p.duckdb("data.duckdb", "create sequence calls start 1");
+        let run = p.dre("test", &["r"]);
+        if passes {
+            run.ok().says("PASS");
+        } else {
+            run.failed().says("1 failure rows");
+        }
+        p.write("reports/r/actual.sql", "select nextval('calls') as total");
+        p.write(
+            "reports/r/r.yml",
+            "queries:\n  - query: actual\n    data_tests: [{third: {}}]\noutput: {format: message}\n",
+        );
+        p.write(
+            "macros/checks.sql",
+            "{% test third(relation) %}select * from {{ relation }} where total != 3{% endtest %}",
+        );
+        p.dre("test", &["r"]).ok().says("PASS");
+    }
+}
+
+#[test]
+fn query_result_references_reject_forward_missing_cross_binding_and_argument_collisions() {
+    for (declaration, expected) in [
+        (
+            "query_results: {expected: later}",
+            "must name an earlier query in this Binding",
+        ),
+        (
+            "query_results: {expected: missing}",
+            "must name an earlier query in this Binding",
+        ),
+        (
+            "query_results: {expected: data}, arguments: {expected: x}",
+            "both arguments and query_results",
+        ),
+        ("query_results: {relation: data}", "`relation` is supplied by DRE"),
+        ("query_results: {typo: data}", "no argument `typo`"),
+        (
+            "query_results: {expected: data}, arguments: {relation: explicit_table}, config: {execution: source}",
+            "query_results is available only for local tests",
+        ),
+    ] {
+        let p = project(
+            &format!(
+                "queries:\n  - query: data\n    data_tests: [{{reconcile: {{{declaration}}}}}]\n  - later\noutput: {{format: message}}\n"
+            ),
+            "{% test reconcile(relation, expected) %}select 1{% endtest %}",
+        );
+        p.write("reports/r/later.sql", "rows 1");
+        p.dre("test", &["r"]).failed().says(expected);
+        assert!(!p.run_logs().contains("fixture: opened"));
+    }
+    let p = project(
+        "queries: [data, later]\nsets:\n  - name: earlier\n    queries: [data]\n  - name: later_only\n    queries:\n      - query: later\n        data_tests: [{reconcile: {query_results: {expected: data}}}]\noutput: {format: message}\n",
+        "{% test reconcile(relation, expected) %}select 1{% endtest %}",
+    );
+    p.write("reports/r/later.sql", "rows 1");
+    p.dre("test", &["r", "--set", "all"])
+        .failed()
+        .says("must name an earlier query in this Binding");
+    assert!(!p.run_logs().contains("fixture: opened"));
+}
+
+#[test]
+fn saved_result_relations_are_isolated_between_bindings() {
+    let p = project(
+        "queries:\n  - {query: expected, tab: false}\n  - query: data\n    data_tests: [{same_count: {query_results: {expected: expected}}}]\nsets:\n  - {name: small, vars: {count: 2}}\n  - {name: large, vars: {count: 7}}\noutput: {format: message}\n",
+        "{% test same_count(relation, expected) %}select 1 where (select count(*) from {{ relation }}) != (select count(*) from {{ expected }}){% endtest %}",
+    );
+    p.write("reports/r/expected.sql", "rows {{ var('count') }}");
+    p.write("reports/r/data.sql", "rows {{ var('count') }}");
+    p.dre("test", &["r", "--set", "all", "--threads", "1"]).ok();
+    for (binding, rows) in [("small", 2), ("large", 7)] {
+        let result = p.json(&format!("target/run/r/{binding}/run_results.json"));
+        assert_eq!(result["tests"][0]["status"], "pass");
+        assert_eq!(result["result_sets"][0]["rows"], rows);
+    }
+}

@@ -182,7 +182,7 @@
         },
         "tab": {
           "type": "boolean",
-          "description": "`false` runs the file only for what it does (temp tables, `SET`s) and discards any result, so it gets no tab.",
+          "description": "`false` excludes the query from output tabs. A returned dataset remains available to local data tests; preparation-only statements need source tests.",
           "default": true
         },
         "tab_name": {
@@ -247,7 +247,7 @@
         },
         "data_tests": {
           "type": "array",
-          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.",
+          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding.",
           "items": {
             "type": "object",
             "additionalProperties": {
@@ -393,6 +393,14 @@
           "type": "object",
           "description": "Keyword arguments passed to the test macro. Local tests receive relation automatically.",
           "additionalProperties": true,
+          "default": {}
+        },
+        "query_results": {
+          "type": "object",
+          "description": "Earlier saved query results in this Binding, keyed by macro argument. Local tests only; hidden and empty datasets are supported.",
+          "additionalProperties": {
+            "type": "string"
+          },
           "default": {}
         },
         "config": {
@@ -769,7 +777,7 @@
                   },
                   "data_tests": {
                     "type": "array",
-                    "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
+                    "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run.",
                     "items": {
                       "type": "object",
                       "additionalProperties": {

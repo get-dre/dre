@@ -45,13 +45,7 @@ impl BindingRun<'_> {
             let checked = if test.config.execution == "source" {
                 self.source_test(st, session, &test)
             } else {
-                let spool = self
-                    .produced
-                    .last()
-                    .expect("a tab's result was just saved")
-                    .spool
-                    .clone();
-                self.local_test(&spool, &test)
+                self.local_test(&st.query, &test)
             };
             let (status, failures, error) = match &checked {
                 Ok(0) => (Status::Pass, Some(0), None),
@@ -165,7 +159,7 @@ impl BindingRun<'_> {
         }
     }
 
-    fn local_test(&self, spool: &Path, test: &DataTest) -> Result<u64, String> {
+    fn local_test(&self, query: &str, test: &DataTest) -> Result<u64, String> {
         // Keeping this under the existing spool directory gives success, failure and cancel
         // the same cleanup as report results, while DuckDB can spill without retaining rows.
         let workspace = tempfile::tempdir_in(self.run_dir.join(".spool")).map_err(|e| e.to_string())?;
@@ -173,7 +167,18 @@ impl BindingRun<'_> {
             duckdb::Connection::open(workspace.path().join("tests.duckdb")).map_err(|e| e.to_string())?;
         conn.execute_batch("SET memory_limit = '512MB'; SET threads = 1")
             .map_err(|e| e.to_string())?;
-        load_result(&conn, spool)?;
+        let result_spool = |query: &str| {
+            self.test_results.get(query).ok_or_else(|| format!(
+                "query `{query}` returned no dataset for local testing; use a source test with an explicit relation, or an explicit result-producing SELECT"
+            ))
+        };
+        load_result(&conn, result_spool(query)?, "dre_test_result")?;
+        let mut arguments = test.arguments.clone();
+        for (index, (argument, referenced)) in test.query_results.iter().enumerate() {
+            let relation = format!("dre_test_reference_{index}");
+            load_result(&conn, result_spool(referenced)?, &relation)?;
+            arguments.insert(argument.clone(), json!(format!("\"{relation}\"")));
+        }
         let renderer = Renderer::new(RendererConfig {
             root: self.project.root(),
             project_name: self.project.name(),
@@ -195,7 +200,7 @@ impl BindingRun<'_> {
                 &self.report.file,
                 &test.invocation(),
                 Value::from(minijinja::value::Serde(
-                    json!({"__dre_relation": "\"dre_test_result\"", "__dre_arguments": test.arguments}),
+                    json!({"__dre_relation": "\"dre_test_result\"", "__dre_arguments": arguments}),
                 )),
                 false,
             )
@@ -232,7 +237,7 @@ impl BindingRun<'_> {
     }
 }
 
-fn load_result(conn: &duckdb::Connection, spool: &Path) -> Result<(), String> {
+fn load_result(conn: &duckdb::Connection, spool: &Path, relation: &str) -> Result<(), String> {
     let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
         .map_err(|e| e.to_string())?;
     let columns: Result<Vec<String>, String> = reader
@@ -272,9 +277,13 @@ fn load_result(conn: &duckdb::Connection, spool: &Path) -> Result<(), String> {
             Ok(format!("\"{}\" {sql_type}", field.name().replace('"', "\"\"")))
         })
         .collect();
-    conn.execute_batch(&format!("create table dre_test_result ({})", columns?.join(", ")))
-        .map_err(|e| e.to_string())?;
-    let mut appender = conn.appender("dre_test_result").map_err(|e| e.to_string())?;
+    conn.execute_batch(&format!(
+        "create table \"{}\" ({})",
+        relation.replace('"', "\"\""),
+        columns?.join(", ")
+    ))
+    .map_err(|e| e.to_string())?;
+    let mut appender = conn.appender(relation).map_err(|e| e.to_string())?;
     for batch in reader {
         let batch = batch.map_err(|e| e.to_string())?;
         appender
@@ -325,7 +334,7 @@ mod tests {
             drop(writer);
             let before = std::fs::read(&spool).unwrap();
             let conn = duckdb::Connection::open_in_memory().unwrap();
-            load_result(&conn, &spool).unwrap();
+            load_result(&conn, &spool, "dre_test_result").unwrap();
             let count: i64 = conn
                 .query_row("select count(*) from dre_test_result", [], |row| row.get(0))
                 .unwrap();

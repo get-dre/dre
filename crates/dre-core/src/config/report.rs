@@ -76,7 +76,7 @@ pub struct QueryEntry {
     pub query: Option<Loose<String>>,
     /// The connection this query runs on, over the report's, Set's, folder's and project's. Must agree with the `profile` of any source it uses. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`.
     pub profile: Option<Loose<String>>,
-    /// `false` runs the file only for what it does (temp tables, `SET`s) and discards any result, so it gets no tab.
+    /// `false` excludes the query from output tabs. A returned dataset remains available to local data tests; preparation-only statements need source tests.
     #[schemars(extend("default" = true))]
     pub tab: Option<Loose<bool>>,
     /// The tab (sheet) name. Default: the file's name. Not allowed with `tab: false`.
@@ -92,7 +92,7 @@ pub struct QueryEntry {
     pub columns: Option<serde_json::Value>,
     /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
-    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding.
     #[serde(default)]
     #[schemars(schema_with = "crate::data_tests::schema")]
     pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
@@ -204,7 +204,7 @@ pub struct SetQuery {
     pub tab: Option<Loose<bool>>,
     pub tab_name: Option<Loose<String>>,
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
-    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding.
     pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
     pub secret_columns: Option<Loose<Vec<String>>>,
 }

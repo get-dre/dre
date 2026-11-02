@@ -95,6 +95,7 @@ impl<'a> BindingRun<'a> {
             started: Instant::now(),
             started_at,
             produced: Vec::new(),
+            test_results: BTreeMap::new(),
             tests: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
             processes,

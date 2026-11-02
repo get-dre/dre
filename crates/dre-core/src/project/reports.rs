@@ -730,11 +730,6 @@ impl Loader {
                 }
             }
         }
-        for q in &queries {
-            if !q.tab && q.data_tests.iter().any(|t| t.config.execution == "local") {
-                self.diags.error(Code::InvalidField, Some(file.to_path_buf()), None, format!("{ctx}: query `{}`: local data tests currently require a returned tab result (`tab: true`); hidden local targets are not supported yet", q.query));
-            }
-        }
         let outputs = self.typed_outputs(&base.outputs, &ctx, file, &queries, used);
         if let Some(p) = &base.profile {
             used.connection(p, None, None);

@@ -187,11 +187,13 @@ impl BindingRun<'_> {
             &format!("{at}  {what}"),
             Some(t.elapsed()),
         );
-        // The YAML decides the tabs; the result only has to match it. A tab with no rows
-        // still gets its column names.
-        let (schema, rows) = match (st.tab, exec) {
-            (true, Execution::Result { schema, rows }) => (schema, rows),
-            (true, Execution::NoResult { .. }) => {
+        // Keep final hidden datasets for local checks, without adding output tabs.
+        let (schema, rows) = match exec {
+            Execution::Result { schema, rows } if st.tab || (st.last && self.stages.tests) => (schema, rows),
+            Execution::NoResult { .. } if st.tab => {
+                if st.last && self.stages.tests {
+                    self.test_result(st, session)?;
+                }
                 return Err(Fail::new(
                     Code::NoResultSet,
                     format!(
@@ -200,10 +202,11 @@ impl BindingRun<'_> {
                     ),
                 ));
             }
-            (false, _) => {
+            _ => {
                 drop(writer);
                 let _ = std::fs::remove_file(&spool_path);
-                return self.test_result(st, session);
+                self.test_result(st, session)?;
+                return Ok(());
             }
         };
         {
@@ -221,19 +224,24 @@ impl BindingRun<'_> {
                 ));
             }
             crate::secret_columns::register(&spool_path, &secret, self.ctx.secrets())?;
-            self.produced.push(Produced {
-                query: st.query.clone(),
-                connection: st.connection.clone(),
-                schema,
-                rows,
-                spool: spool_path,
-                name: String::new(),
-                anchor: None,
-                header: None,
-                columns: Default::default(),
-                autofit: None,
-                style: None,
-            });
+            if st.last && self.stages.tests {
+                self.test_results.insert(st.query.clone(), spool_path.clone());
+            }
+            if st.tab {
+                self.produced.push(Produced {
+                    query: st.query.clone(),
+                    connection: st.connection.clone(),
+                    schema,
+                    rows,
+                    spool: spool_path,
+                    name: String::new(),
+                    anchor: None,
+                    header: None,
+                    columns: Default::default(),
+                    autofit: None,
+                    style: None,
+                });
+            }
         }
         self.test_result(st, session)?;
         Ok(())
