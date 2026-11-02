@@ -32,7 +32,7 @@ dre system update        # update DRE itself
 ## Check returned data with `dre test`
 
 Attach SQL checks to a query's saved result with `data_tests`. In this initial implementation,
-checks are project macros under `macros/`, run locally using core-owned embedded DuckDB.
+checks are `test` blocks under `macros/`, run locally using core-owned embedded DuckDB.
 The DuckDB source plugin is not needed for validation; source queries still use their configured
 plugins and execute once. Each check receives an opaque SQL `relation`, never a spool path.
 
@@ -48,9 +48,9 @@ output: {format: csv}
 
 ```sql
 -- macros/checks.sql
-{% macro missing_identifier(relation, column) %}
+{% test missing_identifier(relation, column) %}
 select * from {{ relation }} where {{ column }} is null
-{% endmacro %}
+{% endtest %}
 ```
 
 ```bash
@@ -64,7 +64,14 @@ Omit `config` for the defaults: local execution and error severity. Omit `argume
 the macro needs only `relation`, or uses argument defaults. Ordinary project macros remain
 available as helpers. A Set's query entry can replace `data_tests`; an empty list disables
 inherited checks for that Binding. Test arguments are template values; the macro remains
-responsible for quoting identifiers and constructing valid DuckDB SQL.
+responsible for quoting identifiers and constructing valid DuckDB SQL. Tests may also use explicit
+`test_<name>` macros. Plain macros remain helpers, and duplicate definitions are errors.
+Installed Git and local macro packages use the existing dependency declarations and `dre deps`;
+call their checks as `package.check_name`. Tests can use argument defaults, helpers and
+`dispatch()`; local checks dispatch as DuckDB regardless of the query's source. Configure tests
+in YAML; runtime `config()` calls are unsupported. `dre validate` resolves definitions and
+checks signatures and template syntax without running test SQL or introspection. Column names
+and other data-dependent SQL errors are checked only when `dre test` executes the check.
 
 A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
 the current query when checks find bad data, then stops that Binding before its next query.
