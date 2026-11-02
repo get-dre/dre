@@ -16,7 +16,7 @@ use serde_json::json;
 use super::{BindingRun, Fail, Statement};
 use crate::codes::Code;
 use crate::data_tests::{DataTest, Outcome, Status};
-use crate::engine::Level;
+use crate::engine::{CancelToken, Level};
 use crate::render::{Mode, Renderer, RendererConfig};
 
 #[path = "data_tests_bridge.rs"]
@@ -206,54 +206,7 @@ impl BindingRun<'_> {
         // Keeping this under the existing spool directory gives success, failure and cancel
         // the same cleanup as report results, while DuckDB can spill without retaining rows.
         let workspace = tempfile::tempdir_in(self.run_dir.join(".spool")).map_err(|e| e.to_string())?;
-        let conn =
-            duckdb::Connection::open(workspace.path().join("tests.duckdb")).map_err(|e| e.to_string())?;
-        conn.execute_batch("SET memory_limit = '512MB'; SET threads = 1")
-            .map_err(|e| e.to_string())?;
-        let result_spool = |query: &str| {
-            self.test_results.get(query).ok_or_else(|| format!(
-                "query `{query}` returned no dataset for local testing; use a source test with an explicit relation, or an explicit result-producing SELECT"
-            ))
-        };
-        load_result(&conn, result_spool(query)?, "dre_test_result")?;
-        let mut arguments = test.arguments.clone();
-        for (index, (argument, referenced)) in test.query_results.iter().enumerate() {
-            let relation = format!("dre_test_reference_{index}");
-            load_result(&conn, result_spool(referenced)?, &relation)?;
-            arguments.insert(argument.clone(), json!(format!("\"{relation}\"")));
-        }
-        let renderer = Renderer::new(RendererConfig {
-            root: self.project.root(),
-            project_name: self.project.name(),
-            templates: self.project.templates(),
-            context: self.run_context(),
-            vars: self.vars.clone(),
-            cli_vars: self.opts.vars.clone(),
-            runner: None,
-            connections: None,
-            mode: Mode::Run,
-            connection: None,
-            source_type: "duckdb".into(),
-            sources: None,
-            process: self.ctx.clone(),
-        })
-        .map_err(|e| e.to_string())?;
-        let sql = renderer
-            .render_with(
-                &self.report.file,
-                &test.invocation(),
-                Value::from(minijinja::value::Serde(
-                    json!({"__dre_relation": "\"dre_test_result\"", "__dre_arguments": arguments}),
-                )),
-                false,
-            )
-            .map_err(|e| e.to_string())?;
-        let statements = crate::sqlsplit::split(&sql);
-        if statements.len() != 1
-            || crate::sqlsplit::classify(&statements[0].text) != crate::sqlsplit::StatementKind::Read
-        {
-            return Err("a data test must return failure rows with one SELECT/WITH statement".into());
-        }
+        let conn = local_connection(workspace.path())?;
         let handle = conn.interrupt_handle();
         let finished = AtomicBool::new(false);
         std::thread::scope(|scope| {
@@ -269,6 +222,50 @@ impl BindingRun<'_> {
                 finished: &finished,
                 thread: watcher.thread().clone(),
             };
+            let result_spool = |query: &str| {
+                self.test_results.get(query).ok_or_else(|| format!(
+                "query `{query}` returned no dataset for local testing; use a source test with an explicit relation, or an explicit result-producing SELECT"
+            ))
+            };
+            load_result(&conn, result_spool(query)?, "dre_test_result", &self.opts.cancel)?;
+            let mut arguments = test.arguments.clone();
+            for (index, (argument, referenced)) in test.query_results.iter().enumerate() {
+                let relation = format!("dre_test_reference_{index}");
+                load_result(&conn, result_spool(referenced)?, &relation, &self.opts.cancel)?;
+                arguments.insert(argument.clone(), json!(format!("\"{relation}\"")));
+            }
+            let renderer = Renderer::new(RendererConfig {
+                root: self.project.root(),
+                project_name: self.project.name(),
+                templates: self.project.templates(),
+                context: self.run_context(),
+                vars: self.vars.clone(),
+                cli_vars: self.opts.vars.clone(),
+                runner: None,
+                connections: None,
+                mode: Mode::Run,
+                connection: None,
+                source_type: "duckdb".into(),
+                sources: None,
+                process: self.ctx.clone(),
+            })
+            .map_err(|e| e.to_string())?;
+            let sql = renderer
+                .render_with(
+                    &self.report.file,
+                    &test.invocation(),
+                    Value::from(minijinja::value::Serde(
+                        json!({"__dre_relation": "\"dre_test_result\"", "__dre_arguments": arguments}),
+                    )),
+                    false,
+                )
+                .map_err(|e| e.to_string())?;
+            let statements = crate::sqlsplit::split(&sql);
+            if statements.len() != 1
+                || crate::sqlsplit::classify(&statements[0].text) != crate::sqlsplit::StatementKind::Read
+            {
+                return Err("a data test must return failure rows with one SELECT/WITH statement".into());
+            }
             if test.config.store_failures {
                 // Materialize the check once. Count all rows, then serialize only capped examples.
                 conn.execute_batch(&format!(
@@ -347,7 +344,29 @@ impl Evidence {
     }
 }
 
-fn load_result(conn: &duckdb::Connection, spool: &Path, relation: &str) -> Result<(), String> {
+// Configure DuckDB memory and spill independently. This is not a process RSS limit:
+// Arrow batches and allocations outside DuckDB's buffer manager also occupy memory.
+fn local_connection(workspace: &Path) -> Result<duckdb::Connection, String> {
+    let spill = workspace.join("spill");
+    let spill = spill.to_str().ok_or("local test spill path is not UTF-8")?;
+    let config = duckdb::Config::default()
+        .max_memory("512MB")
+        .and_then(|c| c.threads(1))
+        .and_then(|c| c.with("temp_directory", spill))
+        .and_then(|c| c.with("max_temp_directory_size", "2GB"))
+        .map_err(|e| e.to_string())?;
+    duckdb::Connection::open_with_flags(workspace.join("tests.duckdb"), config).map_err(|e| e.to_string())
+}
+
+fn load_result(
+    conn: &duckdb::Connection,
+    spool: &Path,
+    relation: &str,
+    cancel: &CancelToken,
+) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        return Err("local data test cancelled".into());
+    }
     let reader = FileReader::try_new(File::open(spool).map_err(|e| e.to_string())?, None)
         .map_err(|e| e.to_string())?;
     let columns: Result<Vec<String>, String> = reader
@@ -355,6 +374,16 @@ fn load_result(conn: &duckdb::Connection, spool: &Path, relation: &str) -> Resul
         .fields()
         .iter()
         .map(|field| {
+            if field
+                .metadata()
+                .keys()
+                .any(|key| key.starts_with("ARROW:extension:"))
+            {
+                return Err(format!(
+                    "local data tests cannot load column `{}` with Arrow extension metadata",
+                    field.name()
+                ));
+            }
             let sql_type = match field.data_type() {
                 DataType::Boolean => "BOOLEAN".into(),
                 DataType::Int8 => "TINYINT".into(),
@@ -395,6 +424,9 @@ fn load_result(conn: &duckdb::Connection, spool: &Path, relation: &str) -> Resul
     .map_err(|e| e.to_string())?;
     let mut appender = conn.appender(relation).map_err(|e| e.to_string())?;
     for batch in reader {
+        if cancel.is_cancelled() {
+            return Err("local data test cancelled".into());
+        }
         let batch = batch.map_err(|e| e.to_string())?;
         appender
             .append_record_batch(bridge::to_duckdb(&batch)?)
@@ -416,48 +448,5 @@ impl Drop for FinishWatch<'_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use arrow::array::{Int64Array, RecordBatch};
-    use arrow::datatypes::{Field, Schema};
-    use arrow::ipc::writer::FileWriter;
-    use std::sync::Arc;
-
-    #[test]
-    fn loading_multiple_batches_and_empty_results_preserves_the_original_spool() {
-        for empty in [false, true] {
-            let temp = tempfile::tempdir().unwrap();
-            let spool = temp.path().join("result.arrow");
-            let schema = Arc::new(Schema::new(vec![Field::new("quoted\"id", DataType::Int64, true)]));
-            let mut writer = FileWriter::try_new(File::create(&spool).unwrap(), &schema).unwrap();
-            if !empty {
-                for values in [vec![Some(1), None], vec![Some(i64::MAX)]] {
-                    writer
-                        .write(
-                            &RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(values))])
-                                .unwrap(),
-                        )
-                        .unwrap();
-                }
-            }
-            writer.finish().unwrap();
-            drop(writer);
-            let before = std::fs::read(&spool).unwrap();
-            let conn = duckdb::Connection::open_in_memory().unwrap();
-            load_result(&conn, &spool, "dre_test_result").unwrap();
-            let count: i64 = conn
-                .query_row("select count(*) from dre_test_result", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(count, if empty { 0 } else { 3 });
-            if !empty {
-                let max: i64 = conn
-                    .query_row("select max(\"quoted\"\"id\") from dre_test_result", [], |row| {
-                        row.get(0)
-                    })
-                    .unwrap();
-                assert_eq!(max, i64::MAX);
-            }
-            assert_eq!(std::fs::read(&spool).unwrap(), before);
-        }
-    }
-}
+#[path = "data_tests_tests.rs"]
+mod tests;

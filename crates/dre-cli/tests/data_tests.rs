@@ -185,6 +185,40 @@ fn several_tests_share_the_once_executed_source_result() {
 }
 
 #[test]
+fn local_checks_leave_report_output_values_and_types_unchanged() {
+    let p = TestProject::with_plugins(
+        &[
+            ("dre_project.yml", "name: checks\ndefault_profile: warehouse\n"),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            (
+                "reports/r/r.yml",
+                "queries:\n  - query: data\n    data_tests: [{mutate: {}}, {unchanged: {}}]\noutput: {format: csv}\n",
+            ),
+            (
+                "reports/r/data.sql",
+                "select i::bigint as id, (i / 100)::decimal(18,2) as amount, timestamp_ns '2026-01-02 03:04:05.123456789' as stamp, case when i % 2 = 0 then null else 'quoted,value' end as text from range(10000) t(i) order by i",
+            ),
+            (
+                "macros/checks.sql",
+                "{% test mutate(relation) %}select id::varchar, amount::double, stamp::date, coalesce(text, 'changed') from {{ relation }} where false{% endtest %}\n{% test unchanged(relation) %}select * from {{ relation }} where typeof(id) != 'BIGINT' or typeof(amount) != 'DECIMAL(18,2)' or typeof(stamp) != 'TIMESTAMP_NS' or (id % 2 = 0 and text is not null){% endtest %}",
+            ),
+        ],
+        "connections:\n  warehouse:\n    targets:\n      dev: {type: duckdb, path: data.duckdb}\n",
+        &["dre-plugin-duckdb", "dre-plugin-csv"],
+    );
+    p.dre("run", &["r"]).ok();
+    let csv = p.read("target/run/r/default/r.csv");
+    let original = p.json("target/schema/r/default/last_success.json");
+    p.dre("build", &["r"]).ok();
+    assert_eq!(p.read("target/run/r/default/r.csv"), csv);
+    assert_eq!(p.json("target/schema/r/default/last_success.json"), original);
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["status"], "pass");
+    assert_eq!(result["tests"][1]["status"], "pass");
+    assert!(!p.path("target/run/r/default/.spool").exists());
+}
+
+#[test]
 fn a_set_can_override_checks_and_a_failed_binding_does_not_stop_another() {
     let p = project(
         "queries:\n  - query: data\n    data_tests: [{invalid: {}}]\nsets:\n  - {name: bad, profile: fixture}\n  - name: good\n    profile: fixture\n    queries: [{query: data, data_tests: []}]\noutput: {format: message}\n",
