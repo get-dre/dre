@@ -540,9 +540,25 @@ impl Renderer {
         let mut templates = vec![(MACROS.to_string(), combined, spans, !names.is_empty())];
         for p in &cfg.templates.packages {
             let files: Vec<(PathBuf, PathBuf)> = p.macros.iter().map(|m| (m.clone(), display(m))).collect();
-            let (src, _, spans) = combine(&files)?;
+            let (src, names, spans) = combine(&files)?;
             let t = package_template(&p.name);
             import.push_str(&format!("{{% import \"{t}\" as {} %}}", p.name));
+            // Imported macros do not inherit the caller's imports; expose package helpers there too.
+            env.add_global(
+                p.name.clone(),
+                Value::from_pairs(
+                    names
+                        .into_iter()
+                        .filter(|name| !name.starts_with('_'))
+                        .map(|name| {
+                            let callable = Value::from_object(Dispatched {
+                                template: t.clone(),
+                                name: name.clone(),
+                            });
+                            (name, callable)
+                        }),
+                ),
+            );
             templates.push((t, src, spans, true));
         }
         add_ref(&mut env, cfg.root, cfg.templates.sql.clone(), lookups, &import);
