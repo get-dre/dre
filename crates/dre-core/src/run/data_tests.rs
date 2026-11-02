@@ -44,6 +44,7 @@ impl BindingRun<'_> {
             let checked = self.local_test(&spool, &test);
             let (status, failures, error) = match &checked {
                 Ok(0) => (Status::Pass, Some(0), None),
+                Ok(n) if test.config.severity == "warn" => (Status::Warn, Some(*n), None),
                 Ok(n) => {
                     failed = true;
                     (Status::Fail, Some(*n), None)
@@ -61,13 +62,15 @@ impl BindingRun<'_> {
                 match status {
                     Status::Pass => "PASS",
                     Status::Fail => "FAIL",
+                    Status::Warn => "WARN",
                     Status::Error => "ERROR",
                 },
                 &format!(
-                    "{}: query `{}` test `{}` (local, error): {detail}",
+                    "{}: query `{}` test `{}` (local, {}): {detail}",
                     self.label(),
                     st.query,
-                    test.name
+                    test.name,
+                    test.config.severity
                 ),
                 Some(elapsed),
             );
@@ -75,7 +78,7 @@ impl BindingRun<'_> {
                 query: st.query.clone(),
                 test: test.name.clone(),
                 execution: "local".into(),
-                severity: "error".into(),
+                severity: test.config.severity.clone(),
                 status,
                 failures,
                 error: error.clone(),

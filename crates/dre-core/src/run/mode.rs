@@ -26,6 +26,8 @@ pub enum Results {
     Query,
     /// Run fresh queries and their data tests, without formatting or delivery.
     Test,
+    /// Run fresh queries and data tests before formatting and delivery.
+    Build,
     /// Render the SQL and stop: `dre compile`, `dre validate`, `dre run --dry-run`.
     Compile,
     /// Render, then check each statement against the database without running it:
@@ -83,7 +85,11 @@ impl Mode {
 
     /// A data-testing command, recorded explicitly even when no tests are declared.
     pub(super) fn command(&self) -> Option<&'static str> {
-        (self.results == Results::Test).then_some("test")
+        match self.results {
+            Results::Test => Some("test"),
+            Results::Build => Some("build"),
+            _ => None,
+        }
     }
 
     /// `--dry-run`, as `run_results.json`'s parameters record it.
@@ -156,7 +162,7 @@ impl Stages {
         let source = match &mode.results {
             Results::Compile => Source::Compile,
             Results::Check => Source::Check,
-            Results::Query | Results::Test => Source::Query,
+            Results::Query | Results::Test | Results::Build => Source::Query,
             Results::Replay(dir) => Source::Replay(dir.clone()),
             Results::Retry(id) => Source::Retry(id.clone()),
         };
@@ -169,7 +175,7 @@ impl Stages {
         let preview = mode.preview;
         Stages {
             record: mode.records(),
-            tests: mode.results == Results::Test,
+            tests: matches!(mode.results, Results::Test | Results::Build),
             format: mode.results != Results::Test,
             interleave: mode.records() && managed,
             destinations: mode.renders_destinations(),

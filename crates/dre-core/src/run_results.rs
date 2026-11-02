@@ -169,7 +169,7 @@ pub struct Params {
     pub output_name: Option<String>,
     pub output_path: Option<String>,
     pub dry_run: bool,
-    /// `test` for fresh-query data validation without report outputs. Omitted by earlier commands.
+    /// `test` validates fresh results; `build` validates before producing reports. Omitted by `run`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<&'static str>,
     pub preview: Option<u64>,

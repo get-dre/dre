@@ -301,7 +301,7 @@ impl Loader {
                                                             }
                                                         }
                                                     }
-                                                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("{ctx}: query `{qn}`: data_tests must be single-name maps with arguments and config; only local/error is supported")),
+                                                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("{ctx}: query `{qn}`: data_tests must be single-name maps with arguments and config; only local execution and error/warn severity are supported")),
                                                 }
                                             }
                                             match &e.on_empty {

@@ -418,8 +418,8 @@
         },
         "severity": {
           "type": "string",
-          "description": "Data-failure severity. Currently only `error` is supported.",
-          "pattern": "^error$",
+          "description": "Data-failure severity. `warn` records bad data without failing the Binding.",
+          "pattern": "^(error|warn)$",
           "default": "error"
         }
       },
@@ -769,7 +769,7 @@
                   },
                   "data_tests": {
                     "type": "array",
-                    "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test, never dre run.",
+                    "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
                     "items": {
                       "type": "object",
                       "additionalProperties": {
