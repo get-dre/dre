@@ -29,6 +29,63 @@ dre clean                # remove the target folder
 dre system update        # update DRE itself
 ```
 
+## Check returned data with `dre test`
+
+Attach SQL checks to a query's saved result with `data_tests`. In this initial implementation,
+checks are project macros under `macros/`, run locally using core-owned embedded DuckDB.
+The DuckDB source plugin is not needed for validation; source queries still use their configured
+plugins and execute once. Each check receives an opaque SQL `relation`, never a spool path.
+
+```yaml
+queries:
+  - query: invoices
+    data_tests:
+      - missing_identifier:
+          arguments: {column: invoice_id}
+          config: {execution: local, severity: error}
+output: {format: csv}
+```
+
+```sql
+-- macros/checks.sql
+{% macro missing_identifier(relation, column) %}
+select * from {{ relation }} where {{ column }} is null
+{% endmacro %}
+```
+
+```bash
+dre test monthly                   # fresh queries and attached checks, no report files or delivery
+dre test -s tag:regulatory --set all
+dre test --schedule close_monthly
+dre run monthly                    # report files and delivery; declared checks are skipped
+```
+
+Omit `config` for the defaults: local execution and error severity. Omit `arguments` when
+the macro needs only `relation`, or uses argument defaults. Ordinary project macros remain
+available as helpers. A Set's query entry can replace `data_tests`; an empty list disables
+inherited checks for that Binding. Test arguments are template values; the macro remains
+responsible for quoting identifiers and constructing valid DuckDB SQL.
+
+A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
+the current query when checks find bad data, then stops that Binding before its next query.
+Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings
+continue. Any failed Binding makes the command exit nonzero. `run_results.json` records the
+query, test, execution target, severity, status, duration and full failure count; an execution
+error records its cause instead of a count. Tests do not store failure-row samples.
+
+Checks inspect unformatted Arrow values and never change the saved result. Data moves in
+batches into a disposable, disk-backed DuckDB workspace under the run's spool directory,
+with a 512 MB DuckDB memory limit. Normal completion, failure and cancellation remove it.
+The first implementation accepts scalar integer, floating-point, boolean, string, binary,
+Date32, timezone-free timestamp and supported decimal results; unsupported Arrow types fail
+explicitly rather than being silently coerced.
+
+This initial command supports returned tab results, local execution and error severity only.
+Source-side tests, hidden-result targets, cross-query references, warning severity, failure
+exports and Jinja `test` blocks are not supported yet. Unsupported settings fail clearly.
+`dre validate` checks declaration shape and existing macro syntax; data-dependent SQL checks
+run only under `dre test`.
+
 ## Run a selection when another report is broken
 
 `dre run monthly` loads project-wide configuration and dependencies, then parses and checks the

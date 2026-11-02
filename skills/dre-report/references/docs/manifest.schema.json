@@ -342,6 +342,13 @@
           "type": "boolean",
           "description": "Whether its result becomes a tab (false: run for its effects only)."
         },
+        "data_tests": {
+          "type": "array",
+          "description": "Resolved query data tests, in declaration order.",
+          "items": {
+            "$ref": "#/$defs/DataTest"
+          }
+        },
         "tab_name": {
           "type": [
             "string",
@@ -384,6 +391,50 @@
       "required": [
         "sources"
       ]
+    },
+    "DataTest": {
+      "type": "object",
+      "description": "A resolved declaration, including its name rather than the YAML's single-key map.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "config": {
+          "$ref": "#/$defs/Config"
+        }
+      },
+      "required": [
+        "name",
+        "arguments",
+        "config"
+      ]
+    },
+    "Config": {
+      "type": "object",
+      "description": "Initial local-test options. Unsupported execution modes fail rather than being ignored.",
+      "properties": {
+        "execution": {
+          "type": "string",
+          "description": "The test engine. Currently only `local` is supported.",
+          "pattern": "^local$",
+          "default": "local"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Data-failure severity. Currently only `error` is supported.",
+          "pattern": "^error$",
+          "default": "error"
+        }
+      },
+      "required": [
+        "execution",
+        "severity"
+      ],
+      "additionalProperties": false
     },
     "binding": {
       "type": "object",
