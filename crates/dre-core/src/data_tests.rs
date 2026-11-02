@@ -101,6 +101,13 @@ fn identifier(name: &str) -> bool {
 }
 
 impl DataTest {
+    pub(crate) fn macro_name(&self) -> String {
+        match self.name.split_once('.') {
+            Some((package, name)) => format!("{package}.test_{name}"),
+            None => format!("test_{}", self.name),
+        }
+    }
+
     /// Call a checked macro with values passed through template context, never interpolated SQL.
     pub(crate) fn invocation(&self) -> String {
         let args: Vec<String> = self
@@ -110,7 +117,7 @@ impl DataTest {
             .collect();
         format!(
             "{{{{ {}(relation=__dre_relation{}) }}}}",
-            self.name,
+            self.macro_name(),
             if args.is_empty() {
                 String::new()
             } else {
@@ -149,7 +156,7 @@ pub(crate) fn schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let settings = g.subschema_for::<Settings>();
     schemars::json_schema!({
         "type": "array",
-        "description": "Local checks of the saved result. Each entry names one project macro with optional arguments and config; run by dre test, never dre run.",
+        "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test, never dre run.",
         "items": {"type": "object", "minProperties": 1, "maxProperties": 1,
                   "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"},
                   "additionalProperties": settings}

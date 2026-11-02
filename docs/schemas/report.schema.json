@@ -247,7 +247,7 @@
         },
         "data_tests": {
           "type": "array",
-          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.",
+          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.",
           "items": {
             "type": "object",
             "additionalProperties": {
@@ -769,7 +769,7 @@
                   },
                   "data_tests": {
                     "type": "array",
-                    "description": "Local checks of the saved result. Each entry names one project macro with optional arguments and config; run by dre test, never dre run.",
+                    "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test, never dre run.",
                     "items": {
                       "type": "object",
                       "additionalProperties": {

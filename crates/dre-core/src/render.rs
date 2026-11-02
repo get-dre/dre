@@ -920,19 +920,37 @@ fn combine(
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();
+    let mut defined = BTreeMap::new();
     for (read, shown) in files {
         let src = std::fs::read_to_string(read).map_err(|e| RenderError {
             file: shown.clone(),
             line: None,
             message: format!("can't read macro file: {e}"),
         })?;
+        let src = crate::test_blocks::normalize(&src).map_err(|(line, message)| RenderError {
+            file: shown.clone(),
+            line,
+            message,
+        })?;
+        let definitions = crate::test_blocks::definitions(&src).map_err(|(line, message)| RenderError {
+            file: shown.clone(),
+            line,
+            message,
+        })?;
+        for (name, definition) in definitions {
+            if let Some(previous) = defined.insert(name.clone(), shown.clone()) {
+                return Err(RenderError {
+                    file: shown.clone(),
+                    line: Some(definition.line),
+                    message: format!(
+                        "duplicate macro/test definition `{name}`; also defined in {}",
+                        previous.display()
+                    ),
+                });
+            }
+            names.push(name);
+        }
         let start = combined.matches('\n').count() + 1;
-        names.extend(
-            crate::preflight::Scan::new(&src)
-                .macros()
-                .iter()
-                .map(|d| d.name.clone()),
-        );
         combined.push_str(&src);
         if !combined.ends_with('\n') {
             combined.push('\n');

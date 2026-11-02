@@ -120,6 +120,8 @@ fn a_git_package_installs_into_dre_deps_and_pins_its_commit() {
     let p = project(&[REPORT[0], REPORT[1]]);
     let repo = p.root().join("../repo");
     write_package(&repo);
+    std::fs::write(repo.join("macros/tests.sql"),
+        "{% test positive(relation, column='n') %}select * from {{ relation }} where {{ column }} < 0{% endtest %}").unwrap();
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "v1"]);
@@ -150,6 +152,13 @@ fn a_git_package_installs_into_dre_deps_and_pins_its_commit() {
     again.ok();
     assert!(!again.stdout.contains("Installed"), "{}", again.stdout);
     p.dre("run", &["r"]).ok();
+
+    p.write(
+        "reports/r/r.yml",
+        "queries:\n  - query: q\n    data_tests: [{dre_utils.positive: {}}]\n",
+    );
+    p.write("reports/r/q.sql", "select 1 as n");
+    p.dre("test", &["r"]).ok().says("PASS");
 
     // A new revision is picked up; the old checkout is replaced.
     std::fs::write(repo.join("macros/more.sql"), "{% macro two() %}2{% endmacro %}\n").unwrap();

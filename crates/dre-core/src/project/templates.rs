@@ -107,12 +107,52 @@ impl Loader {
         let mut defs: BTreeMap<String, MacroAt> = BTreeMap::new();
         for m in &project.templates.macros {
             if let Some(file) = read(m) {
-                self.check_template_text(m, &file.0, &file.1, 0, None);
-                checked.insert(m.clone());
                 for (i, d) in file.1.macros().iter().enumerate() {
                     defs.insert(d.name.clone(), (m.clone(), file.clone(), i));
                 }
             }
+        }
+        // Catalog signatures without rendering test SQL or evaluating defaults.
+        let mut tests = BTreeMap::new();
+        let mut files: Vec<(String, PathBuf)> = project
+            .templates
+            .macros
+            .iter()
+            .map(|path| (String::new(), path.clone()))
+            .collect();
+        for package in &project.templates.packages {
+            files.extend(
+                package
+                    .macros
+                    .iter()
+                    .map(|path| (format!("{}.", package.name), path.clone())),
+            );
+        }
+        for (namespace, path) in files {
+            let Some(file) = read(&path) else { continue };
+            let definitions = crate::test_blocks::normalize(&file.0)
+                .and_then(|source| crate::test_blocks::definitions(&source));
+            match definitions {
+                Ok(definitions) => {
+                    self.check_template_text(&path, &file.0, &file.1, 0, None);
+                    for (name, definition) in definitions {
+                        let name = format!("{namespace}{name}");
+                        if tests.insert(name.clone(), definition).is_some() {
+                            self.diags.error(
+                                Code::JinjaSyntax,
+                                Some(path.clone()),
+                                None,
+                                format!("duplicate macro/test definition `{name}`"),
+                            );
+                        }
+                    }
+                }
+                Err((line, message)) => {
+                    self.diags
+                        .error(Code::JinjaSyntax, Some(path.clone()), line, message)
+                }
+            }
+            checked.insert(path.clone());
         }
         let scope = self.scope();
         for r in &project.reports {
@@ -133,6 +173,49 @@ impl Loader {
                 let mut called: Vec<String> = Vec::new();
                 let mut refs: Vec<String> = Vec::new();
                 for q in &b.queries {
+                    for test in &q.data_tests {
+                        called.push(test.macro_name());
+                        let problem = match tests.get(&test.macro_name()) {
+                            None => Some(format!(
+                                "data test `{}` is not defined; use a test block or explicit test_ macro; for package tests, check dependencies and run `dre deps`",
+                                test.name
+                            )),
+                            Some(definition) => {
+                                let given =
+                                    |name: &str| name == "relation" || test.arguments.contains_key(name);
+                                if !definition.arguments.iter().any(|name| name == "relation") {
+                                    Some(format!(
+                                        "data test `{}` must accept the `relation` argument",
+                                        test.name
+                                    ))
+                                } else if let Some(name) = test
+                                    .arguments
+                                    .keys()
+                                    .find(|name| !definition.arguments.contains(name))
+                                {
+                                    Some(format!("data test `{}` has no argument `{name}`", test.name))
+                                } else {
+                                    definition
+                                        .arguments
+                                        .iter()
+                                        .take(definition.required)
+                                        .find(|name| !given(name))
+                                        .map(|name| {
+                                            format!("data test `{}` requires argument `{name}`", test.name)
+                                        })
+                                }
+                            }
+                        };
+                        if let Some(message) = problem {
+                            self.diags.error(
+                                Code::InvalidField,
+                                Some(r.file.clone()),
+                                None,
+                                format!("{ctx}: query `{}`: {message}", q.query),
+                            );
+                        }
+                    }
+
                     let Some(file) = read(&q.path) else { continue };
                     let first = checked.insert(q.path.clone());
                     self.check_vars(&q.path, &file.1, 0, &b.vars, &cli, &ctx);

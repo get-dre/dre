@@ -92,7 +92,7 @@ pub struct QueryEntry {
     pub columns: Option<serde_json::Value>,
     /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
-    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.
     #[serde(default)]
     #[schemars(schema_with = "crate::data_tests::schema")]
     pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
@@ -204,7 +204,7 @@ pub struct SetQuery {
     pub tab: Option<Loose<bool>>,
     pub tab_name: Option<Loose<String>>,
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
-    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`.
     pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
     pub secret_columns: Option<Loose<Vec<String>>>,
 }

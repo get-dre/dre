@@ -55,7 +55,7 @@ A query with settings, instead of just its name.
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
 | `on_empty` | string |  | When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty. |
-| `data_tests` | list of map |  | Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`. |
+| `data_tests` | list of map |  | Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments` and `config`. |
 | `secret_columns` | list of string |  | Columns whose values are secrets (a PDF or zip password): values are masked as `*****` (one under 4 characters where it stands alone) in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages. |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
 | `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
@@ -205,7 +205,7 @@ A query with settings.
 | `query` (required) | string |  | The query's name. |
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
-| `data_tests` | list of map |  | Local checks of the saved result. Each entry names one project macro with optional arguments and config; run by dre test, never dre run. |
+| `data_tests` | list of map |  | Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test, never dre run. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |

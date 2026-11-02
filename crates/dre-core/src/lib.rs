@@ -78,3 +78,5 @@ pub fn version() -> &'static str {
 pub fn slash(p: &std::path::Path) -> std::path::PathBuf {
     std::path::PathBuf::from(p.to_string_lossy().replace('\\', "/"))
 }
+
+mod test_blocks;
