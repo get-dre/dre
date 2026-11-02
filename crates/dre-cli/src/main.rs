@@ -66,7 +66,9 @@ enum Command {
     /// Run reports: render, execute, format into the target folder, and deliver.
     Run(Box<RunArgs>),
     /// Run fresh report queries and local data tests, without report formatting or delivery.
-    Test(Box<TestArgs>),
+    Test(Box<CheckedArgs>),
+    /// Run fresh report queries and data tests before formatting and delivering report outputs.
+    Build(Box<CheckedArgs>),
     /// Render reports' SQL into <target path>/compiled/ without running it, and list the files.
     Compile(CompileArgs),
     /// Run one read-only query on a configured connection and write typed JSON rows.
@@ -186,18 +188,18 @@ struct OutputFile {
 }
 
 #[derive(Args)]
-struct TestArgs {
-    /// Reports, tags or folders to test; every report when omitted.
+struct CheckedArgs {
+    /// Reports, tags or folders to select; every report when omitted.
     selector: Vec<String>,
     /// Select reports by name, tag or folder, as with `dre run`.
     #[arg(short = 's', long = "select", value_name = "SELECTOR", num_args = 1.., action = clap::ArgAction::Append, conflicts_with = "selector")]
     select: Vec<String>,
     #[command(flatten)]
     project: ProjectArgs,
-    /// Test one Set, or `all` of a report's Sets.
+    /// Select one Set, or `all` of a report's Sets.
     #[arg(long)]
     set: Option<String>,
-    /// Test the Bindings selected by this named Schedule, with its vars.
+    /// Run the Bindings selected by this named Schedule, with its vars.
     #[arg(long, value_name = "NAME")]
     schedule: Option<String>,
     /// Override the inherited connection; query and source connections still win.
@@ -214,8 +216,8 @@ struct TestArgs {
     threads: Option<String>,
 }
 
-impl From<TestArgs> for RunArgs {
-    fn from(a: TestArgs) -> Self {
+impl From<CheckedArgs> for RunArgs {
+    fn from(a: CheckedArgs) -> Self {
         Self {
             selector: a.selector,
             select: a.select,
@@ -519,7 +521,7 @@ fn main() -> ExitCode {
     let project_args = match &cli.command {
         Command::Validate(a) => Some(&a.project),
         Command::Run(a) => Some(&a.project),
-        Command::Test(a) => Some(&a.project),
+        Command::Test(a) | Command::Build(a) => Some(&a.project),
         Command::Compile(a) => Some(&a.project),
         _ => None,
     };
@@ -546,8 +548,9 @@ fn main() -> ExitCode {
         Command::Unlock(a) => history::unlock(&ctx, a),
         Command::Release(a) => release(&ctx, a, &printer),
         Command::Validate(a) => validate(&ctx, a, &printer),
-        Command::Run(a) => run(&ctx, *a, printer, false),
-        Command::Test(a) => run(&ctx, (*a).into(), printer, true),
+        Command::Run(a) => run(&ctx, *a, printer, dre_core::run::Results::Query),
+        Command::Test(a) => run(&ctx, (*a).into(), printer, dre_core::run::Results::Test),
+        Command::Build(a) => run(&ctx, (*a).into(), printer, dre_core::run::Results::Build),
         Command::Compile(a) => compile(&ctx, a, printer),
         Command::Query(a) => query(&ctx, a, &printer),
         Command::Catalog(a) => catalog(&ctx, a, &printer),
@@ -1160,7 +1163,12 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
     }
 }
 
-fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, tests: bool) -> ExitCode {
+fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, results: dre_core::run::Results) -> ExitCode {
+    let command = match results {
+        dre_core::run::Results::Test => "test",
+        dre_core::run::Results::Build => "build",
+        _ => "run",
+    };
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone(), ctx.host().clone());
@@ -1178,9 +1186,9 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, tests: bool) -> 
             vars: a.project.vars.iter().cloned().collect(),
             output_name: a.output_name,
             output_path: a.output_path,
-            mode: if tests {
+            mode: if results != dre_core::run::Results::Query {
                 dre_core::run::Mode {
-                    results: dre_core::run::Results::Test,
+                    results,
                     ..Default::default()
                 }
             } else {
@@ -1245,7 +1253,7 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, tests: bool) -> 
         };
         printer.error(&format!("the run {what}{not_run}"));
     }
-    printer.finish(if tests { "test" } else { "run" });
+    printer.finish(command);
     ExitCode::from(summary.exit_code())
 }
 

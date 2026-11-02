@@ -291,6 +291,12 @@ impl<'a> BindingRun<'a> {
             self.open_run_folder(g.took_over.as_ref());
         }
         let result = self.run_stages();
+        if matches!(&result, Err(e) if e.code == Code::DataTestFailed || e.code == Code::DataTestError) {
+            for output in &mut self.outs {
+                output.status = Some(OutputStatus::Skipped);
+                output.reason = Some("data_test_failed".into());
+            }
+        }
         let result = self.stopped_by_cancel(result);
         let status = match (&result, &self.stages.source) {
             (Err(e), _) if e.code == Code::RunCancelled => Status::Cancelled,

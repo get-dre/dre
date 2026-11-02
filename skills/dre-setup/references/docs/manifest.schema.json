@@ -425,8 +425,8 @@
         },
         "severity": {
           "type": "string",
-          "description": "Data-failure severity. Currently only `error` is supported.",
-          "pattern": "^error$",
+          "description": "Data-failure severity. `warn` records bad data without failing the Binding.",
+          "pattern": "^(error|warn)$",
           "default": "error"
         }
       },

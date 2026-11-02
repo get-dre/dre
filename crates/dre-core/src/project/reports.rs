@@ -275,7 +275,7 @@ impl Loader {
                             }
                         }
                     }
-                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests must be a list of single-name maps with arguments and config (only execution: local and severity: error; failure storage is not supported yet)")),
+                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests must be a list of single-name maps with arguments and config (only execution: local and severity: error or warn; failure storage is not supported yet)")),
                 }
             }
             e.tab_name = match &m.tab_name {

@@ -117,7 +117,7 @@ dre test [OPTIONS] [SELECTOR]...
 
 | Argument | Description |
 |---|---|
-| `SELECTOR...` | Reports, tags or folders to test; every report when omitted. |
+| `SELECTOR...` | Reports, tags or folders to select; every report when omitted. |
 
 | Option | Default | Description |
 |---|---|---|
@@ -129,13 +129,53 @@ dre test [OPTIONS] [SELECTOR]...
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
 | `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
-| `--set <SET>` |  | Test one Set, or `all` of a report's Sets. |
-| `--schedule <NAME>` |  | Test the Bindings selected by this named Schedule, with its vars. |
+| `--set <SET>` |  | Select one Set, or `all` of a report's Sets. |
+| `--schedule <NAME>` |  | Run the Bindings selected by this named Schedule, with its vars. |
 | `--profile <PROFILE>` |  | Override the inherited connection; query and source connections still win. |
 | `--timeout <DURATION>` |  | Stop after this duration (for example `2h` or `90m`). |
 | `--keep-runs <N>` |  | How many runs to keep, including the current run. |
 | `--threads <N>` |  | How many Bindings may run at once. |
 
+Example:
+
+```bash
+dre test monthly_revenue --set client_a
+```
+
+## `dre build`
+
+Run fresh report queries and data tests before formatting and delivering report outputs.
+
+```text
+dre build [OPTIONS] [SELECTOR]...
+```
+
+| Argument | Description |
+|---|---|
+| `SELECTOR...` | Reports, tags or folders to select; every report when omitted. |
+
+| Option | Default | Description |
+|---|---|---|
+| `-s, --select <SELECTOR>` |  | Select reports by name, tag or folder, as with `dre run`. |
+| `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
+| `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
+| `--target <TARGET>` |  | The run's target (environment), `target.name` in templates: every profile uses its entry for it (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
+| `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
+| `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
+| `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
+| `--set <SET>` |  | Select one Set, or `all` of a report's Sets. |
+| `--schedule <NAME>` |  | Run the Bindings selected by this named Schedule, with its vars. |
+| `--profile <PROFILE>` |  | Override the inherited connection; query and source connections still win. |
+| `--timeout <DURATION>` |  | Stop after this duration (for example `2h` or `90m`). |
+| `--keep-runs <N>` |  | How many runs to keep, including the current run. |
+| `--threads <N>` |  | How many Bindings may run at once. |
+
+Example:
+
+```bash
+dre build monthly_revenue --schedule daily
+```
 
 ## `dre compile`
 
