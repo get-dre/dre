@@ -1,0 +1,15 @@
+connections:
+  warehouse:
+    targets:
+      dev: {type: duckdb}
+  source:
+    targets:
+      dev:
+        type: postgres
+        host: "{{ env_var('PGHOST', 'localhost') }}"
+        port: 55432
+        database: "{{ env_var('PGDATABASE', 'shop') }}"
+        user: "{{ env_var('PGUSER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD', '') }}"
+        sslmode: prefer
+        connect_timeout: 5
