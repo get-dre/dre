@@ -203,7 +203,7 @@ impl BindingRun<'_> {
             (false, _) => {
                 drop(writer);
                 let _ = std::fs::remove_file(&spool_path);
-                return Ok(());
+                return self.test_result(st, session);
             }
         };
         {
@@ -235,7 +235,7 @@ impl BindingRun<'_> {
                 style: None,
             });
         }
-        self.test_result(st)?;
+        self.test_result(st, session)?;
         Ok(())
     }
 

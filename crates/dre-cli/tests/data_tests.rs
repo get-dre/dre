@@ -96,7 +96,7 @@ fn execution_error_stops_immediately_and_has_no_invented_failure_count() {
 
 #[test]
 fn unsupported_options_fail_clearly_without_opening_the_source() {
-    for config in ["execution: source", "severity: invalid", "store_failures: true"] {
+    for config in ["execution: invalid", "severity: invalid", "store_failures: true"] {
         let p = project(
             &format!(
                 "queries:\n  - query: data\n    data_tests:\n      - positive:\n          config: {{{config}}}\noutput: {{format: message}}\n"
@@ -440,4 +440,149 @@ fn warning_execution_errors_skip_remaining_checks_queries_and_all_report_product
     assert!(!p.run_logs().contains("LATER_QUERY_RAN"));
     assert!(!p.path("target/run/r/default/report.csv").exists());
     assert!(!record.path().join("deliveries.jsonl").exists());
+}
+
+fn source_project(tests: &str, definitions: &str) -> TestProject {
+    TestProject::with_plugins(
+        &[
+            (
+                "dre_project.yml",
+                "name: source_checks\ndefault_profile: unused\n",
+            ),
+            ("dependencies.yml", "plugins: [duckdb, fixture]\n"),
+            (
+                "reports/r/r.yml",
+                &format!(
+                    "queries:\n  - query: prepare\n    profile: actual\n    tab: false\n    data_tests: [{tests}]\n  - {{query: later, profile: actual}}\noutput: {{format: message}}\n"
+                ),
+            ),
+            (
+                "reports/r/prepare.sql",
+                "create temp table saved as select nextval('calls') as id; create temp view checked as select * from saved",
+            ),
+            ("reports/r/later.sql", "select nextval('calls') as id"),
+            ("macros/checks.sql", definitions),
+        ],
+        "connections:\n  unused:\n    targets:\n      dev: {type: fixture}\n  actual:\n    targets:\n      dev: {type: duckdb, path: source.duckdb}\n",
+        &["dre-plugin-duckdb", "dre-source-fixture"],
+    )
+}
+
+#[test]
+fn source_tests_inspect_temp_relations_on_actual_session_before_next_query() {
+    let p = source_project(
+        "native: {arguments: {relation: checked}, config: {execution: source}}, once: {arguments: {relation: saved}, config: {execution: source}}",
+        "{% macro default__predicate() %}INVALID_DIALECT{% endmacro %}\n{% macro duckdb__predicate() %}id != 1 or list_extract([id], 1) != 1{% endmacro %}\n{% test native(relation) %}select * from {{ relation }} where {{ dispatch('predicate')() }}{% endtest %}\n{% test once(relation) %}select * from {{ relation }} where id != 1{% endtest %}",
+    );
+    p.duckdb("source.duckdb", "create sequence calls start 1");
+    p.dre("test", &["r"]).ok().says("PASS");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"].as_array().unwrap().len(), 2);
+    assert!(
+        result["tests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["execution"] == "source" && t["status"] == "pass")
+    );
+    // Two sequence calls: preparation and the later query, regardless of check count.
+    p.write("reports/r/prepare.sql", "select nextval('calls') as id");
+    p.write(
+        "reports/r/r.yml",
+        "queries: [{query: prepare, profile: actual}]\noutput: {format: message}\n",
+    );
+    p.dre("run", &["r", "--output-json", "saved"]).ok();
+    assert!(p.read("saved/r/default/prepare.json").contains('3'));
+}
+
+#[test]
+fn source_failures_collect_checks_and_errors_stop_even_at_warn_severity() {
+    for command in ["test", "build"] {
+        for broken in [false, true] {
+            let p = source_project(
+                &format!(
+                    "check: {{arguments: {{relation: checked}}, config: {{execution: source, severity: {}}}}}, pass: {{arguments: {{relation: saved}}, config: {{execution: source}}}}",
+                    if broken { "warn" } else { "error" }
+                ),
+                &format!(
+                    "{{% test check(relation) %}}select {} from {{{{ relation }}}}{{% endtest %}}\n{{% test pass(relation) %}}select * from {{{{ relation }}}} where id != 1{{% endtest %}}",
+                    if broken { "missing_column" } else { "*" }
+                ),
+            );
+            p.duckdb("source.duckdb", "create sequence calls start 1");
+            p.write("reports/r/later.sql", "select * from LATER_SHOULD_NOT_RUN");
+            p.dre(command, &["r"]).failed().lacks("LATER_SHOULD_NOT_RUN");
+            let result = p.json("target/run/r/default/run_results.json");
+            assert_eq!(
+                result["tests"].as_array().unwrap().len(),
+                if broken { 1 } else { 2 }
+            );
+            assert_eq!(
+                result["tests"][0]["status"],
+                if broken { "error" } else { "fail" }
+            );
+            if broken {
+                assert!(result["tests"][0].get("failures").is_none());
+            } else {
+                assert_eq!(result["tests"][0]["failures"], 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn source_tests_require_sessions_without_falling_back_to_local() {
+    let p = project(
+        "queries:\n  - query: data\n    data_tests: [{positive: {arguments: {relation: explicit_table}, config: {execution: source, severity: warn}}}]\noutput: {format: message}\n",
+        POSITIVE,
+    );
+    p.dre_env("test", &["r"], &[("DRE_FIXTURE_MODE", "no_sessions")])
+        .failed()
+        .says("support sessions");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["status"], "error");
+    assert!(result["tests"][0].get("failures").is_none());
+}
+
+#[test]
+fn source_tests_require_an_explicit_nonempty_string_relation_before_execution() {
+    for arguments in ["{}", "{relation: null}", "{relation: 123}", "{relation: ''}"] {
+        let p = project(
+            &format!(
+                "queries:\n  - query: data\n    data_tests: [{{positive: {{arguments: {arguments}, config: {{execution: source}}}}}}]\noutput: {{format: message}}\n"
+            ),
+            POSITIVE,
+        );
+        p.dre("test", &["r"])
+            .failed()
+            .says("explicit nonempty string arguments.relation");
+        assert!(!p.run_logs().contains("fixture: opened"));
+    }
+}
+
+#[test]
+fn source_warning_records_count_and_continues_to_next_query() {
+    let p = source_project(
+        "invalid: {arguments: {relation: saved}, config: {execution: source, severity: warn}}",
+        "{% test invalid(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.duckdb("source.duckdb", "create sequence calls start 1");
+    p.dre("test", &["r"]).ok().says("WARN");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["failures"], 1);
+    assert_eq!(result["tests"][0]["status"], "warn");
+    assert_eq!(result["result_sets"][0]["query"], "later");
+}
+
+#[test]
+fn empty_preparation_query_does_not_silently_skip_source_checks() {
+    let p = source_project(
+        "check: {arguments: {relation: saved}, config: {execution: source}}",
+        "{% test check(relation) %}select * from {{ relation }}{% endtest %}",
+    );
+    p.write("reports/r/prepare.sql", "-- no statement");
+    p.dre("test", &["r"])
+        .failed()
+        .says("attached data tests but no executable statements");
+    assert!(!p.run_logs().contains("fixture: opened"));
 }

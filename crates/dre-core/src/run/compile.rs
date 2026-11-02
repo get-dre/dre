@@ -143,6 +143,16 @@ impl BindingRun<'_> {
         // 2. Split. One file makes at most one tab, from its last statement, so any earlier
         // SELECT would be lost: that's an error, not a guess.
         let parts = sqlsplit::split(&sql);
+        if self.stages.tests && !q.data_tests.is_empty() && parts.is_empty() {
+            return Err(Fail::new(
+                Code::DataTestError,
+                format!(
+                    "{}: query `{}` has attached data tests but no executable statements; add a result-producing statement for local tests or preparation SQL for source tests",
+                    q.path.display(),
+                    q.query
+                ),
+            ));
+        }
         if q.tab && parts.is_empty() {
             return Err(format!(
                 "{}: `{}` makes a tab but has no statements; add a query, or `tab: false` if it's meant to be empty",
@@ -164,6 +174,7 @@ impl BindingRun<'_> {
                 ));
             }
             out.push(Statement {
+                last,
                 query: q.query.clone(),
                 connection: connection.to_string(),
                 file: q.path.clone(),

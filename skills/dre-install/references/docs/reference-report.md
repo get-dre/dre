@@ -205,7 +205,7 @@ A query with settings.
 | `query` (required) | string |  | The query's name. |
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
-| `data_tests` | list of map |  | Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run. |
+| `data_tests` | list of map |  | Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |

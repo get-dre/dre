@@ -1,8 +1,11 @@
 //! Local checks of immutable Arrow spools, using a disposable core-owned DuckDB database.
 
+use super::session::{Session, masked_source_error, protected_sql};
+use dre_protocol::{CAP_SESSIONS, host::Execution};
 use std::fs::File;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use arrow::datatypes::{DataType, TimeUnit};
@@ -21,8 +24,8 @@ mod bridge;
 
 impl BindingRun<'_> {
     /// Check the final result of this query before advancing to the next query.
-    pub(super) fn test_result(&mut self, st: &Statement) -> Result<(), Fail> {
-        if !self.stages.tests || !st.tab {
+    pub(super) fn test_result(&mut self, st: &Statement, session: &Arc<Mutex<Session>>) -> Result<(), Fail> {
+        if !self.stages.tests || !st.last {
             return Ok(());
         }
         let tests = self
@@ -35,13 +38,21 @@ impl BindingRun<'_> {
         if tests.is_empty() {
             return Ok(());
         }
-        let result = self.produced.last().expect("a tab's result was just saved");
-        let spool = result.spool.clone();
         let mut failed = false;
         for test in tests {
             self.not_cancelled()?;
             let started = Instant::now();
-            let checked = self.local_test(&spool, &test);
+            let checked = if test.config.execution == "source" {
+                self.source_test(st, session, &test)
+            } else {
+                let spool = self
+                    .produced
+                    .last()
+                    .expect("a tab's result was just saved")
+                    .spool
+                    .clone();
+                self.local_test(&spool, &test)
+            };
             let (status, failures, error) = match &checked {
                 Ok(0) => (Status::Pass, Some(0), None),
                 Ok(n) if test.config.severity == "warn" => (Status::Warn, Some(*n), None),
@@ -66,10 +77,11 @@ impl BindingRun<'_> {
                     Status::Error => "ERROR",
                 },
                 &format!(
-                    "{}: query `{}` test `{}` (local, {}): {detail}",
+                    "{}: query `{}` test `{}` ({}, {}): {detail}",
                     self.label(),
                     st.query,
                     test.name,
+                    test.config.execution,
                     test.config.severity
                 ),
                 Some(elapsed),
@@ -77,7 +89,7 @@ impl BindingRun<'_> {
             self.tests.push(Outcome {
                 query: st.query.clone(),
                 test: test.name.clone(),
-                execution: "local".into(),
+                execution: test.config.execution.clone(),
                 severity: test.config.severity.clone(),
                 status,
                 failures,
@@ -101,6 +113,56 @@ impl BindingRun<'_> {
             ));
         }
         Ok(())
+    }
+
+    fn source_test(
+        &mut self,
+        st: &Statement,
+        session: &Arc<Mutex<Session>>,
+        test: &DataTest,
+    ) -> Result<u64, String> {
+        {
+            let mut source = session.lock().unwrap();
+            if !source.get()?.has(CAP_SESSIONS) {
+                return Err(format!(
+                    "source data tests require the source plugin for connection `{}` to support sessions",
+                    st.connection
+                ));
+            }
+        }
+        let renderer = self.renderer(Some(&st.connection)).map_err(|e| e.message)?;
+        let sql = renderer
+            .render_with(
+                &self.report.file,
+                &test.invocation(),
+                Value::from(minijinja::value::Serde(json!({
+                    "__dre_relation": test.arguments["relation"], "__dre_arguments": test.arguments
+                }))),
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        let statements = crate::sqlsplit::split(&sql);
+        if statements.len() != 1
+            || crate::sqlsplit::classify(&statements[0].text) != crate::sqlsplit::StatementKind::Read
+        {
+            return Err("a data test must return failure rows with one SELECT/WITH statement".into());
+        }
+        let sensitive = st.sensitive || self.ctx.secrets().contains_secret(&sql);
+        self.ui.sql_log()(
+            &format!("{}: test {}", st.file.display(), test.name),
+            &protected_sql(self.ctx.secrets(), &sql, sensitive),
+        );
+        let mut source = session.lock().unwrap();
+        let (plugin, _scope) = source.statement(sensitive)?;
+        match plugin
+            .execute(&sql, None, &mut |_, _| Ok(()))
+            .map_err(|e| masked_source_error(self.ctx.secrets(), &e, sensitive))?
+        {
+            Execution::Result { rows, .. } => Ok(rows),
+            Execution::NoResult { .. } => {
+                Err("a data test must return failure rows, but the source returned no result set".into())
+            }
+        }
     }
 
     fn local_test(&self, spool: &Path, test: &DataTest) -> Result<u64, String> {

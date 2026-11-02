@@ -391,7 +391,7 @@
       "properties": {
         "arguments": {
           "type": "object",
-          "description": "Keyword arguments passed to the test macro. DRE supplies relation automatically.",
+          "description": "Keyword arguments passed to the test macro. Local tests receive relation automatically.",
           "additionalProperties": true,
           "default": {}
         },
@@ -408,12 +408,12 @@
     },
     "Config": {
       "type": "object",
-      "description": "Initial local-test options. Unsupported execution modes fail rather than being ignored.",
+      "description": "Data-test execution and severity options.",
       "properties": {
         "execution": {
           "type": "string",
-          "description": "The test engine. Currently only `local` is supported.",
-          "pattern": "^local$",
+          "description": "The test engine: `local` checks saved rows; `source` checks an explicit relation.",
+          "pattern": "^(local|source)$",
           "default": "local"
         },
         "severity": {
@@ -769,7 +769,7 @@
                   },
                   "data_tests": {
                     "type": "array",
-                    "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
+                    "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
                     "items": {
                       "type": "object",
                       "additionalProperties": {
