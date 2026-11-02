@@ -172,8 +172,17 @@ impl Loader {
                 };
                 let mut called: Vec<String> = Vec::new();
                 let mut refs: Vec<String> = Vec::new();
-                for q in &b.queries {
+                for (query_index, q) in b.queries.iter().enumerate() {
                     for test in &q.data_tests {
+                        for referenced in test.query_results.values() {
+                            if !b.queries[..query_index]
+                                .iter()
+                                .any(|earlier| &earlier.query == referenced)
+                            {
+                                self.diags.error(Code::InvalidField, Some(r.file.clone()), None,
+                                    format!("{ctx}: query `{}`: data test `{}`: query_results `{referenced}` must name an earlier query in this Binding; forward, missing and cross-Binding references are not allowed", q.query, test.name));
+                            }
+                        }
                         called.push(test.macro_name());
                         let problem = match tests.get(&test.macro_name()) {
                             None => Some(format!(
@@ -181,8 +190,11 @@ impl Loader {
                                 test.name
                             )),
                             Some(definition) => {
-                                let given =
-                                    |name: &str| name == "relation" || test.arguments.contains_key(name);
+                                let given = |name: &str| {
+                                    name == "relation"
+                                        || test.arguments.contains_key(name)
+                                        || test.query_results.contains_key(name)
+                                };
                                 if !definition.arguments.iter().any(|name| name == "relation") {
                                     Some(format!(
                                         "data test `{}` must accept the `relation` argument",
@@ -191,6 +203,7 @@ impl Loader {
                                 } else if let Some(name) = test
                                     .arguments
                                     .keys()
+                                    .chain(test.query_results.keys())
                                     .find(|name| !definition.arguments.contains(name))
                                 {
                                     Some(format!("data test `{}` has no argument `{name}`", test.name))

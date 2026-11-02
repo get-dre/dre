@@ -95,6 +95,35 @@ the database state they read, not a separately returned dataset. They still cons
 compute; a temporary view can re-evaluate its SQL. Normal connection permissions apply, and
 an error does not roll back earlier preparation side effects.
 
+Hidden queries (`tab: false`) still provide their returned datasets to local checks, without
+adding report tabs. Empty returned datasets retain their schema and run checks before any
+`on_empty` output policy. A statement returning no dataset cannot be checked locally: use
+an explicit result-producing query, or a source test with an explicit relation.
+
+For reconciliation, attach a local test to the later query and map macro arguments to earlier
+query names with `query_results`. These names must exist earlier in the same Binding;
+forward references and access to other Bindings are errors. Each mapped argument receives an
+opaque DuckDB relation over the saved rows. Original source SQL does not run again.
+`query_results` is separate from `arguments` and existing lookup references, and is unavailable
+for source tests. Tolerances remain ordinary macro arguments:
+
+```yaml
+queries:
+  - {query: expected_totals, tab: false}
+  - query: actual_totals
+    data_tests:
+      - reconcile:
+          query_results: {expected: expected_totals}
+          arguments: {tolerance: 0.01}
+```
+
+```sql
+{% test reconcile(relation, expected, tolerance) %}
+select 1 where abs((select sum(amount) from {{ relation }})
+                - (select sum(amount) from {{ expected }})) > {{ tolerance }}
+{% endtest %}
+```
+
 A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
 the current query when checks find bad data, then stops that Binding before its next query.
 Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings

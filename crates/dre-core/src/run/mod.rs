@@ -575,6 +575,8 @@ struct BindingRun<'a> {
     started: Instant,
     started_at: chrono::DateTime<chrono::Utc>,
     produced: Vec<Produced>,
+    /// Saved final datasets, including hidden queries, isolated to this Binding.
+    test_results: BTreeMap<String, PathBuf>,
     tests: Vec<crate::data_tests::Outcome>,
     /// Each of the Binding's outputs, in order: built from `b.outputs`, so an output's index
     /// (`oi`) reads both.

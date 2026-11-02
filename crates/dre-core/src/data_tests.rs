@@ -13,6 +13,9 @@ pub struct Settings {
     /// Keyword arguments passed to the test macro. Local tests receive relation automatically.
     #[serde(default)]
     pub arguments: Map<String, Value>,
+    /// Earlier saved query results in this Binding, keyed by macro argument. Local tests only; hidden and empty datasets are supported.
+    #[serde(default)]
+    pub query_results: BTreeMap<String, String>,
     /// Execution and severity settings; defaults to local execution and error severity.
     #[serde(default)]
     pub config: Config,
@@ -52,6 +55,7 @@ pub struct DataTest {
     pub name: String,
     pub arguments: Map<String, Value>,
     pub config: Config,
+    pub query_results: BTreeMap<String, String>,
 }
 
 /// Resolve a single-key test declaration and reject options this implementation cannot run.
@@ -65,16 +69,34 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
             "`{name}` must be a macro name, optionally qualified by its package"
         ));
     }
-    for argument in settings.arguments.keys() {
+    for argument in settings.arguments.keys().chain(settings.query_results.keys()) {
         if !identifier(argument) || (argument == "relation" && settings.config.execution != "source") {
             return Err(format!(
                 "`{argument}` is not a valid test argument; `relation` is supplied by DRE"
             ));
         }
     }
+    if settings.query_results.contains_key("relation") {
+        return Err("`relation` is supplied by DRE; query_results must name another macro argument".into());
+    }
+    if let Some(argument) = settings
+        .query_results
+        .keys()
+        .find(|key| settings.arguments.contains_key(*key))
+    {
+        return Err(format!(
+            "`{argument}` is supplied by both arguments and query_results"
+        ));
+    }
+    if settings.config.execution != "local" && !settings.query_results.is_empty() {
+        return Err(
+            "query_results is available only for local tests; saved results are not uploaded to sources"
+                .into(),
+        );
+    }
     if let Some(key) = settings.unknown.0.first() {
         return Err(format!(
-            "unsupported data test key `{}`; use arguments and config",
+            "unsupported data test key `{}`; use arguments, query_results and config",
             key.name
         ));
     }
@@ -102,6 +124,7 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
         name: name.clone(),
         arguments: settings.arguments.clone(),
         config: settings.config.clone(),
+        query_results: settings.query_results.clone(),
     })
 }
 
@@ -124,6 +147,7 @@ impl DataTest {
         let args: Vec<String> = self
             .arguments
             .keys()
+            .chain(self.query_results.keys())
             .filter(|key| key.as_str() != "relation")
             .map(|key| format!("{key}=__dre_arguments.{key}"))
             .collect();
@@ -169,7 +193,7 @@ pub(crate) fn schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let settings = g.subschema_for::<Settings>();
     schemars::json_schema!({
         "type": "array",
-        "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
+        "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run.",
         "items": {"type": "object", "minProperties": 1, "maxProperties": 1,
                   "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"},
                   "additionalProperties": settings}
