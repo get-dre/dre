@@ -164,6 +164,7 @@ impl BindingRun<'_> {
                 ));
             }
             out.push(Statement {
+                last,
                 query: q.query.clone(),
                 connection: connection.to_string(),
                 file: q.path.clone(),

@@ -516,6 +516,8 @@ impl Produced {
 }
 
 struct Statement {
+    /// Final statement of the attached query, including preparation-only queries.
+    last: bool,
     query: String,
     /// The connection it runs on.
     connection: String,

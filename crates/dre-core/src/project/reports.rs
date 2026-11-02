@@ -275,7 +275,7 @@ impl Loader {
                             }
                         }
                     }
-                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests must be a list of single-name maps with arguments and config (only execution: local and severity: error or warn; failure storage is not supported yet)")),
+                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests must be a list of single-name maps with arguments and config (execution: local or source and severity: error or warn; failure storage is not supported yet)")),
                 }
             }
             e.tab_name = match &m.tab_name {
@@ -731,8 +731,8 @@ impl Loader {
             }
         }
         for q in &queries {
-            if !q.tab && !q.data_tests.is_empty() {
-                self.diags.error(Code::InvalidField, Some(file.to_path_buf()), None, format!("{ctx}: query `{}`: local data tests currently require a returned tab result (`tab: true`); hidden or source targets are not supported yet", q.query));
+            if !q.tab && q.data_tests.iter().any(|t| t.config.execution == "local") {
+                self.diags.error(Code::InvalidField, Some(file.to_path_buf()), None, format!("{ctx}: query `{}`: local data tests currently require a returned tab result (`tab: true`); hidden local targets are not supported yet", q.query));
             }
         }
         let outputs = self.typed_outputs(&base.outputs, &ctx, file, &queries, used);

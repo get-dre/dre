@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// Keyword arguments passed to the test macro. DRE supplies relation automatically.
+    /// Keyword arguments passed to the test macro. Local tests receive relation automatically.
     #[serde(default)]
     pub arguments: Map<String, Value>,
     /// Execution and severity settings; defaults to local execution and error severity.
@@ -21,12 +21,12 @@ pub struct Settings {
     pub unknown: crate::config::de::UnknownKeys,
 }
 
-/// Initial local-test options. Unsupported execution modes fail rather than being ignored.
+/// Data-test execution and severity options.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// The test engine. Currently only `local` is supported.
-    #[schemars(regex(pattern = "^local$"))]
+    /// The test engine: `local` checks saved rows; `source` checks an explicit relation.
+    #[schemars(regex(pattern = "^(local|source)$"))]
     pub execution: String,
     /// Data-failure severity. `warn` records bad data without failing the Binding.
     #[schemars(regex(pattern = "^(error|warn)$"))]
@@ -66,7 +66,7 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
         ));
     }
     for argument in settings.arguments.keys() {
-        if !identifier(argument) || argument == "relation" {
+        if !identifier(argument) || (argument == "relation" && settings.config.execution != "source") {
             return Err(format!(
                 "`{argument}` is not a valid test argument; `relation` is supplied by DRE"
             ));
@@ -80,13 +80,23 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
     }
     if let Some(key) = settings.config.unknown.0.first() {
         return Err(format!(
-            "unsupported data test config key `{}`; this version supports only execution: local and severity: error or warn",
+            "unsupported data test config key `{}`; this version supports execution: local or source and severity: error or warn",
             key.name
         ));
     }
-    if settings.config.execution != "local" || !matches!(settings.config.severity.as_str(), "error" | "warn")
+    if !matches!(settings.config.execution.as_str(), "local" | "source")
+        || !matches!(settings.config.severity.as_str(), "error" | "warn")
     {
-        return Err("this version supports only execution: local and severity: error or warn".into());
+        return Err("this version supports execution: local or source and severity: error or warn".into());
+    }
+    if settings.config.execution == "source"
+        && !settings
+            .arguments
+            .get("relation")
+            .and_then(Value::as_str)
+            .is_some_and(|r| !r.trim().is_empty())
+    {
+        return Err("execution: source requires an explicit nonempty string arguments.relation".into());
     }
     Ok(DataTest {
         name: name.clone(),
@@ -114,6 +124,7 @@ impl DataTest {
         let args: Vec<String> = self
             .arguments
             .keys()
+            .filter(|key| key.as_str() != "relation")
             .map(|key| format!("{key}=__dre_arguments.{key}"))
             .collect();
         format!(
@@ -158,7 +169,7 @@ pub(crate) fn schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let settings = g.subschema_for::<Settings>();
     schemars::json_schema!({
         "type": "array",
-        "description": "Local checks of the saved result. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
+        "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments and config; run by dre test and dre build, never dre run.",
         "items": {"type": "object", "minProperties": 1, "maxProperties": 1,
                   "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"},
                   "additionalProperties": settings}

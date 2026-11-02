@@ -441,3 +441,105 @@ fn warning_execution_errors_skip_remaining_checks_queries_and_all_report_product
     assert!(!p.path("target/run/r/default/report.csv").exists());
     assert!(!record.path().join("deliveries.jsonl").exists());
 }
+
+fn source_project(tests: &str, definitions: &str) -> TestProject {
+    TestProject::with_plugins(
+        &[
+            (
+                "dre_project.yml",
+                "name: source_checks\ndefault_profile: unused\n",
+            ),
+            ("dependencies.yml", "plugins: [duckdb, fixture]\n"),
+            (
+                "reports/r/r.yml",
+                &format!(
+                    "queries:\n  - query: prepare\n    profile: actual\n    tab: false\n    data_tests: [{tests}]\n  - {{query: later, profile: actual}}\noutput: {{format: message}}\n"
+                ),
+            ),
+            (
+                "reports/r/prepare.sql",
+                "create temp table saved as select nextval('calls') as id; create temp view checked as select * from saved",
+            ),
+            ("reports/r/later.sql", "select nextval('calls') as id"),
+            ("macros/checks.sql", definitions),
+        ],
+        "connections:\n  unused:\n    targets:\n      dev: {type: fixture}\n  actual:\n    targets:\n      dev: {type: duckdb, path: source.duckdb}\n",
+        &["dre-plugin-duckdb", "dre-source-fixture"],
+    )
+}
+
+#[test]
+fn source_tests_inspect_temp_relations_on_actual_session_before_next_query() {
+    let p = source_project(
+        "native: {arguments: {relation: checked}, config: {execution: source}}, once: {arguments: {relation: saved}, config: {execution: source}}",
+        "{% macro default__predicate() %}INVALID_DIALECT{% endmacro %}\n{% macro duckdb__predicate() %}id != 1 or list_extract([id], 1) != 1{% endmacro %}\n{% test native(relation) %}select * from {{ relation }} where {{ dispatch('predicate')() }}{% endtest %}\n{% test once(relation) %}select * from {{ relation }} where id != 1{% endtest %}",
+    );
+    p.duckdb("source.duckdb", "create sequence calls start 1");
+    p.dre("test", &["r"]).ok().says("PASS");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"].as_array().unwrap().len(), 2);
+    assert!(
+        result["tests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["execution"] == "source" && t["status"] == "pass")
+    );
+    // Two sequence calls: preparation and the later query, regardless of check count.
+    p.write("reports/r/prepare.sql", "select nextval('calls') as id");
+    p.write(
+        "reports/r/r.yml",
+        "queries: [{query: prepare, profile: actual}]\noutput: {format: message}\n",
+    );
+    p.dre("run", &["r", "--output-json", "saved"]).ok();
+    assert!(p.read("saved/r/default/prepare.json").contains('3'));
+}
+
+#[test]
+fn source_failures_collect_checks_and_errors_stop_even_at_warn_severity() {
+    for command in ["test", "build"] {
+        for broken in [false, true] {
+            let p = source_project(
+                &format!(
+                    "check: {{arguments: {{relation: checked}}, config: {{execution: source, severity: {}}}}}, pass: {{arguments: {{relation: saved}}, config: {{execution: source}}}}",
+                    if broken { "warn" } else { "error" }
+                ),
+                &format!(
+                    "{{% test check(relation) %}}select {} from {{{{ relation }}}}{{% endtest %}}\n{{% test pass(relation) %}}select * from {{{{ relation }}}} where id != 1{{% endtest %}}",
+                    if broken { "missing_column" } else { "*" }
+                ),
+            );
+            p.duckdb("source.duckdb", "create sequence calls start 1");
+            p.write("reports/r/later.sql", "select * from LATER_SHOULD_NOT_RUN");
+            p.dre(command, &["r"]).failed().lacks("LATER_SHOULD_NOT_RUN");
+            let result = p.json("target/run/r/default/run_results.json");
+            assert_eq!(
+                result["tests"].as_array().unwrap().len(),
+                if broken { 1 } else { 2 }
+            );
+            assert_eq!(
+                result["tests"][0]["status"],
+                if broken { "error" } else { "fail" }
+            );
+            if broken {
+                assert!(result["tests"][0].get("failures").is_none());
+            } else {
+                assert_eq!(result["tests"][0]["failures"], 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn source_tests_require_sessions_without_falling_back_to_local() {
+    let p = project(
+        "queries:\n  - query: data\n    data_tests: [{positive: {arguments: {relation: explicit_table}, config: {execution: source, severity: warn}}}]\noutput: {format: message}\n",
+        POSITIVE,
+    );
+    p.dre_env("test", &["r"], &[("DRE_FIXTURE_MODE", "no_sessions")])
+        .failed()
+        .says("support sessions");
+    let result = p.json("target/run/r/default/run_results.json");
+    assert_eq!(result["tests"][0]["status"], "error");
+    assert!(result["tests"][0].get("failures").is_none());
+}
