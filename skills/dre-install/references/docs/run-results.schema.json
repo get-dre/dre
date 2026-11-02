@@ -383,7 +383,7 @@
             "string",
             "null"
           ],
-          "description": "`test` for fresh-query data validation without report outputs. Omitted by earlier commands."
+          "description": "`test` validates fresh results; `build` validates before producing reports. Omitted by `run`."
         },
         "preview": {
           "type": [
@@ -536,6 +536,7 @@
       "enum": [
         "pass",
         "fail",
+        "warn",
         "error"
       ]
     },
