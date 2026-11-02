@@ -679,6 +679,18 @@ The source plugin couldn't connect: the host is unreachable, the credentials are
 
 ## Queries
 
+### data-test-error
+
+A data test could not execute.
+
+The test definition, generated SQL or result conversion failed. The message identifies the report query and test; this is an execution error, not a data failure count.
+
+### data-test-failed
+
+A data test returned failure rows.
+
+The test checked the saved query result and returned one or more failure rows. Fix the data or the test before continuing this Binding. dre run does not execute data tests.
+
 ### no-data
 
 An output with `on_empty: fail` had no data.

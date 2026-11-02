@@ -10,6 +10,7 @@ pub mod coltypes;
 pub mod config;
 pub mod constraints;
 pub mod context;
+pub mod data_tests;
 pub mod dates;
 pub mod delivery;
 pub mod diag;

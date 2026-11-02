@@ -235,6 +235,7 @@ impl BindingRun<'_> {
                 style: None,
             });
         }
+        self.test_result(st)?;
         Ok(())
     }
 

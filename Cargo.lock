@@ -2270,6 +2270,7 @@ dependencies = [
  "croner",
  "csv",
  "dre-protocol",
+ "duckdb",
  "flate2",
  "libc",
  "minijinja 3.0.5",

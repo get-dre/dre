@@ -245,6 +245,21 @@
           "description": "When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.",
           "$ref": "#/$defs/OnEmpty"
         },
+        "data_tests": {
+          "type": "array",
+          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/Settings"
+            },
+            "minProperties": 1,
+            "maxProperties": 1,
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"
+            }
+          }
+        },
         "secret_columns": {
           "type": "array",
           "description": "Columns whose values are secrets (a PDF or zip password): values are masked as `*****` (one under 4 characters where it stands alone) in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.",
@@ -369,6 +384,46 @@
           "const": "fail"
         }
       ]
+    },
+    "Settings": {
+      "type": "object",
+      "description": "One named declaration's arguments and behavior.",
+      "properties": {
+        "arguments": {
+          "type": "object",
+          "description": "Keyword arguments passed to the test macro. DRE supplies relation automatically.",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "config": {
+          "description": "Execution and severity settings; defaults to local execution and error severity.",
+          "$ref": "#/$defs/Config",
+          "default": {
+            "execution": "local",
+            "severity": "error"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Config": {
+      "type": "object",
+      "description": "Initial local-test options. Unsupported execution modes fail rather than being ignored.",
+      "properties": {
+        "execution": {
+          "type": "string",
+          "description": "The test engine. Currently only `local` is supported.",
+          "pattern": "^local$",
+          "default": "local"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Data-failure severity. Currently only `error` is supported.",
+          "pattern": "^error$",
+          "default": "error"
+        }
+      },
+      "additionalProperties": false
     },
     "output": {
       "type": "object",
@@ -711,6 +766,21 @@
                   "tab_name": {
                     "type": "string",
                     "description": "The tab name."
+                  },
+                  "data_tests": {
+                    "type": "array",
+                    "description": "Local checks of the saved result. Each entry names one project macro with optional arguments and config; run by dre test, never dre run.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/$defs/Settings"
+                      },
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "propertyNames": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"
+                      }
+                    }
                   },
                   "on_empty": {
                     "enum": [

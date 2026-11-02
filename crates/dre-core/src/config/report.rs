@@ -92,6 +92,10 @@ pub struct QueryEntry {
     pub columns: Option<serde_json::Value>,
     /// When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::data_tests::schema")]
+    pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
     /// Columns whose values are secrets (a PDF or zip password): values are masked as `*****` (one under 4 characters where it stands alone) in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages.
     pub secret_columns: Option<Loose<Vec<String>>>,
     /// Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on.
@@ -200,6 +204,8 @@ pub struct SetQuery {
     pub tab: Option<Loose<bool>>,
     pub tab_name: Option<Loose<String>>,
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
+    /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one project macro name to `arguments` and `config`.
+    pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
     pub secret_columns: Option<Loose<Vec<String>>>,
 }
 
@@ -218,7 +224,8 @@ fn output_or_list(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     })
 }
 
-fn set_queries(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+fn set_queries(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let tests = crate::data_tests::schema(g);
     schemars::json_schema!({
         "type": "array",
         "items": {
@@ -232,6 +239,7 @@ fn set_queries(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
                         "query": {"type": "string", "description": "The query's name."},
                         "tab": {"type": "boolean", "description": "Whether the query makes a tab."},
                         "tab_name": {"type": "string", "description": "The tab name."},
+                        "data_tests": tests,
                         "on_empty": {"enum": ["continue", "skip", "fail"], "description": "When this query returns no rows: keep its empty tab, leave it out, or fail the run."},
                         "secret_columns": {"type": "array", "items": {"type": "string"}, "description": "Columns whose values are masked in DRE's logs, results and previews, added to the query's own."}
                     },

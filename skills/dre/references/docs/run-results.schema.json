@@ -151,6 +151,13 @@
         "$ref": "#/$defs/ResultSet"
       }
     },
+    "tests": {
+      "type": "array",
+      "description": "Data test outcomes, omitted for commands that do not run tests.",
+      "items": {
+        "$ref": "#/$defs/Outcome"
+      }
+    },
     "outputs": {
       "type": "array",
       "description": "Every file every output wrote.",
@@ -371,6 +378,13 @@
         "dry_run": {
           "type": "boolean"
         },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`test` for fresh-query data validation without report outputs. Omitted by earlier commands."
+        },
         "preview": {
           "type": [
             "integer",
@@ -465,6 +479,64 @@
         "connection",
         "rows",
         "columns"
+      ]
+    },
+    "Outcome": {
+      "type": "object",
+      "description": "One test's outcome, without retained failure-row values.",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "test": {
+          "type": "string"
+        },
+        "execution": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status2"
+        },
+        "failures": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Full number of failure rows; absent for execution errors.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "query",
+        "test",
+        "execution",
+        "severity",
+        "status",
+        "duration_ms"
+      ]
+    },
+    "Status2": {
+      "type": "string",
+      "description": "A successful check, a data failure, or a check which could not execute.",
+      "enum": [
+        "pass",
+        "fail",
+        "error"
       ]
     },
     "OutputFile": {
