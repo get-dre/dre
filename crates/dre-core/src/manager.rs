@@ -766,7 +766,12 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
             match part {
                 std::path::Component::Normal(part) => path.push(part),
                 std::path::Component::CurDir => {}
-                _ => return Err(format!("the archive contains unsafe path {}", raw.display())),
+                _ => {
+                    return Err(format!(
+                        "the archive contains unsafe path {}",
+                        crate::slash(&raw).display()
+                    ));
+                }
             }
         }
         let _kind = kind;
@@ -779,10 +784,16 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
         roots.insert(first.to_string_lossy().to_string());
         top_level_file |= !kind.is_dir() && path.components().count() == 1;
         if !seen.insert(path.clone()) {
-            return Err(format!("the archive contains duplicate entry {}", path.display()));
+            return Err(format!(
+                "the archive contains duplicate entry {}",
+                crate::slash(&path).display()
+            ));
         }
         if files.iter().any(|file| crate::fs::is_below(&path, file)) {
-            return Err(format!("the archive has conflicting path {}", path.display()));
+            return Err(format!(
+                "the archive has conflicting path {}",
+                crate::slash(&path).display()
+            ));
         }
         if !kind.is_dir() {
             files.push(path);
@@ -802,7 +813,12 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
             match part {
                 std::path::Component::Normal(part) => path.push(part),
                 std::path::Component::CurDir => {}
-                _ => return Err(format!("the archive contains unsafe path {}", raw.display())),
+                _ => {
+                    return Err(format!(
+                        "the archive contains unsafe path {}",
+                        crate::slash(&raw).display()
+                    ));
+                }
             }
         }
         let _kind = kind;
@@ -819,7 +835,7 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
         }
         entry
             .unpack(&dst)
-            .map_err(|e| format!("can't extract {}: {e}", path.display()))?;
+            .map_err(|e| format!("can't extract {}: {e}", crate::slash(&path).display()))?;
         if entry_is_executable(&dst) {
             executable_files.push(path);
         }
@@ -834,10 +850,12 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
         .unwrap_or_else(|| staging.to_path_buf());
     let manifest_path = base.join(crate::plugins::MANIFEST);
     let manifest = if manifest_path.exists() {
-        Some(
-            read_manifest(&base)
-                .ok_or_else(|| format!("the archive has an invalid {}", manifest_path.display()))?,
-        )
+        Some(read_manifest(&base).ok_or_else(|| {
+            format!(
+                "the archive has an invalid {}",
+                crate::slash(&manifest_path).display()
+            )
+        })?)
     } else {
         None
     };

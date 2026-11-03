@@ -128,7 +128,7 @@ pub fn discover(root: &Path, files: &[PathBuf], diags: &mut Diagnostics) -> BTre
                     "lookup `{name}` is defined more than once: {}",
                     paths
                         .iter()
-                        .map(|p| p.display().to_string())
+                        .map(|p| crate::slash(p).display().to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
