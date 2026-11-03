@@ -353,10 +353,10 @@ fn project_and_package_test_blocks_can_call_qualified_package_helpers() {
         p.dre("validate", &[]).ok();
         p.dre("test", &["r"])
             .failed()
-            .says(if package_test {
-                "checks/macros/check.sql:2"
+            .says(&if package_test {
+                "checks/macros/check.sql:2:".replace('/', std::path::MAIN_SEPARATOR_STR)
             } else {
-                "macros/test.sql:2"
+                "macros/test.sql:2:".to_owned()
             })
             .says("missing_helper");
     }
