@@ -5,38 +5,9 @@ name: Skills
 # the shared snippets, the practices copy and the generated plugin references are up to date. It
 # also fails when a plugin declares a field or option that docs/plugins.md doesn't document.
 # .github/scripts/skills.py does the work. The skills release (skills-release.yml) runs it at the
-# tag.
+# tag. Regular pushes and pull requests run these checks in ci.yml's schema-docs job.
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "skills/**"
-      - ".claude-plugin/**"
-      - "README.md"
-      - "docs/**"
-      - "plugins/*/describe.json"
-      - "go/*/describe.json"
-      - ".github/scripts/skills.py"
-      - ".github/scripts/test_skills.py"
-      - ".github/scripts/test_dre_port.py"
-      - ".github/scripts/fixtures/dre-port/**"
-      - ".github/scripts/packages.json"
-      - ".github/workflows/skills.yml"
-  pull_request:
-    paths:
-      - "skills/**"
-      - ".claude-plugin/**"
-      - "README.md"
-      - "docs/**"
-      - "plugins/*/describe.json"
-      - "go/*/describe.json"
-      - ".github/scripts/skills.py"
-      - ".github/scripts/test_skills.py"
-      - ".github/scripts/test_dre_port.py"
-      - ".github/scripts/fixtures/dre-port/**"
-      - ".github/scripts/packages.json"
-      - ".github/workflows/skills.yml"
   workflow_call:
 
 env:

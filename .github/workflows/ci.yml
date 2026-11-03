@@ -28,8 +28,14 @@ permissions:
 jobs:
   scope:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      examples: ${{ steps.scope.outputs.examples }}
+      linux_reuse: ${{ steps.reuse.outputs.linux_reuse }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,11 +43,20 @@ jobs:
           fetch-depth: 0
       - run: python3 .github/scripts/test_ci_scope.py
       - run: python3 .github/scripts/test_check_examples.py
+      - run: python3 .github/scripts/test_ci_linux_reuse.py
       - id: scope
         run: python3 .github/scripts/ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: reuse
+        if: steps.scope.outputs.full == 'true'
+        run: python3 .github/scripts/ci_linux_reuse.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  security:
+    uses: ./.github/workflows/security.yml
 
   jdbc:
     needs: scope
@@ -173,8 +188,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
 
   schema-docs:
-    # The YAML reference pages are generated from the JSON Schemas in docs/schemas/; every page
-    # has a section (docs/sections.json), and docs/README.md and the previous/next links match.
+    # Keep cheap repository checks in one checkout, including docs-only changes.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,6 +200,43 @@ jobs:
       - run: python3 .github/scripts/docs_sections.py check
       - run: python3 .github/scripts/plugin_pages.py check
       - run: python3 .github/scripts/check_links.py
+      - run: python3 .github/scripts/test_check_tracked_artifacts.py
+      - run: python3 .github/scripts/check_tracked_artifacts.py
+      - run: python3 .github/scripts/test_package_readme.py
+      - run: python3 .github/scripts/package_readme.py check
+      - run: python3 .github/scripts/test_skills.py
+      - run: python3 .github/scripts/test_dre_port.py
+      - run: python3 .github/scripts/skills.py check
+
+  examples:
+    needs: scope
+    # Full engine changes exercise every example against source builds below.
+    if: needs.scope.outputs.full == 'false' && needs.scope.outputs.examples != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Keep the clean-machine released-install coverage for example-only changes.
+      - name: Install the matching released CLI
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, subprocess, sys
+          sys.path.insert(0, ".github/scripts")
+          from plugin_versions import version
+          core = version(pathlib.Path("Cargo.toml").read_text(), "Cargo.toml")
+          if not core:
+              raise SystemExit("Cargo.toml has no core version")
+          subprocess.run([sys.executable, "-m", "pip", "install", f"dre-cli=={core}"], check=True)
+          PY
+      - run: python .github/scripts/check_examples.py --selection-json "$EXAMPLES"
+        env:
+          EXAMPLES: ${{ needs.scope.outputs.examples }}
 
   lint:
     needs: scope
@@ -200,7 +251,7 @@ jobs:
       # Every Rust cache is saved only from master, so PRs can't evict master's caches or each
       # other's, and every run (PRs included) restores master's. The key follows Cargo.lock, the
       # toolchain and CARGO_* variables, not Cargo.toml's [profile] settings: after changing those,
-      # bump prefix-key in all three jobs (lint, test-linux, test), or master keeps its stale cache.
+      # bump prefix-key in every Rust-cache job, or master keeps its stale cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
@@ -221,11 +272,11 @@ jobs:
 
   test-linux:
     needs: scope
-    if: needs.scope.outputs.full == 'true'
+    if: needs.scope.outputs.full == 'true' && needs.scope.outputs.linux_reuse != 'true'
     # Every test on Linux, the plugin integration tests among them, against local emulators (each
     # skips itself when its service's env var is unset). Pull requests run only this job's tests:
-    # macOS and Windows run on master (the `test` job). On master it only builds, to save the
-    # cache: the pull request already ran these tests on the same code. Docker Hub images come
+    # macOS and Windows run on master (the `test` job). An identical, fully tested PR tree uses
+    # cache-linux instead; absent verified evidence, master runs these tests too. Images come
     # through Google's mirror of it (mirror.gcr.io): the same digests, without Docker Hub's pull
     # limit for shared runners.
     runs-on: ubuntu-latest
@@ -257,7 +308,6 @@ jobs:
           MP_SMTP_AUTH_ALLOW_INSECURE: "1"
         ports: ["1025:1025", "8025:8025"]
     env:
-      RUN_TESTS: ${{ github.event_name != 'push' }}
       # sccache caches each compiled unit, Rust and the C/C++ inside crates (DuckDB, aws-lc), in
       # GitHub's cache, keyed by its inputs. It still hits when Cargo.lock changes and the
       # whole-target cache below misses (a cold build: 10 minutes; with sccache: 3). cc-rs uses
@@ -287,7 +337,6 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet
           df -h /
       - name: Start emulators that need arguments
-        if: env.RUN_TESTS == 'true'
         run: |
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/id_test"
           echo "DRE_TEST_SFTP_KEY=$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
@@ -351,11 +400,9 @@ jobs:
       # Postgres and ClickHouse with TLS behind an SSH bastion, for the postgres and clickhouse
       # plugins' tunnel tests.
       - name: Start the SSH bastion
-        if: env.RUN_TESTS == 'true'
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
       # Every Go module; bigquery and clickhouse against their emulators (and through the bastion).
       - name: Go tests
-        if: env.RUN_TESTS == 'true'
         run: for m in go/*/; do (cd "$m" && go test ./...) || exit 1; done
       # The Go packages; the Rust tests check them through the same host code core uses.
       - name: Build the Go packages
@@ -374,6 +421,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
+          shared-key: test-linux
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
@@ -381,22 +429,49 @@ jobs:
       # Build the plugins first: otherwise each test process builds them (DuckDB from C++
       # source) into an uncached directory, and the tests sit at SLOW for many minutes.
       - run: cargo build --workspace --bins
-      # Separate compilation from execution; on master only refresh the test cache.
+      # Separate compilation from execution for timing evidence.
       - name: Compile test binaries
         run: cargo nextest run --workspace --no-run
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
       # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
       # test even after a failure, so one failure can't hide others.
-      - if: env.RUN_TESTS == 'true'
-        run: cargo nextest run --workspace --no-fail-fast
+      - run: cargo nextest run --workspace --no-fail-fast
         env:
           DRE_TEST_PREBUILT_BINS: "1"
       - name: Validate and run public examples against this build
-        if: env.RUN_TESTS == 'true'
         run: python .github/scripts/check_examples.py --dre target/debug/dre --plugins-dir target/debug
       # nextest doesn't run doctests.
-      - if: env.RUN_TESTS == 'true'
-        run: cargo test --workspace --doc
+      - run: cargo test --workspace --doc
+
+  cache-linux:
+    # PRs cannot save the shared Rust cache. Refresh it on master without starting emulators
+    # or building temporary Go executables when the exact tree already passed full Linux CI.
+    needs: scope
+    if: needs.scope.outputs.full == 'true' && needs.scope.outputs.linux_reuse == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free disk space for the Rust cache
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v2-rust
+          shared-key: test-linux
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: nextest
+      - run: cargo build --workspace --bins
+      - run: cargo nextest run --workspace --no-run
 
   test:
     # macOS and Windows: on master (after the pull request's Linux run) and by hand, not on pull
