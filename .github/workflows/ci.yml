@@ -491,12 +491,23 @@ jobs:
   test:
     # macOS and Windows: on master (after the pull request's Linux run) and by hand, not on pull
     # requests. Releases are tagged on master, so a tagged commit has passed them.
+    # Split macOS tests across two runners to reduce wall time. Each repeats setup and build;
+    # examples and doctests run on the first partition. Windows stays on one runner.
     needs: scope
     if: github.event_name != 'pull_request' && needs.scope.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            partition: 1
+            partitions: 2
+          - os: macos-latest
+            partition: 2
+            partitions: 2
+          - os: windows-latest
+            partition: 1
+            partitions: 1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -507,7 +518,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          # Both macOS partitions build the same targets: let the first one save.
+          save-if: ${{ github.ref == 'refs/heads/master' && matrix.partition == 1 }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
@@ -535,13 +547,15 @@ jobs:
           tool: nextest
       - name: Compile test binaries
         run: cargo nextest run --workspace --no-run
-      - run: cargo nextest run --workspace --no-fail-fast
+      - run: cargo nextest run --workspace --no-fail-fast --partition count:${{ matrix.partition }}/${{ matrix.partitions }}
         env:
           DRE_TEST_PREBUILT_BINS: "1"
       - name: Validate and run public examples against this build
+        if: matrix.partition == 1
         shell: bash
         run: |
           ext=""; [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
           python .github/scripts/check_examples.py --dre "target/debug/dre$ext" --plugins-dir target/debug
       # nextest doesn't run doctests.
-      - run: cargo test --workspace --doc
+      - if: matrix.partition == 1
+        run: cargo test --workspace --doc
