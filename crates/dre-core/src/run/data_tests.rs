@@ -3,7 +3,7 @@
 use super::session::{Session, masked_source_error, protected_sql};
 use dre_protocol::{CAP_SESSIONS, host::Execution};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -39,13 +39,34 @@ impl BindingRun<'_> {
             return Ok(());
         }
         let mut failed = false;
-        for test in tests {
+        for (ordinal, test) in tests.into_iter().enumerate() {
+            let query_ordinal = self
+                .b
+                .queries
+                .iter()
+                .position(|q| q.query == st.query)
+                .unwrap_or(0);
+            let mut evidence = Evidence::new(
+                self.run_dir
+                    .join("test_failures")
+                    .join(format!(
+                        "{}-{}",
+                        query_ordinal + 1,
+                        crate::for_each::safe_name(&st.query)
+                    ))
+                    .join(format!(
+                        "{}-{}.csv",
+                        ordinal + 1,
+                        crate::for_each::safe_name(&test.name)
+                    )),
+                &test,
+            );
             self.not_cancelled()?;
             let started = Instant::now();
             let checked = if test.config.execution == "source" {
-                self.source_test(st, session, &test)
+                self.source_test(st, session, &test, &mut evidence)
             } else {
-                self.local_test(&st.query, &test)
+                self.local_test(&st.query, &test, &mut evidence)
             };
             let (status, failures, error) = match &checked {
                 Ok(0) => (Status::Pass, Some(0), None),
@@ -56,12 +77,30 @@ impl BindingRun<'_> {
                 }
                 Err(e) => (Status::Error, None, Some(self.ctx.secrets().mask(e).into_owned())),
             };
+            let retained = evidence.writer.is_some();
+            let path = retained.then(|| evidence.path.display().to_string());
+            let truncated = failures.map(|n| n > evidence.rows);
             let elapsed = started.elapsed();
-            let detail = match (&failures, &error) {
+            let mut detail = match (&failures, &error) {
                 (Some(n), _) => format!("{n} failure rows"),
                 (_, Some(e)) => e.clone(),
                 _ => String::new(),
             };
+            if let Some(path) = &path {
+                if failures.is_some() {
+                    detail.push_str(&format!(
+                        "; {} examples: {path}{}",
+                        evidence.rows,
+                        if truncated == Some(true) {
+                            " (truncated)"
+                        } else {
+                            ""
+                        }
+                    ));
+                } else {
+                    detail.push_str(&format!("; partial evidence: {path}"));
+                }
+            }
             self.ui.step(
                 Level::Info,
                 match status {
@@ -88,6 +127,9 @@ impl BindingRun<'_> {
                 status,
                 failures,
                 error: error.clone(),
+                failure_path: path,
+                stored_failures: failures.and_then(|_| retained.then_some(evidence.rows)),
+                failures_truncated: retained.then_some(truncated).flatten(),
                 duration_ms: elapsed.as_millis() as u64,
             });
             if let Some(error) = error {
@@ -114,6 +156,7 @@ impl BindingRun<'_> {
         st: &Statement,
         session: &Arc<Mutex<Session>>,
         test: &DataTest,
+        evidence: &mut Evidence,
     ) -> Result<u64, String> {
         {
             let mut source = session.lock().unwrap();
@@ -149,7 +192,7 @@ impl BindingRun<'_> {
         let mut source = session.lock().unwrap();
         let (plugin, _scope) = source.statement(sensitive)?;
         match plugin
-            .execute(&sql, None, &mut |_, _| Ok(()))
+            .execute(&sql, None, &mut |_, batch| evidence.write(&batch))
             .map_err(|e| masked_source_error(self.ctx.secrets(), &e, sensitive))?
         {
             Execution::Result { rows, .. } => Ok(rows),
@@ -159,7 +202,7 @@ impl BindingRun<'_> {
         }
     }
 
-    fn local_test(&self, query: &str, test: &DataTest) -> Result<u64, String> {
+    fn local_test(&self, query: &str, test: &DataTest, evidence: &mut Evidence) -> Result<u64, String> {
         // Keeping this under the existing spool directory gives success, failure and cancel
         // the same cleanup as report results, while DuckDB can spill without retaining rows.
         let workspace = tempfile::tempdir_in(self.run_dir.join(".spool")).map_err(|e| e.to_string())?;
@@ -226,6 +269,30 @@ impl BindingRun<'_> {
                 finished: &finished,
                 thread: watcher.thread().clone(),
             };
+            if test.config.store_failures {
+                // Materialize the check once. Count all rows, then serialize only capped examples.
+                conn.execute_batch(&format!(
+                    "create temp table dre_test_failures as {}",
+                    statements[0].text
+                ))
+                .map_err(|e| e.to_string())?;
+                let count: u64 = conn
+                    .query_row("select count(*) from dre_test_failures", [], |row| row.get(0))
+                    .map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "select * from dre_test_failures limit {}",
+                        test.config.failure_limit
+                    ))
+                    .map_err(|e| e.to_string())?;
+                // Use fallible steps: DuckDB's Arrow iterator panics on fetch/conversion errors.
+                drop(stmt.stream_arrow([]).map_err(|e| e.to_string())?);
+                while let Some(array) = stmt.step().map_err(|e| e.to_string())? {
+                    let batch = duckdb::arrow::array::RecordBatch::from(array);
+                    evidence.write(&bridge::from_duckdb(&batch)?)?;
+                }
+                return Ok(count);
+            }
             let mut stmt = conn.prepare(&statements[0].text).map_err(|e| e.to_string())?;
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
             let mut count = 0;
@@ -234,6 +301,49 @@ impl BindingRun<'_> {
             }
             Ok(count)
         })
+    }
+}
+
+/// One capped diagnostic sink shared by both engines; no output/delivery registration.
+struct Evidence {
+    path: PathBuf,
+    limit: u64,
+    rows: u64,
+    writer: Option<arrow::csv::Writer<File>>,
+}
+
+impl Evidence {
+    fn new(path: PathBuf, test: &DataTest) -> Self {
+        Self {
+            path,
+            limit: if test.config.store_failures {
+                test.config.failure_limit
+            } else {
+                0
+            },
+            rows: 0,
+            writer: None,
+        }
+    }
+
+    fn write(&mut self, batch: &arrow::array::RecordBatch) -> Result<(), String> {
+        let take = (self.limit - self.rows).min(batch.num_rows() as u64) as usize;
+        if take == 0 {
+            return Ok(());
+        }
+        if self.writer.is_none() {
+            let parent = self.path.parent().ok_or("failure evidence path has no parent")?;
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            let file = File::create_new(&self.path)
+                .map_err(|e| format!("cannot create {}: {e}", self.path.display()))?;
+            self.writer = Some(arrow::csv::WriterBuilder::new().with_header(true).build(file));
+        }
+        let writer = self.writer.as_mut().expect("writer was opened above");
+        writer
+            .write(&batch.slice(0, take))
+            .map_err(|e| format!("cannot write {}: {e}", self.path.display()))?;
+        self.rows += take as u64;
+        Ok(())
     }
 }
 

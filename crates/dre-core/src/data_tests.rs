@@ -34,6 +34,11 @@ pub struct Config {
     /// Data-failure severity. `warn` records bad data without failing the Binding.
     #[schemars(regex(pattern = "^(error|warn)$"))]
     pub severity: String,
+    /// Retain local CSV examples under the Target path. Disabled by default; never delivered as report output.
+    pub store_failures: bool,
+    /// Maximum CSV example rows (default 1000), not a limit on the check or its full failure count. Integer from 1 to 9223372036854775807.
+    #[schemars(range(min = 1, max = 9223372036854775807_u64))]
+    pub failure_limit: u64,
     #[serde(rename = "$unknown", default, skip_serializing)]
     #[schemars(skip)]
     pub unknown: crate::config::de::UnknownKeys,
@@ -44,6 +49,8 @@ impl Default for Config {
         Self {
             execution: "local".into(),
             severity: "error".into(),
+            store_failures: false,
+            failure_limit: 1000,
             unknown: Default::default(),
         }
     }
@@ -102,7 +109,7 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
     }
     if let Some(key) = settings.config.unknown.0.first() {
         return Err(format!(
-            "unsupported data test config key `{}`; this version supports execution: local or source and severity: error or warn",
+            "unsupported data test config key `{}`; use execution, severity, store_failures and failure_limit",
             key.name
         ));
     }
@@ -110,6 +117,9 @@ pub(crate) fn resolve(entry: &BTreeMap<String, Settings>) -> Result<DataTest, St
         || !matches!(settings.config.severity.as_str(), "error" | "warn")
     {
         return Err("this version supports execution: local or source and severity: error or warn".into());
+    }
+    if !(1..=i64::MAX as u64).contains(&settings.config.failure_limit) {
+        return Err("failure_limit must be an integer from 1 to 9223372036854775807 (default: 1000)".into());
     }
     if settings.config.execution == "source"
         && !settings
@@ -176,6 +186,15 @@ pub struct Outcome {
     pub failures: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Local diagnostic CSV, excluded from report outputs and deliveries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_path: Option<String>,
+    /// Number of CSV example rows; absent if execution/export failed and the file may be partial.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored_failures: Option<u64>,
+    /// Whether the full failure count exceeds the retained examples.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failures_truncated: Option<bool>,
     pub duration_ms: u64,
 }
 

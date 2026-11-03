@@ -21,3 +21,21 @@ pub fn to_duckdb(batch: &RecordBatch) -> Result<duck::array::RecordBatch, String
         data,
     )))
 }
+
+/// A batch from DuckDB, as the `arrow` DRE uses.
+pub fn from_duckdb(batch: &duck::array::RecordBatch) -> Result<RecordBatch, String> {
+    use duck::array::Array as _;
+    let (mut array, mut schema) = duck::ffi::to_ffi(&duck::array::StructArray::from(batch.clone()).to_data())
+        .map_err(|e| e.to_string())?;
+    // SAFETY: both crates define these structs from the same C layout. `from_raw` moves the
+    // contents out and leaves an empty struct behind, which the old crate drops harmlessly.
+    let (array, schema) = unsafe {
+        (
+            arrow::ffi::FFI_ArrowArray::from_raw(std::ptr::from_mut(&mut array).cast()),
+            arrow::ffi::FFI_ArrowSchema::from_raw(std::ptr::from_mut(&mut schema).cast()),
+        )
+    };
+    // SAFETY: `array` and `schema` were just exported from a valid array.
+    let data = unsafe { arrow::ffi::from_ffi(array, &schema) }.map_err(|e| e.to_string())?;
+    Ok(RecordBatch::from(StructArray::from(data)))
+}

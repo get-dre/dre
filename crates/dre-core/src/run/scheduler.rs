@@ -428,19 +428,31 @@ mod tests {
     fn no_job_starts_once_the_run_is_cancelled() {
         for workers in [1, 3] {
             let cancel = CancelToken::new();
-            let ran = Scheduler::new(workers).run(
-                jobs((0..50).map(|i| (vec![], i))),
+            let queued = Barrier::new(if workers == 1 { 1 } else { workers + 1 });
+            let cancelled = Barrier::new(workers);
+            let items = jobs((0..50).map(|i| (vec![], i))).into_iter().inspect(|job| {
+                if workers > 1 && job.as_ref().unwrap().item == 49 {
+                    // Leave queued jobs waiting until every worker reaches cancellation.
+                    queued.wait();
+                }
+            });
+            let ran = Scheduler::new(workers).queue(50).run(
+                items,
                 &cancel,
                 || (),
                 |_, _, n| {
-                    if n == 0 {
-                        cancel.cancel();
+                    if n < workers {
+                        queued.wait();
+                        if n == 0 {
+                            cancel.cancel();
+                        }
+                        // No worker takes another job before cancellation is set.
+                        cancelled.wait();
                     }
                     Some(n)
                 },
             );
-            // Each worker may have taken one job before it saw the cancel.
-            assert!(ran.done.len() <= workers, "{}", ran.done.len());
+            assert_eq!(ran.done, (0..workers).map(|n| (n, n)).collect::<Vec<_>>());
         }
     }
 

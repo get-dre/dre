@@ -435,11 +435,26 @@
           "description": "Data-failure severity. `warn` records bad data without failing the Binding.",
           "pattern": "^(error|warn)$",
           "default": "error"
+        },
+        "store_failures": {
+          "type": "boolean",
+          "description": "Retain local CSV examples under the Target path. Disabled by default; never delivered as report output.",
+          "default": false
+        },
+        "failure_limit": {
+          "type": "integer",
+          "description": "Maximum CSV example rows (default 1000), not a limit on the check or its full failure count. Integer from 1 to 9223372036854775807.",
+          "format": "uint64",
+          "minimum": 1,
+          "maximum": 9223372036854775807,
+          "default": 1000
         }
       },
       "required": [
         "execution",
-        "severity"
+        "severity",
+        "store_failures",
+        "failure_limit"
       ],
       "additionalProperties": false
     },
