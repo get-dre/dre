@@ -36,9 +36,10 @@ impl fmt::Display for Diagnostic {
             Severity::Warning => "warning",
         };
         write!(f, "{sev}[{}]: ", self.code)?;
+        // The display contract: a file reads `/`-separated on every platform (`crate::slash`).
         match (&self.file, self.line) {
-            (Some(file), Some(line)) => write!(f, "{}:{line}: ", file.display())?,
-            (Some(file), None) => write!(f, "{}: ", file.display())?,
+            (Some(file), Some(line)) => write!(f, "{}:{line}: ", crate::slash(file).display())?,
+            (Some(file), None) => write!(f, "{}: ", crate::slash(file).display())?,
             _ => {}
         }
         f.write_str(&self.message)
@@ -122,5 +123,40 @@ impl Diagnostics {
         let mut v: Vec<&Diagnostic> = self.0.iter().collect();
         v.sort_by(|a, b| (&a.file, a.line, a.severity).cmp(&(&b.file, b.line, b.severity)));
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn diag(file: &str, line: Option<usize>) -> Diagnostic {
+        Diagnostic {
+            severity: Severity::Error,
+            code: Code::ParseFailed,
+            message: "boom".to_string(),
+            file: Some(PathBuf::from(file)),
+            line,
+            plugin: None,
+        }
+    }
+
+    #[test]
+    fn a_diagnostic_prints_a_native_path_with_slashes() {
+        assert_eq!(
+            diag(r"reports\ops\cq.sql", Some(2)).to_string(),
+            "error[parse-failed]: reports/ops/cq.sql:2: boom"
+        );
+        assert_eq!(
+            diag(r"reports\ops\cq.sql", None).to_string(),
+            "error[parse-failed]: reports/ops/cq.sql: boom"
+        );
+    }
+
+    #[test]
+    fn the_line_delimiter_keeps_line_2_apart_from_line_20() {
+        assert!(diag("a/b.sql", Some(2)).to_string().contains("a/b.sql:2: "));
+        assert!(!diag("a/b.sql", Some(2)).to_string().contains("a/b.sql:20"));
+        assert!(diag("a/b.sql", Some(20)).to_string().contains("a/b.sql:20: "));
     }
 }

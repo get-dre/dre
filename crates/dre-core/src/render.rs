@@ -182,9 +182,10 @@ pub struct RenderError {
 
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The display contract: a file reads `/`-separated on every platform (`crate::slash`).
         match self.line {
-            Some(l) => write!(f, "{}:{l}: {}", self.file.display(), self.message),
-            None => write!(f, "{}: {}", self.file.display(), self.message),
+            Some(l) => write!(f, "{}:{l}: {}", crate::slash(&self.file).display(), self.message),
+            None => write!(f, "{}: {}", crate::slash(&self.file).display(), self.message),
         }
     }
 }
@@ -1674,6 +1675,17 @@ impl Object for Row {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_render_error_prints_a_native_path_with_slashes() {
+        let error = |line| RenderError {
+            file: PathBuf::from(r"macros\qualified.sql"),
+            line,
+            message: "boom".to_string(),
+        };
+        assert_eq!(error(Some(2)).to_string(), "macros/qualified.sql:2: boom");
+        assert_eq!(error(None).to_string(), "macros/qualified.sql: boom");
+    }
 
     fn renderer(vars: Json, cli: &[(&str, &str)], macros: &[(&str, &str)]) -> (tempfile::TempDir, Renderer) {
         let dir = tempfile::tempdir().unwrap();

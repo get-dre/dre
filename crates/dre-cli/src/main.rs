@@ -1016,7 +1016,10 @@ fn plugin_list(ctx: &Context) -> ExitCode {
     let dir = dre_core::plugins::plugins_dir(ctx.env(), in_project.then_some(here));
     let found = dre_core::plugins::discover(&dir, &dre_core::plugins::Prober::default());
     if found.is_empty() {
-        println!("No plugin packages installed in {}", dir.display());
+        println!(
+            "No plugin packages installed in {}",
+            dre_core::slash(&dir).display()
+        );
         return exit::ok();
     }
     let quiet: dre_protocol::host::LogSink = std::sync::Arc::new(|_, _| {});
@@ -1040,7 +1043,10 @@ fn plugin_list(ctx: &Context) -> ExitCode {
                     .map_err(|e| e.to_string())
             }
             // An executable that couldn't say what it provides doesn't start.
-            None => Err(format!("can't ask {} what it provides", p.path.display())),
+            None => Err(format!(
+                "can't ask {} what it provides",
+                dre_core::slash(&p.path).display()
+            )),
         };
         let (version, protocol) = match started {
             Ok(proc_) => {
@@ -1059,7 +1065,7 @@ fn plugin_list(ctx: &Context) -> ExitCode {
             provides.join(", "),
             version,
             protocol,
-            p.path.display().to_string(),
+            dre_core::slash(&p.path).display().to_string(),
         ]);
     }
     print!("{}", ls::columns(rows));
