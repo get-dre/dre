@@ -147,11 +147,95 @@ fn nothing_matched_is_an_error() {
 }
 
 #[test]
-fn it_writes_nothing_and_needs_no_profiles() {
+fn missing_profiles_still_list_without_writing_anything() {
     let p = project();
     std::fs::remove_file(p.dir.path().join("profiles/profiles.yml")).unwrap();
-    p.dre("ls", &[]).ok();
-    p.dre("ls", &["--output", "json"]).ok();
+    for args in [vec![], vec!["--output", "json"]] {
+        let r = p.dre("ls", &args);
+        assert_eq!(r.code, 1);
+        assert!(r.stderr.contains("error[profiles-missing]"), "{}", r.stderr);
+        assert!(r.stdout.contains("daily"), "{}", r.stdout);
+    }
     assert!(!p.path("target").exists());
     assert!(!p.path("logs").exists());
+}
+
+fn diagnostic_project() -> TestProject {
+    TestProject::with_plugins(
+        &[
+            (
+                "dre_project.yml",
+                "name: diagnostics\ndefault_profile: warehouse\n",
+            ),
+            ("dependencies.yml", "plugins: [duckdb, csv]\n"),
+            ("reports/example/example.yml", "queries: [query]\n"),
+            ("reports/example/query.sql", "select 1 as n\n"),
+            (
+                "sources.yml",
+                "sources:\n  - name: sales\n    profile: warehouse\n    tables: [{name: orders}]\n",
+            ),
+        ],
+        PROFILES,
+        &["dre-plugin-csv"],
+    )
+}
+
+#[test]
+fn loaded_project_errors_reach_stderr_and_fail_every_listing() {
+    let p = diagnostic_project();
+    std::fs::remove_file(p.path("reports/example/query.sql")).unwrap();
+    for resource in ["report", "source"] {
+        for output in ["text", "json"] {
+            let r = p.dre("ls", &["--resource-type", resource, "--output", output]);
+            assert_eq!(r.code, 1, "stdout: {}\nstderr: {}", r.stdout, r.stderr);
+            assert!(r.stderr.contains("error["), "{}", r.stderr);
+            assert!(r.stderr.contains("query"), "{}", r.stderr);
+            assert!(!r.stdout.is_empty());
+            if output == "json" {
+                let doc: Value = serde_json::from_str(&r.stdout).unwrap();
+                if resource == "report" {
+                    assert!(
+                        !doc["reports"]["example"]["errors"].as_array().unwrap().is_empty(),
+                        "{doc}"
+                    );
+                } else {
+                    assert_eq!(doc.as_object().unwrap().len(), 1);
+                    assert!(doc["sources"]["sales"]["tables"]["orders"].is_object());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn clean_projects_and_warnings_only_succeed() {
+    let p = diagnostic_project();
+    for resource in ["report", "source"] {
+        p.dre("ls", &["--resource-type", resource]).ok();
+    }
+    p.write("ignored.yml", "[unrecognized]\n");
+    for resource in ["report", "source"] {
+        for output in ["text", "json"] {
+            let r = p.dre("ls", &["--resource-type", resource, "--output", output]);
+            r.ok();
+            assert!(r.stderr.contains("warning[unrecognized-yaml]"), "{}", r.stderr);
+            if output == "json" {
+                serde_json::from_str::<Value>(&r.stdout).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn failed_project_load_reports_diagnostics_without_listing() {
+    let p = diagnostic_project();
+    p.write("dre_project.yml", "name: [\n");
+    for resource in ["report", "source"] {
+        for output in ["text", "json"] {
+            let r = p.dre("ls", &["--resource-type", resource, "--output", output]);
+            assert_eq!(r.code, 2);
+            assert!(r.stderr.contains("error["), "{}", r.stderr);
+            assert!(r.stdout.is_empty(), "{}", r.stdout);
+        }
+    }
 }

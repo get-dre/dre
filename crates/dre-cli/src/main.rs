@@ -83,6 +83,9 @@ enum Command {
     /// Remove the target folder (compiled SQL, run outputs, schema snapshots, the manifest).
     Clean(CleanArgs),
     /// List the reports and Bindings a selection or schedule covers, without running anything.
+    /// Diagnostics go to stderr in file and line order; stdout holds only listing data (including
+    /// JSON on loaded-project errors). Errors exit 1, warnings alone exit 0; load failures and invalid
+    /// selections exit 2.
     Ls(ls::LsArgs),
     /// Work out when schedules fire, for people and orchestrators.
     #[command(subcommand)]

@@ -370,7 +370,7 @@ fn select_by_source_in_run_compile_validate_and_ls() {
 }
 
 #[test]
-fn the_manifest_follows_the_inputs_and_needs_no_profiles() {
+fn the_manifest_follows_the_inputs_despite_missing_profiles() {
     let p = project(&[
         ("reports/ops/o/o.yml", "queries: [oq]\n"),
         (
@@ -386,7 +386,8 @@ fn the_manifest_follows_the_inputs_and_needs_no_profiles() {
         let mut a = vec!["--output", "json"];
         a.extend_from_slice(args);
         let r = p.dre("ls", &a);
-        r.ok();
+        assert_eq!(r.code, 1);
+        assert!(r.stderr.contains("error[profiles-missing]"), "{}", r.stderr);
         r.stdout
     };
     let dev = ls(&[]);

@@ -511,6 +511,8 @@ fn the_manifest_and_ls_json_match_the_published_schema() {
     assert_valid(&v, &m);
 
     let r = p.dre("ls", &["--schedule", "close_a", "--output", "json"]);
-    r.ok();
+    assert_eq!(r.code, 1);
+    assert!(r.stderr.contains("error[unknown-query]"), "{}", r.stderr);
+    assert!(r.stderr.contains("query `nope`"), "{}", r.stderr);
     assert_valid(&v, &serde_json::from_str(&r.stdout).unwrap());
 }
