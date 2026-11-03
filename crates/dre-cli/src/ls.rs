@@ -41,7 +41,7 @@ pub struct LsArgs {
     /// Project directory (default: the current directory).
     #[arg(long, default_value = ".")]
     project_dir: PathBuf,
-    /// Directory holding profiles.yml (not needed; accepted as on the other project commands).
+    /// Directory holding profiles.yml (accepted as on the other project commands).
     #[arg(long)]
     profiles_dir: Option<PathBuf>,
     /// The target path, accepted as on the other project commands; `ls` writes nothing to it.
@@ -77,15 +77,23 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
         schedule: None,
     };
     let (project, diags) = project::load_with(&a.project_dir, &opts, ctx);
+    if let Some(project) = &project {
+        ctx.secrets().set_enabled(project.mask_secrets());
+    }
+    for d in diags.sorted() {
+        eprintln!("{}", ctx.secrets().mask(&d.to_string()));
+    }
     let Some(project) = project else {
-        for d in diags.sorted() {
-            eprintln!("{d}");
-        }
         return crate::exit::not_started();
     };
-    ctx.secrets().set_enabled(project.mask_secrets());
+    let exit = if diags.has_errors() {
+        crate::exit::failed()
+    } else {
+        crate::exit::ok()
+    };
     if a.resource_type == ResourceType::Source {
-        return sources(ctx, &project, &a);
+        let result = sources(ctx, &project, &a);
+        return if result == crate::exit::ok() { exit } else { result };
     }
     let (reports, schedules) = match select(&project, &a) {
         Ok(found) => found,
@@ -102,7 +110,7 @@ pub fn ls(ctx: &dre_core::Context, a: LsArgs) -> ExitCode {
         }
         LsOutput::Text => print!("{}", ctx.secrets().mask(&table(&reports))),
     }
-    crate::exit::ok()
+    exit
 }
 
 type Selected<'a> = (Vec<(&'a Report, Vec<&'a Binding>)>, Vec<String>);
