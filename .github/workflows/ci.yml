@@ -207,6 +207,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Windows-only failures from POSIX path assumptions are cheap to catch here first.
+      - run: python3 .github/scripts/test_check_portable_tests.py
+      - run: python3 .github/scripts/check_portable_tests.py
       # The Go plugin packages (databricks, bigquery, snowflake, clickhouse) and their shared
       # protocol module, each its own Go module.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
