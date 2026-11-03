@@ -27,14 +27,9 @@ permissions:
 jobs:
   scope:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: read
     outputs:
       full: ${{ steps.scope.outputs.full }}
       examples: ${{ steps.scope.outputs.examples }}
-      linux_reuse: ${{ steps.reuse.outputs.linux_reuse }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,17 +37,11 @@ jobs:
           fetch-depth: 0
       - run: python3 .github/scripts/test_ci_scope.py
       - run: python3 .github/scripts/test_check_examples.py
-      - run: python3 .github/scripts/test_ci_linux_reuse.py
       - id: scope
         run: python3 .github/scripts/ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      - id: reuse
-        if: steps.scope.outputs.full == 'true'
-        run: python3 .github/scripts/ci_linux_reuse.py
-        env:
-          GH_TOKEN: ${{ github.token }}
 
   security:
     uses: ./.github/workflows/security.yml
@@ -271,11 +260,11 @@ jobs:
 
   test-linux:
     needs: scope
-    if: needs.scope.outputs.full == 'true' && needs.scope.outputs.linux_reuse != 'true'
+    if: needs.scope.outputs.full == 'true'
     # Every test on Linux, the plugin integration tests among them, against local emulators (each
     # skips itself when its service's env var is unset). Pull requests run only this job's tests:
-    # macOS and Windows run on master (the `test` job). An identical, fully tested PR tree uses
-    # cache-linux instead; absent verified evidence, master runs these tests too. Images come
+    # macOS and Windows run on master (the `test` job). Master also runs Linux against the
+    # actual merged code and current toolchain. Docker Hub images come
     # through Google's mirror of it (mirror.gcr.io): the same digests, without Docker Hub's pull
     # limit for shared runners.
     runs-on: ubuntu-latest
@@ -420,7 +409,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
-          shared-key: test-linux
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
@@ -441,51 +429,6 @@ jobs:
         run: python .github/scripts/check_examples.py --dre target/debug/dre --plugins-dir target/debug
       # nextest doesn't run doctests.
       - run: cargo test --workspace --doc
-
-      # The Actions run's head SHA identifies the PR head, not the synthetic merge checkout.
-      # Record the actual tested tree after every full-suite step has passed.
-      - name: Record full Linux evidence
-        if: github.event_name == 'pull_request'
-        run: python3 .github/scripts/ci_linux_reuse.py --record "$RUNNER_TEMP/linux-evidence.json"
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-      - name: Upload full Linux evidence
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-tested-tree-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/linux-evidence.json
-          if-no-files-found: error
-
-  cache-linux:
-    # PRs cannot save the shared Rust cache. Refresh it on master without starting emulators
-    # or building temporary Go executables when the exact tree already passed full Linux CI.
-    needs: scope
-    if: needs.scope.outputs.full == 'true' && needs.scope.outputs.linux_reuse == 'true'
-    runs-on: ubuntu-latest
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Free disk space for the Rust cache
-        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet
-      - run: rustup toolchain install stable --profile minimal && rustup default stable
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: v2-rust
-          shared-key: test-linux
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: nextest
-      - run: cargo build --workspace --bins
-      - run: cargo nextest run --workspace --no-run
 
   test:
     # macOS and Windows: on master (after the pull request's Linux run) and by hand, not on pull
