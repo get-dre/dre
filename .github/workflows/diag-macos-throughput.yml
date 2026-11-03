@@ -2,7 +2,8 @@ name: diag macOS throughput
 
 # Temporary measurement only. Not merged; deleted before the real change.
 on:
-  workflow_dispatch:
+  push:
+    branches: [diag/macos-throughput]
 
 permissions:
   contents: read
