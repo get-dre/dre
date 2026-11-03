@@ -1,0 +1,35 @@
+queries:
+  - query: checks_bad_data
+    data_tests:
+      - nonnegative: {config: {store_failures: true, failure_limit: 1}}
+      - row_count: {arguments: {expected: 3}}
+  - query: checks_later
+    tab: false
+    data_tests: [{row_count: {arguments: {expected: 1}}}]
+sets:
+  - {name: data_failure, profile: warehouse}
+  - name: warning_only
+    profile: warehouse
+    queries:
+      - query: checks_bad_data
+        data_tests: [{nonnegative: {config: {severity: warn, store_failures: true, failure_limit: 1}}}]
+      - query: checks_later
+        tab: false
+        data_tests: [{row_count: {arguments: {expected: 1}}}]
+  - name: execution_error
+    profile: warehouse
+    queries:
+      - query: checks_bad_data
+        data_tests: [{broken_column: {config: {severity: warn}}}, {nonnegative: {}}]
+      - {query: checks_later, tab: false}
+  - name: no_evidence
+    profile: warehouse
+    queries:
+      - {query: checks_bad_data, data_tests: [{nonnegative: {}}]}
+      - {query: checks_later, tab: false}
+  - name: independent
+    profile: warehouse
+    queries: [{query: checks_bad_data, data_tests: []}]
+output:
+  format: csv
+  destination: {profile: local, path: "out/diagnostics-{{ run.set }}.csv"}

@@ -1,13 +1,15 @@
 # Public DRE examples
 
 Small, complete projects using synthetic Acme Corp data. Most need no database server or account;
-the overdue-loan example uses your Oracle or SQL Server test database. Install [DRE](../docs/install.md), then copy an example folder and
+the overdue-loan example uses your Oracle or SQL Server test database, and the data-test example
+has an optional PostgreSQL source scenario. Install [DRE](../docs/install.md), then copy an example folder and
 run commands from that folder. Dependencies install on demand; network access is needed
 the first time.
 
 | Project | What it demonstrates |
 |---|---|
 | [Tutorial](tutorial/) | One workbook, a variable, another tab, formats, Sets, a schedule and local delivery |
+| [Data tests](data-tests/) | Saved-result and source checks, reconciliation, run/test/build, warning/error Bindings and capped CSV evidence |
 | [Monthly finance](monthly-finance/) | Source declarations, a typed account lookup, two tabs, formulas, totals and an Excel template |
 | [Overdue loans](overdue-loans/) | Oracle/SQL Server JDBC preparation, independent business checks, ordinary/template workbooks and unexecuted SAS reference |
 | [Bank file](bank-file/) | Fixed-width layout, zero padding, implied decimals and CRLF records |

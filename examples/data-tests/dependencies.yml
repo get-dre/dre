@@ -1,0 +1,1 @@
+plugins: [duckdb, postgres, csv]

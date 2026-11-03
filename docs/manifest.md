@@ -168,6 +168,11 @@ Paths are relative to the project root with forward slashes on every OS. Keys ar
 are no timestamps, host names or absolute paths, so the same project gives the same bytes on any
 machine, and moving the target path doesn't change the file.
 
+Resolved query entries include `data_tests`: each test's name, arguments, execution/severity
+configuration and earlier-query `query_results` mapping. These declarations identify what will
+run; actual statuses, full failure counts, timings and optional evidence are recorded in
+`run_results.json` and structured run events.
+
 ### Generic integration context
 
 DRE 0.4.1 adds report `description`, opaque `meta`, and `meta_layers` with the originating file
@@ -235,7 +240,7 @@ selector or schedule that matches nothing exits 2 (see [exit codes](exit-codes.m
 
 ## `run_results.json`
 
-Each Binding a `dre run` executes writes `run/<report>/<set or default>/runs/<run id>/run_results.json`
+Each Binding that `dre run`, `dre test` or `dre build` executes writes `run/<report>/<set or default>/runs/<run id>/run_results.json`
 in the target path (`dre history <report> --latest --path` prints the latest run's folder; see
 [the target path](target-path.md)). It records its `run_id`, the report, Set, the inherited `profile`, the `target`, the
 `connections` its queries used, the schedule and its vars, every

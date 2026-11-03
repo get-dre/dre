@@ -1,0 +1,4 @@
+- name: checked_daily
+  report: checked
+  cron: "0 8 * * *"
+  timezone: Australia/Melbourne

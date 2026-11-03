@@ -31,6 +31,18 @@ dre system update        # update DRE itself
 
 ## Check returned data with `dre test`
 
+Choose the command explicitly; the same report selectors, Sets and named Schedules apply:
+
+| Command | Fresh report queries | Attached data tests | Report formatting and delivery |
+|---|---|---|---|
+| `dre run` | Yes | No | Yes |
+| `dre test` | Yes | Yes | No |
+| `dre build` | Yes | Yes | Only for Bindings whose tests allow continuation |
+
+`dre build --schedule close_monthly` combines checks and delivery; DRE does not schedule the
+command itself. There is no individual-test selector. For a complete synthetic project,
+see the [data-test example](https://github.com/get-dre/dre/blob/master/examples/data-tests/).
+
 Attach SQL checks to a query with `data_tests`. Define checks as `test` blocks under
 `macros/`. By default, checks inspect saved results locally using core-owned embedded DuckDB.
 The DuckDB source plugin is not needed for local validation; source queries still use their
@@ -58,6 +70,7 @@ dre test monthly                   # fresh queries and attached checks, no repor
 dre test -s tag:regulatory --set all
 dre test --schedule close_monthly
 dre run monthly                    # report files and delivery; declared checks are skipped
+dre build monthly                  # checks first; format/deliver only allowed Bindings
 ```
 
 Omit `config` for the defaults: local execution and error severity. Omit `arguments` when
@@ -72,8 +85,11 @@ through their package namespace, such as `quality.predicate(column)`, including 
 macro files or packages. Tests can use argument defaults, helpers and
 `dispatch()`; local checks dispatch as DuckDB regardless of the query's source. Configure tests
 in YAML; runtime `config()` calls are unsupported. `dre validate` resolves definitions and
-checks signatures and template syntax without running test SQL or introspection. Column names
-and other data-dependent SQL errors are checked only when `dre test` executes the check.
+checks signatures and template syntax without running test SQL or introspection. A missing
+package or definition fails before source execution where detectable; run `dre deps` after
+adding or changing a package declaration. Familiar syntax does not make arbitrary dbt packages,
+adapter APIs or runtime functions compatible with DRE. Column names
+and other data-dependent SQL errors are checked only when `dre test` or `dre build` executes the check.
 
 For database relations, select `execution: source` and supply `arguments.relation` explicitly:
 
@@ -126,9 +142,12 @@ select 1 where abs((select sum(amount) from {{ relation }})
 {% endtest %}
 ```
 
-A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
-the current query when checks find bad data, then stops that Binding before its next query.
-Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings
+A test returns failure rows: zero passes; a positive count records bad data at the declared
+severity. DRE runs all checks attached to the current query when they merely find bad data.
+An error-severity failure then stops that Binding before its next query. `severity: warn`
+allows continuation; warning-only commands succeed.
+Broken SQL or a missing runtime column is always an execution error, even with warning severity,
+and stops the Binding immediately. Earlier source side effects may already exist. Other selected Bindings
 continue. Any failed Binding makes the command exit nonzero. `run_results.json` records the
 query, test, execution target, severity, status, duration and full failure count; an execution
 error records its cause instead of a count. By default, tests do not retain failure-row samples.
@@ -146,6 +165,13 @@ explicitly rather than being silently coerced. Decimals must use Decimal128 with
 at most 38 and a nonnegative scale. Timezone-bearing timestamps, nested types and Arrow
 extension types are rejected. Date32 and timezone-free timestamps retain their stored units
 and precision; result spools and report output values keep their original Arrow types.
+
+The existing SQLite database remains the disposable per-row population/job index; embedded
+DuckDB serves local data tests independently. No delivery-history database or migration is
+introduced. A bounded 1,000-row Python comparison with one and four workers did not justify
+replacing the existing index: the direct DuckDB candidate took longer. It used Python SQLite
+3.42 and DuckDB 1.4.5, not DRE's Rust bindings or embedded DuckDB 1.5.6, and omitted Arrow,
+formatting and delivery. This is a keep decision, not an end-to-end performance claim.
 
 `dre validate` checks declarations and test definitions without executing report or test SQL.
 Data-dependent checks run under `dre test` and `dre build`.

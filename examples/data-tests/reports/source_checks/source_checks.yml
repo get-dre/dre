@@ -1,0 +1,10 @@
+profile: source
+queries:
+  - query: checks_prepare_source
+    tab: false
+    data_tests:
+      - nonnegative: {arguments: {relation: dre_demo_checked_view}, config: {execution: source}}
+      - row_count: {arguments: {relation: dre_demo_checked, expected: 2}, config: {execution: source}}
+  - query: checks_read_source
+    data_tests: [{row_count: {arguments: {expected: 2}}}]
+output: {format: csv}

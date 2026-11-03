@@ -1,0 +1,19 @@
+tags: [data_checks]
+queries:
+  - {query: checks_setup, tab: false}
+  - {query: checks_expected, tab: false}
+  - query: checks_detail
+    data_tests:
+      - nonnegative: {}
+      - reconcile_total:
+          query_results: {expected: checks_expected}
+  - query: checks_counter
+    tab: false
+    data_tests: [{execution_count: {}}]
+  - query: checks_empty
+    tab: false
+    data_tests: [{row_count: {arguments: {expected: 0}}}]
+output:
+  format: csv
+  queries: [checks_detail]
+  destination: {profile: local, path: out/checked.csv}
