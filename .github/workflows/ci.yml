@@ -418,7 +418,6 @@ jobs:
           - os: windows-latest
             partition: 1
             partitions: 1
-    name: test (${{ matrix.os }}, ${{ matrix.partition }}/${{ matrix.partitions }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
