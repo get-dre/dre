@@ -36,6 +36,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - run: python3 .github/scripts/test_ci_scope.py
+      - run: python3 .github/scripts/test_check_emulator_env.py
       - run: python3 .github/scripts/test_check_examples.py
       - id: scope
         run: python3 .github/scripts/ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA"
@@ -261,8 +262,8 @@ jobs:
   test-linux:
     needs: scope
     if: needs.scope.outputs.full == 'true'
-    # Every test on Linux, the plugin integration tests among them, against local emulators (each
-    # skips itself when its service's env var is unset). Pull requests run only this job's tests:
+    # Every test on Linux, the plugin integration tests among them, against local emulators.
+    # The preflight requires their environment so no emulator test silently skips. PRs run only these tests:
     # macOS and Windows run on master (the `test` job). Master also runs Linux against the
     # actual merged code and current toolchain. Docker Hub images come
     # through Google's mirror of it (mirror.gcr.io): the same digests, without Docker Hub's pull
@@ -389,6 +390,8 @@ jobs:
       # plugins' tunnel tests.
       - name: Start the SSH bastion
         run: .github/scripts/ssh_bastion.sh "$RUNNER_TEMP/bastion" "$RUNNER_TEMP/id_test" >> "$GITHUB_ENV"
+      - name: Require emulator test environment
+        run: python3 .github/scripts/check_emulator_env.py
       # Every Go module; bigquery and clickhouse against their emulators (and through the bastion).
       - name: Go tests
         run: for m in go/*/; do (cd "$m" && go test ./...) || exit 1; done
