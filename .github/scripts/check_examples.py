@@ -16,10 +16,13 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
-         "slack-headline", "sftp-delivery", "password-statements", "multilingual")
-# Examples that need a newer DRE than the released one the examples workflow installs: skipped
-# there (the CI job against this build runs them all).
-NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0)}
+         "slack-headline", "sftp-delivery", "password-statements", "multilingual",
+         "data-tests", "mcp")
+EXTERNAL = {"overdue-loans/oracle": "requires Oracle and user-supplied JDBC drivers",
+            "overdue-loans/sqlserver": "requires SQL Server and user-supplied JDBC drivers"}
+# Minimum versions for callers checking examples with an older installed CLI. CI uses the
+# exact core version declared by the checkout, or the source build for mixed engine changes.
+NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0)}
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True
 
@@ -184,7 +187,25 @@ def current(project, report, binding="default"):
     return json.loads((directory / "runs" / run_id / "run_results.json").read_text(encoding="utf-8"))
 
 
-def check(dre, plugins):
+def selected_examples(names):
+    discovered = {p.parent.relative_to(ROOT / "examples").as_posix()
+                  for p in (ROOT / "examples").rglob("dre_project.yml")
+                  if not {".steps", "target", "out", "dre_deps"}.intersection(p.relative_to(ROOT / "examples").parts)}
+    registered = set(NAMES) | EXTERNAL.keys()
+    if missing := discovered - registered:
+        raise ValueError("register new examples and their checks: " + ", ".join(sorted(missing)))
+    if stale := registered - discovered:
+        raise ValueError("registered examples missing from tree: " + ", ".join(sorted(stale)))
+    if not names or "*" in names:
+        return sorted(discovered)
+    selected = {p for p in discovered if any(p == n or p.startswith(n + "/") for n in names)}
+    unknown = [n for n in names if not any(p == n or p.startswith(n + "/") for p in discovered)]
+    if unknown:
+        raise ValueError("unknown example: " + ", ".join(unknown))
+    return sorted(selected)
+
+
+def check(dre, plugins, names):
     environment = dict(os.environ)
     environment.pop("DRE_TARGET", None)
     environment.pop("DRE_PROFILES_DIR", None)
@@ -203,7 +224,7 @@ def check(dre, plugins):
 
         def run(project, *args, target="dev"):
             command = [dre, *args, "--project-dir", str(project),
-                       "--profiles-dir", str(project)]
+                       "--profiles-dir", str(project / "profiles" if (project / "profiles").is_dir() else project)]
             if args[0] != "schedule":
                 command.extend(["--target", target])
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
@@ -214,7 +235,10 @@ def check(dre, plugins):
         version = subprocess.run([dre, "--version"], capture_output=True, text=True).stdout
         have = tuple(int(x) for x in version.split()[-1].split("-")[0].split(".")[:3])
         projects = {}
-        for name in NAMES:
+        for name in names:
+            if name in EXTERNAL:
+                print(f"{name}: not run locally; {EXTERNAL[name]}")
+                continue
             if have < NEEDS.get(name, (0, 0, 0)):
                 print(f"{name}: skipped, it needs DRE {'.'.join(map(str, NEEDS[name]))} (this is {have})")
                 continue
@@ -226,7 +250,19 @@ def check(dre, plugins):
             run(project, "validate")
             if name in ("slack-headline", "sftp-delivery"):
                 run(project, "validate", target="prod")
-            if name in ("tutorial", "regional-reports"):
+            if name == "data-tests":
+                run(project, "test", "checked")
+                run(project, "build", "--schedule", "checked_daily")
+                assert (project / "out/checked.csv").read_text(encoding="utf-8").startswith("execution,amount")
+                run(project, "run", "checked")
+            elif name == "mcp":
+                run(project, "run", "setup", "--no-deliver")
+                run(project, "run", "revenue", "--no-deliver")
+                result = current(project, "revenue")
+                sheet = workbook(project / result["outputs"][0]["path"])["revenue"]
+                assert_cell(sheet, "B2", 30.75)
+                assert_cell(sheet, "B3", 5)
+            elif name in ("tutorial", "regional-reports"):
                 run(project, "run", "--set", "all")
             else:
                 run(project, "run")
@@ -234,6 +270,8 @@ def check(dre, plugins):
             print(name + ": validated and ran locally")
 
         for name in ("tutorial", "regional-reports"):
+            if name not in projects:
+                continue
             for region, revenue in (("North", 1200), ("South", 900)):
                 book = workbook(projects[name] / "out" / (region + ".xlsx"))
                 assert_cell(book["Sales"], "A2", region)
@@ -241,33 +279,38 @@ def check(dre, plugins):
                 assert book["Sales"]["D2"][1] == "#,##0.00", "Revenue lost its number format"
             assert_cell(workbook(projects[name] / "out/North.xlsx")["Sales"], "D3", 800)
 
-        finance = workbook(projects["monthly-finance"] / "out/finance-2026-01.xlsx")
-        assert set(finance) == {"Detail", "Summary"}
-        assert_cell(finance["Detail"], "D6", 3500)
-        assert_cell(finance["Detail"], "F2", 120)
-        assert finance["Detail"]["F2"][2] == "ROUND(D2*0.1,2)"
-        assert_cell(finance["Detail"], "E2", "4000")
-        assert_cell(finance["Summary"], "B4", 3500)
-        presentation = workbook(projects["monthly-finance"] / "out/presentation-2026-01.xlsx")
-        assert_cell(presentation["Summary"], "A1", "Acme Corp - 2026-01")
-        assert_cell(presentation["Summary"], "B5", 2000)
-        assert_cell(presentation["Summary"], "B6", 1500)
-        assert presentation["Summary"]["B7"][2] == "SUM(B5:B6)", "Template total failed to expand"
+        if "monthly-finance" in projects:
+            finance = workbook(projects["monthly-finance"] / "out/finance-2026-01.xlsx")
+            assert set(finance) == {"Detail", "Summary"}
+            assert_cell(finance["Detail"], "D6", 3500)
+            assert_cell(finance["Detail"], "F2", 120)
+            assert finance["Detail"]["F2"][2] == "ROUND(D2*0.1,2)"
+            assert_cell(finance["Detail"], "E2", "4000")
+            assert_cell(finance["Summary"], "B4", 3500)
+            presentation = workbook(projects["monthly-finance"] / "out/presentation-2026-01.xlsx")
+            assert_cell(presentation["Summary"], "A1", "Acme Corp - 2026-01")
+            assert_cell(presentation["Summary"], "B5", 2000)
+            assert_cell(presentation["Summary"], "B6", 1500)
+            assert presentation["Summary"]["B7"][2] == "SUM(B5:B6)", "Template total failed to expand"
 
-        expected = (
-            "0000000042CLIENT A            000001234520260131\r\n"
-            "0000000099CLIENT B            000000678920260131\r\n")
-        assert (projects["bank-file"] / "out/payments.txt").read_bytes() == expected.encode()
+        if "bank-file" in projects:
+            expected = (
+                "0000000042CLIENT A            000001234520260131\r\n"
+                "0000000099CLIENT B            000000678920260131\r\n")
+            assert (projects["bank-file"] / "out/payments.txt").read_bytes() == expected.encode()
         for name in ("slack-headline", "sftp-delivery"):
+            if name not in projects:
+                continue
             record = latest(records(projects[name]))
             assert record["deliveries"] and all(
                 d["status"] == "not_delivered" for d in record["deliveries"])
-        headline = latest(records(projects["slack-headline"]))["output_results"][0]
-        assert headline["message"]["text"] == "Acme Corp revenue: $3,500"
-        run(projects["slack-headline"], "run", "--var", "threshold=4000")
-        skipped = current(projects["slack-headline"], "headline")
-        assert skipped["output_results"][0]["status"] == "skipped"
-        assert skipped["outputs"] == []
+        if "slack-headline" in projects:
+            headline = latest(records(projects["slack-headline"]))["output_results"][0]
+            assert headline["message"]["text"] == "Acme Corp revenue: $3,500"
+            run(projects["slack-headline"], "run", "--var", "threshold=4000")
+            skipped = current(projects["slack-headline"], "headline")
+            assert skipped["output_results"][0]["status"] == "skipped"
+            assert skipped["outputs"] == []
         statements = projects.get("password-statements")
         if statements:
             for member in ("1001", "1002"):
@@ -321,49 +364,51 @@ def check(dre, plugins):
                 else:
                     for word in expected:
                         assert "".join(word.split()) in text, (city, word, text)
-        sftp_record = latest(records(projects["sftp-delivery"]))
-        output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
-        assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"
+        if "sftp-delivery" in projects:
+            sftp_record = latest(records(projects["sftp-delivery"]))
+            output = projects["sftp-delivery"] / sftp_record["outputs"][0]["path"]
+            assert output.read_text(encoding="utf-8") == "client,revenue\nclient_a,3500.00\n"
 
-        spec = importlib.util.spec_from_file_location(
-            "tutorial_prepare", ROOT / "examples/tutorial/prepare.py")
-        helper = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(helper)
-        tutorial = scratch / "first-report"
-        subprocess.run([dre, "new", str(tutorial), "--profile", "sample"],
-                       env=environment, check=True, capture_output=True)
-        for step in range(1, 8):
-            helper.prepare(step, tutorial)
-            run(tutorial, "validate")
-            options = ["--set", "all"] if step >= 5 else []
-            if step == 3:
-                options.append("--accept-schema-change")
-            run(tutorial, "run", "sales", *options)
-            default = current(tutorial, "sales", "north" if step >= 5 else "default")
-            book = workbook(tutorial / default["outputs"][0]["path"])
-            detail = book["Sales" if step >= 3 else "sales"]
-            assert_cell(detail, "D2", 1200)
-            assert_cell(detail, "D3", 800)
-            if step < 5:
-                assert_cell(detail, "D4", 900)
-                assert_cell(detail, "D5", 600)
-            if step >= 3:
-                assert_cell(book["Summary"], "B2", 2000)
-            if step >= 4:
-                assert detail["D2"][1] == "#,##0.00"
-            if step == 2:
-                run(tutorial, "run", "sales", "--var", "month=2026-02")
-                override = current(tutorial, "sales")
-                overridden = workbook(tutorial / override["outputs"][0]["path"])
-                assert_cell(overridden["sales"], "D2", 1400)
-                assert_cell(overridden["sales"], "D3", 1100)
-            if step >= 6:
-                schedule = run(tutorial, "schedule", "ls")
-                assert "weekday_sales" in schedule
-            if step == 7:
-                assert (tutorial / "out/North.xlsx").exists()
-                assert (tutorial / "out/South.xlsx").exists()
-            print("tutorial step " + str(step) + ": output verified")
+        if "tutorial" in projects:
+            spec = importlib.util.spec_from_file_location(
+                "tutorial_prepare", ROOT / "examples/tutorial/prepare.py")
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+            tutorial = scratch / "first-report"
+            subprocess.run([dre, "new", str(tutorial), "--profile", "sample"],
+                           env=environment, check=True, capture_output=True)
+            for step in range(1, 8):
+                helper.prepare(step, tutorial)
+                run(tutorial, "validate")
+                options = ["--set", "all"] if step >= 5 else []
+                if step == 3:
+                    options.append("--accept-schema-change")
+                run(tutorial, "run", "sales", *options)
+                default = current(tutorial, "sales", "north" if step >= 5 else "default")
+                book = workbook(tutorial / default["outputs"][0]["path"])
+                detail = book["Sales" if step >= 3 else "sales"]
+                assert_cell(detail, "D2", 1200)
+                assert_cell(detail, "D3", 800)
+                if step < 5:
+                    assert_cell(detail, "D4", 900)
+                    assert_cell(detail, "D5", 600)
+                if step >= 3:
+                    assert_cell(book["Summary"], "B2", 2000)
+                if step >= 4:
+                    assert detail["D2"][1] == "#,##0.00"
+                if step == 2:
+                    run(tutorial, "run", "sales", "--var", "month=2026-02")
+                    override = current(tutorial, "sales")
+                    overridden = workbook(tutorial / override["outputs"][0]["path"])
+                    assert_cell(overridden["sales"], "D2", 1400)
+                    assert_cell(overridden["sales"], "D3", 1100)
+                if step >= 6:
+                    schedule = run(tutorial, "schedule", "ls")
+                    assert "weekday_sales" in schedule
+                if step == 7:
+                    assert (tutorial / "out/North.xlsx").exists()
+                    assert (tutorial / "out/South.xlsx").exists()
+                print("tutorial step " + str(step) + ": output verified")
         print("All example outputs verified; temporary projects removed on exit.")
 
 
@@ -371,5 +416,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dre", default="dre", help="CLI executable (built or installed)")
     parser.add_argument("--plugins-dir", type=Path, help="Prebuilt plugin directory")
+    parser.add_argument("--example", action="append", help="Run a named example (repeatable; default: all)")
+    parser.add_argument("--list", action="store_true", help="List selected projects without running DRE")
+    parser.add_argument("--selection-json", help="JSON array of selected example names from CI")
     args = parser.parse_args()
-    check(args.dre, args.plugins_dir)
+    try:
+        names = selected_examples(json.loads(args.selection_json) if args.selection_json else args.example)
+    except (ValueError, TypeError) as error:
+        parser.error(str(error))
+    if args.list:
+        print(json.dumps(names))
+    else:
+        check(args.dre, args.plugins_dir, names)
