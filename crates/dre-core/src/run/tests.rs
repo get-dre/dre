@@ -285,16 +285,22 @@ fn cancelling_a_run_stops_its_plugins_and_delivers_nothing() {
     let opts = options();
     let cancel = opts.cancel.clone();
     let stopper = ctx.host().clone();
-    let started = std::time::Instant::now();
-    let summary = std::thread::scope(|s| {
-        s.spawn(|| {
-            std::thread::sleep(Duration::from_millis(200));
+    let (summary, cancelled_at) = std::thread::scope(|s| {
+        let stop = s.spawn(|| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while calls_of(&host, "Execute").is_empty() {
+                assert!(std::time::Instant::now() < deadline, "query never started");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let cancelled_at = std::time::Instant::now();
             cancel.cancel();
             stopper.cancel();
+            cancelled_at
         });
-        run_once(&ctx, &project, &opts)
+        let summary = run_once(&ctx, &project, &opts);
+        (summary, stop.join().unwrap())
     });
-    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(cancelled_at.elapsed() < Duration::from_secs(10));
     assert!(host.cancelled());
     assert_eq!(summary.cancelled, Some(crate::engine::CancelReason::Interrupt));
     assert_ne!(summary.outcomes[0].status, Status::Success);
