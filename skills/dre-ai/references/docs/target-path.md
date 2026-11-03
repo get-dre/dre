@@ -131,4 +131,4 @@ See [CLI options](cli-reference.md#dre-history), [error codes](reference-error-c
 
 ---
 
-**Previous:** [Orchestration recipe](orchestration.md) · **Next:** [Managing plugins](managing-plugins.md)
+**Previous:** [Orchestration recipe](orchestration.md) · **Next:** [Data handling and local files](data-handling.md)

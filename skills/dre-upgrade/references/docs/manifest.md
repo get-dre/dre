@@ -168,6 +168,11 @@ Paths are relative to the project root with forward slashes on every OS. Keys ar
 are no timestamps, host names or absolute paths, so the same project gives the same bytes on any
 machine, and moving the target path doesn't change the file.
 
+Resolved query entries include `data_tests`: each test's name, arguments, execution/severity
+configuration and earlier-query `query_results` mapping. These declarations identify what will
+run; actual statuses, full failure counts, timings and optional evidence are recorded in
+`run_results.json` and structured run events.
+
 ### Generic integration context
 
 DRE 0.4.1 adds report `description`, opaque `meta`, and `meta_layers` with the originating file
@@ -235,7 +240,7 @@ selector or schedule that matches nothing exits 2 (see [exit codes](exit-codes.m
 
 ## `run_results.json`
 
-Each Binding a `dre run` executes writes `run/<report>/<set or default>/runs/<run id>/run_results.json`
+Each Binding that `dre run`, `dre test` or `dre build` executes writes `run/<report>/<set or default>/runs/<run id>/run_results.json`
 in the target path (`dre history <report> --latest --path` prints the latest run's folder; see
 [the target path](target-path.md)). It records its `run_id`, the report, Set, the inherited `profile`, the `target`, the
 `connections` its queries used, the schedule and its vars, every
@@ -248,6 +253,16 @@ and `status`: `delivered`, `not_delivered` for a `{deliver: false}` entry, or `f
 drift, the resolved
 `target_path`, and `manifest_checksum`: the SHA-256 of manifest bytes written by the caller,
 when supplied. A scoped CLI run sets it to null and does not hash or rebuild a stale manifest.
+
+For `dre test` and `dre build`, `tests` records each declared check that ran or was skipped:
+its query, name, one-based query declaration `query_ordinal` and test declaration `ordinal`,
+execution engine, severity, status
+(`pass`, `warn`, `fail`, `error`, `skipped`) and `duration_ms`. Executed checks record the full
+`failures` count; errors record an `error` cause, and skipped checks record `skip_reason`
+without a count. Enabled CSV evidence adds `failure_path`, `stored_failures` and
+`failures_truncated`. `skipped_queries`, when non-empty, lists later queries not started
+because a data test stopped the Binding. Both fields are omitted when empty; existing
+`dre run` behavior is unchanged.
 
 `project_errors`, when non-empty, lists the first discovered error in each report outside the
 run's selection: `{"path": "reports/other/other.yml", "code": "unknown-key", "message": "..."}`.

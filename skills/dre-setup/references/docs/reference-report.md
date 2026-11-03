@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.10/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.11/report.schema.json
 ```
 
 For copyable examples and common errors, see [Build and run reports](building-reports.md). The [glossary](glossary.md) defines DRE's terms.
@@ -49,12 +49,13 @@ A query with settings, instead of just its name.
 |---|---|---|---|
 | `query` (required) | string |  | The name of a `.sql` file under `reports/`, without folder or extension. |
 | `profile` | string |  | The connection this query runs on, over the report's, Set's, folder's and project's. Must agree with the `profile` of any source it uses. May use Jinja with `var()`, `env_var()`, `run.*` and `target.name`. |
-| `tab` | boolean | `true` | `false` runs the file only for what it does (temp tables, `SET`s) and discards any result, so it gets no tab. |
+| `tab` | boolean | `true` | `false` excludes the query from output tabs. A returned dataset remains available to local data tests; preparation-only statements need source tests. |
 | `tab_name` | string |  | The tab (sheet) name. Default: the file's name. Not allowed with `tab: false`. |
 | `anchor` | string |  | Where the data starts on the sheet (xlsx only). Default: `A1`. |
 | `header` | boolean |  | Whether to write the column names as the first row (xlsx only). Default: the output's `header`. |
 | `columns` | map |  | Per-column settings for this tab, by column name (xlsx only). |
 | `on_empty` | string |  | When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty. |
+| `data_tests` | list of map |  | Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding. |
 | `secret_columns` | list of string |  | Columns whose values are secrets (a PDF or zip password): values are masked as `*****` (one under 4 characters where it stands alone) in the console, logs, `run_results.json`, `rows.jsonl`, `--output-json` and previews. Never masked in delivered files or messages. |
 | `autofit` | boolean |  | Size this tab's columns from their content (xlsx only), over the output's `autofit`. Default: the output's, which is on. |
 | `style` | map (see below) |  | How this tab looks (xlsx only), over the output's `style`: `font`, `header`, `totals`, `banded_rows`, `borders`, and cell keys (`bold`, `fill`, ...) for every data cell. See the xlsx plugin page. |
@@ -204,6 +205,7 @@ A query with settings.
 | `query` (required) | string |  | The query's name. |
 | `tab` | boolean |  | Whether the query makes a tab. |
 | `tab_name` | string |  | The tab name. |
+| `data_tests` | list of map |  | Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |

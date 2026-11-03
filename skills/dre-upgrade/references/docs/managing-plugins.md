@@ -70,4 +70,4 @@ See [dependency keys](reference-dependencies.md), the [registry](registry.md), a
 
 ---
 
-**Previous:** [The target path](target-path.md) · **Next:** [Plugin packages, the registry and `dre.lock`](registry.md)
+**Previous:** [Data handling and local files](data-handling.md) · **Next:** [Plugin packages, the registry and `dre.lock`](registry.md)

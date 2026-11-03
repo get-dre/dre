@@ -46,7 +46,12 @@ New to a term? The [glossary](glossary.md) defines DRE's vocabulary and differen
   from one run of its queries, each from its own `queries:`. A `message` output turns the results
   into a short headline posted to Slack, Teams, Google Chat or an email body; `when:` sends an
   output only when the data calls for it. See [messages](messages.md).
-- **Logs**: each `dre run` of a report and Set writes `dre.log` in its own run folder
+- **Data tests**: query-level checks return failure rows. `dre run` skips them, `dre test` runs
+  fresh queries and checks without report formatting or delivery, and `dre build` checks before
+  producing reports. Local checks inspect saved rows through core-owned embedded DuckDB;
+  source checks inspect an explicit relation in the query's existing database session. See
+  [data tests](building-reports.md#check-returned-data-with-dre-test).
+- **Logs**: each `dre run`, `dre test` or `dre build` of a report and Set writes `dre.log` in its own run folder
   (`target/run/<report>/<set>/runs/<run id>/`), including the full SQL of each statement, the
   run's settings and every step; it goes when the run is pruned (`keep_runs`). Other commands
   write to the console only. `--log-format json` prints the same events as JSON lines.
@@ -59,7 +64,7 @@ New to a term? The [glossary](glossary.md) defines DRE's vocabulary and differen
   by default: compiled SQL, each run's output files, schema snapshots, `run_results.json` and the
   [manifest](manifest.md). `--target-path`, `DRE_TARGET_PATH` or `target_path:` in
   `dre_project.yml` move it (see [below](target-path.md)).
-- **Selecting**: `run`, `compile`, `validate` and `ls` take report names, `tag:<tag>`,
+- **Selecting**: `run`, `test`, `build`, `compile`, `validate` and `ls` take report names, `tag:<tag>`,
   `source:<source>` or `source:<source>.<table>`, folder names or dotted folder paths, as arguments (`dre run daily monthly`) or with `-s`/`--select`. Several
   match any of them: `-s daily monthly`, `-s daily,monthly`, or repeated `-s` (a semicolon works
   too, quoted: `-s "daily;monthly"`).

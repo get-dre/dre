@@ -44,6 +44,7 @@ Schedules, orchestrators and where runs write their files.
 - [Schedule occurrences: `dre schedule ls`](schedule-ls.md): When a project's schedules fire, as a table or a versioned JSON document with the command for each firing, and its JSON Schema.
 - [Orchestration recipe](orchestration.md): Self-host scheduling: load occurrences into a database after every merge, refresh weekly, and run what's due. With Airflow, Databricks Jobs and cron.
 - [The target path](target-path.md): The target path: where DRE writes compiled SQL, outputs, snapshots and the project manifest, how overlapping runs are kept apart, and how to clean it.
+- [Data handling and local files](data-handling.md): What DRE writes to disk, where it keeps generated files and caches, how long runs are retained, and how to clean them safely.
 
 ## Plugins
 
