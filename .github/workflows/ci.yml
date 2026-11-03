@@ -401,10 +401,8 @@ jobs:
   test:
     # macOS and Windows: on master (after the pull request's Linux run) and by hand, not on pull
     # requests. Releases are tagged on master, so a tagged commit has passed them.
-    # macOS starts every test in a new process and re-validates the test binary's signature on
-    # each start: ~0.6s for a 265MB debug binary, and that fixed cost, not CPU, is most of its
-    # run. Two partitions split the test list across two runners; each pays the shared setup and
-    # build again. Windows stays on one runner.
+    # Split macOS tests across two runners to reduce wall time. Each repeats setup and build;
+    # examples and doctests run on the first partition. Windows stays on one runner.
     needs: scope
     if: github.event_name != 'pull_request' && needs.scope.outputs.full == 'true'
     strategy:
