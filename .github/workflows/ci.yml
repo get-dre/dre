@@ -221,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        image: mirror.gcr.io/library/postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
           POSTGRES_USER: dre
           POSTGRES_PASSWORD: dre
@@ -241,7 +241,7 @@ jobs:
           --health-cmd "clickhouse-client --user dre --password dre --query 'SELECT 1'"
           --health-interval 5s --health-retries 20
       mailpit:
-        image: mirror.gcr.io/axllent/mailpit:latest@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+        image: mirror.gcr.io/axllent/mailpit:latest@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231
         env:
           MP_SMTP_AUTH_ACCEPT_ANY: "1"
           MP_SMTP_AUTH_ALLOW_INSECURE: "1"

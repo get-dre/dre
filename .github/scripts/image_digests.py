@@ -10,6 +10,10 @@ workflow runs `update` and proposes the changes as a pull request.
 
 `update` resolves digests with `docker buildx imagetools inspect` (the multi-platform index
 digest, as `docker pull` uses).
+
+A cron job can't push a workflow file (GitHub rejects the token), so `update` rewrites only
+`.github/scripts/ssh_bastion.sh`. Images in a workflow file are pinned some other way (`gha` or
+ByDigest in ci.yml); `update` fails and says what to do when a `name:tag@sha256:…` one moved.
 """
 
 import pathlib
@@ -18,7 +22,8 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-FILES = [*sorted((ROOT / ".github/workflows").glob("*.yml")), ROOT / ".github/scripts/ssh_bastion.sh"]
+WORKFLOWS = ROOT / ".github/workflows"
+REWRITTEN = [ROOT / ".github/scripts/ssh_bastion.sh"]
 NAME = r"[a-z0-9][a-z0-9._/-]*"
 PINNED = re.compile(rf"(?P<ref>{NAME}:[\w][\w.-]*)@(?P<digest>sha256:[0-9a-f]{{64}})")
 # An image reference in a workflow `image:` key or after `docker run`'s options.
@@ -73,21 +78,31 @@ def resolve(ref):
 def main():
     cmd = sys.argv[1] if len(sys.argv) == 2 else ""
     if cmd == "check":
-        bad = [(f, image) for f in FILES for image in unpinned(f.read_text())]
+        files = [*sorted(WORKFLOWS.glob("*.yml")), *REWRITTEN]
+        bad = [(f, image) for f in files for image in unpinned(f.read_text())]
         for f, image in bad:
             print(f"::error file={f.relative_to(ROOT)}::{image} isn't pinned by digest "
                   "(name:tag@sha256:…; see .github/scripts/image_digests.py)")
         sys.exit(1 if bad else 0)
     if cmd == "update":
-        refs = sorted({ref for f in FILES for ref, _ in pinned(f.read_text())})
+        refs = sorted({ref for f in REWRITTEN for ref, _ in pinned(f.read_text())})
         digests = {ref: resolve(ref) for ref in refs}
-        for f in FILES:
+        for f in REWRITTEN:
             text = f.read_text()
             new = replace_digests(text, digests)
             if new != text:
                 f.write_text(new)
                 print(f"updated {f.relative_to(ROOT)}")
-        return
+        stale = [f for f in sorted(WORKFLOWS.glob("*.yml"))
+                 if any(m["image"].split("@")[0] in digests
+                        and digests[m["image"].split("@")[0]] != pinned(m["image"])[0][1]
+                        for m in IMAGE_KEY.finditer(f.read_text())
+                        if "@sha256:" in m["image"])]
+        for f in stale:
+            print(f"::error file={f.relative_to(ROOT)}::an image digest here moved, and a cron "
+                  "job can't push a workflow change. Run .github/scripts/image_digests.py "
+                  "update locally and pin it by hand.")
+        sys.exit(1 if stale else 0)
     sys.exit(__doc__)
 
 
