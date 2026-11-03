@@ -244,6 +244,7 @@ impl Loader {
             style: None,
             on_empty: None,
             secret_columns: Vec::new(),
+            data_tests: Vec::new(),
         };
         if let Some(m) = m {
             for k in &m.unknown.0 {
@@ -263,6 +264,19 @@ impl Loader {
                     line,
                     format!("report `{report}`: `profile` of `{name}` must be a connection name"),
                 ),
+            }
+            if let Some(tests) = &m.data_tests {
+                match tests {
+                    Loose::Ok(tests) => {
+                        for entry in tests {
+                            match crate::data_tests::resolve(entry) {
+                                Ok(test) => e.data_tests.push(test),
+                                Err(message) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests: {message}")),
+                            }
+                        }
+                    }
+                    Loose::Bad(_) => self.diags.error(Code::InvalidField, file.clone(), line, format!("report `{report}`: query `{name}`: data_tests must be a list of single-name maps with arguments and config (execution: local or source and severity: error or warn; failure storage is not supported yet)")),
+                }
             }
             e.tab_name = match &m.tab_name {
                 None => None,
@@ -796,6 +810,7 @@ impl Loader {
             style: None,
             on_empty: None,
             secret_columns: Vec::new(),
+            data_tests: Vec::new(),
         };
         let base = BindingBase {
             profile: profile.clone(),

@@ -32,7 +32,8 @@ pub fn is_templated(s: &str) -> bool {
 
 /// Compile-check a template with MiniJinja's parser; returns `(line, message)` on a syntax error.
 pub fn check_syntax(name: &str, src: &str) -> Result<(), (Option<usize>, String)> {
-    match machinery::parse(src, name, Default::default()) {
+    let normalized = crate::test_blocks::normalize(src)?;
+    match machinery::parse(&normalized, name, Default::default()) {
         Ok(_) => Ok(()),
         Err(e) => Err((e.line(), e.detail().unwrap_or("syntax error").to_string())),
     }
@@ -129,6 +130,8 @@ impl Scan {
     /// Scan `src`. A lexing error (an unclosed string, say) ends the scan there; the syntax
     /// error itself is [`check_syntax`]'s to report.
     pub fn new(src: &str) -> Scan {
+        let normalized = crate::test_blocks::normalize(src).unwrap_or_else(|_| src.to_string());
+        let src = normalized.as_str();
         let tokens: Vec<(Token<'_>, usize)> = machinery::tokenize(src, false, Default::default())
             .map_while(Result::ok)
             .map(|(t, span)| (t, usize::from(span.start_line)))

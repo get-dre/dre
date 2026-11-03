@@ -24,6 +24,10 @@ pub enum Results {
     /// Run the queries (`dre run`).
     #[default]
     Query,
+    /// Run fresh queries and their data tests, without formatting or delivery.
+    Test,
+    /// Run fresh queries and data tests before formatting and delivery.
+    Build,
     /// Render the SQL and stop: `dre compile`, `dre validate`, `dre run --dry-run`.
     Compile,
     /// Render, then check each statement against the database without running it:
@@ -76,7 +80,16 @@ impl Mode {
 
     /// Whether destinations are rendered, and so need an entry for the run.
     pub(super) fn renders_destinations(&self) -> bool {
-        self.delivery != Delivery::Keep
+        self.results != Results::Test && self.delivery != Delivery::Keep
+    }
+
+    /// A data-testing command, recorded explicitly even when no tests are declared.
+    pub(super) fn command(&self) -> Option<&'static str> {
+        match self.results {
+            Results::Test => Some("test"),
+            Results::Build => Some("build"),
+            _ => None,
+        }
     }
 
     /// `--dry-run`, as `run_results.json`'s parameters record it.
@@ -110,6 +123,10 @@ pub(super) enum Deliver {
 pub(super) struct Stages {
     /// Lock the Binding, make its run folder and write `run_results.json`.
     pub record: bool,
+    /// Run attached data tests between queries.
+    pub tests: bool,
+    /// Format and deliver report outputs after querying.
+    pub format: bool,
     pub source: Source,
     /// Render each query just before it runs, so a template can look at what earlier queries
     /// made (`columns()` of a temp table): a run of a managed report. Otherwise every query
@@ -145,7 +162,7 @@ impl Stages {
         let source = match &mode.results {
             Results::Compile => Source::Compile,
             Results::Check => Source::Check,
-            Results::Query => Source::Query,
+            Results::Query | Results::Test | Results::Build => Source::Query,
             Results::Replay(dir) => Source::Replay(dir.clone()),
             Results::Retry(id) => Source::Retry(id.clone()),
         };
@@ -158,6 +175,8 @@ impl Stages {
         let preview = mode.preview;
         Stages {
             record: mode.records(),
+            tests: matches!(mode.results, Results::Test | Results::Build),
+            format: mode.results != Results::Test,
             interleave: mode.records() && managed,
             destinations: mode.renders_destinations(),
             row_limit: preview.filter(|_| !per_row),

@@ -63,10 +63,10 @@ impl BindingRun<'_> {
         let mut i = 0;
         let mut two_tabs = None;
         let queries = self.b.queries.clone();
-        for q in &queries {
+        for (query_index, q) in queries.iter().enumerate() {
             let conn = self.connection_of(&q.query)?;
             let renderer = self.renderer(Some(&conn))?;
-            let sts = self.render_query(&renderer, q, &conn, &mut two_tabs)?;
+            let sts = self.render_query(&renderer, q, query_index, &conn, &mut two_tabs)?;
             for w in renderer.take_warnings() {
                 self.ui.warn(&w);
             }
@@ -187,11 +187,13 @@ impl BindingRun<'_> {
             &format!("{at}  {what}"),
             Some(t.elapsed()),
         );
-        // The YAML decides the tabs; the result only has to match it. A tab with no rows
-        // still gets its column names.
-        let (schema, rows) = match (st.tab, exec) {
-            (true, Execution::Result { schema, rows }) => (schema, rows),
-            (true, Execution::NoResult { .. }) => {
+        // Keep final hidden datasets for local checks, without adding output tabs.
+        let (schema, rows) = match exec {
+            Execution::Result { schema, rows } if st.tab || (st.last && self.stages.tests) => (schema, rows),
+            Execution::NoResult { .. } if st.tab => {
+                if st.last && self.stages.tests {
+                    self.test_result(st, session)?;
+                }
                 return Err(Fail::new(
                     Code::NoResultSet,
                     format!(
@@ -200,9 +202,10 @@ impl BindingRun<'_> {
                     ),
                 ));
             }
-            (false, _) => {
+            _ => {
                 drop(writer);
                 let _ = std::fs::remove_file(&spool_path);
+                self.test_result(st, session)?;
                 return Ok(());
             }
         };
@@ -221,20 +224,26 @@ impl BindingRun<'_> {
                 ));
             }
             crate::secret_columns::register(&spool_path, &secret, self.ctx.secrets())?;
-            self.produced.push(Produced {
-                query: st.query.clone(),
-                connection: st.connection.clone(),
-                schema,
-                rows,
-                spool: spool_path,
-                name: String::new(),
-                anchor: None,
-                header: None,
-                columns: Default::default(),
-                autofit: None,
-                style: None,
-            });
+            if st.last && self.stages.tests {
+                self.test_results.insert(st.query.clone(), spool_path.clone());
+            }
+            if st.tab {
+                self.produced.push(Produced {
+                    query: st.query.clone(),
+                    connection: st.connection.clone(),
+                    schema,
+                    rows,
+                    spool: spool_path,
+                    name: String::new(),
+                    anchor: None,
+                    header: None,
+                    columns: Default::default(),
+                    autofit: None,
+                    style: None,
+                });
+            }
         }
+        self.test_result(st, session)?;
         Ok(())
     }
 
@@ -295,7 +304,7 @@ impl BindingRun<'_> {
                 .and_then(|conn| {
                     let renderer = self.renderer(Some(&conn))?;
                     let mut two = None;
-                    self.render_query(&renderer, q, &conn, &mut two)
+                    self.render_query(&renderer, q, 0, &conn, &mut two)
                 })
                 .map(|_| {
                     std::fs::read_to_string(self.compiled_dir.join(format!("{}.sha256", q.query)))

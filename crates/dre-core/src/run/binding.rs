@@ -95,6 +95,9 @@ impl<'a> BindingRun<'a> {
             started: Instant::now(),
             started_at,
             produced: Vec::new(),
+            test_results: BTreeMap::new(),
+            tests: Vec::new(),
+            skipped_queries: Vec::new(),
             outs: b.outputs.iter().map(|_| OutputRun::default()).collect(),
             processes,
             drift: Vec::new(),
@@ -258,6 +261,8 @@ impl<'a> BindingRun<'a> {
             error_code: error.as_ref().map(|e| e.code.clone()),
             error: error.map(|e| e.message),
             files: self.files().map(|(p, _)| p.clone()).collect(),
+            tests: self.tests.clone(),
+            skipped_queries: self.skipped_queries.clone(),
             summary: self.summary_line(),
             schedule: self.opts.schedule.clone(),
             schedule_vars: self.schedule_vars.clone(),
@@ -289,6 +294,19 @@ impl<'a> BindingRun<'a> {
             self.open_run_folder(g.took_over.as_ref());
         }
         let result = self.run_stages();
+        if let Err(error) = &result
+            && (error.code == Code::DataTestFailed || error.code == Code::DataTestError)
+        {
+            self.skip_after_test_failure(error.code.as_str());
+            for output in &mut self.outs {
+                output.status = Some(OutputStatus::Skipped);
+                output.reason = Some(if error.code == Code::DataTestError {
+                    "data_test_error".into()
+                } else {
+                    "data_test_failed".into()
+                });
+            }
+        }
         let result = self.stopped_by_cancel(result);
         let status = match (&result, &self.stages.source) {
             (Err(e), _) if e.code == Code::RunCancelled => Status::Cancelled,
@@ -412,6 +430,9 @@ impl<'a> BindingRun<'a> {
             Source::Query => self.query(&per_connection)?,
         }
         pool.close_all();
+        if !self.stages.format {
+            return Ok(());
+        }
         self.results()?;
         let (file_outs, message_outs) = self.make_files()?;
         self.check_drift()?;

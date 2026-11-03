@@ -151,6 +151,20 @@
         "$ref": "#/$defs/ResultSet"
       }
     },
+    "tests": {
+      "type": "array",
+      "description": "Data test outcomes, omitted for commands that do not run tests.",
+      "items": {
+        "$ref": "#/$defs/Outcome"
+      }
+    },
+    "skipped_queries": {
+      "type": "array",
+      "description": "Later queries not started because a data test failed or could not execute.",
+      "items": {
+        "type": "string"
+      }
+    },
     "outputs": {
       "type": "array",
       "description": "Every file every output wrote.",
@@ -371,6 +385,13 @@
         "dry_run": {
           "type": "boolean"
         },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`test` validates fresh results; `build` validates before producing reports. Omitted by `run`."
+        },
         "preview": {
           "type": [
             "integer",
@@ -465,6 +486,114 @@
         "connection",
         "rows",
         "columns"
+      ]
+    },
+    "Outcome": {
+      "type": "object",
+      "description": "One test's outcome, without retained failure-row values.",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "test": {
+          "type": "string"
+        },
+        "query_ordinal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "One-based query declaration position, including repeated query names.",
+          "format": "uint",
+          "minimum": 0
+        },
+        "ordinal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "One-based declaration position within the query, distinguishing repeated test names.",
+          "format": "uint",
+          "minimum": 0
+        },
+        "skip_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why a declared test did not run; absent for executed checks."
+        },
+        "execution": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status2"
+        },
+        "failures": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Full number of failure rows; absent for execution errors and skipped checks.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failure_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local diagnostic CSV, excluded from report outputs and deliveries."
+        },
+        "stored_failures": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of CSV example rows; absent if execution/export failed and the file may be partial.",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failures_truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the full failure count exceeds the retained examples."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "query",
+        "test",
+        "execution",
+        "severity",
+        "status",
+        "duration_ms"
+      ]
+    },
+    "Status2": {
+      "type": "string",
+      "description": "A successful check, a data failure, an execution error, or an unstarted declaration.",
+      "enum": [
+        "pass",
+        "fail",
+        "warn",
+        "error",
+        "skipped"
       ]
     },
     "OutputFile": {

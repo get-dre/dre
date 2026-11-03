@@ -63,6 +63,13 @@ pub enum RunEvent {
         detail: String,
         elapsed: Option<Duration>,
     },
+    /// One completed or skipped declaration, with machine-readable test metadata.
+    DataTest {
+        report: String,
+        set: Option<String>,
+        binding: String,
+        outcome: crate::data_tests::Outcome,
+    },
     Warn(String),
     BindingEnd(BindingOutcome),
     /// A Binding compiled: what it would do.

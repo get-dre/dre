@@ -29,6 +29,167 @@ dre clean                # remove the target folder
 dre system update        # update DRE itself
 ```
 
+## Check returned data with `dre test`
+
+Attach SQL checks to a query with `data_tests`. Define checks as `test` blocks under
+`macros/`. By default, checks inspect saved results locally using core-owned embedded DuckDB.
+The DuckDB source plugin is not needed for local validation; source queries still use their
+configured plugins and execute once. Each local check receives an opaque SQL `relation`, never a spool path.
+
+```yaml
+queries:
+  - query: invoices
+    data_tests:
+      - missing_identifier:
+          arguments: {column: invoice_id}
+          config: {execution: local, severity: error}
+output: {format: csv}
+```
+
+```sql
+-- macros/checks.sql
+{% test missing_identifier(relation, column) %}
+select * from {{ relation }} where {{ column }} is null
+{% endtest %}
+```
+
+```bash
+dre test monthly                   # fresh queries and attached checks, no report files or delivery
+dre test -s tag:regulatory --set all
+dre test --schedule close_monthly
+dre run monthly                    # report files and delivery; declared checks are skipped
+```
+
+Omit `config` for the defaults: local execution and error severity. Omit `arguments` when
+the macro needs only `relation`, or uses argument defaults. Ordinary project macros remain
+available as helpers. A Set's query entry can replace `data_tests`; an empty list disables
+inherited checks for that Binding. Test arguments are template values; the macro remains
+responsible for quoting identifiers and constructing SQL for the selected execution engine. Tests may also use explicit
+`test_<name>` macros. Plain macros remain helpers, and duplicate definitions are errors.
+Installed Git and local macro packages use the existing dependency declarations and `dre deps`;
+call their checks as `package.check_name`. Project and package test blocks can call helpers
+through their package namespace, such as `quality.predicate(column)`, including helpers in other
+macro files or packages. Tests can use argument defaults, helpers and
+`dispatch()`; local checks dispatch as DuckDB regardless of the query's source. Configure tests
+in YAML; runtime `config()` calls are unsupported. `dre validate` resolves definitions and
+checks signatures and template syntax without running test SQL or introspection. Column names
+and other data-dependent SQL errors are checked only when `dre test` executes the check.
+
+For database relations, select `execution: source` and supply `arguments.relation` explicitly:
+
+```yaml
+queries:
+  - query: prepare_invoices
+    profile: warehouse
+    tab: false
+    data_tests:
+      - missing_identifier:
+          arguments: {relation: temp_invoices, column: invoice_id}
+          config: {execution: source}
+```
+
+Source checks run after the query's last statement and before the next query, through that
+query's actual connection and existing session. They can read temporary tables and views,
+including preparation queries with no returned dataset. The source plugin must support sessions.
+Macros dispatch for the source dialect and may use its native SQL functions. DRE neither infers
+a relation from preparation SQL nor uploads saved results to the source. Source checks validate
+the database state they read, not a separately returned dataset. They still consume database
+compute; a temporary view can re-evaluate its SQL. Normal connection permissions apply, and
+an error does not roll back earlier preparation side effects.
+
+Hidden queries (`tab: false`) still provide their returned datasets to local checks, without
+adding report tabs. Empty returned datasets retain their schema and run checks before any
+`on_empty` output policy. A statement returning no dataset cannot be checked locally: use
+an explicit result-producing query, or a source test with an explicit relation.
+
+For reconciliation, attach a local test to the later query and map macro arguments to earlier
+query names with `query_results`. These names must exist earlier in the same Binding;
+forward references and access to other Bindings are errors. Each mapped argument receives an
+opaque DuckDB relation over the saved rows. Original source SQL does not run again.
+`query_results` is separate from `arguments` and existing lookup references, and is unavailable
+for source tests. Tolerances remain ordinary macro arguments:
+
+```yaml
+queries:
+  - {query: expected_totals, tab: false}
+  - query: actual_totals
+    data_tests:
+      - reconcile:
+          query_results: {expected: expected_totals}
+          arguments: {tolerance: 0.01}
+```
+
+```sql
+{% test reconcile(relation, expected, tolerance) %}
+select 1 where abs((select sum(amount) from {{ relation }})
+                - (select sum(amount) from {{ expected }})) > {{ tolerance }}
+{% endtest %}
+```
+
+A test returns failure rows: zero passes; any positive count fails. DRE runs every check on
+the current query when checks find bad data, then stops that Binding before its next query.
+Broken SQL or a missing runtime column stops the Binding immediately. Other selected Bindings
+continue. Any failed Binding makes the command exit nonzero. `run_results.json` records the
+query, test, execution target, severity, status, duration and full failure count; an execution
+error records its cause instead of a count. By default, tests do not retain failure-row samples.
+
+Local checks inspect unformatted Arrow values and never change the saved result. Data moves in
+batches into a disposable, disk-backed DuckDB workspace under the run's spool directory,
+with a configured 512 MB DuckDB memory budget, one DuckDB thread and a 2 GB spill limit per
+check. The memory setting is not a hard process limit: Arrow batches and engine allocations
+can take memory beyond that budget. The spill limit covers temporary spill files, not the
+disk-backed imported tables. A check that exhausts its available resources returns an execution error.
+Normal completion, failure and cancellation remove the database and spill files.
+The first implementation accepts scalar integer, floating-point, boolean, string, binary,
+Date32, timezone-free timestamp and supported decimal results; unsupported Arrow types fail
+explicitly rather than being silently coerced. Decimals must use Decimal128 with precision
+at most 38 and a nonnegative scale. Timezone-bearing timestamps, nested types and Arrow
+extension types are rejected. Date32 and timezone-free timestamps retain their stored units
+and precision; result spools and report output values keep their original Arrow types.
+
+`dre validate` checks declarations and test definitions without executing report or test SQL.
+Data-dependent checks run under `dre test` and `dre build`.
+
+Diagnostics identify the Report, Set (when present), query, test declaration position,
+local/source execution, severity and elapsed time. `PASS`, `WARN`, `FAIL`, `ERROR` and `SKIP`
+remain readable without color. A failure count means rows returned by the check: a duplicate
+check can return one row per duplicated key rather than one per invalid input row.
+Execution errors show their cause without a fabricated failure count. Skipped checks have no
+failure count, and later queries are listed as skipped even when they declare no tests.
+The final `Tests` summary separates passing checks, warnings, data failures, execution errors
+and skipped checks across all selected Bindings.
+
+`--log-format json` emits a `data_test` event with `report`, `set`, `binding` and a structured
+`test` outcome. `binding_end` includes `tests` and `skipped_queries`; the final `test_summary`
+event counts each test status. Consumers can use those records without parsing text.
+`run_results.json` records the same test outcomes and skipped query names. `ordinal` is the
+one-based declaration position within its query, and `query_ordinal` identifies the query
+declaration position, so repeated query or test names remain distinct.
+`skip_reason` identifies the earlier data-test failure or execution error that blocked a check.
+Default diagnostics contain counts and causes, never failure-row samples.
+
+### Retain failure examples
+
+Set `config: {store_failures: true, failure_limit: 1000}` on a test to retain CSV
+examples. Storage is off by default. `failure_limit` is an integer from 1 to
+9223372036854775807 and caps only CSV rows; the check executes once and counts all
+failures. Both engines write under the configured Target path, isolated by run,
+Binding, query and declaration order. Diagnostics and `run_results.json` record
+`failure_path`, `stored_failures` and `failures_truncated` when a CSV exists. Passing
+tests create no CSV. Evidence survives failed or cancelled runs and disposable
+workspace cleanup. `dre clean` removes it with other Target artifacts. Evidence
+never joins report outputs, attachments or deliveries. Local CSV storage requires
+no source write permissions.
+
+The [evidence sink](https://github.com/get-dre/dre/blob/master/crates/dre-core/src/run/data_tests.rs) uses Arrow's existing
+CSV writer: UTF-8 text, a header, comma separators, doubled quotes inside quoted
+fields, and LF line endings. Nulls become empty fields, losing the distinction from
+empty strings. Scalars become text without Arrow type or precision metadata;
+unsupported nested types cause a test execution error. Without SQL ordering,
+examples can differ between runs. Spreadsheets may infer dates, round identifiers
+or interpret values beginning with `=` as formulas. Import evidence as text when
+investigating untrusted values or exact identifiers.
+
 ## Run a selection when another report is broken
 
 `dre run monthly` loads project-wide configuration and dependencies, then parses and checks the

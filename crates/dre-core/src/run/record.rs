@@ -252,10 +252,14 @@ impl BindingRun<'_> {
                 .filter(|q| q.tab && o.feeds(&q.query))
                 .map(|q| q.query.clone())
                 .collect();
-            let status = match (run.status, status) {
-                (Some(s), _) => s,
-                (None, Status::Error) => OutputStatus::Failed,
-                (None, _) => OutputStatus::Kept,
+            let status = if !self.stages.format {
+                OutputStatus::Skipped
+            } else {
+                match (run.status, status) {
+                    (Some(s), _) => s,
+                    (None, Status::Error) => OutputStatus::Failed,
+                    (None, _) => OutputStatus::Kept,
+                }
             }
             .as_str();
             output_results.push(run_results::OutputResult {
@@ -341,6 +345,8 @@ impl BindingRun<'_> {
                     columns: p.schema.fields().iter().map(|f| f.name().clone()).collect(),
                 })
                 .collect(),
+            tests: self.tests.clone(),
+            skipped_queries: self.skipped_queries.clone(),
             outputs,
             output_results,
             delivery,

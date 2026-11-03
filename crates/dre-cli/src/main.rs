@@ -65,6 +65,10 @@ enum Command {
     Validate(ValidateArgs),
     /// Run reports: render, execute, format into the target folder, and deliver.
     Run(Box<RunArgs>),
+    /// Run fresh report queries and data tests, without report formatting or delivery.
+    Test(Box<CheckedArgs>),
+    /// Run fresh report queries and data tests before formatting and delivering report outputs.
+    Build(Box<CheckedArgs>),
     /// Render reports' SQL into <target path>/compiled/ without running it, and list the files.
     Compile(CompileArgs),
     /// Run one read-only query on a configured connection and write typed JSON rows.
@@ -184,6 +188,52 @@ struct OutputFile {
 }
 
 #[derive(Args)]
+struct CheckedArgs {
+    /// Reports, tags or folders to select; every report when omitted.
+    selector: Vec<String>,
+    /// Select reports by name, tag or folder, as with `dre run`.
+    #[arg(short = 's', long = "select", value_name = "SELECTOR", num_args = 1.., action = clap::ArgAction::Append, conflicts_with = "selector")]
+    select: Vec<String>,
+    #[command(flatten)]
+    project: ProjectArgs,
+    /// Select one Set, or `all` of a report's Sets.
+    #[arg(long)]
+    set: Option<String>,
+    /// Run the Bindings selected by this named Schedule, with its vars.
+    #[arg(long, value_name = "NAME")]
+    schedule: Option<String>,
+    /// Override the inherited connection; query and source connections still win.
+    #[arg(long)]
+    profile: Option<String>,
+    /// Stop after this duration (for example `2h` or `90m`).
+    #[arg(long, value_name = "DURATION")]
+    timeout: Option<String>,
+    /// How many runs to keep, including the current run.
+    #[arg(long, value_name = "N")]
+    keep_runs: Option<String>,
+    /// How many Bindings may run at once.
+    #[arg(long, value_name = "N")]
+    threads: Option<String>,
+}
+
+impl From<CheckedArgs> for RunArgs {
+    fn from(a: CheckedArgs) -> Self {
+        Self {
+            selector: a.selector,
+            select: a.select,
+            project: a.project,
+            set: a.set,
+            schedule: a.schedule,
+            profile: a.profile,
+            timeout: a.timeout,
+            keep_runs: a.keep_runs,
+            threads: a.threads,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Args, Default)]
 struct RunArgs {
     /// What to run: report names, `tag:<tag>`, folder names or dotted folder paths
     /// (`dre run a b` runs both). Runs every report when omitted.
@@ -343,7 +393,7 @@ struct DepsArgs {
     profiles_dir: Option<PathBuf>,
 }
 
-#[derive(Args)]
+#[derive(Args, Default)]
 struct ProjectArgs {
     /// Project directory (default: the current directory).
     #[arg(long, default_value = ".")]
@@ -471,6 +521,7 @@ fn main() -> ExitCode {
     let project_args = match &cli.command {
         Command::Validate(a) => Some(&a.project),
         Command::Run(a) => Some(&a.project),
+        Command::Test(a) | Command::Build(a) => Some(&a.project),
         Command::Compile(a) => Some(&a.project),
         _ => None,
     };
@@ -497,7 +548,9 @@ fn main() -> ExitCode {
         Command::Unlock(a) => history::unlock(&ctx, a),
         Command::Release(a) => release(&ctx, a, &printer),
         Command::Validate(a) => validate(&ctx, a, &printer),
-        Command::Run(a) => run(&ctx, *a, printer),
+        Command::Run(a) => run(&ctx, *a, printer, dre_core::run::Results::Query),
+        Command::Test(a) => run(&ctx, (*a).into(), printer, dre_core::run::Results::Test),
+        Command::Build(a) => run(&ctx, (*a).into(), printer, dre_core::run::Results::Build),
         Command::Compile(a) => compile(&ctx, a, printer),
         Command::Query(a) => query(&ctx, a, &printer),
         Command::Catalog(a) => catalog(&ctx, a, &printer),
@@ -1110,7 +1163,12 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
     }
 }
 
-fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
+fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, results: dre_core::run::Results) -> ExitCode {
+    let command = match results {
+        dre_core::run::Results::Test => "test",
+        dre_core::run::Results::Build => "build",
+        _ => "run",
+    };
     // Signals from the start: one that arrives while the project loads still cancels the run.
     let cancel = dre_core::engine::CancelToken::new();
     signals::watch(cancel.clone(), ctx.host().clone());
@@ -1128,14 +1186,21 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
             vars: a.project.vars.iter().cloned().collect(),
             output_name: a.output_name,
             output_path: a.output_path,
-            mode: run_mode(
-                a.dry_run,
-                a.from_results,
-                a.retry_failed,
-                a.hold,
-                a.no_deliver,
-                a.preview,
-            ),
+            mode: if results != dre_core::run::Results::Query {
+                dre_core::run::Mode {
+                    results,
+                    ..Default::default()
+                }
+            } else {
+                run_mode(
+                    a.dry_run,
+                    a.from_results,
+                    a.retry_failed,
+                    a.hold,
+                    a.no_deliver,
+                    a.preview,
+                )
+            },
             output_json: a.output_json,
             rows: dre_core::run::RowOptions {
                 only_keys: a.only_keys,
@@ -1188,7 +1253,7 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer) -> ExitCode {
         };
         printer.error(&format!("the run {what}{not_run}"));
     }
-    printer.finish("run");
+    printer.finish(command);
     ExitCode::from(summary.exit_code())
 }
 

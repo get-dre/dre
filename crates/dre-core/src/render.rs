@@ -540,9 +540,25 @@ impl Renderer {
         let mut templates = vec![(MACROS.to_string(), combined, spans, !names.is_empty())];
         for p in &cfg.templates.packages {
             let files: Vec<(PathBuf, PathBuf)> = p.macros.iter().map(|m| (m.clone(), display(m))).collect();
-            let (src, _, spans) = combine(&files)?;
+            let (src, names, spans) = combine(&files)?;
             let t = package_template(&p.name);
             import.push_str(&format!("{{% import \"{t}\" as {} %}}", p.name));
+            // Imported macros do not inherit the caller's imports; expose package helpers there too.
+            env.add_global(
+                p.name.clone(),
+                Value::from_pairs(
+                    names
+                        .into_iter()
+                        .filter(|name| !name.starts_with('_'))
+                        .map(|name| {
+                            let callable = Value::from_object(Dispatched {
+                                template: t.clone(),
+                                name: name.clone(),
+                            });
+                            (name, callable)
+                        }),
+                ),
+            );
             templates.push((t, src, spans, true));
         }
         add_ref(&mut env, cfg.root, cfg.templates.sql.clone(), lookups, &import);
@@ -920,19 +936,37 @@ fn combine(
     let mut combined = String::new();
     let mut names = Vec::new();
     let mut spans = Vec::new();
+    let mut defined = BTreeMap::new();
     for (read, shown) in files {
         let src = std::fs::read_to_string(read).map_err(|e| RenderError {
             file: shown.clone(),
             line: None,
             message: format!("can't read macro file: {e}"),
         })?;
+        let src = crate::test_blocks::normalize(&src).map_err(|(line, message)| RenderError {
+            file: shown.clone(),
+            line,
+            message,
+        })?;
+        let definitions = crate::test_blocks::definitions(&src).map_err(|(line, message)| RenderError {
+            file: shown.clone(),
+            line,
+            message,
+        })?;
+        for (name, definition) in definitions {
+            if let Some(previous) = defined.insert(name.clone(), shown.clone()) {
+                return Err(RenderError {
+                    file: shown.clone(),
+                    line: Some(definition.line),
+                    message: format!(
+                        "duplicate macro/test definition `{name}`; also defined in {}",
+                        previous.display()
+                    ),
+                });
+            }
+            names.push(name);
+        }
         let start = combined.matches('\n').count() + 1;
-        names.extend(
-            crate::preflight::Scan::new(&src)
-                .macros()
-                .iter()
-                .map(|d| d.name.clone()),
-        );
         combined.push_str(&src);
         if !combined.ends_with('\n') {
             combined.push('\n');

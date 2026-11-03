@@ -182,7 +182,7 @@
         },
         "tab": {
           "type": "boolean",
-          "description": "`false` runs the file only for what it does (temp tables, `SET`s) and discards any result, so it gets no tab.",
+          "description": "`false` excludes the query from output tabs. A returned dataset remains available to local data tests; preparation-only statements need source tests.",
           "default": true
         },
         "tab_name": {
@@ -244,6 +244,21 @@
         "on_empty": {
           "description": "When this query returns no rows: `continue` keeps its empty tab or section, `skip` leaves its tab (or per-query file) out, `fail` fails the run. Wins over the output's `on_empty`. Default: the output decides once every query is empty.",
           "$ref": "#/$defs/OnEmpty"
+        },
+        "data_tests": {
+          "type": "array",
+          "description": "Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding.",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/Settings"
+            },
+            "minProperties": 1,
+            "maxProperties": 1,
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"
+            }
+          }
         },
         "secret_columns": {
           "type": "array",
@@ -369,6 +384,68 @@
           "const": "fail"
         }
       ]
+    },
+    "Settings": {
+      "type": "object",
+      "description": "One named declaration's arguments and behavior.",
+      "properties": {
+        "arguments": {
+          "type": "object",
+          "description": "Keyword arguments passed to the test macro. Local tests receive relation automatically.",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "query_results": {
+          "type": "object",
+          "description": "Earlier saved query results in this Binding, keyed by macro argument. Local tests only; hidden and empty datasets are supported.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "config": {
+          "description": "Execution and severity settings; defaults to local execution and error severity.",
+          "$ref": "#/$defs/Config",
+          "default": {
+            "execution": "local",
+            "severity": "error",
+            "store_failures": false,
+            "failure_limit": 1000
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Config": {
+      "type": "object",
+      "description": "Data-test execution and severity options.",
+      "properties": {
+        "execution": {
+          "type": "string",
+          "description": "The test engine: `local` checks saved rows; `source` checks an explicit relation.",
+          "pattern": "^(local|source)$",
+          "default": "local"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Data-failure severity. `warn` records bad data without failing the Binding.",
+          "pattern": "^(error|warn)$",
+          "default": "error"
+        },
+        "store_failures": {
+          "type": "boolean",
+          "description": "Retain local CSV examples under the Target path. Disabled by default; never delivered as report output.",
+          "default": false
+        },
+        "failure_limit": {
+          "type": "integer",
+          "description": "Maximum CSV example rows (default 1000), not a limit on the check or its full failure count. Integer from 1 to 9223372036854775807.",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "additionalProperties": false
     },
     "output": {
       "type": "object",
@@ -711,6 +788,21 @@
                   "tab_name": {
                     "type": "string",
                     "description": "The tab name."
+                  },
+                  "data_tests": {
+                    "type": "array",
+                    "description": "Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/$defs/Settings"
+                      },
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "propertyNames": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"
+                      }
+                    }
                   },
                   "on_empty": {
                     "enum": [

@@ -81,6 +81,32 @@ struct Rows {
     bar: Option<ProgressBar>,
 }
 
+#[derive(Default, serde::Serialize)]
+struct TestCounts {
+    pass: usize,
+    warn: usize,
+    fail: usize,
+    error: usize,
+    skipped: usize,
+}
+
+impl TestCounts {
+    fn total(&self) -> usize {
+        self.pass + self.warn + self.fail + self.error + self.skipped
+    }
+
+    fn record(&mut self, status: dre_core::data_tests::Status) {
+        use dre_core::data_tests::Status;
+        match status {
+            Status::Pass => self.pass += 1,
+            Status::Warn => self.warn += 1,
+            Status::Fail => self.fail += 1,
+            Status::Error => self.error += 1,
+            Status::Skipped => self.skipped += 1,
+        }
+    }
+}
+
 struct Inner {
     /// What every line masks: the command's secrets.
     secrets: Secrets,
@@ -107,6 +133,7 @@ struct Inner {
     started: Instant,
     succeeded: usize,
     failed: usize,
+    tests: TestCounts,
 }
 
 /// Renders run events. Cheap to clone; clones share state (plugin log lines arrive on threads).
@@ -144,6 +171,7 @@ impl Printer {
                 started: Instant::now(),
                 succeeded: 0,
                 failed: 0,
+                tests: TestCounts::default(),
             })),
         }
     }
@@ -301,6 +329,17 @@ impl Printer {
             let (ok, failed) = (i.succeeded, i.failed);
             let secs = i.started.elapsed().as_secs_f64();
             let text = format!("'{what}' in {} · {ok} succeeded, {failed} failed", fmt_secs(secs));
+            if i.tests.total() > 0 {
+                let tests = &i.tests;
+                let summary = format!("{} total · {} pass, {} warn, {} fail, {} error, {} skipped",
+                    tests.total(), tests.pass, tests.warn, tests.fail, tests.error, tests.skipped);
+                i.file_log("INFO", &format!("Tests {summary}"));
+                if i.format == LogFormat::Json {
+                    i.json(json!({"event": "test_summary", "total": i.tests.total(), "tests": i.tests}));
+                } else {
+                    i.print(Tone::Note, "Tests", &summary);
+                }
+            }
             i.file_log("INFO", &format!("Finished {text}"));
             if i.format == LogFormat::Json {
                 i.json(json!({"event": "finished", "command": what, "succeeded": ok, "failed": failed, "elapsed_ms": (secs * 1000.0) as u64}));
@@ -588,6 +627,18 @@ impl dre_core::engine::EventSink for Printer {
                 detail,
                 elapsed,
             } => self.on_step(level, &verb, &detail, elapsed),
+            RunEvent::DataTest {
+                report,
+                set,
+                binding,
+                outcome,
+            } => self.with(|i| {
+                i.tests.record(outcome.status);
+                if i.format == LogFormat::Json {
+                    i.json(json!({"event": "data_test", "report": report, "set": set,
+                        "binding": binding, "test": outcome}));
+                }
+            }),
             RunEvent::Warn(msg) => self.on_warn(&msg),
             RunEvent::BindingEnd(o) => self.on_binding_end(&o),
             RunEvent::Compiled(p) => self.on_compiled(&p),
@@ -822,7 +873,8 @@ impl Printer {
             i.in_binding = false;
             if i.format == LogFormat::Json {
                 i.json(json!({
-                    "event": "binding_end", "report": o.report, "set": o.set, "status": o.status,
+                    "event": "binding_end", "report": o.report, "set": o.set, "binding": o.binding, "status": o.status,
+                    "tests": o.tests, "skipped_queries": o.skipped_queries,
                     "elapsed_ms": o.elapsed.as_millis() as u64, "error": o.error,
                     "error_code": o.error_code, "error_kind": o.error_code.as_ref().map(|c| c.kind()), "summary": o.summary,
                     "files": o.files, "schedule": o.schedule, "schedule_vars": o.schedule_vars, "vars": o.vars,
