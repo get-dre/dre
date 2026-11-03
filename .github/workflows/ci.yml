@@ -8,8 +8,7 @@ on:
   # By hand, e.g. to run macOS and Windows on a branch: `gh workflow run ci.yml --ref <branch>`.
   workflow_dispatch:
 
-# A new push to a pull request cancels its older run. Runs on master all finish: they save the
-# build caches every other run restores.
+# PR pushes cancel older CI runs. Started master runs finish so they can save trusted caches.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -525,6 +524,7 @@ jobs:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
       - name: Go tests
+        if: matrix.partition == 1
         shell: bash
         run: for m in go/*/; do (cd "$m" && go test ./...) || exit 1; done
       # The Go packages; the Rust tests check them through the same host code core uses.
