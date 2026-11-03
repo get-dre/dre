@@ -345,8 +345,10 @@ fn extension_handoff_forwards_arguments_without_treating_it_as_a_plugin() {
 }
 
 /// A signing key for test registries, trusted by debug builds through `DRE_TEST_EXTENSION_KEY`.
+#[cfg(unix)]
 struct Signer(minisign::KeyPair);
 
+#[cfg(unix)]
 impl Signer {
     fn new() -> Signer {
         Signer(minisign::KeyPair::generate_unencrypted_keypair().unwrap())
@@ -367,6 +369,7 @@ impl Signer {
 }
 
 /// A one-extension registry in `p` serving `companion` (already written) as `dre-mcp`.
+#[cfg(unix)]
 fn companion_registry(p: &TestProject, version: &str, minisig: Option<String>, url: Option<&str>) {
     let digest = dre_core::checksum::sha256_hex(p.read("companion").as_bytes());
     let url = url.map_or_else(|| p.path("companion").display().to_string(), str::to_owned);
