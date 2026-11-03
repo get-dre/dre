@@ -29,7 +29,8 @@ chrono-tz.workspace = true
 calamine = { version = "0.37", features = ["dates"] }
 csv = "1"
 dre-protocol.workspace = true
-arrow.workspace = true
+arrow = { workspace = true, features = ["ffi"] }
+duckdb = { workspace = true, features = ["appender-arrow"] }
 ureq = "3"
 sha2 = "0.11"
 flate2 = "1"

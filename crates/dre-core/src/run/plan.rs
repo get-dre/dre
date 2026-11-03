@@ -125,6 +125,8 @@ fn select<'a>(
                     error: Some(e),
                     error_code: Some(Code::InvalidSelector.into()),
                     files: Vec::new(),
+                    tests: Vec::new(),
+                    skipped_queries: Vec::new(),
                     summary: String::new(),
                     schedule: opts.schedule.clone(),
                     schedule_vars: None,

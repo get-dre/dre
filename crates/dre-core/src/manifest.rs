@@ -178,6 +178,9 @@ pub struct ManifestQuery {
     pub depends_on: Option<DependsOn>,
     /// Whether its result becomes a tab (false: run for its effects only).
     pub tab: bool,
+    /// Resolved query data tests, in declaration order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub data_tests: Vec<crate::data_tests::DataTest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tab_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -470,6 +473,7 @@ fn query(q: &QueryEntry, parsed: Option<&crate::parse::ParsedQuery>) -> Manifest
             sources: p.sources.clone(),
         }),
         tab: q.tab,
+        data_tests: q.data_tests.clone(),
         tab_name: q.tab_name.clone(),
         anchor: q.anchor.clone(),
         header: q.header,

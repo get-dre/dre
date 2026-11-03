@@ -69,6 +69,12 @@ pub struct RunResults {
     pub duration_ms: u64,
     /// Each result set its queries produced, in order.
     pub result_sets: Vec<ResultSet>,
+    /// Data test outcomes, omitted for commands that do not run tests.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<crate::data_tests::Outcome>,
+    /// Later queries not started because a data test failed or could not execute.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_queries: Vec<String>,
     /// Every file every output wrote.
     pub outputs: Vec<OutputFile>,
     /// One entry per output, in declared order.
@@ -166,6 +172,9 @@ pub struct Params {
     pub output_name: Option<String>,
     pub output_path: Option<String>,
     pub dry_run: bool,
+    /// `test` validates fresh results; `build` validates before producing reports. Omitted by `run`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<&'static str>,
     pub preview: Option<u64>,
     pub accept_schema_change: bool,
 }

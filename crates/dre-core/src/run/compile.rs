@@ -46,10 +46,10 @@ impl BindingRun<'_> {
         // Reported after the unmanaged-report check, which matters more.
         let mut two_tabs: Option<String> = None;
         let queries = self.b.queries.clone();
-        for q in &queries {
+        for (query_index, q) in queries.iter().enumerate() {
             let conn = self.connection_of(&q.query)?;
             let renderer = self.renderer(Some(&conn))?;
-            statements.extend(self.render_query(&renderer, q, &conn, &mut two_tabs)?);
+            statements.extend(self.render_query(&renderer, q, query_index, &conn, &mut two_tabs)?);
         }
         self.render_destinations().map_err(|e| e.or(Code::RenderFailed))?;
         for r in self.renderers.values() {
@@ -99,6 +99,7 @@ impl BindingRun<'_> {
         &mut self,
         renderer: &Renderer,
         q: &QueryEntry,
+        query_index: usize,
         connection: &str,
         two_tabs: &mut Option<String>,
     ) -> Result<Vec<Statement>, Fail> {
@@ -143,6 +144,16 @@ impl BindingRun<'_> {
         // 2. Split. One file makes at most one tab, from its last statement, so any earlier
         // SELECT would be lost: that's an error, not a guess.
         let parts = sqlsplit::split(&sql);
+        if self.stages.tests && !q.data_tests.is_empty() && parts.is_empty() {
+            return Err(Fail::new(
+                Code::DataTestError,
+                format!(
+                    "{}: query `{}` has attached data tests but no executable statements; add a result-producing statement for local tests or preparation SQL for source tests",
+                    q.path.display(),
+                    q.query
+                ),
+            ));
+        }
         if q.tab && parts.is_empty() {
             return Err(format!(
                 "{}: `{}` makes a tab but has no statements; add a query, or `tab: false` if it's meant to be empty",
@@ -164,7 +175,9 @@ impl BindingRun<'_> {
                 ));
             }
             out.push(Statement {
+                last,
                 query: q.query.clone(),
+                query_index,
                 connection: connection.to_string(),
                 file: q.path.clone(),
                 line,

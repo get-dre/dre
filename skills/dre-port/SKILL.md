@@ -3,8 +3,8 @@ name: dre-port
 description: Guided migration of reporting to DRE from SAS source (.sas and dependencies), SSRS/Power BI paginated (.rdl), Crystal definition exports or SQL. Inventories dependencies and semantic gaps, translates supported logic to database SQL and tabular outputs, and validates against business expectations or optional CSV/XLSX reference outputs. Use when porting legacy reports, assessing a folder, or checking output differences. SAS execution and binary Crystal .rpt import are outside this workflow. If the user pastes a password, token or key, never write it to a file or command; explain the leak, give rotate steps, and use an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.1.0"
-  dre: ">=0.9.0, <0.11.0"
+  version: "5.2.0"
+  dre: ">=0.9.0, <0.12.0"
 ---
 
 # Port a report to DRE

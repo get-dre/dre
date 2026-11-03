@@ -342,6 +342,13 @@
           "type": "boolean",
           "description": "Whether its result becomes a tab (false: run for its effects only)."
         },
+        "data_tests": {
+          "type": "array",
+          "description": "Resolved query data tests, in declaration order.",
+          "items": {
+            "$ref": "#/$defs/DataTest"
+          }
+        },
         "tab_name": {
           "type": [
             "string",
@@ -384,6 +391,72 @@
       "required": [
         "sources"
       ]
+    },
+    "DataTest": {
+      "type": "object",
+      "description": "A resolved declaration, including its name rather than the YAML's single-key map.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "config": {
+          "$ref": "#/$defs/Config"
+        },
+        "query_results": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "arguments",
+        "config",
+        "query_results"
+      ]
+    },
+    "Config": {
+      "type": "object",
+      "description": "Data-test execution and severity options.",
+      "properties": {
+        "execution": {
+          "type": "string",
+          "description": "The test engine: `local` checks saved rows; `source` checks an explicit relation.",
+          "pattern": "^(local|source)$",
+          "default": "local"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Data-failure severity. `warn` records bad data without failing the Binding.",
+          "pattern": "^(error|warn)$",
+          "default": "error"
+        },
+        "store_failures": {
+          "type": "boolean",
+          "description": "Retain local CSV examples under the Target path. Disabled by default; never delivered as report output.",
+          "default": false
+        },
+        "failure_limit": {
+          "type": "integer",
+          "description": "Maximum CSV example rows (default 1000), not a limit on the check or its full failure count. Integer from 1 to 9223372036854775807.",
+          "format": "uint64",
+          "minimum": 1,
+          "maximum": 9223372036854775807,
+          "default": 1000
+        }
+      },
+      "required": [
+        "execution",
+        "severity",
+        "store_failures",
+        "failure_limit"
+      ],
+      "additionalProperties": false
     },
     "binding": {
       "type": "object",

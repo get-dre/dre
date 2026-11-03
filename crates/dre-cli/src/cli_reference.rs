@@ -16,6 +16,8 @@ const FLAG_ENV: &[(&str, &str)] = &[
 const EXAMPLES: &[(&str, &str)] = &[
     ("validate", "dre validate --live monthly_revenue"),
     ("run", "dre run monthly_revenue --set client_a --target prod"),
+    ("test", "dre test monthly_revenue --set client_a"),
+    ("build", "dre build monthly_revenue --schedule daily"),
     ("compile", "dre compile tag:finance"),
     ("clean", "dre clean"),
     ("ls", "dre ls --schedule daily"),
