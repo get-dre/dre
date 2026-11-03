@@ -133,10 +133,17 @@ error records its cause instead of a count. Tests do not store failure-row sampl
 
 Local checks inspect unformatted Arrow values and never change the saved result. Data moves in
 batches into a disposable, disk-backed DuckDB workspace under the run's spool directory,
-with a 512 MB DuckDB memory limit. Normal completion, failure and cancellation remove it.
+with a configured 512 MB DuckDB memory budget, one DuckDB thread and a 2 GB spill limit per
+check. The memory setting is not a hard process limit: Arrow batches and engine allocations
+can take memory beyond that budget. The spill limit covers temporary spill files, not the
+disk-backed imported tables. A check that exhausts its available resources returns an execution error.
+Normal completion, failure and cancellation remove the database and spill files.
 The first implementation accepts scalar integer, floating-point, boolean, string, binary,
 Date32, timezone-free timestamp and supported decimal results; unsupported Arrow types fail
-explicitly rather than being silently coerced.
+explicitly rather than being silently coerced. Decimals must use Decimal128 with precision
+at most 38 and a nonnegative scale. Timezone-bearing timestamps, nested types and Arrow
+extension types are rejected. Date32 and timezone-free timestamps retain their stored units
+and precision; result spools and report output values keep their original Arrow types.
 
 This initial command supports returned tab results, local execution and error severity only.
 Source-side tests, hidden-result targets, cross-query references, warning severity, failure
