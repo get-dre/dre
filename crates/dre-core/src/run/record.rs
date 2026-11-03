@@ -346,6 +346,7 @@ impl BindingRun<'_> {
                 })
                 .collect(),
             tests: self.tests.clone(),
+            skipped_queries: self.skipped_queries.clone(),
             outputs,
             output_results,
             delivery,

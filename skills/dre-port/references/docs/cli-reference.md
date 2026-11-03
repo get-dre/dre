@@ -109,7 +109,7 @@ dre run monthly_revenue --set client_a --target prod
 
 ## `dre test`
 
-Run fresh report queries and local data tests, without report formatting or delivery.
+Run fresh report queries and data tests, without report formatting or delivery.
 
 ```text
 dre test [OPTIONS] [SELECTOR]...

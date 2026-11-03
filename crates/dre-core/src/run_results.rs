@@ -72,6 +72,9 @@ pub struct RunResults {
     /// Data test outcomes, omitted for commands that do not run tests.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<crate::data_tests::Outcome>,
+    /// Later queries not started because a data test failed or could not execute.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_queries: Vec<String>,
     /// Every file every output wrote.
     pub outputs: Vec<OutputFile>,
     /// One entry per output, in declared order.

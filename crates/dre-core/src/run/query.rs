@@ -63,10 +63,10 @@ impl BindingRun<'_> {
         let mut i = 0;
         let mut two_tabs = None;
         let queries = self.b.queries.clone();
-        for q in &queries {
+        for (query_index, q) in queries.iter().enumerate() {
             let conn = self.connection_of(&q.query)?;
             let renderer = self.renderer(Some(&conn))?;
-            let sts = self.render_query(&renderer, q, &conn, &mut two_tabs)?;
+            let sts = self.render_query(&renderer, q, query_index, &conn, &mut two_tabs)?;
             for w in renderer.take_warnings() {
                 self.ui.warn(&w);
             }
@@ -304,7 +304,7 @@ impl BindingRun<'_> {
                 .and_then(|conn| {
                     let renderer = self.renderer(Some(&conn))?;
                     let mut two = None;
-                    self.render_query(&renderer, q, &conn, &mut two)
+                    self.render_query(&renderer, q, 0, &conn, &mut two)
                 })
                 .map(|_| {
                     std::fs::read_to_string(self.compiled_dir.join(format!("{}.sha256", q.query)))
