@@ -1,8 +1,8 @@
 name: Security scan
 
 # Known vulnerabilities and licences of every dependency, Rust and Go, and the workflows' own
-# security (zizmor: actions pinned by SHA, images by digest, minimal permissions): on every pull request and
-# push to master, before every release (release.yml calls this workflow), and weekly, so a new
+# security (zizmor: actions pinned by SHA, images by digest, minimal permissions): called by CI
+# on every pull request and master push, by release.yml before every release, and weekly, so a new
 # advisory against unchanged lockfiles shows up as a red run. A pull request that doesn't change a
 # language's dependencies only warns about that language's advisories (security_scan.py mode):
 # they aren't its doing, and a red run there would block unrelated work. Licences always fail.
@@ -11,9 +11,6 @@ name: Security scan
 # the accepted advisories are in .github/vulnerability-exceptions.toml.
 
 on:
-  pull_request:
-  push:
-    branches: [master]
   schedule:
     - cron: "17 6 * * 1"  # Mondays, 06:17 UTC
   workflow_dispatch:

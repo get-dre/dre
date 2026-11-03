@@ -26,7 +26,7 @@ minijinja.workspace = true
 minijinja-contrib.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
-calamine = { version = "0.37", features = ["dates"] }
+calamine = { version = "0.38", features = ["dates"] }
 csv = "1"
 dre-protocol.workspace = true
 arrow = { workspace = true, features = ["ffi"] }

@@ -74,11 +74,20 @@ merge (a change to paths, processes or anything else that differs by platform):
 gh workflow run ci.yml --ref <branch>
 ```
 
+CI classifies the complete change once. Documentation-only changes keep the repository, package
+page and skills checks; example-only changes run the selected examples against the matching
+released CLI on all three platforms. Engine and unknown changes keep the full test coverage.
+New PR pushes cancel the older CI run, including its read-only security jobs.
+
+Master runs Linux tests against the merged code and current toolchain, alongside macOS and
+Windows. A passing PR alone does not skip those tests. Rust cache writes remain master-only.
+
 ## Security scans
 
 The `Security scan` workflow ([`.github/workflows/security.yml`](.github/workflows/security.yml))
 checks every Rust crate and Go module DRE depends on for known vulnerabilities and for licences
-that aren't compatible with DRE's GPL-3.0-only. It runs on every pull request, before every release
+that aren't compatible with DRE's GPL-3.0-only. CI calls it on every pull request and master push,
+and release builds call it before every release
 and weekly. To run it locally (Python 3.11 or later):
 
 ```sh
