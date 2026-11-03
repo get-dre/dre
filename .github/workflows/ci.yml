@@ -443,6 +443,21 @@ jobs:
       # nextest doesn't run doctests.
       - run: cargo test --workspace --doc
 
+      # The Actions run's head SHA identifies the PR head, not the synthetic merge checkout.
+      # Record the actual tested tree after every full-suite step has passed.
+      - name: Record full Linux evidence
+        if: github.event_name == 'pull_request'
+        run: python3 .github/scripts/ci_linux_reuse.py --record "$RUNNER_TEMP/linux-evidence.json"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+      - name: Upload full Linux evidence
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-tested-tree-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-evidence.json
+          if-no-files-found: error
+
   cache-linux:
     # PRs cannot save the shared Rust cache. Refresh it on master without starting emulators
     # or building temporary Go executables when the exact tree already passed full Linux CI.

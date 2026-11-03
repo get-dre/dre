@@ -79,9 +79,9 @@ page and skills checks; example-only changes run the selected examples against t
 released CLI on all three platforms. Engine and unknown changes keep the full test coverage.
 New PR pushes cancel the older CI run, including its read-only security jobs.
 
-On master, Linux execution can reuse a successful PR run only when its source tree matches the
-merged commit, its head includes the merged commit's parent, and its Linux Go tests, Rust tests,
-examples and doctests all passed. Without that evidence, including an API failure, Linux runs
+On master, Linux execution can reuse a successful PR run only when its recorded checkout tree
+matches the merged commit, the evidence identifies that PR and run attempt, and its Linux Go
+tests, Rust tests, examples and doctests all passed. Without that evidence, including an API failure, Linux runs
 the full suite. Reuse refreshes the master-only Rust cache in a separate job without emulators.
 
 ## Security scans
