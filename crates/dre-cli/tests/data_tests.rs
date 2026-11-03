@@ -952,7 +952,8 @@ fn local_error_and_cancel_keep_completed_evidence_but_remove_disposable_workspac
                 }
             ),
         );
-        let run = p.dre("test", &["r", "--timeout", "2s"]);
+        let args: &[&str] = if cancel { &["r", "--timeout", "2s"] } else { &["r"] };
+        let run = p.dre("test", args);
         if cancel {
             assert_eq!(run.code, 124, "{run:?}");
         } else {
