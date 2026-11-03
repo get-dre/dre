@@ -5,7 +5,7 @@
 Please report a vulnerability privately, never in a public issue or discussion:
 
 - through GitHub's [private vulnerability reporting](https://github.com/get-dre/dre/security/advisories/new), or
-- by email to [security@getdre.com](mailto:security@getdre.com).
+- by email to [hello@getdre.com](mailto:hello@getdre.com).
 
 Include what you found, how to reproduce it, and the DRE version (`dre --version`). Please give us
 a reasonable time to fix it before you share it publicly.
