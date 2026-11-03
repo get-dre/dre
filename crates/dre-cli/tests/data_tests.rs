@@ -304,6 +304,58 @@ fn local_package_tests_use_helpers_defaults_and_the_local_duckdb_dialect() {
 }
 
 #[test]
+fn project_and_package_test_blocks_can_call_qualified_package_helpers() {
+    for package_test in [false, true] {
+        let name = if package_test {
+            "quality.positive"
+        } else {
+            "positive"
+        };
+        let p = project(
+            &format!(
+                "queries:\n  - query: data\n    data_tests: [{{{name}: {{}}}}]\noutput: {{format: message}}\n"
+            ),
+            "{% macro predicate(column) %}WRONG_PROJECT_HELPER{% endmacro %}",
+        );
+        p.write(
+            "packages.yml",
+            "packages: [{local: ../checks}, {local: ../helpers}]\n",
+        );
+        p.write("../checks/dre_package.yml", "name: quality\n");
+        p.write("../helpers/dre_package.yml", "name: helpers\n");
+        p.write(
+            "../helpers/macros/predicate.sql",
+            "{% macro predicate(column) %}{{ column }} < 0{% endmacro %}",
+        );
+        p.write(
+            "../checks/macros/helper.sql",
+            "{% macro predicate(column) %}{{ helpers.predicate(column) }}{% endmacro %}",
+        );
+        let file = if package_test {
+            "../checks/macros/check.sql"
+        } else {
+            "macros/test.sql"
+        };
+        p.write(file, "{% test positive(relation, column='n') %}\nselect * from {{ relation }} where {{ quality.predicate(column) }}\n{% endtest %}");
+        p.dre("validate", &[]).ok();
+        p.dre("test", &["r"]).ok().says("PASS");
+        p.write(
+            file,
+            "{% test positive(relation) %}\n{{ quality.missing_helper() }}\n{% endtest %}",
+        );
+        p.dre("validate", &[]).ok();
+        p.dre("test", &["r"])
+            .failed()
+            .says(if package_test {
+                "checks/macros/check.sql:2"
+            } else {
+                "macros/test.sql:2"
+            })
+            .says("missing_helper");
+    }
+}
+
+#[test]
 fn test_definition_errors_keep_the_original_file_and_line() {
     let p = project(
         "queries: [data]\n",

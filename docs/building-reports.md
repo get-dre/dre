@@ -67,7 +67,9 @@ inherited checks for that Binding. Test arguments are template values; the macro
 responsible for quoting identifiers and constructing SQL for the selected execution engine. Tests may also use explicit
 `test_<name>` macros. Plain macros remain helpers, and duplicate definitions are errors.
 Installed Git and local macro packages use the existing dependency declarations and `dre deps`;
-call their checks as `package.check_name`. Tests can use argument defaults, helpers and
+call their checks as `package.check_name`. Project and package test blocks can call helpers
+through their package namespace, such as `quality.predicate(column)`, including helpers in other
+macro files or packages. Tests can use argument defaults, helpers and
 `dispatch()`; local checks dispatch as DuckDB regardless of the query's source. Configure tests
 in YAML; runtime `config()` calls are unsupported. `dre validate` resolves definitions and
 checks signatures and template syntax without running test SQL or introspection. Column names
