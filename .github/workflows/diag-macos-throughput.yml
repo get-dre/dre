@@ -1,6 +1,8 @@
 name: diag macOS throughput
 
 # Temporary measurement only. Not merged; deleted before the real change.
+# `shared-key: test` reuses the rust-cache the real `test` job saves on master, so these jobs
+# build warm like a branch run does.
 on:
   push:
     branches: [diag/macos-throughput]
@@ -14,8 +16,12 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
-  prepare:
-    # nproc, binary sizes, per-test-exec cost, and test counts per kind.
+  threads:
+    # nextest test-threads sweep: default (3), 6, 8.
+    strategy:
+      fail-fast: false
+      matrix:
+        threads: ["default", "6", "8"]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,16 +31,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
+          shared-key: test
           save-if: false
-      - name: Host facts
-        run: |
-          set -x
-          uname -a
-          sw_vers
-          (nproc || sysctl -n hw.ncpu) 2>&1
-          sysctl -n hw.ncpu hw.physicalcpu hw.memsize
-          rustc -V
-          df -h /
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/plugin/go.mod
@@ -55,79 +53,15 @@ jobs:
       - name: Compile test binaries (timed)
         run: |
           s=$SECONDS; cargo nextest run --workspace --no-run; echo "DIAG compile_tests=$((SECONDS-s))s"
-      - name: Test binary sizes
-        run: |
-          du -sh target/debug/deps
-          find target/debug/deps -type f -perm -111 -size +1M -exec ls -lh {} + 2>/dev/null \
-            | awk '{print $5, $9}' | sort -nr | head -20
-      - name: Test counts per kind
-        run: |
-          cargo nextest list --workspace > "$RUNNER_TEMP/list.txt" 2>&1
-          wc -l "$RUNNER_TEMP/list.txt"
-          for k in lib bin test examples; do
-            cargo nextest list --workspace -E "kind($k)" 2>/dev/null | tail -n +1 | grep -c '::' \
-              | sed "s/^/DIAG kind_$k=/" || true
-          done
-      - name: Per-process start cost
-        run: |
-          python3 - <<'PY'
-          import glob, os, statistics, subprocess, time
-          bins = [(os.path.getsize(p), p) for p in glob.glob("target/debug/deps/*")
-                  if os.access(p, os.X_OK) and os.path.isfile(p)]
-          bins.sort()
-          big = bins[-1][1]
-          def med(cmd, n=20):
-              ts = []
-              for _ in range(n):
-                  t = time.perf_counter()
-                  subprocess.run(cmd, capture_output=True)
-                  ts.append(time.perf_counter() - t)
-              return statistics.median(ts)
-          print(f"DIAG spawn_true_ms={med(['/usr/bin/true'])*1000:.1f}")
-          print(f"DIAG spawn_bigest_list_ms={med([big, '--list', '--format', 'terse'])*1000:.1f}")
-          print(f"DIAG biggest={os.path.getsize(big)/1e6:.1f}MB")
-          PY
-
-  threads:
-    # nextest test-threads sweep: default (3), 6, 8, 12.
-    strategy:
-      fail-fast: false
-      matrix:
-        threads: ["default", "6", "8", "12"]
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: rustup toolchain install stable --profile minimal && rustup default stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: v2-rust
-          save-if: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go/plugin/go.mod
-          cache-dependency-path: go/*/go.sum
-      - name: Build the Go packages
-        run: |
-          dir="$RUNNER_TEMP/go-plugins"; mkdir -p "$dir"
-          for p in databricks bigquery snowflake clickhouse; do
-            (cd "go/$p" && go build -o "$dir/dre-plugin-$p" .) || exit 1
-          done
-          echo "DRE_TEST_GO_PLUGINS=$dir" >> "$GITHUB_ENV"
-      - run: cargo build --workspace --bins
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: nextest
-      - run: cargo nextest run --workspace --no-run
       - name: Run nextest
         env:
           THREADS: ${{ matrix.threads }}
+          DRE_TEST_PREBUILT_BINS: "1"
         run: |
           if [ "$THREADS" != "default" ]; then export NEXTEST_TEST_THREADS="$THREADS"; fi
           s=$SECONDS
           cargo nextest run --workspace --no-fail-fast
-          echo "DIAG threads=$THREADS wall=$((SECONDS-s))s"
+          echo "DIAG threads=$THREADS step=$((SECONDS-s))s"
 
   libsplit:
     # In-process unit tests with cargo test --lib, nextest for the rest.
@@ -140,6 +74,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
+          shared-key: test
           save-if: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -158,16 +93,18 @@ jobs:
           tool: nextest
       - run: cargo nextest run --workspace --no-run
       - name: cargo test --lib (in-process unit tests, timed)
+        env:
+          DRE_TEST_PREBUILT_BINS: "1"
         run: |
-          s=$SECONDS; cargo test --workspace --lib 2>&1 | tail -6
+          s=$SECONDS; cargo test --workspace --lib --no-fail-fast 2>&1 | tail -6
           echo "DIAG lib_cargo_test=$((SECONDS-s))s"
       - name: nextest without lib targets (timed)
+        env:
+          DRE_TEST_PREBUILT_BINS: "1"
         run: |
           s=$SECONDS
           cargo nextest run --workspace --no-fail-fast -E 'not kind(lib)'
           echo "DIAG nextest_no_lib=$((SECONDS-s))s"
-      - name: libsplit total
-        run: echo "DIAG libsplit note=sum of the two step walls above"
 
   serial:
     # Serial vs parallel on two packages: equal walls mean fixed per-test cost.
@@ -180,6 +117,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v2-rust
+          shared-key: test
           save-if: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -190,13 +128,56 @@ jobs:
         with:
           tool: nextest
       - run: cargo nextest run --workspace --no-run
-      - name: Parallel (default threads)
+      - name: Parallel then serial on dre-core and dre-protocol
+        env:
+          DRE_TEST_PREBUILT_BINS: "1"
         run: |
           s=$SECONDS
           cargo nextest run -p dre-core -p dre-protocol --no-fail-fast
-          echo "DIAG serial_subset_parallel=$((SECONDS-s))s"
-      - name: Serial (--test-threads=1)
-        run: |
+          echo "DIAG subset_parallel=$((SECONDS-s))s"
           s=$SECONDS
           cargo nextest run -p dre-core -p dre-protocol --no-fail-fast --test-threads=1
-          echo "DIAG serial_subset_serial=$((SECONDS-s))s"
+          echo "DIAG subset_serial=$((SECONDS-s))s"
+
+  spawn:
+    # Per-process exec cost with a warm page cache (binaries built in this job).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v2-rust
+          shared-key: test
+          save-if: false
+      - run: cargo build --workspace --bins
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: nextest
+      - run: cargo nextest run --workspace --no-run
+      - name: Host facts and spawn cost
+        run: |
+          (nproc || sysctl -n hw.ncpu) 2>&1
+          sysctl -n hw.ncpu hw.memsize
+          du -sh target/debug/deps
+          find target/debug/deps -type f -perm -111 -size +1M -exec ls -l {} + 2>/dev/null \
+            | awk '{print $5, $9}' | sort -nr | head -6
+          python3 - <<'PY'
+          import glob, os, statistics, subprocess, time
+          bins = [(os.path.getsize(p), p) for p in glob.glob("target/debug/deps/*")
+                  if os.access(p, os.X_OK) and os.path.isfile(p)]
+          bins.sort()
+          big = bins[-1][1]
+          def med(cmd, n=20):
+              ts = []
+              for _ in range(n):
+                  t = time.perf_counter()
+                  subprocess.run(cmd, capture_output=True)
+                  ts.append(time.perf_counter() - t)
+              return statistics.median(ts)
+          print(f"DIAG biggest={os.path.getsize(big)/1e6:.1f}MB")
+          print(f"DIAG spawn_true_ms={med(['/usr/bin/true'])*1000:.1f}")
+          print(f"DIAG spawn_big_list_ms={med([big,'--list','--format','terse'])*1000:.1f}")
+          PY
