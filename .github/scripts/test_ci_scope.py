@@ -53,10 +53,16 @@ class ScopeCli(unittest.TestCase):
                     self.assertEqual(json.loads(result.stdout), {"full": full, "examples": examples})
                     self.assertIn(f"full={str(full).lower()}\n", output.read_text())
             # Rename a source file into docs: the removed source still requires full CI.
+            git("reset", "--hard", base)
+            git("clean", "-fdq")
             source = root / "unknown/config.yml"
+            source.parent.mkdir()
+            source.write_text("fixture\n")
+            git("add", "-A")
+            git("commit", "-qm", "source")
+            previous = git("rev-parse", "HEAD")
             source.rename(root / "notes.md")
             git("add", "-A")
-            previous = git("rev-parse", "HEAD")
             git("commit", "-qm", "rename")
             result = subprocess.check_output([os.sys.executable, str(SCRIPT), "--base", previous], cwd=root)
             self.assertTrue(json.loads(result)["full"])
