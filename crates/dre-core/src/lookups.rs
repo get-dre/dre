@@ -726,6 +726,33 @@ mod tests {
     }
 
     #[test]
+    fn truncated_xls_directory_returns_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lookup, _) = lookup(dir.path(), "truncated.xls", "", None);
+        // A CFB header, one FAT sector and a directory truncated to 64 of its 128 bytes.
+        let mut bytes = vec![0u8; 512 + 512 + 64];
+        bytes[..8].copy_from_slice(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1");
+        for (offset, value) in [(26, 3u16), (28, 0xfffe), (30, 9), (32, 6)] {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[76..1024].fill(0xff);
+        for (offset, value) in [
+            (44, 1u32),
+            (48, 1),
+            (56, 4096),
+            (60, 0xffff_fffe),
+            (68, 0xffff_fffe),
+            (76, 0),
+            (512, 0xffff_fffd),
+            (516, 0xffff_fffe),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        std::fs::write(dir.path().join("lookups/truncated.xls"), bytes).unwrap();
+        assert!(read(dir.path(), &lookup).is_err());
+    }
+
+    #[test]
     fn csv_is_all_text_unless_typed() {
         let dir = tempfile::tempdir().unwrap();
         let (l, _) = lookup(
