@@ -39,7 +39,7 @@ arrow = "59"
 # Snappy only: the parquet plugin always writes Snappy, and nothing in DRE reads other codecs.
 # The default codecs pulled in zstd 0.13, whose advisories are fixed only in zstd 0.14 (parquet 60).
 parquet = { version = "59", default-features = false, features = ["arrow", "snap", "simdutf8"] }
-duckdb = { version = "1.10505", features = ["bundled"] }
+duckdb = { version = "1.10506.1", features = ["bundled"] }
 
 # Native DuckDB debug symbols dominate development/test disk usage. Omit debug
 # info only for libduckdb-sys. Its build script also sets native NDEBUG, as in
