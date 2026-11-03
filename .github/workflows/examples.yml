@@ -2,21 +2,7 @@ name: Public examples
 on:
   push:
     branches: [master]
-    paths:
-      - "examples/**"
-      - "docs/first-report.md"
-      - "docs/examples.md"
-      - ".github/scripts/check_examples.py"
-      - ".github/scripts/ci_scope.py"
-      - ".github/workflows/examples.yml"
   pull_request:
-    paths:
-      - "examples/**"
-      - "docs/first-report.md"
-      - "docs/examples.md"
-      - ".github/scripts/check_examples.py"
-      - ".github/scripts/ci_scope.py"
-      - ".github/workflows/examples.yml"
 permissions:
   contents: read
 jobs:
@@ -38,7 +24,7 @@ jobs:
   examples:
     needs: scope
     # Mixed engine/workflow changes run every example against source builds in CI instead.
-    if: needs.scope.outputs.full == 'false'
+    if: needs.scope.outputs.full == 'false' && needs.scope.outputs.examples != '[]'
     strategy:
       fail-fast: false
       matrix:

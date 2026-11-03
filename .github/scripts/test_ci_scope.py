@@ -23,6 +23,8 @@ class ScopeCli(unittest.TestCase):
             ([".github/workflows/ci.yml"], True, []),
             ([".github/scripts/check_examples.py"], True, []),
             (["unknown/config.yml"], True, []),
+            ([f"docs/page-{i}.md" for i in range(3001)] +
+             ["examples/tutorial/reports/sales/sales.sql"], False, ["tutorial"]),
         ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
