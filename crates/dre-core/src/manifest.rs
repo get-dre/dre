@@ -75,6 +75,11 @@ pub fn subset(
 
 /// The manifest's source section, without building or checksumming the rest of the project.
 /// Includes rendered fields and each table's reports from the loaded parse dependencies.
+///
+/// # Panics
+///
+/// Panics if the source model cannot serialize to JSON. This is an internal invariant:
+/// its derived serialization uses string map keys and JSON-compatible fields.
 pub fn sources(project: &Project) -> Json {
     sorted(serde_json::to_value(source_map(project)).expect("manifest sources serialize"))
 }
