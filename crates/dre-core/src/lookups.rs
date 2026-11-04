@@ -17,7 +17,7 @@
 //! rows than `lookup_inline_max_rows` is loaded into a temporary table by the source plugin
 //! instead, when it can; otherwise it's inlined with a warning.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -460,19 +460,21 @@ fn read_sheet(path: &Path, sheet: Option<&str>) -> Result<Raw, String> {
 /// Rows given as objects (json, jsonl, yml): columns are every key, in first-seen order.
 fn read_objects(items: &[Json]) -> Result<Raw, String> {
     let mut columns: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut objects = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
         let obj = item
             .as_object()
             .ok_or_else(|| format!("entry {}: each row must be an object", i + 1))?;
         for k in obj.keys() {
-            if !columns.contains(k) {
+            if seen.insert(k) {
                 columns.push(k.clone());
             }
         }
+        objects.push(obj);
     }
     let mut rows = Vec::new();
-    for (i, item) in items.iter().enumerate() {
-        let obj = item.as_object().expect("every item was checked to be a map");
+    for (i, obj) in objects.into_iter().enumerate() {
         let label = format!("entry {}", i + 1);
         let mut cells = Vec::new();
         for c in &columns {
@@ -832,6 +834,32 @@ mod tests {
         let files = [PathBuf::from("lookups/e.csv"), PathBuf::from("lookups/e.yml")];
         assert!(discover(dir.path(), &files, &mut d).is_empty());
         assert_eq!(d.error_count(), 2);
+    }
+
+    #[test]
+    fn object_columns_keep_first_seen_order_across_duplicate_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lookup, _) = lookup(
+            dir.path(),
+            "ordered.json",
+            r#"[{"z": 1, "a": 2}, {"a": 3, "m": 4, "z": 5}, {"m": 6, "b": 7}]"#,
+            None,
+        );
+        let table = read(dir.path(), &lookup).unwrap();
+        assert_eq!(table.columns, ["z", "a", "m", "b"]);
+        assert_eq!(
+            table.rows[1],
+            [
+                Cell::Text("5".into()),
+                Cell::Text("3".into()),
+                Cell::Text("4".into()),
+                Cell::Null,
+            ]
+        );
+        assert_eq!(
+            read_objects(&[Json::Null]).unwrap_err(),
+            "entry 1: each row must be an object"
+        );
     }
 
     #[test]

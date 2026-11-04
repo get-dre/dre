@@ -73,6 +73,12 @@ pub fn subset(
     document(project, reports, schedules, errors)
 }
 
+/// The manifest's source section, without building or checksumming the rest of the project.
+/// Includes rendered fields and each table's reports from the loaded parse dependencies.
+pub fn sources(project: &Project) -> Json {
+    sorted(serde_json::to_value(source_map(project)).expect("manifest sources serialize"))
+}
+
 // -- the format ---------------------------------------------------------------------------------
 
 type Map = JsonMap<String, Json>;
@@ -423,7 +429,7 @@ fn document(
         },
         reports,
         schedules,
-        sources: sources(project),
+        sources: source_map(project),
         plugins,
         extensions: crate::packages::declared_extensions(project.root()).unwrap_or_default(),
     };
@@ -545,7 +551,7 @@ fn binding(b: &Binding) -> ManifestBinding {
 /// the target, and `run.*` with no report: the run date, but a fixed `run.now` unless
 /// `DRE_RUN_AT` sets it, so the bytes don't change by the second). A field that doesn't render
 /// is left as written, with the problem under `errors`.
-fn sources(project: &Project) -> BTreeMap<String, ManifestSource> {
+fn source_map(project: &Project) -> BTreeMap<String, ManifestSource> {
     if project.sources().is_empty() {
         return BTreeMap::new();
     }
@@ -776,11 +782,11 @@ fn project_checksum(project: &Project) -> String {
 /// The error diagnostics that belong to a report: those in one of its own files.
 pub fn report_errors(project: &Project, diags: &Diagnostics) -> ReportErrors {
     let mut out = ReportErrors::new();
+    let sorted = diags.sorted();
     for r in project.reports() {
         let files = report_files(project, r);
-        let msgs: Vec<String> = diags
-            .sorted()
-            .into_iter()
+        let msgs: Vec<String> = sorted
+            .iter()
             .filter(|d| d.severity == Severity::Error)
             .filter(|d| d.file.as_ref().is_some_and(|f| files.contains(&slash(f))))
             .map(|d| d.to_string())
@@ -806,7 +812,12 @@ pub fn render(doc: &Json, secrets: &crate::secrets::Secrets) -> String {
 /// Write `project`'s manifest atomically ([`crate::fs::write_atomic`]). Returns the SHA-256 of
 /// the bytes written.
 pub fn write(project: &Project, errors: &ReportErrors) -> Result<String, String> {
-    let text = render(&build(project, errors), project.inputs().process.secrets());
+    write_document(project, &build(project, errors))
+}
+
+/// Write an already-built manifest atomically, masking secrets and returning its bytes' SHA-256.
+pub fn write_document(project: &Project, document: &Json) -> Result<String, String> {
+    let text = render(document, project.inputs().process.secrets());
     let dir = &project.target_dir();
     crate::target::ensure(dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
     let dst = dir.join(FILE);

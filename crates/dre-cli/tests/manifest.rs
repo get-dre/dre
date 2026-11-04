@@ -349,6 +349,25 @@ fn validate_json_project_is_the_manifest() {
 }
 
 #[test]
+fn validate_json_keeps_the_project_when_the_manifest_cannot_be_written() {
+    let p = project();
+    p.write("blocked", "a file cannot hold a manifest");
+    let result = p.dre("validate", &["--json", "--target-path", "blocked"]);
+    result.failed();
+    let doc: Value = serde_json::from_str(&result.stdout).unwrap();
+    assert_eq!(doc["ok"], false);
+    assert!(doc["project"]["reports"]["daily"].is_object());
+    assert!(doc["diagnostics"].as_array().unwrap().iter().any(|d| {
+        d["code"] == "target-path-unwritable"
+            && d["message"]
+                .as_str()
+                .unwrap()
+                .contains("target path from --target-path")
+    }));
+    assert!(!p.path("blocked/manifest.json").exists());
+}
+
+#[test]
 fn every_manifest_json_surface_redacts_escaped_secrets() {
     let p = project();
     p.write(

@@ -217,8 +217,10 @@ fn sources(ctx: &dre_core::Context, project: &Project, a: &LsArgs) -> ExitCode {
                 .iter()
                 .any(|(ws, wt)| ws == s && wt.as_deref().is_none_or(|wt| wt == t))
     };
-    let doc = dre_core::manifest::build(project, &Default::default());
-    let mut all = doc["sources"].as_object().cloned().unwrap_or_default();
+    let mut all = dre_core::manifest::sources(project)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     for (name, src) in all.iter_mut() {
         if let Some(tables) = src["tables"].as_object_mut() {
             tables.retain(|t, _| picked(name, t));
@@ -330,4 +332,59 @@ fn table(reports: &[(&Report, Vec<&Binding>)]) -> String {
         }
     }
     columns(rows)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::ffi::CString;
+    use std::io::Write;
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn source_listing_does_not_read_report_files_after_loading() {
+        let (root, ctx, project, _diags) = crate::tests::manifest_project();
+        let full = dre_core::manifest::build(&project, &Default::default());
+        assert_eq!(
+            dre_core::manifest::render(&serde_json::json!({"sources": full["sources"]}), ctx.secrets()),
+            dre_core::manifest::render(
+                &serde_json::json!({"sources": dre_core::manifest::sources(&project)}),
+                ctx.secrets(),
+            ),
+        );
+        let query = root.path().join("reports/r/q.sql");
+        std::fs::remove_file(&query).unwrap();
+        let path = CString::new(query.as_os_str().as_bytes()).unwrap();
+        // SAFETY: path is NUL-terminated and remains alive throughout mkfifo.
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        let crate::Command::Ls(args) =
+            crate::Cli::parse_from(["dre", "ls", "--resource-type", "source", "--output", "json"]).command
+        else {
+            panic!("parsed ls")
+        };
+        let (ready, started) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready.send(()).unwrap();
+            let result = sources(&ctx, &project, &args);
+            done.send(result).unwrap();
+        });
+        started.recv().unwrap();
+        // A checksum read blocks on this FIFO. Release it before failing so no thread leaks.
+        let result = finished.recv_timeout(Duration::from_secs(30));
+        if matches!(result, Err(mpsc::RecvTimeoutError::Timeout)) {
+            let mut writer = std::fs::OpenOptions::new().write(true).open(&query).unwrap();
+            writer.write_all(b"select 1").unwrap();
+        }
+        worker.join().unwrap();
+        assert_eq!(
+            result.expect("source listing read an unrelated report file"),
+            crate::exit::ok()
+        );
+    }
 }

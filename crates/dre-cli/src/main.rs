@@ -644,7 +644,11 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
     if let Some(p) = &project {
         ctx.secrets().set_enabled(p.mask_secrets());
     }
-    if let Err(e) = dre_core::start::write_manifest(ctx, project.as_ref(), &report_errors, &req) {
+    let manifest = project
+        .as_ref()
+        .map(|p| dre_core::manifest::build(p, &report_errors));
+    if let Err(e) = dre_core::start::write_built_manifest(ctx, project.as_ref().zip(manifest.as_ref()), &req)
+    {
         diags.error(Code::TargetPathUnwritable, None, None, e);
     }
     if let Some(p) = &project {
@@ -685,7 +689,7 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         diags: &diags,
         targets: targets.as_ref(),
         plans: &plans,
-        report_errors: &report_errors,
+        manifest: manifest.as_ref(),
     };
     if a.json {
         report.print_json(ctx);
@@ -731,14 +735,14 @@ struct Validation<'v> {
     diags: &'v dre_core::Diagnostics,
     targets: Option<&'v dre_core::run::RunTargets>,
     plans: &'v [dre_core::run::BindingPlan],
-    report_errors: &'v dre_core::manifest::ReportErrors,
+    manifest: Option<&'v serde_json::Value>,
 }
 
 impl Validation<'_> {
-    /// `--json`: one document, secrets masked.
-    fn print_json(&self, ctx: &Context) {
+    /// `--json`: the written manifest with validation results.
+    fn json(&self) -> serde_json::Value {
         let (project, diags, targets) = (self.project, self.diags, self.targets);
-        let out = serde_json::json!({
+        serde_json::json!({
             "ok": self.ok,
             "profiles": project.map(|p| serde_json::json!({
                 "path": p.profiles().path,
@@ -755,12 +759,16 @@ impl Validation<'_> {
             "warnings": diags.warning_count(),
             "diagnostics": diags.sorted(),
             "compiled": self.plans,
-            "project": project.map(|p| dre_core::manifest::build(p, self.report_errors)),
-        });
+            "project": self.manifest,
+        })
+    }
+
+    /// Print one document, secrets masked.
+    fn print_json(&self, ctx: &Context) {
         println!(
             "{}",
             ctx.secrets()
-                .to_json_pretty(&out)
+                .to_json_pretty(&self.json())
                 .expect("a JSON value serializes")
         );
     }
@@ -1423,6 +1431,57 @@ mod tests {
     use dre_core::run::{DeliveryMode, Results, RunTargets, UsedProfile};
 
     use super::*;
+
+    pub(super) fn manifest_project() -> (
+        tempfile::TempDir,
+        Context,
+        project::Project,
+        dre_core::Diagnostics,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("reports/r")).unwrap();
+        for (path, text) in [
+            ("dre_project.yml", "name: m\ndefault_profile: w\n"),
+            (
+                "profiles.yml",
+                "connections: {w: {targets: {dev: {type: mem}}}}\n",
+            ),
+            ("reports/r/r.yml", "queries: [q]\n"),
+            (
+                "sources.yml",
+                "sources: [{name: sales, tables: [{name: orders}]}]\n",
+            ),
+            ("reports/r/q.sql", "select * from {{ source('sales', 'orders') }}"),
+        ] {
+            std::fs::write(root.path().join(path), text).unwrap();
+        }
+        let ctx = Context::empty();
+        let (project, diags) = project::load_with(root.path(), &LoadOptions::default(), &ctx);
+        assert!(!diags.has_errors(), "{:?}", diags.sorted());
+        let project = project.unwrap();
+        (root, ctx, project, diags)
+    }
+
+    #[test]
+    fn validation_json_reuses_the_written_manifest() {
+        let (root, _ctx, project, diags) = manifest_project();
+        let errors = dre_core::manifest::report_errors(&project, &diags);
+        let manifest = dre_core::manifest::build(&project, &errors);
+        dre_core::manifest::write_document(&project, &manifest).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dre_core::manifest::path(&project)).unwrap()).unwrap();
+        // Output must use the document already written, even if an input changes afterwards.
+        std::fs::write(root.path().join("reports/r/q.sql"), "select 2").unwrap();
+        let report = Validation {
+            ok: true,
+            project: Some(&project),
+            diags: &diags,
+            targets: None,
+            plans: &[],
+            manifest: Some(&manifest),
+        };
+        assert_eq!(report.json()["project"], written);
+    }
 
     #[test]
     fn run_flags_pick_the_mode() {

@@ -125,7 +125,18 @@ pub fn write_manifest(
     errors: &crate::manifest::ReportErrors,
     req: &ProjectRequest,
 ) -> Result<Option<String>, String> {
-    let Some(p) = project else {
+    let document = project.map(|p| crate::manifest::build(p, errors));
+    write_built_manifest(ctx, project.zip(document.as_ref()), req)
+}
+
+/// Write a manifest already built for a loaded project, or remove a stale one when loading failed.
+/// Keeps the document available to the caller even if writing fails.
+pub fn write_built_manifest(
+    ctx: &Context,
+    manifest: Option<(&Project, &serde_json::Value)>,
+    req: &ProjectRequest,
+) -> Result<Option<String>, String> {
+    let Some((p, document)) = manifest else {
         let root = &req.dir;
         let from_file = crate::target::project_value(root);
         if let Ok(t) = crate::target::resolve(
@@ -138,7 +149,7 @@ pub fn write_manifest(
         }
         return Ok(None);
     };
-    crate::manifest::write(p, errors)
+    crate::manifest::write_document(p, document)
         .map(Some)
         .map_err(|e| format!("{e} (target path from {})", p.target_source()))
 }
