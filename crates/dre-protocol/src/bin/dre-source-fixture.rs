@@ -10,7 +10,7 @@
 //! - `no_sessions`: a normal source that doesn't advertise `sessions`
 //! - `no_check`: a normal source that doesn't advertise `check`
 //! - `close_probe`: speaks the protocol by hand, outside the SDK: answers `hello`, `open` and
-//!   `describe`, fails every `execute` with `fixture can't run `<sql>``, and on a protocol `close`
+//!   `describe`, fails every `execute` with ``fixture can't run `<sql>` ``, and on a protocol `close`
 //!   after an `open` writes `close` to `$DRE_FIXTURE_CLOSE_FILE`. End of input writes nothing, so
 //!   a test can tell a `close` request from a closed pipe (the SDK handles both the same way)
 //!
