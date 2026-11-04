@@ -354,3 +354,123 @@ fn signed(text: &str) -> String {
     }
     format!("+{t}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::Env;
+
+    #[test]
+    fn locale_number_rounding_and_grouping() {
+        for (tag, value, decimals, expected) in [
+            ("en-US", 1234.5, 2, "1,234.50"),
+            ("DE_de", -1234.5, 1, "-1.234,5"),
+            ("fr-FR", 1234.5, 1, "1\u{202f}234,5"),
+            ("de-CH", 1234.5, 1, "1\u{2019}234.5"),
+            ("en", 2.5, 0, "3"),
+            ("en", -2.5, 0, "-3"),
+            ("en", -0.004, 2, "0.00"),
+            ("en", -0.0, 0, "0"),
+            ("en", 999.999, 2, "1,000.00"),
+            ("en", 1_000_000_000_000.0, 0, "1,000,000,000,000"),
+        ] {
+            assert_eq!(
+                Locale::parse(tag).unwrap().number(value, decimals),
+                expected,
+                "{tag}: {value}"
+            );
+        }
+        assert_eq!(
+            Locale::parse("de").unwrap().format_number(1234.5, 2, false),
+            "1234,50"
+        );
+    }
+
+    #[test]
+    fn currency_symbols_spacing_and_rounded_zero() {
+        for (tag, value, code, expected) in [
+            ("en", -1234.5, "USD", "-$1,234.50"),
+            ("de", 1234.5, "EUR", "1.234,50\u{a0}€"),
+            ("de-CH", 1234.5, "CHF", "CHF\u{a0}1\u{2019}234.50"),
+            ("pt-BR", 1234.5, "BRL", "R$\u{a0}1.234,50"),
+            ("en", 12.0, "XYZ", "XYZ\u{a0}12.00"),
+            ("en", -0.004, "USD", "$0.00"),
+        ] {
+            assert_eq!(
+                Locale::parse(tag).unwrap().currency(value, code, 2),
+                expected,
+                "{tag}: {code}"
+            );
+        }
+    }
+
+    fn environment() -> Environment<'static> {
+        let mut env = Environment::new();
+        register(&mut env, Locale::default(), &Secrets::new(&Env::default()));
+        env
+    }
+
+    #[test]
+    fn filters_handle_nulls_arguments_and_compact_boundaries() {
+        let env = environment();
+        for (expression, expected) in [
+            ("none | number", ""),
+            ("missing | percent", ""),
+            ("none | currency('USD')", ""),
+            ("none | compact", ""),
+            ("none | signed", ""),
+            ("' 1234.5 ' | number(2)", "1,234.50"),
+            ("1.25 | number(0, decimals=1)", "1.3"),
+            ("1 | number(12)", "1.000000000000"),
+            ("0.125 | percent(1)", "12.5%"),
+            ("0.125 | percent | signed", "+12.5%"),
+            ("-2 | signed", "\u{2212}2"),
+            ("0 | signed", "0"),
+            ("949 | compact", "949"),
+            ("950 | compact", "1K"),
+            ("1000 | compact", "1K"),
+            ("999950 | compact", "1M"),
+            ("-1250000 | compact", "-1.3M"),
+            ("1000000000 | compact", "1B"),
+            ("1000000000000 | compact", "1T"),
+        ] {
+            let template = format!("{{{{ {expression} }}}}");
+            assert_eq!(env.render_str(&template, ()).unwrap(), expected, "{expression}");
+        }
+    }
+
+    #[test]
+    fn invalid_filter_inputs_have_useful_errors() {
+        let env = environment();
+        for (expression, message) in [
+            (
+                "'not a number' | number",
+                "`number` needs a number, but got the text \"not a number\"",
+            ),
+            ("[] | percent", "`percent` needs a number, but got sequence"),
+            ("1 | number(13)", "`decimals` must be between 0 and 12"),
+            (
+                "1 | currency",
+                "`currency` needs a currency code, like `currency('EUR')`",
+            ),
+            (
+                "1 | currency('usd')",
+                "`currency('usd')`: the code must be three capital letters (ISO 4217), like `EUR`",
+            ),
+        ] {
+            let template = format!("{{{{ {expression} }}}}");
+            assert_eq!(
+                env.render_str(&template, ()).unwrap_err().detail(),
+                Some(message),
+                "{expression}"
+            );
+        }
+        for tag in ["", "zz", "en-US-extra", "e", "en-!"] {
+            assert!(
+                Locale::parse(tag)
+                    .unwrap_err()
+                    .starts_with(&format!("unknown locale `{tag}`;"))
+            );
+        }
+    }
+}
