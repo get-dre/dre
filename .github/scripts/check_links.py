@@ -2,7 +2,7 @@
 """Fail on a broken link between the docs: a relative link to a page that doesn't exist, or to
 an anchor no heading on that page makes (GitHub's anchor rules).
 
-    check_links.py      check README.md, docs/*.md and skills/**/*.md
+    check_links.py      check root policy/contributor docs, docs/*.md and skills/**/*.md
 """
 
 import pathlib
@@ -28,7 +28,8 @@ def anchors(md):
 def problems():
     found = []
     # skills/shared/topics/ link as their copies in <skill>/references/topics/ do; the copies are checked.
-    files = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md")),
+    files = [*(ROOT / name for name in ("README.md", "SECURITY.md", "CONTRIBUTING.md", "CLA.md")),
+             *sorted((ROOT / "docs").glob("*.md")),
              *sorted(p for p in (ROOT / "skills").rglob("*.md") if "shared/topics" not in p.as_posix())]
     cache = {}
     for f in files:

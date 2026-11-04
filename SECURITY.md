@@ -32,4 +32,4 @@ wheel. See [Verifying a download](docs/install.md#verifying-a-download).
   the `sftp` destination and the `postgres` SSH tunnel sign with RSA keys through a library with
   a timing weakness and no fixed release. The risk is low (one signature per connection); DRE
   warns when an RSA key is used, and `allow_rsa_keys: false` refuses them. Ed25519 and ECDSA keys,
-  and `use_agent: true`, aren't affected. See [RSA keys](docs/plugins.md#rsa-keys).
+  and `use_agent: true`, aren't affected. See [RSA keys](docs/plugin-sftp.md#rsa-keys).

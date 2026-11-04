@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Scan the dependencies for known vulnerabilities and licences DRE can't ship.
+"""Scan dependencies for known vulnerabilities, incompatible licences and unapproved sources.
 
-    security_scan.py rust [--advisories fail|warn] [--report-dir DIR]   cargo-deny: advisories and licences
+    security_scan.py rust [--advisories fail|warn] [--report-dir DIR]   cargo-deny: advisories, licences and sources
     security_scan.py go [--advisories fail|warn] [--report-dir DIR]     govulncheck and go-licenses, for every module in go/
     git diff --name-only BASE HEAD | security_scan.py mode rust|go          fail or warn, for a pull request
 
@@ -22,7 +22,7 @@ malformed entry fails both commands.
 With --advisories warn, a vulnerability is printed as a warning and doesn't fail the scan. CI uses
 it on a pull request that doesn't change that language's dependencies (see `mode`): an advisory
 published against unchanged lockfiles isn't that pull request's doing. Pushes to master, the
-weekly run and releases always use fail. Licences and the exceptions file always fail.
+weekly run and releases always use fail. Licences, sources and the exceptions file always fail.
 
 Licences: deny.toml's `licenses.allow` (compatible with GPL-3.0-only) applies to the Rust crates
 and, through go-licenses, to the Go modules; the Go exceptions are in
@@ -235,15 +235,15 @@ def rust(report_dir, advisories):
         path.write_text(config)
         base = [tool("cargo-deny"), "--manifest-path", str(ROOT / "Cargo.toml"), "--config", str(path)]
         check = ["check", "--warn", "unmaintained"]
-        licences = subprocess.run(base + check + ["licenses"], check=False).returncode
+        policy = subprocess.run(base + check + ["licenses", "sources"], check=False).returncode
         found = subprocess.run(base + check + ["advisories"], check=False).returncode
         if advisories == "warn":
             found = warned("cargo-deny", found)
         if report_dir:
             with open(report_dir / "cargo-deny.json", "w") as out:
-                subprocess.run(base + ["--format", "json"] + check + ["advisories", "licenses"],
+                subprocess.run(base + ["--format", "json"] + check + ["advisories", "licenses", "sources"],
                                stdout=out, stderr=out, check=False)
-    return 1 if licences or found else 0
+    return 1 if policy or found else 0
 
 
 def go(report_dir, advisories):

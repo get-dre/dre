@@ -4,7 +4,9 @@
 import datetime
 import pathlib
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import security_scan as ss  # noqa: E402
@@ -122,6 +124,30 @@ class DenyConfig(unittest.TestCase):
 
     def test_allowed_licences_come_from_deny_toml(self):
         self.assertEqual(ss.allowed_licences(DENY), ["MIT", "Apache-2.0"])
+
+
+class RustScan(unittest.TestCase):
+    def test_unapproved_sources_fail_even_when_advisories_only_warn(self):
+        def run(args, **kwargs):
+            return ss.subprocess.CompletedProcess(args, 1 if "sources" in args else 0)
+
+        for mode in ("fail", "warn"):
+            with self.subTest(advisories=mode), \
+                    mock.patch.object(ss, "load_exceptions", return_value=[]), \
+                    mock.patch.object(ss, "tool", return_value="cargo-deny"), \
+                    mock.patch.object(ss.subprocess, "run", side_effect=run):
+                self.assertEqual(ss.rust(None, mode), 1)
+
+    def test_sources_are_included_in_the_json_report(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(ss, "load_exceptions", return_value=[]), \
+                mock.patch.object(ss, "tool", return_value="cargo-deny"), \
+                mock.patch.object(ss.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            self.assertEqual(ss.rust(pathlib.Path(tmp), "fail"), 0)
+            report_args = next(call.args[0] for call in run.call_args_list
+                               if "--format" in call.args[0])
+            self.assertIn("sources", report_args)
 
 
 def finding(osv, function=None):
