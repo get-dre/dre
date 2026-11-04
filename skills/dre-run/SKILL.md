@@ -266,8 +266,8 @@ Load `references/topics/per-row.md` and `references/topics/delivery.md` first.
 - **Rerun schedule firings in a window** (RUN-3): list them with `dre schedule ls --schedule
   <name> --from <start> --to <end> --output json`. `--from` is inclusive; `--to` is exclusive.
   For each occurrence, run its `invocation.argv` from the project directory with its
-  `invocation.env`, preserving `DRE_RUN_AT` and `DRE_RUN_DATE`. Add the deployment's target,
-  profile and credentials. Delivery rules still apply (RUN-2): a rerun delivers again.
+  `invocation.env`, preserving `DRE_RUN_AT` and `DRE_RUN_DATE`. Let the deployment supply its
+  target/profile and secret environment. Delivery rules still apply (RUN-2): a rerun delivers again.
 - **Run one report or Set of a schedule:** `dre run --schedule <name> -s <report> --set <set>`
   keeps the schedule's vars and timezone.
 - **Wire an orchestrator:** the occurrences JSON (`dre schedule ls --output json`) carries each
