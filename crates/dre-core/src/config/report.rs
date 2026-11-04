@@ -310,8 +310,8 @@ pub struct Destination {
     /// At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it.
     #[schemars(regex(pattern = "^\\s*[0-9_]+\\s*/\\s*[A-Za-z]+\\s*$"))]
     pub rate: Option<Loose<String>>,
-    /// With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).
-    #[schemars(range(min = 1))]
+    /// With `rate`: how many deliveries may go back to back while keeping the same average. From 1 to 4294967295; default: 1 (evenly spaced).
+    #[schemars(range(min = 1, max = 4294967295_u64))]
     pub burst: Option<Loose<u64>>,
     /// Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`.
     #[serde(default)]

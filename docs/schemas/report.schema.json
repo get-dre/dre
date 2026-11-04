@@ -561,7 +561,8 @@
         },
         "burst": {
           "type": "integer",
-          "description": "With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced).",
+          "description": "With `rate`: how many deliveries may go back to back while keeping the same average. From 1 to 4294967295; default: 1 (evenly spaced).",
+          "maximum": 4294967295,
           "minimum": 1
         },
         "zip": {

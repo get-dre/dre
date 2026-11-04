@@ -129,7 +129,7 @@ Where a file is delivered: the name of a destination profile in `profiles.yml`, 
 | `attach` | string or list of string |  | On a message output's entry, for a destination that takes messages and files (`slack`, `email`): other outputs of the report whose files go with the message. |
 | `hold` | boolean |  | Hold this delivery: the output is rendered and every other destination delivered, and this one waits for `dre release`. `dre run --hold` holds every destination. |
 | `rate` | string |  | At most this many deliveries to this destination per second, minute or hour (`100/minute`, `5/second`, `20000/hour`), spaced evenly: `60/minute` sends one a second. For `dre run` and `dre release`; `--rate` overrides it. |
-| `burst` | integer |  | With `rate`: how many deliveries may go back to back while keeping the same average. Default: 1 (evenly spaced). |
+| `burst` | integer |  | With `rate`: how many deliveries may go back to back while keeping the same average. From 1 to 4294967295; default: 1 (evenly spaced). |
 | `zip` | boolean or map (see below) |  | Deliver one zip instead of loose files: the output's files plus every `attach:`ed output's, flat. `true` for no password, or `{password, encryption}`. The zip is named by `path` (which must end in `.zip`), else `<output>.zip`. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
