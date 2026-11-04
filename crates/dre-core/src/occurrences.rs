@@ -441,3 +441,102 @@ pub fn document(project: &Project, req: &Request) -> Result<Json, String> {
         "problems": problems,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instant(text: &str) -> DateTime<Utc> {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn window_order_and_maximum_are_checked_exactly() {
+        let from = instant("2026-01-01T00:00:00Z");
+        for to in [from, from - Duration::seconds(1)] {
+            assert_eq!(
+                Window::new(from, to).unwrap_err(),
+                format!("--to ({}) must be after --from ({})", rfc3339(to), rfc3339(from))
+            );
+        }
+        let limit = from + Duration::days(MAX_WINDOW_DAYS);
+        assert!(Window::new(from, limit).is_ok());
+        assert_eq!(
+            Window::new(from, limit + Duration::seconds(1)).unwrap_err(),
+            "the window from 2026-01-01T00:00:00Z to 2027-01-02T00:00:01Z is longer than 366 days; ask for less, in several calls if needed"
+        );
+    }
+
+    #[test]
+    fn invalid_timings_report_the_reason() {
+        let window = Window::new(instant("2026-01-01T00:00:00Z"), instant("2026-01-02T00:00:00Z")).unwrap();
+        for (timing, expected) in [
+            (json!({}), "a schedule needs one of `cron`, `every` or `rrule`"),
+            (json!({"cron": "@never"}), "invalid cron `@never`: unknown macro"),
+            (
+                json!({"cron": "0 0 * *"}),
+                "invalid cron `0 0 * *`: expected 5 fields (minute hour day-of-month month day-of-week), found 4",
+            ),
+            (
+                json!({"cron": "60 * * * *"}),
+                "invalid cron `60 * * * *`: minute field `60` has `60` outside 0-59",
+            ),
+            (json!({"every": {}}), "`every` has no unit"),
+            (json!({"every": {"hours": 1}}), "unknown `every` unit `hours`"),
+            (json!({"every": {"days": 1}}), "`every` needs `starting`"),
+            (
+                json!({"cron": "* * * * *", "also": ["2026-01-01"]}),
+                "`also` needs a schedule that fires at one time of day",
+            ),
+        ] {
+            assert_eq!(
+                expand(timing.as_object().unwrap(), Tz::UTC, &window).unwrap_err(),
+                expected,
+                "{timing}"
+            );
+        }
+        for (rule, reason) in [
+            ("FREQ=INVALID", "unknown FREQ `INVALID`"),
+            ("COUNT=1", "`FREQ` is required"),
+            (
+                "FREQ=DAILY;INTERVAL=0",
+                "`INTERVAL` must be a positive whole number",
+            ),
+            ("FREQ=DAILY;BYHOUR=24", "`BYHOUR` value `24` is out of range"),
+            (
+                "FREQ=DAILY;COUNT=1;UNTIL=20260102",
+                "`UNTIL` and `COUNT` can't both be set",
+            ),
+        ] {
+            let error = expand(json!({"rrule": rule}).as_object().unwrap(), Tz::UTC, &window).unwrap_err();
+            assert!(error.starts_with(&format!("invalid rrule `{rule}`:")), "{error}");
+            assert!(error.ends_with(reason), "{error}");
+        }
+    }
+
+    #[test]
+    fn recurrence_limit_is_an_error_instead_of_a_truncated_result() {
+        let window = Window::new(instant("2026-01-01T00:00:00Z"), instant("2026-01-02T00:00:00Z")).unwrap();
+        let timing = json!({"rrule": "FREQ=SECONDLY", "starting": "2026-01-01"});
+        assert_eq!(
+            expand(timing.as_object().unwrap(), Tz::UTC, &window).unwrap_err(),
+            "rrule `FREQ=SECONDLY` fires more than 65535 times in the window; ask for a shorter one"
+        );
+    }
+
+    #[test]
+    fn expansion_includes_from_and_excludes_to() {
+        let from = instant("2026-01-01T00:00:00Z");
+        let to = instant("2026-01-02T00:00:00Z");
+        let window = Window::new(from, to).unwrap();
+        for timing in [
+            json!({"cron": "@daily"}),
+            json!({"rrule": "FREQ=DAILY", "starting": "2025-12-31"}),
+        ] {
+            assert_eq!(
+                expand(timing.as_object().unwrap(), Tz::UTC, &window).unwrap(),
+                vec![from]
+            );
+        }
+    }
+}
