@@ -2,11 +2,11 @@
 //!
 //! A run is [planned](plan::plan) first: which Bindings, each parsed once with the run's inputs,
 //! every profile's entry, and how they're scheduled. Then each Binding runs through its stages
-//! (see [`mode`]): **render** its SQL ([`compile`]), **query** each statement on its
-//! connection's session, one per connection, in strict YAML order ([`query`]), **format** its
-//! outputs into `target/run/` ([`format`]), **deliver** them ([`deliver`]) and **record** the
-//! schema snapshot and `run_results.json` ([`record`]). A per-row output is made and delivered
-//! row by row ([`per_row`]). The [`scheduler`] runs Bindings, and rows, at once. Everything that
+//! (see `mode`): **render** its SQL (`compile`), **query** each statement on its
+//! connection's session, one per connection, in strict YAML order (`query`), **format** its
+//! outputs into `target/run/` (`format`), **deliver** them (`deliver`) and **record** the
+//! schema snapshot and `run_results.json` (`record`). A per-row output is made and delivered
+//! row by row (`per_row`). The `scheduler` runs Bindings, and rows, at once. Everything that
 //! happens is a [`RunEvent`] for the host's [`EventSink`].
 
 use std::collections::BTreeMap;

@@ -7,7 +7,7 @@
 //!
 //! JSON is redacted structurally, before it is serialized: serializing escapes `"`, `\` and
 //! control characters, so masking the finished text would miss a secret that contains them. Use
-//! [`to_json_pretty`] / [`to_json_line`] for every JSON surface, never `mask` on JSON text.
+//! [`Secrets::to_json_pretty`] / [`Secrets::to_json_line`] for every JSON surface, never `mask` on JSON text.
 //!
 //! Every value is masked, however short. One shorter than 4 characters is masked where it stands
 //! alone (not inside a longer word or number), so a PIN of `12` masks `PIN 12` but leaves `2012`
