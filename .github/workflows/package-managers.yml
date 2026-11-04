@@ -44,6 +44,7 @@ jobs:
   render:
     name: Render
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
@@ -68,6 +69,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       GITHUB_TOKEN: ${{ github.token }}
@@ -96,6 +98,7 @@ jobs:
       matrix:
         os: [windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
@@ -122,6 +125,7 @@ jobs:
     needs: [render, homebrew, scoop]
     if: inputs.push
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
       TAG: ${{ inputs.tag }}

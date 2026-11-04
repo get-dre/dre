@@ -27,6 +27,7 @@ permissions:
 jobs:
   scope:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
       examples: ${{ steps.scope.outputs.examples }}
@@ -167,6 +168,7 @@ jobs:
     needs: scope
     if: github.event_name == 'pull_request' && needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -179,6 +181,7 @@ jobs:
   schema-docs:
     # Keep cheap repository checks in one checkout, including docs-only changes.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -207,6 +210,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -232,6 +236,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -274,6 +279,7 @@ jobs:
     # through Google's mirror of it (mirror.gcr.io): the same digests, without Docker Hub's pull
     # limit for shared runners.
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     services:
       postgres:
         image: mirror.gcr.io/library/postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
@@ -459,6 +465,7 @@ jobs:
             partition: 1
             partitions: 1
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
