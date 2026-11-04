@@ -24,6 +24,7 @@ use dre_protocol::plugin::{
     About, Delivery, Destination, Result, conn_required, conn_str, serve_destination,
 };
 use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE};
+use dre_webhook::never_sent;
 use serde_json::{Map, Value, json};
 
 const DEFAULT_API: &str = "https://slack.com/api";
@@ -414,16 +415,6 @@ fn explain(method: &str, v: &Value, target: &Target) -> String {
         ),
         _ => format!("Slack {method} failed for {to}: {error}"),
     }
-}
-/// Whether a request certainly never reached the server (no connection was made), so trying
-/// again can't post twice.
-fn never_sent(e: &ureq::Error) -> bool {
-    matches!(
-        e,
-        ureq::Error::HostNotFound
-            | ureq::Error::ConnectionFailed
-            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
-    ) || matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused)
 }
 
 fn main() {
