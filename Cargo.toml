@@ -32,14 +32,15 @@ walkdir = "2"
 semver = { version = "1", features = ["serde"] }
 tempfile = "3"
 assert_cmd = "2"
-# The newest `duckdb` crate (1.10506) is still built on arrow 58, so the DuckDB plugin converts
+# The DuckDB 1.x `duckdb` crate (1.10506) is built on arrow 58, so the DuckDB plugin converts
 # batches between that and this one through the Arrow C data interface (plugins/duckdb/src/bridge.rs).
 # Once duckdb moves to arrow 59, drop the bridge and use one version.
 arrow = "59"
 # Snappy only: the parquet plugin always writes Snappy, and nothing in DRE reads other codecs.
 # The default codecs pulled in zstd 0.13, whose advisories are fixed only in zstd 0.14 (parquet 60).
 parquet = { version = "59", default-features = false, features = ["arrow", "snap", "simdutf8"] }
-duckdb = { version = "1.10506.1", features = ["bundled"] }
+# duckdb-rs 1.20000 bundles DuckDB 2.0 and changes Arrow streaming; upgrade it separately.
+duckdb = { version = "~1.10506.1", features = ["bundled"] }
 
 # Native DuckDB debug symbols dominate development/test disk usage. Omit debug
 # info only for libduckdb-sys. Its build script also sets native NDEBUG, as in
