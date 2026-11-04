@@ -269,7 +269,7 @@ func (s *session) Check(sql string) (string, error) {
 
 // Load puts the rows into a session temp table, as one CREATE TEMP TABLE ... AS SELECT over an
 // array of structs: a session has no bulk path into a temp table.
-func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (plugin.Loaded, error) {
 	table := "dre_lookup_" + name
 	sql, rows, err := tempTableSQL(table, schema, recs)
 	if err != nil {
@@ -333,7 +333,7 @@ func (s *session) Close() {
 
 // tempTableSQL is a temp table holding recs. Every column is typed in the array's STRUCT, so an
 // empty or all-NULL column still gets its type.
-func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.Record) (string, int64, error) {
+func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.RecordBatch) (string, int64, error) {
 	var cols []string
 	for _, f := range schema.Fields() {
 		var t string

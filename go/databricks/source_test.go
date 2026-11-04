@@ -26,9 +26,9 @@ func TestTempViewSQLEscapesForSparkAndCastsEveryColumn(t *testing.T) {
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{`O'Brien \ Co`, ""}, []bool{true, false})
 	b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 0}, []bool{true, false})
 	b.Field(2).(*array.Date32Builder).AppendValues([]arrow.Date32{20454, 0}, []bool{true, false})
-	rec := b.NewRecord()
+	rec := b.NewRecordBatch()
 	defer rec.Release()
-	sql, n, err := tempViewSQL("dre_lookup_x", schema, []arrow.Record{rec})
+	sql, n, err := tempViewSQL("dre_lookup_x", schema, []arrow.RecordBatch{rec})
 	want := "CREATE OR REPLACE TEMPORARY VIEW dre_lookup_x AS SELECT CAST(`code` AS STRING) AS `code`, " +
 		"CAST(`n` AS BIGINT) AS `n`, CAST(`d` AS DATE) AS `d` FROM VALUES\n  " +
 		`('O\'Brien \\ Co', 1, DATE'2026-01-01'),` + "\n  (NULL, NULL, NULL)\nAS t(`code`, `n`, `d`)"

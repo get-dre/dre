@@ -119,7 +119,7 @@ func (s *session) Check(query string) (string, error) {
 }
 
 // Load puts the rows into a temporary table, as one statement over VALUES.
-func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (plugin.Loaded, error) {
 	table := "dre_lookup_" + name
 	sql, rows, err := tempTableSQL(table, schema, recs)
 	if err != nil {
@@ -147,7 +147,7 @@ type result struct {
 	cols    []column
 	schema  *arrow.Schema
 	batches []*arrowbatches.ArrowBatch
-	pending []arrow.Record
+	pending []arrow.RecordBatch
 }
 
 func newResult(cols []column, batches []*arrowbatches.ArrowBatch) *result {
@@ -158,7 +158,7 @@ func (r *result) Schema() (*arrow.Schema, error) { return r.schema, nil }
 
 func (r *result) HasNext() bool { return len(r.pending) > 0 || len(r.batches) > 0 }
 
-func (r *result) Next() (arrow.Record, error) {
+func (r *result) Next() (arrow.RecordBatch, error) {
 	for len(r.pending) == 0 {
 		if len(r.batches) == 0 {
 			return nil, io.EOF
@@ -178,7 +178,7 @@ func (r *result) Next() (arrow.Record, error) {
 
 // tempTableSQL is a temporary table holding recs. Every value is sent as text and cast to its
 // column's type, so NULLs and NaN need no special VALUES typing.
-func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.Record) (string, int64, error) {
+func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.RecordBatch) (string, int64, error) {
 	var defs, sel []string
 	for i, f := range schema.Fields() {
 		var t string

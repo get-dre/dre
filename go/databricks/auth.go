@@ -194,6 +194,7 @@ func (a *auth) bearer() (string, error) {
 		// The SDK caches and renews its tokens itself.
 		req, _ := http.NewRequest("GET", a.sdk.Host, nil)
 		if err := a.sdk.Authenticate(req); err != nil {
+			//lint:ignore ST1005 Preserve the service or protocol name in this diagnostic.
 			return "", fmt.Errorf("Databricks login (%s) failed: %v", a.sdk.AuthType, err)
 		}
 		return strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "), nil
@@ -348,6 +349,7 @@ func (o *oauth) tokenRequest(form url.Values, basic string) (*tokens, error) {
 		if o.clientSecret != "" {
 			hint = " (check `client_id` and `client_secret`, and that the service principal can use this workspace)"
 		}
+		//lint:ignore ST1005 Preserve the service or protocol name in this diagnostic.
 		return nil, fmt.Errorf("Databricks OAuth failed (HTTP %d)%s: %s", resp.StatusCode, hint, detail)
 	}
 	if body.Access == "" {

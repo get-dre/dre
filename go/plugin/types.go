@@ -58,7 +58,7 @@ func outputType(t arrow.DataType) arrow.DataType {
 }
 
 // Convert puts rec's columns under schema (from OutputSchema). The caller releases the result.
-func Convert(rec arrow.Record, schema *arrow.Schema) (arrow.Record, error) {
+func Convert(rec arrow.RecordBatch, schema *arrow.Schema) (arrow.RecordBatch, error) {
 	if int(rec.NumCols()) != len(schema.Fields()) {
 		return nil, fmt.Errorf("a batch has %d columns but the result has %d", rec.NumCols(), len(schema.Fields()))
 	}
@@ -73,7 +73,7 @@ func Convert(rec arrow.Record, schema *arrow.Schema) (arrow.Record, error) {
 		}
 		cols[i] = c
 	}
-	out := array.NewRecord(schema, cols, rec.NumRows())
+	out := array.NewRecordBatch(schema, cols, rec.NumRows())
 	for _, c := range cols {
 		c.Release()
 	}

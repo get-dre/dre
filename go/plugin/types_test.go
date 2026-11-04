@@ -13,15 +13,15 @@ import (
 
 var mem = memory.DefaultAllocator
 
-func record(t *testing.T, fields []arrow.Field, build func(b *array.RecordBuilder)) arrow.Record {
+func record(t *testing.T, fields []arrow.Field, build func(b *array.RecordBuilder)) arrow.RecordBatch {
 	t.Helper()
 	b := array.NewRecordBuilder(mem, arrow.NewSchema(fields, nil))
 	defer b.Release()
 	build(b)
-	return b.NewRecord()
+	return b.NewRecordBatch()
 }
 
-func convert(t *testing.T, rec arrow.Record) arrow.Record {
+func convert(t *testing.T, rec arrow.RecordBatch) arrow.RecordBatch {
 	t.Helper()
 	out, err := Convert(rec, OutputSchema(rec.Schema()))
 	if err != nil {
@@ -118,7 +118,7 @@ func TestIntegerBatchesOfDifferentSizesGiveOneColumnType(t *testing.T) {
 	big := record(t, []arrow.Field{{Name: "n", Type: arrow.PrimitiveTypes.Int64}}, func(b *array.RecordBuilder) {
 		b.Field(0).(*array.Int64Builder).Append(1 << 40)
 	})
-	for _, rec := range []arrow.Record{small, big} {
+	for _, rec := range []arrow.RecordBatch{small, big} {
 		out, err := Convert(rec, schema)
 		if err != nil {
 			t.Fatal(err)

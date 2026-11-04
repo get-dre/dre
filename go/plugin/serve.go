@@ -192,7 +192,7 @@ type Session interface {
 	Check(sql string) (note string, err error)
 	// Load puts rows into a temporary table on the session. name is already checked to be a
 	// plain identifier.
-	Load(name string, schema *arrow.Schema, recs []arrow.Record) (Loaded, error)
+	Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (Loaded, error)
 	Close()
 }
 
@@ -209,7 +209,7 @@ type Result interface {
 	// batch is converted to it (see Convert).
 	Schema() (*arrow.Schema, error)
 	HasNext() bool
-	Next() (arrow.Record, error)
+	Next() (arrow.RecordBatch, error)
 }
 
 type server struct {
@@ -466,7 +466,7 @@ func (s *server) failure(err error) *errorReply {
 	return m
 }
 
-func (s *server) sendRecord(rec arrow.Record) error {
+func (s *server) sendRecord(rec arrow.RecordBatch) error {
 	b, err := EncodeRecord(rec)
 	if err != nil {
 		return err
@@ -844,7 +844,7 @@ func (s *server) stream(res Result, rowLimit *int64) error {
 	}
 	if !sent {
 		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-		empty := b.NewRecord()
+		empty := b.NewRecordBatch()
 		b.Release()
 		err := s.sendRecord(empty)
 		empty.Release()

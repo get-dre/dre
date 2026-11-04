@@ -26,13 +26,13 @@ import (
 
 type fakeResult struct {
 	schema *arrow.Schema
-	recs   []arrow.Record
+	recs   []arrow.RecordBatch
 	i      int
 }
 
 func (r *fakeResult) Schema() (*arrow.Schema, error) { return r.schema, nil }
 func (r *fakeResult) HasNext() bool                  { return r.i < len(r.recs) }
-func (r *fakeResult) Next() (arrow.Record, error) {
+func (r *fakeResult) Next() (arrow.RecordBatch, error) {
 	if r.i >= len(r.recs) {
 		return nil, io.EOF
 	}
@@ -51,7 +51,7 @@ var endlessWaiting = make(chan struct{}, 1)
 
 func (r *endlessResult) Schema() (*arrow.Schema, error) { return idSchema, nil }
 func (r *endlessResult) HasNext() bool                  { return true }
-func (r *endlessResult) Next() (arrow.Record, error) {
+func (r *endlessResult) Next() (arrow.RecordBatch, error) {
 	if r.n > 0 {
 		endlessWaiting <- struct{}{}
 	}
@@ -75,7 +75,7 @@ func (f *fakeDB) Cancel() { f.once.Do(func() { close(f.stop) }) }
 
 var idSchema = arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
 
-func ids(from, n int64) arrow.Record {
+func ids(from, n int64) arrow.RecordBatch {
 	b := array.NewInt64Builder(memory.DefaultAllocator)
 	defer b.Release()
 	for i := from; i < from+n; i++ {
@@ -83,7 +83,7 @@ func ids(from, n int64) arrow.Record {
 	}
 	col := b.NewArray()
 	defer col.Release()
-	return array.NewRecord(idSchema, []arrow.Array{col}, n)
+	return array.NewRecordBatch(idSchema, []arrow.Array{col}, n)
 }
 
 func (f *fakeDB) Run(sql string, fn func(plugin.Result) error) error {
@@ -92,14 +92,14 @@ func (f *fakeDB) Run(sql string, fn func(plugin.Result) error) error {
 	case strings.HasPrefix(strings.ToLower(sql), "create"):
 		return fn(nil)
 	case sql == "select three batches":
-		return fn(&fakeResult{schema: idSchema, recs: []arrow.Record{ids(0, 2), ids(2, 2), ids(4, 2)}})
+		return fn(&fakeResult{schema: idSchema, recs: []arrow.RecordBatch{ids(0, 2), ids(2, 2), ids(4, 2)}})
 	case sql == "select nothing":
 		return fn(&fakeResult{schema: idSchema})
 	case sql == "select null":
 		s := arrow.NewSchema([]arrow.Field{{Name: "n", Type: arrow.Null, Nullable: true}}, nil)
 		col := array.NewNull(2)
 		defer col.Release()
-		return fn(&fakeResult{schema: s, recs: []arrow.Record{array.NewRecord(s, []arrow.Array{col}, 2)}})
+		return fn(&fakeResult{schema: s, recs: []arrow.RecordBatch{array.NewRecordBatch(s, []arrow.Array{col}, 2)}})
 	}
 	switch sql {
 	case "wait":
@@ -135,7 +135,7 @@ func (f *fakeDB) Check(sql string) (string, error) {
 	return "would scan 10 bytes", nil
 }
 
-func (f *fakeDB) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+func (f *fakeDB) Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (plugin.Loaded, error) {
 	var n int64
 	for _, r := range recs {
 		n += r.NumRows()

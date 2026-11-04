@@ -203,7 +203,7 @@ func (s *session) drain(query string) error {
 }
 
 // Load puts the rows into a temporary table on the session, sent as a native insert.
-func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+func (s *session) Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (plugin.Loaded, error) {
 	if err := s.usable(); err != nil {
 		return plugin.Loaded{}, err
 	}
@@ -359,7 +359,7 @@ func (r *result) HasNext() bool {
 	return r.hasNext
 }
 
-func (r *result) Next() (arrow.Record, error) {
+func (r *result) Next() (arrow.RecordBatch, error) {
 	if !r.HasNext() {
 		if err := r.rows.Err(); err != nil {
 			return nil, r.failed(err)
@@ -393,7 +393,7 @@ func (r *result) Next() (arrow.Record, error) {
 		cols[i] = b.NewArray()
 		defer cols[i].Release()
 	}
-	return array.NewRecord(r.schema, cols, n), nil
+	return array.NewRecordBatch(r.schema, cols, n), nil
 }
 
 // returnsRows is whether a statement answers with rows, from its first keyword (after comments
@@ -442,15 +442,6 @@ func firstKeyword(query string) string {
 
 func quote(ident string) string {
 	return "`" + strings.ReplaceAll(strings.ReplaceAll(ident, `\`, `\\`), "`", "\\`") + "`"
-}
-
-// code is a ClickHouse error's code, or 0.
-func code(err error) int32 {
-	var e *clickhouse.Exception
-	if errors.As(err, &e) {
-		return e.Code
-	}
-	return 0
 }
 
 // cleanErr keeps ClickHouse's message, without the driver's framing, and gives sign-in and

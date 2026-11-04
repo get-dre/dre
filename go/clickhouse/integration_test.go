@@ -54,7 +54,7 @@ func started(t *testing.T, conn map[string]any) *plugintest.Conversation {
 	return c
 }
 
-func cell(t *testing.T, recs []arrow.Record, col string) string {
+func cell(t *testing.T, recs []arrow.RecordBatch, col string) string {
 	t.Helper()
 	for _, r := range recs {
 		for i, f := range r.Schema().Fields() {
@@ -106,7 +106,7 @@ func TestALookupLoadsIntoATempTable(t *testing.T) {
 		b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
 		b.Field(2).(*array.Date32Builder).AppendValues([]arrow.Date32{20000, 0}, []bool{true, false})
 		c.Send(map[string]any{"type": "load", "name": "codes"})
-		c.SendRecord(b.NewRecord())
+		c.SendRecord(b.NewRecordBatch())
 		c.Send(map[string]any{"type": "result_set_end"})
 		r := c.Reply()
 		if r["type"] != "loaded" || r["relation"] != "`dre_lookup_codes`" || r["rows"] != 2.0 {

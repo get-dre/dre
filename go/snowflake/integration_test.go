@@ -34,7 +34,7 @@ func live(t *testing.T) *plugintest.Conversation {
 	return c
 }
 
-func value(t *testing.T, recs []arrow.Record, col string) string {
+func value(t *testing.T, recs []arrow.RecordBatch, col string) string {
 	t.Helper()
 	for _, r := range recs {
 		for i, f := range r.Schema().Fields() {
@@ -56,7 +56,7 @@ func TestLiveStatementsShareASessionAndLoadWorks(t *testing.T) {
 	b := array.NewRecordBuilder(mem, arrow.NewSchema([]arrow.Field{{Name: "code", Type: arrow.BinaryTypes.String, Nullable: true}}, nil))
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{`x'y\z`}, nil)
 	c.Send(map[string]any{"type": "load", "name": "codes"})
-	c.SendRecord(b.NewRecord())
+	c.SendRecord(b.NewRecordBatch())
 	c.Send(map[string]any{"type": "result_set_end"})
 	if r := c.Reply(); r["type"] != "loaded" || r["rows"] != 1.0 {
 		t.Fatalf("%v", r)

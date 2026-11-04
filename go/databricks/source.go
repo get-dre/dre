@@ -195,7 +195,7 @@ func (d *databricks) explain(query string) (string, error) {
 
 // Load puts the rows into a temporary view, as one VALUES statement: a SQL warehouse
 // connection has no bulk path.
-func (d *databricks) Load(name string, schema *arrow.Schema, recs []arrow.Record) (plugin.Loaded, error) {
+func (d *databricks) Load(name string, schema *arrow.Schema, recs []arrow.RecordBatch) (plugin.Loaded, error) {
 	view := "dre_lookup_" + name
 	sql, rows, err := tempViewSQL(view, schema, recs)
 	if err != nil {
@@ -285,7 +285,7 @@ func quote(ident string) string {
 // tempViewSQL is a temporary view holding recs, as one VALUES statement. A SQL warehouse
 // connection has no bulk path, so this is the only way in; every column is cast explicitly so
 // an all-NULL column still gets its type.
-func tempViewSQL(view string, schema *arrow.Schema, recs []arrow.Record) (string, int64, error) {
+func tempViewSQL(view string, schema *arrow.Schema, recs []arrow.RecordBatch) (string, int64, error) {
 	var casts, names []string
 	for _, f := range schema.Fields() {
 		var t string

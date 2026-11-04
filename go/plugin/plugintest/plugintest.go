@@ -63,7 +63,7 @@ func (c *Conversation) Send(v any) {
 }
 
 // SendRecord writes one Arrow frame.
-func (c *Conversation) SendRecord(rec arrow.Record) {
+func (c *Conversation) SendRecord(rec arrow.RecordBatch) {
 	b, err := plugin.EncodeRecord(rec)
 	if err != nil {
 		c.t.Fatal(err)
@@ -110,7 +110,7 @@ func (c *Conversation) Message() map[string]any {
 }
 
 // Records reads one Arrow frame.
-func (c *Conversation) Records() []arrow.Record {
+func (c *Conversation) Records() []arrow.RecordBatch {
 	c.t.Helper()
 	f, err := plugin.ReadFrame(c.out)
 	if err != nil || f.Tag != plugin.TagArrow {
@@ -153,13 +153,13 @@ func (c *Conversation) OpenReadOnly(conn map[string]any) {
 }
 
 // Query runs sql and returns the result's records, after checking the reply sequence.
-func (c *Conversation) Query(sql string) []arrow.Record {
+func (c *Conversation) Query(sql string) []arrow.RecordBatch {
 	c.t.Helper()
 	c.Send(map[string]any{"type": "execute", "sql": sql})
 	if r := c.Reply(); r["type"] != "result" {
 		c.t.Fatalf("execute %q: %v", sql, r)
 	}
-	var recs []arrow.Record
+	var recs []arrow.RecordBatch
 	for {
 		f, err := plugin.ReadFrame(c.out)
 		if err != nil {
