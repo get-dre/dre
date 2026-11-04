@@ -306,18 +306,7 @@ func tempViewSQL(view string, schema *arrow.Schema, recs []arrow.RecordBatch) (s
 		casts = append(casts, fmt.Sprintf("CAST(%s AS %s) AS %s", quote(f.Name), t, quote(f.Name)))
 		names = append(names, quote(f.Name))
 	}
-	var rows []string
-	var n int64
-	for _, rec := range recs {
-		for r := 0; r < int(rec.NumRows()); r++ {
-			vals := make([]string, rec.NumCols())
-			for c := range vals {
-				vals[c] = literal(rec.Column(c), r)
-			}
-			rows = append(rows, "("+strings.Join(vals, ", ")+")")
-			n++
-		}
-	}
+	rows, n := plugin.SQLRows(recs, literal)
 	var from string
 	if len(rows) == 0 {
 		nulls := strings.TrimSuffix(strings.Repeat("NULL, ", len(names)), ", ")

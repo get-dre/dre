@@ -353,18 +353,7 @@ func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.RecordBatch) 
 		}
 		cols = append(cols, quote(f.Name)+" "+t)
 	}
-	var rows []string
-	var n int64
-	for _, rec := range recs {
-		for r := 0; r < int(rec.NumRows()); r++ {
-			vals := make([]string, rec.NumCols())
-			for c := range vals {
-				vals[c] = literal(rec.Column(c), r)
-			}
-			rows = append(rows, "("+strings.Join(vals, ", ")+")")
-			n++
-		}
-	}
+	rows, n := plugin.SQLRows(recs, literal)
 	return fmt.Sprintf("CREATE OR REPLACE TEMP TABLE %s AS SELECT * FROM UNNEST(ARRAY<STRUCT<%s>>[\n  %s\n])",
 		quote(table), strings.Join(cols, ", "), strings.Join(rows, ",\n  ")), n, nil
 }

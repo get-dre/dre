@@ -199,18 +199,7 @@ func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.RecordBatch) 
 		defs = append(defs, quote(f.Name)+" "+t)
 		sel = append(sel, fmt.Sprintf("$%d::%s AS %s", i+1, t, quote(f.Name)))
 	}
-	var rows []string
-	var n int64
-	for _, rec := range recs {
-		for r := 0; r < int(rec.NumRows()); r++ {
-			vals := make([]string, rec.NumCols())
-			for c := range vals {
-				vals[c] = literal(rec.Column(c), r)
-			}
-			rows = append(rows, "("+strings.Join(vals, ", ")+")")
-			n++
-		}
-	}
+	rows, n := plugin.SQLRows(recs, literal)
 	if n == 0 {
 		return fmt.Sprintf("CREATE OR REPLACE TEMPORARY TABLE %s (%s)", quote(table), strings.Join(defs, ", ")), 0, nil
 	}
