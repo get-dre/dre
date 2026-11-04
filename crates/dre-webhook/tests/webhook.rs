@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
 use dre_webhook::{never_sent, post, scrub};
@@ -48,17 +48,20 @@ fn errors_remove_full_webhook_urls_and_their_bases() {
 fn retryable_statuses_are_retried_without_changing_the_payload() {
     for status in [429, 503] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/hook?key=secret", listener.local_addr().unwrap());
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/hook?key=secret");
         let server = std::thread::spawn(move || {
             let mut requests = Vec::new();
-            for status in [status, 202] {
+            'requests: for status in [status, 202] {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut headers = String::new();
                 loop {
                     let mut line = String::new();
-                    reader.read_line(&mut line).unwrap();
+                    if reader.read_line(&mut line).unwrap() == 0 {
+                        break 'requests;
+                    }
                     headers.push_str(&line);
                     if line == "\r\n" {
                         break;
@@ -81,16 +84,18 @@ fn retryable_statuses_are_retried_without_changing_the_payload() {
         });
         let connection: Map<_, _> = json!({"retries": 1}).as_object().unwrap().clone();
         let payload = json!({"text": "hello"});
-        post(
+        let result = post(
             &url,
             &payload,
             &connection,
             "Test",
             "application/json; charset=UTF-8",
             |status| format!("rejected {status}"),
-        )
-        .unwrap();
+        );
+        // Wake accept if a broken retry path returned after only the first request.
+        drop(TcpStream::connect_timeout(&address, Duration::from_secs(5)));
         let requests = server.join().unwrap();
+        result.unwrap();
         assert_eq!(requests.len(), 2);
         for (headers, body) in requests {
             assert!(
