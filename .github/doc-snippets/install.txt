@@ -1,0 +1,1 @@
+curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION={{DRE_RELEASE}} DRE_INSTALL_DIR=/usr/local/bin sh
