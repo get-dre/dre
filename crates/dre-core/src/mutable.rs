@@ -5,6 +5,8 @@
 //! `list` and `dict`: they are shared by reference (`{% set b = a %}` is the same list), iterate
 //! in insertion order, and print like their immutable counterparts. They live for one render:
 //! nothing is kept between templates, Bindings or Sets.
+//! If a panic interrupts a mutation, later accesses propagate lock poisoning instead of exposing
+//! the partially updated collection.
 //!
 //! A mutating method on an immutable `[]` or `{}` literal (or a `var()` value) is refused with a
 //! hint to use `list()` / `dict()`; see [`unknown_method`].
@@ -85,8 +87,8 @@ fn bad(msg: impl Into<String>) -> Error {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    // A poisoned lock only means an earlier render panicked; the data is still a plain Vec.
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    // A panic can interrupt a mutation; never expose a partially updated collection.
+    m.lock().unwrap()
 }
 
 /// Python index rules: negative counts from the end.
@@ -342,5 +344,28 @@ impl Object for MutableDict {
             }
             _ => Err(Error::from(ErrorKind::UnknownMethod)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lock;
+    use std::sync::Mutex;
+
+    #[test]
+    #[should_panic(expected = "PoisonError")]
+    fn poisoned_collection_is_not_recovered() {
+        let items = Mutex::new(Vec::<i32>::new());
+        std::thread::scope(|scope| {
+            let update = scope.spawn(|| {
+                let mut items = items.lock().unwrap();
+                items.push(1);
+                panic!("update interrupted");
+            });
+            assert!(update.join().is_err());
+        });
+        assert!(items.is_poisoned());
+
+        drop(lock(&items));
     }
 }
