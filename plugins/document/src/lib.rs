@@ -3,8 +3,8 @@
 //!
 //! Core streams every result set and sends the template context in `write`'s `template`
 //! (`dre_core::document::Context`). The plugin buffers the result sets, renders the template once
-//! at `finish` ([`template`]), resolves its images, stylesheets and fonts inside the project
-//! ([`assets`]), and writes the HTML, or lays it out into a PDF ([`pdf`]), in-process: no browser,
+//! at `finish` (`template`), resolves its images, stylesheets and fonts inside the project
+//! (`assets`), and writes the HTML, or lays it out into a PDF ([`pdf`]), in-process: no browser,
 //! no network.
 //!
 //! Options (defaults): `max_rows` (50,000 rows across the output's queries; more is an error,

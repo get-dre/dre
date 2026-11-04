@@ -70,6 +70,8 @@ enum Command {
     /// Run fresh report queries and data tests before formatting and delivering report outputs.
     Build(Box<CheckedArgs>),
     /// Render reports' SQL into <target path>/compiled/ without running it, and list the files.
+    // The CLI placeholder is literal help text; preserve generated help.
+    #[allow(rustdoc::invalid_html_tags)]
     Compile(CompileArgs),
     /// Run one read-only query on a configured connection and write typed JSON rows.
     Query(QueryArgs),
@@ -1385,7 +1387,7 @@ fn clean(ctx: &Context, a: CleanArgs) -> ExitCode {
     }
 }
 
-/// `dre deps` has no `--no-auto-install`, and it doesn't use [`load_project`]: it writes no
+/// `dre deps` has no `--no-auto-install`, and it doesn't use [`dre_core::start::load_project`]: it writes no
 /// manifest, and it syncs a project that has other errors, since it only needs what's declared.
 fn deps(ctx: &Context, a: DepsArgs, printer: &output::Printer) -> ExitCode {
     if !dre_core::start::install_packages(&a.project_dir, printer) {
