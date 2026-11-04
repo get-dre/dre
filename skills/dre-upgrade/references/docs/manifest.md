@@ -41,7 +41,8 @@ close_monthly --output json`. See its [JSON Schema](manifest.schema.json).
 
 `dre compile` and `dre validate` write `manifest.json` right after the project loads, before
 plugin option checks and compilation. It always describes the whole project, whatever was
-selected. A later error still leaves that manifest.
+selected. A later error still leaves that manifest. `dre validate --json` reuses this same
+document for its `project` field, including when writing the file fails.
 
 From DRE 0.9, `dre run` loads its selection without building the whole manifest. It leaves an
 existing manifest unchanged, including when the project cannot load. Integrations should use

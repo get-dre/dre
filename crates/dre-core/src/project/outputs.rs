@@ -1038,7 +1038,13 @@ impl Loader {
         };
         match (d.burst, rate.as_mut()) {
             (None, _) => {}
-            (Some(Loose::Ok(n)), Some(r)) if n > 0 => r.burst = n,
+            (Some(Loose::Ok(n)), Some(r)) if n > 0 && n <= u32::MAX as u64 => r.burst = n,
+            (Some(Loose::Ok(n)), Some(_)) if n > u32::MAX as u64 => self.diags.error(
+                Code::InvalidField,
+                file.map(Path::to_path_buf),
+                None,
+                format!("{ctx}: destination `{p}`: `burst` must be at most {}", u32::MAX),
+            ),
             (Some(Loose::Ok(_)), None) => self.diags.error(
                 Code::InvalidField,
                 file.map(Path::to_path_buf),

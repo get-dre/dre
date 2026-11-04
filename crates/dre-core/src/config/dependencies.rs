@@ -44,7 +44,7 @@ pub struct PluginsKey {
 /// `plugins:`: a list of packages, or package names mapped to versions.
 pub type PluginsSection = Located<Loose<OneOf<Vec<Located<Loose<PluginItem>>>, Map<serde_json::Value>>>>;
 
-/// One `plugins:` item (see [`Item`] for its description).
+/// One `plugins:` item (see `Item` for its description).
 pub type PluginItem = OneOf<PackageName, OneOf<PinnedVersion, PluginEntry>>;
 
 /// A package name, e.g. `duckdb`. Any version.

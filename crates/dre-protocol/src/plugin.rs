@@ -6,7 +6,7 @@
 //! can't express (`validate()`). The SDK checks a config block against both on `validate` and
 //! before every `write` and `deliver`, so plugin code only sees options that passed.
 //!
-//! - **Logging:** use the `log` crate (`log::info!`, `log::warn!`), or [`log`] for a message with
+//! - **Logging:** use the `log` crate (`log::info!`, `log::warn!`), or [`log()`] for a message with
 //!   fields; the SDK sends them to core as `log` messages. The plugin's own records keep their
 //!   level; its dependencies' are shown only with `-v`. Long requests may report [`progress`].
 //! - **Errors:** return a [`PluginError`] to give core the problem's kind and code; any other
@@ -637,7 +637,7 @@ pub trait Destination {
     }
 }
 
-/// The frames core sends, read on a background thread (see [`read_stdin`]).
+/// The frames core sends, read on a background thread (see `read_stdin`).
 pub struct Input {
     rx: Receiver<std::result::Result<Frame, FrameError>>,
 }

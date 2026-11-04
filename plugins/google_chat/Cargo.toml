@@ -1,7 +1,7 @@
 [package]
 name = "dre-plugin-google_chat"
 description = "DRE destination plugin: post messages to a Google Chat space through its webhook"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 dre-protocol.workspace = true
 serde_json.workspace = true
-ureq = "3"
+dre-webhook = { path = "../../crates/dre-webhook" }
 
 [dev-dependencies]
 tempfile.workspace = true

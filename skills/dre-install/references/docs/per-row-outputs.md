@@ -84,8 +84,9 @@ This is separate from `--threads`, and opens no extra warehouse connections.
 `rate:` on a destination entry paces its deliveries across every worker, to stay under an SMTP
 relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`, spaced
 evenly (`60/minute` sends one a second). `burst: 20` lets up to 20 go back to back while keeping
-the same average. `dre run --rate` and `dre release --rate` override every destination's rate
-for one command. If a service still says to slow down, the delivery is tried again after
+the same average. `burst` must be between 1 and 4294967295. `dre run --rate` and
+`dre release --rate` override every destination's rate for one command. If a service still says
+to slow down, the delivery is tried again after
 `retry_wait` (doubling, up to `max_retry_wait`) or the service's `Retry-After`, up to `retries`
 times (see [Tries again](plugins.md#tries-again)).
 

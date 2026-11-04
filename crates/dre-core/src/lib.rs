@@ -79,4 +79,63 @@ pub fn slash(p: &std::path::Path) -> std::path::PathBuf {
     std::path::PathBuf::from(p.to_string_lossy().replace('\\', "/"))
 }
 
+/// A path relative to `root` when it is inside it, with `/` separators on every platform.
+/// Paths outside `root` keep their original prefix. Relativity follows the native path rules;
+/// separator normalization happens afterwards, as in [`slash`].
+pub fn slash_relative(root: &std::path::Path, path: &std::path::Path) -> std::path::PathBuf {
+    slash(path.strip_prefix(root).unwrap_or(path))
+}
+
+#[cfg(test)]
+mod path_tests {
+    use std::path::Path;
+
+    #[test]
+    fn relative_paths_preserve_native_prefix_rules_before_normalizing_separators() {
+        for (root, path, expected) in [
+            ("project", "project/reports/daily.sql", "reports/daily.sql"),
+            ("project", "elsewhere/daily.sql", "elsewhere/daily.sql"),
+            (
+                "project",
+                "./project/reports/daily.sql",
+                "./project/reports/daily.sql",
+            ),
+            ("./project", "./project/reports/daily.sql", "reports/daily.sql"),
+            ("project", "project/./reports/daily.sql", "reports/daily.sql"),
+            ("project", "project", ""),
+            ("project", r"project/reports\daily.sql", "reports/daily.sql"),
+        ] {
+            assert_eq!(
+                super::slash_relative(Path::new(root), Path::new(path)).to_string_lossy(),
+                expected,
+                "root {root:?}, path {path:?}"
+            );
+        }
+        let root = std::env::temp_dir().join("dre-path-contract");
+        assert_eq!(
+            super::slash_relative(&root, &root.join("reports").join("daily.sql")),
+            Path::new("reports/daily.sql")
+        );
+        let outside = root.with_file_name("outside").join("daily.sql");
+        assert_eq!(super::slash_relative(&root, &outside), super::slash(&outside));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_paths_strip_only_native_prefixes_and_replace_invalid_utf8() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        assert_eq!(
+            super::slash_relative(Path::new("project"), Path::new(r"project\reports\daily.sql")),
+            Path::new("project/reports/daily.sql")
+        );
+        let path = Path::new(OsStr::from_bytes(b"project/report-\xff.sql"));
+        assert_eq!(
+            super::slash_relative(Path::new("project"), path).to_string_lossy(),
+            "report-\u{fffd}.sql"
+        );
+    }
+}
+
 mod test_blocks;

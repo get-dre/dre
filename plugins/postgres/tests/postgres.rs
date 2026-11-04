@@ -650,6 +650,20 @@ fn the_tunnel_warns_about_rsa_keys_and_can_refuse_them() {
     );
 }
 
+fn cancellation_sql(seconds: u32) -> String {
+    // No result header can race the cancellation reply; pg_sleep itself returns unsupported void.
+    format!("do $$ begin perform pg_sleep({seconds}); end $$")
+}
+
+#[test]
+fn cancellation_fixture_runs_without_a_result_set() {
+    needs_server!();
+    let mut p = open(false, json!({}));
+    let (execution, batches) = collect(&mut p, &cancellation_sql(0), None);
+    assert!(matches!(execution, Execution::NoResult { .. }));
+    assert!(batches.is_empty());
+}
+
 /// The suite's session cases (streaming, `row_limit`, a failed statement, cancel) on a server.
 #[test]
 fn conforms_to_the_protocol_on_a_server() {
@@ -659,6 +673,6 @@ fn conforms_to_the_protocol_on_a_server() {
         .statement("empty", "select 1 as n where false")
         .statement("no_result", "create temporary table dre_conformance (n int)")
         .statement("error", "select * from dre_conformance_missing")
-        .statement("slow", "select pg_sleep(30)");
+        .statement("slow", &cancellation_sql(30));
     conformance::assert_conforms_with(bin(), &conformance::Options::default().session(session));
 }

@@ -340,7 +340,7 @@ pub(crate) fn installed(
     Ok(find(&dir, &req.name, Some(&req.req()), pin.as_ref(), prober))
 }
 
-/// Why [`locate`] found nothing.
+/// Why [`locate_in`] found nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocateError {
     /// No declared package provides the plugin (an `undeclared-plugin` error elsewhere).

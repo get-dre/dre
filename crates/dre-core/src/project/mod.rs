@@ -1237,7 +1237,7 @@ impl Loader {
     }
 
     fn rel(&self, p: &Path) -> PathBuf {
-        crate::slash(p.strip_prefix(&self.root).unwrap_or(p))
+        crate::slash_relative(&self.root, p)
     }
 
     fn run(&mut self) -> Option<Project> {
@@ -1721,6 +1721,50 @@ mod tests {
             .iter()
             .map(|d| format!("{} {}", d.code, d.message))
             .collect()
+    }
+
+    #[test]
+    fn destination_burst_keeps_supported_values_and_rejects_overflow() {
+        for (burst, valid) in [
+            (1_u64, true),
+            (u32::MAX as u64, true),
+            (4294967297, false),
+            (4294967296, false),
+        ] {
+            let yaml = format!(
+                "queries: [daily]\noutput:\n  format: csv\n  destination: {{profile: local, path: out.csv, rate: 10/second, burst: {burst}}}\n"
+            );
+            let dir = project(&[
+                ("dre_project.yml", "name: burst_test\n"),
+                ("reports/daily/daily.yml", &yaml),
+                ("reports/daily/daily.sql", "select 1 as n"),
+            ]);
+            let (loaded, diags) = load(dir.path(), &LoadOptions::default());
+            let errors = codes(&diags);
+            assert_eq!(
+                !errors.iter().any(|e| e.contains("`burst`")),
+                valid,
+                "burst {burst}: {errors:?}"
+            );
+            if valid {
+                let report = loaded.expect("supported burst loads");
+                assert_eq!(
+                    report.reports()[0].bindings[0].outputs[0].destinations[0]
+                        .rate
+                        .as_ref()
+                        .unwrap()
+                        .burst,
+                    burst
+                );
+            } else {
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.contains("`burst` must be at most 4294967295")),
+                    "{errors:?}"
+                );
+            }
+        }
     }
 
     #[test]
