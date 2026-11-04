@@ -101,6 +101,10 @@ python3 .github/scripts/security_scan.py go
 `rust` runs `cargo deny` with [`deny.toml`](deny.toml); `go` runs `govulncheck` and `go-licenses`
 in each module under `go/`.
 
+Rust dependencies must come from crates.io or an explicitly allowed Git repository in
+`deny.toml`. Git dependencies require a pinned revision. The Rust scan always rejects
+unapproved sources, including on pull requests where advisories only warn.
+
 The same workflow checks the workflows themselves with [zizmor](https://docs.zizmor.sh/)
 (`pipx run zizmor .github/workflows`). Every third-party action is pinned by its full commit SHA,
 with the version as a comment (`uses: actions/checkout@<sha> # v7.0.1`), and Dependabot updates

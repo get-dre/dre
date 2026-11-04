@@ -1,4 +1,4 @@
-# cargo-deny: known vulnerabilities and licences of every crate in the workspace.
+# cargo-deny: known vulnerabilities, licences and sources of every crate in the workspace.
 #
 # Run it through `.github/scripts/security_scan.py rust`, as CI does: the advisory ignore list is
 # generated from .github/vulnerability-exceptions.toml, so it isn't written here. A plain
@@ -13,6 +13,15 @@ version = 2
 # `--warn unmaintained`), and so do yanked ones: a yank isn't a vulnerability, and the advisory
 # that caused it, if any, fails on its own. Update a yanked crate with `cargo update -p`.
 yanked = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# PDF table headers repeat only in this pinned revision, not the crates.io release (0.40.0).
+# Remove this allowance when plugins/document moves back to a crates.io release.
+allow-git = ["https://github.com/fulgur-rs/fulgur"]
+required-git-spec = "rev"
 
 [licenses]
 version = 2
