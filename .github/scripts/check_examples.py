@@ -21,7 +21,7 @@ NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
 EXTERNAL = {"overdue-loans/oracle": "requires Oracle and user-supplied JDBC drivers",
             "overdue-loans/sqlserver": "requires SQL Server and user-supplied JDBC drivers"}
 # Minimum versions for callers checking examples with an older installed CLI. CI uses the
-# exact core version declared by the checkout, or the source build for mixed engine changes.
+# latest published CLI below 1.0, or the source build for mixed engine changes.
 NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0)}
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True

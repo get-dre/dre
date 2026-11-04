@@ -173,4 +173,4 @@ Search this index for the question's terms, then open the linked page. These loc
 - [Building from source](docs/building-from-source.md): Build dre and the first-party plugins from source: the Rust workspace with cargo and the Go Databricks plugin, for development or an unsupported platform.
   Terms/options: `CARGO_TARGET_DIR`, `DRE_PLUGINS_DIR`, `bigquery`, `clickhouse`, `databricks`, `dre`, `dre_deps/plugins/`, `go/`, `plugin-install-failed`, `plugin-not-installed`, `snowflake`, `target`.
 - [Editor setup](docs/editor-setup.md): Autocomplete and validation for DRE's YAML files in VS Code and JetBrains, from the JSON Schemas.
-  Terms/options: `delimiter`, `docs/schemas/`, `dre`, `dre_project.yml`, `invalid-output-option`, `subject`, `target:`, `to`, `unknown-key`, `v0.2`.
+  Terms/options: `delimiter`, `docs/schemas/`, `dre`, `dre_project.yml`, `invalid-output-option`, `subject`, `target:`, `to`, `unknown-key`.

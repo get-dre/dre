@@ -181,6 +181,28 @@ Licences and unapproved Rust sources always fail.
   included here (say where it came from in the pull request). Don't copy code from other
   projects with incompatible licenses.
 
+## Refresh published install snippets and editor schemas
+
+After a stable core release and its website schemas are live, run:
+
+```sh
+python3 .github/scripts/published_docs.py sync
+python3 .github/scripts/skills.py sync
+python3 .github/scripts/skills.py generate
+python3 .github/scripts/published_docs.py check
+python3 .github/scripts/skills.py check
+```
+
+`published_docs.py sync` selects GitHub's latest stable core release and verifies every editor
+schema URL returns JSON stamped with that released minor before changing any file. Do not use
+an unreleased workspace version. Commit the refreshed docs, release metadata and skill copies
+in a follow-up PR. CI checks the committed rendering offline.
+
+Edit install and orchestration snippets in `.github/doc-snippets/*.txt`, where
+`{{DRE_RELEASE}}` stands for that published tag. The marked blocks in `docs/` are generated,
+so GitHub, the website and bundled skills all show the same copyable command. Editor URLs
+carry the released minor and serve its newest patch schema; historical changelog links stay as written.
+
 ## Code of conduct
 
 Be respectful and constructive. Maintainers may remove comments, or block people, who aren't.

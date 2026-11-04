@@ -1,0 +1,16 @@
+# .github/workflows/schedules.yml
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays, 03:00 UTC
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsSL https://getdre.com/install.sh | DRE_VERSION={{DRE_RELEASE}} sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: dre validate
+      - run: scheduler/refresh.sh
+        env:
+          DRE_SCHEDULER_DB: ${{ secrets.DRE_SCHEDULER_DB }}

@@ -15,10 +15,10 @@ and underlines mistakes before you run `dre validate`.
 kind (the [YAML reference](yaml-reference.md) lists them):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.4/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.11/report.schema.json
 ```
 
-The URL carries DRE's minor version (`v0.2`) and always serves the newest 0.2.x schema. A patch
+The URL carries a released DRE minor version and serves that minor's newest patch schema. A patch
 release doesn't narrow what a schema accepts; the one exception is 0.2.1, which removed
 `target:` from `dre_project.yml`. Use the minor version of the DRE you run. The schemas are also in the `dre` repository, in `docs/schemas/`, at every release tag.
 
@@ -32,13 +32,13 @@ To apply a schema to every file of a kind without a comment line, map them in yo
 ```json
 {
   "yaml.schemas": {
-    "https://getdre.com/schemas/v0.4/report.schema.json": "reports/**/*.yml",
-    "https://getdre.com/schemas/v0.4/project.schema.json": "dre_project.yml",
-    "https://getdre.com/schemas/v0.4/dependencies.schema.json": ["dependencies.yml", "packages.yml"],
-    "https://getdre.com/schemas/v0.4/schedules.schema.json": "schedules.yml",
-    "https://getdre.com/schemas/v0.4/timings.schema.json": "timings.yml",
-    "https://getdre.com/schemas/v0.4/sets.schema.json": "sets.yml",
-    "https://getdre.com/schemas/v0.4/sources.schema.json": "sources/*.yml"
+    "https://getdre.com/schemas/v0.11/report.schema.json": "reports/**/*.yml",
+    "https://getdre.com/schemas/v0.11/project.schema.json": "dre_project.yml",
+    "https://getdre.com/schemas/v0.11/dependencies.schema.json": ["dependencies.yml", "packages.yml"],
+    "https://getdre.com/schemas/v0.11/schedules.schema.json": "schedules.yml",
+    "https://getdre.com/schemas/v0.11/timings.schema.json": "timings.yml",
+    "https://getdre.com/schemas/v0.11/sets.schema.json": "sets.yml",
+    "https://getdre.com/schemas/v0.11/sources.schema.json": "sources/*.yml"
   }
 }
 ```

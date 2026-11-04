@@ -185,6 +185,8 @@ jobs:
           persist-credentials: false
       - run: python3 .github/scripts/schema_docs.py check
       - run: python3 .github/scripts/test_registry_index.py
+      - run: python3 .github/scripts/test_published_docs.py
+      - run: python3 .github/scripts/published_docs.py check
       - run: python3 .github/scripts/test_docs_sections.py
       - run: python3 .github/scripts/docs_sections.py check
       - run: python3 .github/scripts/plugin_pages.py check
@@ -212,18 +214,9 @@ jobs:
         with:
           persist-credentials: false
       # Keep the clean-machine released-install coverage for example-only changes.
-      - name: Install the matching released CLI
-        shell: bash
-        run: |
-          python - <<'PY'
-          import pathlib, subprocess, sys
-          sys.path.insert(0, ".github/scripts")
-          from plugin_versions import version
-          core = version(pathlib.Path("Cargo.toml").read_text(), "Cargo.toml")
-          if not core:
-              raise SystemExit("Cargo.toml has no core version")
-          subprocess.run([sys.executable, "-m", "pip", "install", f"dre-cli=={core}"], check=True)
-          PY
+      - name: Install the latest published CLI below 1.0
+        # check_examples.py gates newer examples by the installed release's capabilities.
+        run: python -m pip install "dre-cli<1"
       - run: python .github/scripts/check_examples.py --selection-json "$EXAMPLES"
         env:
           EXAMPLES: ${{ needs.scope.outputs.examples }}
