@@ -52,6 +52,8 @@ Set in `profiles.yml`, under `connections:`, in a target with `type: bigquery`.
 
 <!-- END generated -->
 
+Incomplete OAuth token responses fail with a read error; DRE does not use a partially received token.
+
 ## Notes
 
 An alpha: `bigquery` is published as 1.0.0 pre-releases (`1.0.0-alpha.N`), which `dre deps`

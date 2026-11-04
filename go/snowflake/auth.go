@@ -65,6 +65,7 @@ func config(conn map[string]any) (*sf.Config, error) {
 			return nil, err
 		}
 	}
+	//lint:ignore SA1019 Keep the configured login timeout until the driver provides a replacement.
 	cfg.LoginTimeout = rules.ConnectTimeout * time.Duration(retries+1)
 	cfg.MaxRetryCount = int(retries)
 	if keep, err := plugin.Bool(conn, "client_session_keep_alive", false); err != nil {
@@ -187,6 +188,7 @@ func signIn(cfg *sf.Config, conn map[string]any) error {
 			return fmt.Errorf("`authenticator` `%s` isn't an Okta URL", auth)
 		}
 		if cfg.Password == "" {
+			//lint:ignore ST1005 Preserve the service or protocol name in this diagnostic.
 			return fmt.Errorf("Okta sign-in needs `password`")
 		}
 		cfg.Authenticator = sf.AuthTypeOkta
@@ -270,7 +272,10 @@ func refreshOAuth(cfg *sf.Config, id, secret, refresh string) (string, error) {
 		return "", fmt.Errorf("can't renew the OAuth token: %v", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("can't read the OAuth token response: %v", err)
+	}
 	var r struct {
 		AccessToken string `json:"access_token"`
 		Message     string `json:"message"`
@@ -285,6 +290,7 @@ func refreshOAuth(cfg *sf.Config, id, secret, refresh string) (string, error) {
 		if msg == "" {
 			msg = resp.Status
 		}
+		//lint:ignore ST1005 Preserve the service or protocol name in this diagnostic.
 		return "", fmt.Errorf("Snowflake refused to renew the OAuth token: %s", msg)
 	}
 	return r.AccessToken, nil

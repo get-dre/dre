@@ -36,6 +36,7 @@ func workspacePath(remote string) (api, shown string, err error) {
 		bad = bad || s == "" || s == "." || s == ".."
 	}
 	if bad {
+		//lint:ignore ST1005 The trailing ellipsis is part of the example path, not sentence punctuation.
 		return "", "", fmt.Errorf("`%s` must be a workspace file path: /Workspace/Users/<user>/..., /Workspace/Shared/... or /Workspace/Repos/...", remote)
 	}
 	return api, "/Workspace" + api, nil

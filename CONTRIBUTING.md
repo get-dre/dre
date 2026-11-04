@@ -58,7 +58,8 @@ Before you push, run the main formatting, lint and test checks:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 gofmt -l go                              # prints nothing when the Go code is formatted
-for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
+go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+for m in go/*/; do (cd "$m" && go vet ./... && staticcheck ./... && go test ./...); done
 ```
 
 CI also checks generated docs and skills, package metadata and repository policies. See

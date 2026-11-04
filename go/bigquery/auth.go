@@ -167,7 +167,10 @@ func (e entraToken) SubjectToken(ctx context.Context, _ externalaccount.Supplier
 		return "", fmt.Errorf("can't get a token from %s: %v", hostOf(e.url), err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("can't read the token response from %s: %v", hostOf(e.url), err)
+	}
 	var r struct {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error_description"`

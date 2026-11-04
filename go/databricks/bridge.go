@@ -33,7 +33,7 @@ func (b *bridged) Schema() (*arrow.Schema, error) {
 
 func (b *bridged) HasNext() bool { return b.it.HasNext() }
 
-func (b *bridged) Next() (arrow.Record, error) {
+func (b *bridged) Next() (arrow.RecordBatch, error) {
 	rec, err := b.it.Next()
 	if err == io.EOF {
 		return nil, err
@@ -46,7 +46,7 @@ func (b *bridged) Next() (arrow.Record, error) {
 }
 
 // recordV18 copies a v12 record into a v18 one. The caller releases it.
-func recordV18(rec arrow12.Record) (arrow.Record, error) {
+func recordV18(rec arrow12.Record) (arrow.RecordBatch, error) {
 	var buf bytes.Buffer
 	w := ipc12.NewWriter(&buf, ipc12.WithSchema(rec.Schema()), ipc12.WithAllocator(memory12.DefaultAllocator))
 	if err := w.Write(rec); err != nil {
@@ -66,7 +66,7 @@ func recordV18(rec arrow12.Record) (arrow.Record, error) {
 		}
 		return nil, fmt.Errorf("can't pass on a result batch: it was empty")
 	}
-	out := r.Record()
+	out := r.RecordBatch()
 	out.Retain()
 	return out, nil
 }

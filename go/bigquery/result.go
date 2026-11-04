@@ -95,8 +95,8 @@ func arrowType(f *bigquery.FieldSchema) arrow.DataType {
 type result struct {
 	bq     bigquery.Schema
 	schema *arrow.Schema
-	next   func() (arrow.Record, error) // io.EOF at the end
-	peeked arrow.Record
+	next   func() (arrow.RecordBatch, error) // io.EOF at the end
+	peeked arrow.RecordBatch
 	err    error
 	done   bool
 }
@@ -120,7 +120,7 @@ func newResult(it *bigquery.RowIterator) (*result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("can't read the Storage Read API's Arrow: %w", err)
 		}
-		r.next = func() (arrow.Record, error) {
+		r.next = func() (arrow.RecordBatch, error) {
 			if !rd.Next() {
 				if err := rd.Err(); err != nil && !errors.Is(err, io.EOF) {
 					return nil, err
@@ -128,7 +128,7 @@ func newResult(it *bigquery.RowIterator) (*result, error) {
 				rd.Release()
 				return nil, io.EOF
 			}
-			rec := rd.Record()
+			rec := rd.RecordBatch()
 			rec.Retain()
 			return rec, nil
 		}
@@ -154,7 +154,7 @@ func newResult(it *bigquery.RowIterator) (*result, error) {
 		}
 		return it.Next(row)
 	}
-	r.next = func() (arrow.Record, error) { return restBatch(next, r.bq, r.schema, batchRows) }
+	r.next = func() (arrow.RecordBatch, error) { return restBatch(next, r.bq, r.schema, batchRows) }
 	return r, nil
 }
 
@@ -180,7 +180,7 @@ func (r *result) HasNext() bool {
 	return true
 }
 
-func (r *result) Next() (arrow.Record, error) {
+func (r *result) Next() (arrow.RecordBatch, error) {
 	if !r.HasNext() {
 		return nil, io.EOF
 	}
@@ -196,7 +196,7 @@ func (r *result) Next() (arrow.Record, error) {
 }
 
 // normalise compacts JSON columns and turns interval text (Storage API) into intervals.
-func (r *result) normalise(rec arrow.Record) (arrow.Record, error) {
+func (r *result) normalise(rec arrow.RecordBatch) (arrow.RecordBatch, error) {
 	cols := make([]arrow.Array, rec.NumCols())
 	for i := range cols {
 		c := rec.Column(i)
@@ -224,7 +224,7 @@ func (r *result) normalise(rec arrow.Record) (arrow.Record, error) {
 	for i, c := range cols {
 		fields[i] = arrow.Field{Name: rec.Schema().Field(i).Name, Type: c.DataType(), Nullable: true}
 	}
-	out := array.NewRecord(arrow.NewSchema(fields, nil), cols, rec.NumRows())
+	out := array.NewRecordBatch(arrow.NewSchema(fields, nil), cols, rec.NumRows())
 	for _, c := range cols {
 		c.Release()
 	}
@@ -256,7 +256,7 @@ func monthDayNano(v *bigquery.IntervalValue) arrow.MonthDayNanoInterval {
 
 // restBatch reads up to n REST rows (from next, which returns iterator.Done at the end) into
 // one Arrow batch; io.EOF when there are none left.
-func restBatch(next func(*[]bigquery.Value) error, bq bigquery.Schema, schema *arrow.Schema, n int) (arrow.Record, error) {
+func restBatch(next func(*[]bigquery.Value) error, bq bigquery.Schema, schema *arrow.Schema, n int) (arrow.RecordBatch, error) {
 	b := array.NewRecordBuilder(mem, schema)
 	defer b.Release()
 	rows := 0
@@ -279,7 +279,7 @@ func restBatch(next func(*[]bigquery.Value) error, bq bigquery.Schema, schema *a
 	if rows == 0 {
 		return nil, io.EOF
 	}
-	return b.NewRecord(), nil
+	return b.NewRecordBatch(), nil
 }
 
 // appendValue appends one REST value; top says whether f's REPEATED applies at this level.

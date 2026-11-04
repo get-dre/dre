@@ -86,7 +86,7 @@ func WriteJSON(w *bufio.Writer, v any) error {
 }
 
 // EncodeRecord writes one record as a self-contained IPC stream (schema, batch, end marker).
-func EncodeRecord(rec arrow.Record) ([]byte, error) {
+func EncodeRecord(rec arrow.RecordBatch) ([]byte, error) {
 	var buf bytes.Buffer
 	w := ipc.NewWriter(&buf, ipc.WithSchema(rec.Schema()), ipc.WithAllocator(memory.DefaultAllocator))
 	if err := w.Write(rec); err != nil {
@@ -99,15 +99,15 @@ func EncodeRecord(rec arrow.Record) ([]byte, error) {
 }
 
 // DecodeRecords reads every record of one IPC stream. The caller releases them.
-func DecodeRecords(b []byte) (*arrow.Schema, []arrow.Record, error) {
+func DecodeRecords(b []byte) (*arrow.Schema, []arrow.RecordBatch, error) {
 	r, err := ipc.NewReader(bytes.NewReader(b), ipc.WithAllocator(memory.DefaultAllocator))
 	if err != nil {
 		return nil, nil, fmt.Errorf("bad Arrow data: %w", err)
 	}
 	defer r.Release()
-	var recs []arrow.Record
+	var recs []arrow.RecordBatch
 	for r.Next() {
-		rec := r.Record()
+		rec := r.RecordBatch()
 		rec.Retain()
 		recs = append(recs, rec)
 	}

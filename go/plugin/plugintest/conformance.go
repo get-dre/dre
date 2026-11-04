@@ -341,6 +341,7 @@ func (d *driver) reply() (map[string]any, error) {
 			return nil, err
 		}
 		if f.Tag != plugin.TagJSON {
+			//lint:ignore ST1005 Preserve the service or protocol name in this diagnostic.
 			return nil, errors.New("Arrow data where a reply was expected")
 		}
 		m, err := d.message(f)
@@ -500,7 +501,7 @@ func arrowFrame(spec any) ([]byte, error) {
 		cols[i] = column(f.Type, values, int(n))
 		defer cols[i].Release()
 	}
-	rec := array.NewRecord(schema, cols, int64(n))
+	rec := array.NewRecordBatch(schema, cols, int64(n))
 	defer rec.Release()
 	return plugin.EncodeRecord(rec)
 }

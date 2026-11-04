@@ -149,6 +149,7 @@ func statusOf(client *http.Client, method, url string, a *auth) (int, error) {
 // destination entry's `if_exists`.
 func deliver(local, remote string, conn, opts map[string]any) (string, error) {
 	if remote == "" {
+		//lint:ignore ST1005 The trailing ellipsis is part of the example path, not sentence punctuation.
 		return "", fmt.Errorf("the databricks destination needs `output.destination.path`: /Volumes/<catalog>/<schema>/<volume>/<file> or /Workspace/...")
 	}
 	switch strings.SplitN(strings.TrimLeft(remote, "/"), "/", 2)[0] {

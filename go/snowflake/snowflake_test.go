@@ -23,7 +23,7 @@ import (
 )
 
 // sent runs one batch through what the plugin does before core sees it.
-func sent(t *testing.T, rec arrow.Record, cols []column) arrow.Record {
+func sent(t *testing.T, rec arrow.RecordBatch, cols []column) arrow.RecordBatch {
 	t.Helper()
 	norm, err := normalise(rec, cols)
 	if err != nil {
@@ -36,11 +36,11 @@ func sent(t *testing.T, rec arrow.Record, cols []column) arrow.Record {
 	return out
 }
 
-func batch(fields []arrow.Field, build func(b *array.RecordBuilder)) arrow.Record {
+func batch(fields []arrow.Field, build func(b *array.RecordBuilder)) arrow.RecordBatch {
 	b := array.NewRecordBuilder(mem, arrow.NewSchema(fields, nil))
 	defer b.Release()
 	build(b)
-	return b.NewRecord()
+	return b.NewRecordBatch()
 }
 
 func TestIntegerBatchesOfDifferentWidthsGiveOneColumnType(t *testing.T) {
@@ -117,7 +117,7 @@ func TestTempTableSQLCastsTextValues(t *testing.T) {
 		b.Field(0).(*array.StringBuilder).AppendValues([]string{`it's \x`, ""}, []bool{true, false})
 		b.Field(1).(*array.Float64Builder).AppendValues([]float64{1.5, 0}, []bool{true, false})
 	})
-	sql, n, err := tempTableSQL("dre_lookup_codes", s, []arrow.Record{rec})
+	sql, n, err := tempTableSQL("dre_lookup_codes", s, []arrow.RecordBatch{rec})
 	want := "CREATE OR REPLACE TEMPORARY TABLE \"dre_lookup_codes\" AS SELECT $1::VARCHAR AS \"code\", $2::FLOAT AS \"rate\" FROM VALUES\n" +
 		"  ('it\\'s \\\\x', '1.5'),\n  (NULL, NULL)"
 	if err != nil || n != 2 || sql != want {

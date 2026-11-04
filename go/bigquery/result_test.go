@@ -59,7 +59,7 @@ func restRow() []bigquery.Value {
 
 // storageRecord is the same row as the Storage Read API sends it: nested Arrow, JSON
 // pretty-printed, the interval as BigQuery's canonical text.
-func storageRecord(t *testing.T) arrow.Record {
+func storageRecord(t *testing.T) arrow.RecordBatch {
 	fields := arrowSchema(allTypes).Fields()
 	fields[12] = arrow.Field{Name: "iv", Type: arrow.BinaryTypes.String, Nullable: true}
 	b := array.NewRecordBuilder(mem, arrow.NewSchema(fields, nil))
@@ -92,11 +92,11 @@ func storageRecord(t *testing.T) arrow.Record {
 	rng.Append(true)
 	rng.FieldBuilder(0).(*array.Date32Builder).Append(arrow.Date32FromTime(when))
 	rng.FieldBuilder(1).(*array.Date32Builder).AppendNull()
-	return b.NewRecord()
+	return b.NewRecordBatch()
 }
 
 // sent is what core receives for rec: the shared type rule applied, each cell as text.
-func sent(t *testing.T, rec arrow.Record) ([]string, *arrow.Schema) {
+func sent(t *testing.T, rec arrow.RecordBatch) ([]string, *arrow.Schema) {
 	t.Helper()
 	r := &result{bq: allTypes, schema: arrowSchema(allTypes)}
 	norm, err := r.normalise(rec)
@@ -183,8 +183,8 @@ func TestTempTableSQLTypesEveryColumnAndEscapes(t *testing.T) {
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{`it's "x"` + "\n\\", ""}, []bool{true, false})
 	b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
 	b.Field(2).(*array.Date32Builder).AppendValues([]arrow.Date32{arrow.Date32FromTime(when), 0}, []bool{true, false})
-	rec := b.NewRecord()
-	sql, n, err := tempTableSQL("dre_lookup_codes", s, []arrow.Record{rec})
+	rec := b.NewRecordBatch()
+	sql, n, err := tempTableSQL("dre_lookup_codes", s, []arrow.RecordBatch{rec})
 	if err != nil || n != 2 {
 		t.Fatal(err, n)
 	}

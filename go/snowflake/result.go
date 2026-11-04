@@ -74,7 +74,7 @@ func isJSON(typ string) bool {
 }
 
 // normalise brings one batch to the declared types. The caller releases the result.
-func normalise(rec arrow.Record, cols []column) (arrow.Record, error) {
+func normalise(rec arrow.RecordBatch, cols []column) (arrow.RecordBatch, error) {
 	out := make([]arrow.Array, rec.NumCols())
 	for i := range out {
 		c, col := rec.Column(i), cols[i]
@@ -122,7 +122,7 @@ func normalise(rec arrow.Record, cols []column) (arrow.Record, error) {
 	for i, a := range out {
 		fields[i] = arrow.Field{Name: cols[i].name, Type: a.DataType(), Nullable: true}
 	}
-	res := array.NewRecord(arrow.NewSchema(fields, nil), out, rec.NumRows())
+	res := array.NewRecordBatch(arrow.NewSchema(fields, nil), out, rec.NumRows())
 	for _, a := range out {
 		a.Release()
 	}

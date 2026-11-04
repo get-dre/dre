@@ -52,7 +52,7 @@ func liveOnly(t *testing.T) *plugintest.Conversation {
 	return c
 }
 
-func cell(t *testing.T, recs []arrow.Record, col string) string {
+func cell(t *testing.T, recs []arrow.RecordBatch, col string) string {
 	t.Helper()
 	for _, r := range recs {
 		for i, f := range r.Schema().Fields() {
@@ -83,7 +83,7 @@ func TestALookupLoadsIntoATempTable(t *testing.T) {
 	b.Field(0).(*array.StringBuilder).AppendValues([]string{"x'y", "z"}, nil)
 	b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
 	c.Send(map[string]any{"type": "load", "name": "codes"})
-	c.SendRecord(b.NewRecord())
+	c.SendRecord(b.NewRecordBatch())
 	c.Send(map[string]any{"type": "result_set_end"})
 	r := c.Reply()
 	if r["type"] != "loaded" || r["relation"] != "dre_lookup_codes" || r["rows"] != 2.0 {

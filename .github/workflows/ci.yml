@@ -259,6 +259,10 @@ jobs:
           cache-dependency-path: go/*/go.sum
       - run: test -z "$(gofmt -l go)" || { gofmt -l go; exit 1; }
       - run: for m in go/*/; do (cd "$m" && go vet ./...) || exit 1; done
+      - name: Staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          for m in go/*/; do (cd "$m" && staticcheck ./...) || exit 1; done
 
   test-linux:
     needs: scope
