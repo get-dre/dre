@@ -675,7 +675,7 @@ struct RenderedDest {
 type Fail = Error;
 
 fn rel(root: &Path, p: &Path) -> PathBuf {
-    crate::slash(p.strip_prefix(root).unwrap_or(p))
+    crate::slash_relative(root, p)
 }
 
 /// An instant as DRE records it: RFC 3339 in UTC, to the second.

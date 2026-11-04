@@ -1237,7 +1237,7 @@ impl Loader {
     }
 
     fn rel(&self, p: &Path) -> PathBuf {
-        crate::slash(p.strip_prefix(&self.root).unwrap_or(p))
+        crate::slash_relative(&self.root, p)
     }
 
     fn run(&mut self) -> Option<Project> {

@@ -93,10 +93,7 @@ fn anywhere(root: &Path, name: &str) -> Vec<PathBuf> {
 }
 
 fn shown(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .unwrap_or(p)
-        .to_string_lossy()
-        .replace('\\', "/")
+    crate::slash_relative(root, p).to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

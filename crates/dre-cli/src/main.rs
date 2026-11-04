@@ -1082,7 +1082,7 @@ fn target_line(p: &dre_core::project::Project) -> String {
 
 /// A path under the project as people read it: relative to the project when it's inside it.
 fn shown(project: &dre_core::project::Project, p: &std::path::Path) -> PathBuf {
-    dre_core::slash(p.strip_prefix(project.root()).unwrap_or(p))
+    dre_core::slash_relative(project.root(), p)
 }
 
 /// `--rate N/unit`.
