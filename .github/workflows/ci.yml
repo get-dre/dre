@@ -188,6 +188,7 @@ jobs:
       - run: python3 .github/scripts/test_docs_sections.py
       - run: python3 .github/scripts/docs_sections.py check
       - run: python3 .github/scripts/plugin_pages.py check
+      - run: python3 .github/scripts/test_check_links.py
       - run: python3 .github/scripts/check_links.py
       - run: python3 .github/scripts/test_check_tracked_artifacts.py
       - run: python3 .github/scripts/check_tracked_artifacts.py

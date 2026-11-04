@@ -52,7 +52,7 @@ cargo build --workspace --bins
 cargo test --workspace
 ```
 
-Before you push, run the same checks as CI:
+Before you push, run the main formatting, lint and test checks:
 
 ```sh
 cargo fmt --all --check
@@ -60,6 +60,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 gofmt -l go                              # prints nothing when the Go code is formatted
 for m in go/*/; do (cd "$m" && go vet ./... && go test ./...); done
 ```
+
+CI also checks generated docs and skills, package metadata and repository policies. See
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact current steps, and
+[`.github/workflows/security.yml`](.github/workflows/security.yml) for dependency and workflow
+security checks.
 
 The plugin integration tests (Postgres, object store, SFTP, FTP, email) run against local
 emulators, and each one skips itself when its service isn't configured. See the `test-linux`
@@ -92,8 +97,8 @@ and weekly. To run it locally (Python 3.11 or later):
 
 ```sh
 cargo install --locked cargo-deny
-go install golang.org/x/vuln/cmd/govulncheck@latest
-go install github.com/google/go-licenses/v2@latest
+go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+go install github.com/google/go-licenses/v2@v2.0.1
 python3 .github/scripts/security_scan.py rust
 python3 .github/scripts/security_scan.py go
 ```
@@ -120,7 +125,7 @@ On a pull request that doesn't change a language's dependencies (`Cargo.toml`, `
 `deny.toml`, `go/*/go.mod`, `go/*/go.sum`) or the scan itself, that language's advisories only
 warn: a new advisory against unchanged lockfiles isn't that pull request's doing. They fail on
 master, in the weekly run and before a release, so fix them there, in a pull request of their own.
-Licences always fail.
+Licences and unapproved Rust sources always fail.
 
 - **A vulnerability** (RUSTSEC-… or GO-…): update the dependency to a fixed version
   (`cargo update -p <crate>`, or `go get <module>@<version>` and `go mod tidy`), and bump the
