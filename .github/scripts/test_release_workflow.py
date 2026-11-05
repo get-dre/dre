@@ -17,21 +17,22 @@ def field(job, name):
 
 
 def condition(job, *, published="success", managers="success", kind="core", dry=False,
-              prerelease=False, build="success", attest="success", verified="success"):
+              prerelease=False, build="success", attest="success", verified="success",
+              event="push", tag="", skipped_ancestors=True):
     expression = field(job, "if")
     # GitHub otherwise applies implicit success() to the skipped Java ancestors too.
-    if "always()" not in expression:
+    if skipped_ancestors and "always()" not in expression:
         return False
     values = {
         "always()": "True", "needs.publish.result": repr(published),
         "needs.package-managers.result": repr(managers), "needs.plan.outputs.kind": repr(kind),
         "needs.plan.outputs.prerelease": repr(str(prerelease).lower()),
-        "inputs.dry_run": repr(dry), "needs.build.result": repr(build),
+        "inputs.dry_run": repr(dry), "github.event_name": repr(event), "inputs.tag": repr(tag), "needs.build.result": repr(build),
         "needs.attest.result": repr(attest), "needs.crates-verify.result": repr(verified),
     }
     for key, value in values.items():
         expression = expression.replace(key, value)
-    expression = re.sub(r"!(?!=)", " not ", expression.replace("&&", " and "))
+    expression = re.sub(r"!(?!=)", " not ", expression.replace("&&", " and ").replace("||", " or "))
     return eval(expression, {"__builtins__": {}})
 
 
@@ -64,6 +65,19 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertFalse(condition("site", prerelease=True))
         for status in ("failure", "cancelled", "skipped"):
             self.assertFalse(condition("site", managers=status))
+
+    def test_site_only_recovery_never_publishes_wheels(self):
+        args = dict(event="workflow_dispatch", tag="site", published="skipped", managers="skipped")
+        self.assertTrue(condition("site", **args))
+        self.assertFalse(condition("site", **args, dry=True))
+        self.assertFalse(condition("site", **{**args, "event": "push"}))
+        for tag in ("registry", "v0.11.1"):
+            self.assertFalse(condition("site", **{**args, "tag": tag}))
+        for tag in ("site", "registry"):
+            self.assertFalse(condition("release-wheels", event="workflow_dispatch", tag=tag,
+                                       skipped_ancestors=False))
+        self.assertTrue(condition("release-wheels", event="workflow_dispatch", tag="v0.11.1",
+                                  skipped_ancestors=False))
 
     def run_publish_script(self, job, existing="", fail=False):
         script = textwrap.dedent(re.search(
