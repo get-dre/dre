@@ -5,6 +5,30 @@
 
 pub use dre_protocol::util::{write_atomic, write_atomic_mode};
 
+/// Wait for, then hold, an OS lock on the file `path` (across threads and processes; the OS frees
+/// it when the process dies). The file stays: deleting it would let waiters lock different files.
+pub fn lock_file(path: &std::path::Path) -> Result<std::fs::File, String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|e| format!("can't open {}: {e}", path.display()))?;
+    file.lock()
+        .map_err(|e| format!("can't lock {}: {e}", path.display()))?;
+    Ok(file)
+}
+
+/// [`lock_file`] on `<dir>/.install.lock`: installs into `dir` hold it so parallel runs don't
+/// replace each other's files.
+pub fn install_lock(dir: &std::path::Path) -> Result<std::fs::File, String> {
+    lock_file(&dir.join(".install.lock"))
+}
+
 /// Swap a prepared directory into place, restoring the old one if the final rename fails.
 pub fn replace_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
     let old = if to.exists() {

@@ -20,6 +20,33 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT: &str = "current";
 pub const LOCK: &str = "lock";
 pub const RUNS: &str = "runs";
+/// The OS lock held while a lock is checked and taken (it ends in `.tmp`, so it is never moved
+/// into a legacy run).
+const CHECKING: &str = ".lock-checking.tmp";
+
+/// The run ids whose Binding lock this process holds.
+fn held() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<String>> {
+    static HELD: std::sync::Mutex<std::collections::BTreeSet<String>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Make `path` a link to `tmp`, failing with `AlreadyExists` if it exists. Where the file system
+/// has no hard links, create it and write `body` instead.
+fn create_lock(tmp: &Path, path: &Path, body: &str) -> std::io::Result<()> {
+    match std::fs::hard_link(tmp, path) {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?;
+            f.write_all(body.as_bytes())?;
+            f.sync_all()
+        }
+        r => r,
+    }
+}
 
 /// A run id: the UTC start time and four random characters, `20261009T060000Z-k3f9`. Ids sort by
 /// start time.
@@ -97,6 +124,7 @@ impl Drop for Guard {
         {
             let _ = std::fs::remove_file(&self.path);
         }
+        held().remove(&self.run_id);
     }
 }
 
@@ -154,25 +182,39 @@ impl BindingRuns {
     }
 
     /// Take the Binding's lock for `run_id`. A lock left by a process on this host that has
-    /// gone is taken over (the guard says so); one held by a live process, or by any process on
-    /// another host (a shared folder), is [`LockError::Held`]: DRE never guesses about a run it
-    /// can't see. `host` is this machine's name ([`host_name`]).
+    /// gone is taken over (the guard says so), as is one naming this process that this process
+    /// doesn't hold (a restarted container, where DRE gets the same process id again); one held
+    /// by a live process, or by any process on another host (a shared folder), is
+    /// [`LockError::Held`]: DRE never guesses about a run it can't see. `host` is this machine's
+    /// name ([`host_name`]).
     pub fn lock(&self, run_id: &str, started: DateTime<Utc>, host: &str) -> Result<Guard, LockError> {
         std::fs::create_dir_all(&self.dir).map_err(LockError::Io)?;
         let path = self.dir.join(LOCK);
         let me = Holder::me(run_id, started, host);
         let body = serde_json::to_string_pretty(&me).map_err(|e| LockError::Io(e.into()))? + "\n";
+        // The content is written first and the lock appears whole (a hard link, which fails if a
+        // lock exists): a run checking it never reads a half-written one.
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".lock-")
+            .suffix(".tmp")
+            .tempfile_in(&self.dir)
+            .map_err(LockError::Io)?;
+        {
+            use std::io::Write;
+            tmp.write_all(body.as_bytes()).map_err(LockError::Io)?;
+            tmp.as_file().sync_all().map_err(LockError::Io)?;
+        }
+        // Closed before linking (Windows), removed when this returns.
+        let tmp = tmp.into_temp_path();
+        // Checking and taking over a stale lock happen under an OS lock, so two runs can't both
+        // take over the same stale lock.
+        let _checking = crate::fs::lock_file(&self.dir.join(CHECKING))
+            .map_err(|e| LockError::Io(std::io::Error::other(e)))?;
         let mut took_over = None;
         for _ in 0..2 {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write;
-                    f.write_all(body.as_bytes()).map_err(LockError::Io)?;
-                    f.sync_all().map_err(LockError::Io)?;
+            match create_lock(&tmp, &path, &body) {
+                Ok(()) => {
+                    held().insert(run_id.to_string());
                     return Ok(Guard {
                         path,
                         run_id: run_id.to_string(),
@@ -184,7 +226,10 @@ impl BindingRuns {
                     let Ok(holder) = serde_json::from_str::<Holder>(&text) else {
                         return Err(LockError::Unreadable(path));
                     };
-                    if holder.host != me.host || process_alive(holder.pid) {
+                    let mine = holder.pid == std::process::id();
+                    if holder.host != me.host
+                        || (process_alive(holder.pid) && (!mine || held().contains(&holder.run_id)))
+                    {
                         return Err(LockError::Held(holder));
                     }
                     // Its process is gone: the run crashed or was killed.
@@ -392,6 +437,68 @@ mod tests {
             r.lock("new", Utc::now(), &host_name(&crate::Env::default()))
                 .unwrap(),
         );
+    }
+
+    #[test]
+    fn a_lock_naming_this_process_that_it_doesnt_hold_is_taken_over() {
+        // A restarted container: same host name, and DRE is PID 1 again.
+        let (_d, r) = runs();
+        std::fs::create_dir_all(r.dir()).unwrap();
+        let before_restart = Holder {
+            run_id: "before-restart".into(),
+            host: host_name(&crate::Env::default()),
+            pid: std::process::id(),
+            started_at: "2026-10-09T06:00:00Z".into(),
+        };
+        std::fs::write(
+            r.dir().join(LOCK),
+            serde_json::to_string(&before_restart).unwrap(),
+        )
+        .unwrap();
+        let g = r
+            .lock("new", Utc::now(), &host_name(&crate::Env::default()))
+            .unwrap();
+        assert_eq!(g.took_over, Some(before_restart));
+    }
+
+    #[test]
+    fn runs_racing_for_a_lock_get_exactly_one_holder() {
+        let dead = Holder {
+            run_id: "old".into(),
+            host: host_name(&crate::Env::default()),
+            pid: 999_999,
+            started_at: "2026-10-09T06:00:00Z".into(),
+        };
+        for stale in [None, Some(dead)] {
+            let (_d, r) = runs();
+            if let Some(h) = &stale {
+                std::fs::create_dir_all(r.dir()).unwrap();
+                std::fs::write(r.dir().join(LOCK), serde_json::to_string(h).unwrap()).unwrap();
+            }
+            let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let racers: Vec<_> = (0..8)
+                .map(|i| {
+                    let (r, start) = (r.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        start.wait();
+                        r.lock(
+                            &format!("run-{i}"),
+                            Utc::now(),
+                            &host_name(&crate::Env::default()),
+                        )
+                    })
+                })
+                .collect();
+            let results: Vec<_> = racers.into_iter().map(|t| t.join().unwrap()).collect();
+            let holders = results.iter().filter(|r| r.is_ok()).count();
+            assert_eq!(holders, 1, "stale {stale:?}: {results:?}");
+            assert!(
+                results
+                    .iter()
+                    .all(|r| matches!(r, Ok(_) | Err(LockError::Held(_)))),
+                "{results:?}"
+            );
+        }
     }
 
     #[test]

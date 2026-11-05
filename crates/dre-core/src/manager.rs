@@ -954,6 +954,9 @@ pub fn sync(
     mut log: impl FnMut(&str),
 ) -> Result<Vec<Synced>, Vec<String>> {
     let dir = crate::plugins::plugins_dir(ctx.env(), Some(project.root()));
+    // Parallel runs of one project check, install and pin one at a time: a later one finds
+    // the earlier one's install instead of replacing it under its running plugins.
+    let _installing = crate::fs::install_lock(&dir).map_err(|e| vec![e])?;
     let mut lock = Lock::load(project.root()).map_err(|e| vec![e])?;
     let mut indexes: std::collections::BTreeMap<String, Index> = std::collections::BTreeMap::new();
     let mut out = Vec::new();
@@ -1027,9 +1030,19 @@ pub fn sync(
             && req.source.is_default()
             && dir != crate::plugins::cache_dir(ctx.env())
         {
-            let cached = version_dir(&crate::plugins::cache_dir(ctx.env()), name, &l.version);
+            let cache = crate::plugins::cache_dir(ctx.env());
+            let cached = version_dir(&cache, name, &l.version);
+            let cache_lock = match crate::fs::install_lock(&cache) {
+                Ok(f) => f,
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            };
             if crate::plugins::read_manifest(&cached).is_some() {
-                match crate::plugins::link_version(&cached, &version_dir(&dir, name, &l.version)) {
+                let linked = crate::plugins::link_version(&cached, &version_dir(&dir, name, &l.version));
+                drop(cache_lock);
+                match linked {
                     Ok(()) => {
                         out.push(Synced::AlreadyInstalled {
                             name: name.clone(),
@@ -1182,13 +1195,16 @@ pub fn install_linked(
     pin: Option<&Checksums>,
 ) -> Result<Locked, String> {
     let cache = crate::plugins::cache_dir(ctx.env());
-    let locked = install(ctx, &cache, package, v, pin)?;
-    if dir != cache {
-        crate::plugins::link_version(
-            &version_dir(&cache, &package.name, &v.version),
-            &version_dir(dir, &package.name, &v.version),
-        )?;
+    if dir == cache {
+        // The caller holds `dir`'s install lock.
+        return install(ctx, &cache, package, v, pin);
     }
+    let _cache_lock = crate::fs::install_lock(&cache)?;
+    let locked = install(ctx, &cache, package, v, pin)?;
+    crate::plugins::link_version(
+        &version_dir(&cache, &package.name, &v.version),
+        &version_dir(dir, &package.name, &v.version),
+    )?;
     Ok(locked)
 }
 

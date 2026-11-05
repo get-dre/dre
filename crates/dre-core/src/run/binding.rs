@@ -383,6 +383,16 @@ impl<'a> BindingRun<'a> {
             if let Err(e) = self.runs.switch(&self.run_id) {
                 self.ui.warn(&format!("can't make this run the current one: {e}"));
             }
+        } else if matches!(self.stages.source, Source::Retry(_)) {
+            self.ui.step(
+                Level::Info,
+                "Kept",
+                &format!(
+                    "the current run: a retry doesn't replace it; this one's files are in {}",
+                    rel(self.project.root(), &self.run_dir).display()
+                ),
+                None,
+            );
         } else {
             self.ui.warn(&format!(
                 "{}: a run for a later instant is current, so this one doesn't replace it; its files are in {}",
