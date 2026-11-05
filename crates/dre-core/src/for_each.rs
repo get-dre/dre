@@ -184,10 +184,58 @@ pub fn safe_name(key: &str) -> String {
         }
         s.push(c);
     }
-    if s.is_empty() || s.chars().all(|c| c == '.') {
+    if s.is_empty() || s.chars().all(|c| c == '.') || (cfg!(windows) && device_name(&s)) {
         s = format!("_{s}");
     }
     s
+}
+
+/// A Windows device name (`CON`, `nul.txt`, `COM1.xlsx`...): never a file there.
+fn device_name(segment: &str) -> bool {
+    let stem = segment
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    match stem.as_bytes() {
+        b"CON" | b"PRN" | b"AUX" | b"NUL" => true,
+        [b'C', b'O', b'M', n] | [b'L', b'P', b'T', n] => n.is_ascii_digit() && *n != b'0',
+        _ => false,
+    }
+}
+
+/// Whether a rendered per-row `file_name` names one file in the output's folder: no folder,
+/// `.`/`..`, root or drive; on Windows also no `:` (a drive or a stream) and no device name.
+pub fn plain_file_name(name: &str) -> bool {
+    let mut parts = std::path::Path::new(name).components();
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(n)), None) if n == name
+    ) && !name.contains(['/', '\\'])
+        && !(cfg!(windows) && (name.contains(':') || device_name(name)))
+}
+
+/// What a per-row destination path rendered from `source` got from the row's values that
+/// would take it out of the destination's folder: a `..` or an absolute path or drive the
+/// YAML didn't have, or a Windows device name. `None` when it's safe.
+pub fn path_escape(source: &str, rendered: &str) -> Option<&'static str> {
+    let rooted = |p: &str| {
+        let b = p.trim_start().as_bytes();
+        b.first().is_some_and(|c| matches!(c, b'/' | b'\\'))
+            || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
+    };
+    let parents = |p: &str| p.split(['/', '\\']).filter(|s| s.trim() == "..").count();
+    if rooted(rendered) && !rooted(source) {
+        return Some("an absolute path or a drive");
+    }
+    if parents(rendered) > parents(source) {
+        return Some("a `..`");
+    }
+    if rendered.split(['/', '\\']).any(device_name) {
+        return Some("a Windows device name");
+    }
+    None
 }
 
 /// Files of two rows that would collide: (file, first key, second key).

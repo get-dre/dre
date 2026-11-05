@@ -369,6 +369,25 @@ fn the_profile_channel_is_the_default() {
 }
 
 #[test]
+fn an_empty_channel_or_user_never_falls_back_to_the_profile_channel() {
+    // A per-row `channel: "{{ each.channel }}"` whose row has no channel renders empty: that
+    // row's file must not reach the profile's default channel.
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let mut c = conn(&base, "xoxb-good");
+    c["channel"] = json!("C7");
+    for options in [
+        json!({"channel": ""}),
+        json!({"channel": "  "}),
+        json!({"user": ""}),
+    ] {
+        let err = send(&[f.file("a.csv", b"1")], c.clone(), options).unwrap_err();
+        assert!(err.contains("is empty"), "{err}");
+    }
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
 fn target_mistakes_fail_before_any_api_call() {
     let (base, calls) = fake_slack();
     let f = Files::new();

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use serde_json::{Value as Json, json};
+use serde_json::json;
 
 use super::mode::Deliver;
 use super::{BindingRun, Fail, OutputStatus, RenderedDest, rel};
@@ -139,11 +139,7 @@ impl<'a> BindingRun<'a> {
             .name
             .clone()
             .unwrap_or_else(|| format!("output{}", oi + 1));
-        let named = d
-            .path
-            .as_deref()
-            .or(d.options.get("attachment_name").and_then(Json::as_str));
-        let name = crate::zip_pack::zip_name(named, &output).map_err(|e| {
+        let name = crate::zip_pack::entry_zip_name(d.path.as_deref(), &d.options, &output).map_err(|e| {
             Fail::new(
                 Code::DeliveryFailed,
                 format!("{label}: destination `{}`: {e}", d.profile),
@@ -170,7 +166,7 @@ impl<'a> BindingRun<'a> {
             .join(self.zips.len().to_string())
             .join(&name);
         let t = Instant::now();
-        crate::zip_pack::build(&to, &files, z.password.as_deref(), z.encryption).map_err(|e| {
+        z.build(&to, &files).map_err(|e| {
             Fail::new(
                 Code::DeliveryFailed,
                 format!("{label}: destination `{}`: {e}", d.profile),
@@ -227,10 +223,10 @@ impl<'a> BindingRun<'a> {
             attach,
             rate: d.rate,
             message: self.outs[oi].message.clone(),
-            files: match &d.zip_file {
-                Some(z) => vec![z.clone()],
-                None => self.outs[oi].files.iter().map(|(f, _)| f.clone()).collect(),
-            }
+            files: crate::zip_pack::sent_files(
+                d.zip_file.as_ref(),
+                self.outs[oi].files.iter().map(|(f, _)| f),
+            )
             .into_iter()
             .map(|f| crate::release::HeldFile {
                 sha256: crate::checksum::sha256_file(&f).unwrap_or_default(),
@@ -260,10 +256,8 @@ impl<'a> BindingRun<'a> {
     ) -> Result<Option<Sent>, Fail> {
         // An output is never delivered once the run is cancelled.
         self.not_cancelled()?;
-        let files: Vec<PathBuf> = match &d.zip_file {
-            Some(z) => vec![z.clone()],
-            None => self.outs[oi].files.iter().map(|(f, _)| f.clone()).collect(),
-        };
+        let files =
+            crate::zip_pack::sent_files(d.zip_file.as_ref(), self.outs[oi].files.iter().map(|(f, _)| f));
         let o = &self.b.outputs[oi];
         let message = if o.is_message() {
             self.outs[oi].message.clone()

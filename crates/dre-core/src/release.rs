@@ -139,10 +139,11 @@ pub fn release(
     let runs = BindingRuns::new(&store.run_dir(&opts.report, &opts.binding));
     let run_dir = runs.run_dir(&opts.run_id);
     let held = read_held(&run_dir, opts)?;
-    let mut done = released_before(&runs, &opts.run_id);
     let started = chrono::Utc::now();
     let release_id = crate::runs::new_run_id(started);
     let _guard = lock(ctx, &runs, &release_id, started, opts)?;
+    // Read under the lock: a release that just finished has written all it sent.
+    let mut done = released_before(&runs, &opts.run_id);
     let release_dir = runs.run_dir(&release_id);
     std::fs::create_dir_all(&release_dir).map_err(|e| e.to_string())?;
     let mut outcome = ReleaseOutcome {
@@ -188,7 +189,7 @@ pub fn release(
     drop(sender);
     // The release's own record: who, when, what; and every entry released so far.
     write_released(&release_dir, &opts.run_id, &done)?;
-    write_record(&run_dir, &release_dir, &release_id, started, opts, &outcome)?;
+    write_record(ctx, &run_dir, &release_dir, &release_id, started, opts, &outcome)?;
     Ok(outcome)
 }
 
@@ -342,6 +343,7 @@ impl Sender<'_> {
 
 /// The release's `run_results.json`: the run's, as this release, who released it and what.
 fn write_record(
+    ctx: &crate::Context,
     run_dir: &Path,
     release_dir: &Path,
     release_id: &str,
@@ -386,9 +388,11 @@ fn write_record(
         }
         m.remove("retry_of");
     }
+    // Secrets masked, as in a run's own record: a destination's error may echo one.
     crate::fs::write_atomic(
         &release_dir.join("run_results.json"),
-        serde_json::to_string_pretty(&record)
+        ctx.secrets()
+            .to_json_pretty(&record)
             .unwrap_or_default()
             .as_bytes(),
     )
