@@ -169,6 +169,7 @@ its status back to `pending`.
 
 ### CI on merge and weekly (GitHub Actions)
 
+<!-- published-snippet:orchestration -->
 ```yaml
 # .github/workflows/schedules.yml
 on:
@@ -181,12 +182,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://getdre.com/install.sh | DRE_VERSION=v0.1.2 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: curl -fsSL https://getdre.com/install.sh | DRE_VERSION=v0.11.1 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: dre validate
       - run: scheduler/refresh.sh
         env:
           DRE_SCHEDULER_DB: ${{ secrets.DRE_SCHEDULER_DB }}
 ```
+<!-- /published-snippet:orchestration -->
 
 `dre schedule ls` needs no profiles or credentials; `dre validate` needs them only for reports
 whose templates query the database.

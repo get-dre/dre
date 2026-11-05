@@ -317,7 +317,7 @@ dre clean
 
 ## `dre ls`
 
-List the reports and Bindings a selection or schedule covers, without running anything.
+List the reports and Bindings a selection or schedule covers, without running anything. Diagnostics go to stderr in file and line order; stdout holds only listing data (including JSON on loaded-project errors). Errors exit 1, warnings alone exit 0; load failures and invalid selections exit 2.
 
 ```text
 dre ls [OPTIONS] [SELECTOR]...
@@ -337,7 +337,7 @@ dre ls [OPTIONS] [SELECTOR]...
 | `--target <TARGET>` |  | The run's target (environment), which sets every profile's entry (default: $DRE_TARGET; without either, each profile uses its own `target:`, else `dev`). Environment: `DRE_TARGET`. |
 | `--var <NAME=VALUE>` |  | Set a variable for `var()`, as on `dre run`. |
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
-| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (not needed; accepted as on the other project commands). Environment: `DRE_PROFILES_DIR`. |
+| `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (accepted as on the other project commands). Environment: `DRE_PROFILES_DIR`. |
 | `--target-path <PATH>` |  | The target path, accepted as on the other project commands; `ls` writes nothing to it. Environment: `DRE_TARGET_PATH`. |
 
 Example:

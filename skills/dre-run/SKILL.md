@@ -3,7 +3,7 @@ name: dre-run
 description: Invoke this skill before DRE scheduling/run answers or CLI use, even quick questions about when a schedule fires. Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews per-row outputs, retries failed rows, releases held deliveries after review (dre release), paces deliveries with rates, previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.2.0"
+  version: "5.2.1"
   dre: ">=0.9.0, <0.12.0"
 ---
 
@@ -263,10 +263,11 @@ Load `references/topics/per-row.md` and `references/topics/delivery.md` first.
   `--from`/`--to` pick a window (a date or an RFC 3339 time; `--from` may be in the past). Read
   the times out in each schedule's timezone; a schedule under `problems` can't be expanded, and
   the message says why (`dre-report` fixes it).
-- **Rerun a firing exactly** (RUN-3): take its instant from `dre schedule ls --schedule <name>
-  --from <day> --output json` (`fires_at`), then run `DRE_RUN_AT=<fires_at> dre run --schedule
-  <name>`. `run.now`, `run.date` and `run.scheduled_at` render as they would have on time.
-  Delivery rules still apply (RUN-2): a rerun delivers again.
+- **Rerun schedule firings in a window** (RUN-3): list them with `dre schedule ls --schedule
+  <name> --from <start> --to <end> --output json`. `--from` is inclusive; `--to` is exclusive.
+  For each occurrence, run its `invocation.argv` from the project directory with its
+  `invocation.env`, preserving `DRE_RUN_AT` and `DRE_RUN_DATE`. Let the deployment supply its
+  target/profile and secret environment. Delivery rules still apply (RUN-2): a rerun delivers again.
 - **Run one report or Set of a schedule:** `dre run --schedule <name> -s <report> --set <set>`
   keeps the schedule's vars and timezone.
 - **Wire an orchestrator:** the occurrences JSON (`dre schedule ls --output json`) carries each

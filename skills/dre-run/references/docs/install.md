@@ -17,9 +17,11 @@ This puts `dre` in `~/.local/bin`, after checking the download against the relea
 `SHA256SUMS`. `DRE_INSTALL_DIR` picks another folder and `DRE_VERSION` a release (default: the
 newest, pre-releases included). A folder you don't own, such as `/usr/local/bin`, needs `sudo`:
 
+<!-- published-snippet:install -->
 ```bash
-curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION=v0.3.2 DRE_INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION=v0.11.1 DRE_INSTALL_DIR=/usr/local/bin sh
 ```
+<!-- /published-snippet:install -->
 
 Finding the newest release asks GitHub's API, which allows 60 unauthenticated requests an hour.
 If the installer reports GitHub's rate limit, set `GITHUB_TOKEN` or `DRE_VERSION`.
