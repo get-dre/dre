@@ -212,6 +212,41 @@ fn deps_installs_the_highest_matching_version_and_pins_it() {
 }
 
 #[test]
+fn parallel_deps_install_a_plugin_once() {
+    let e = Env::new(DECLARED);
+    let start = std::sync::Barrier::new(4);
+    let runs: Vec<Run> = std::thread::scope(|s| {
+        let racers: Vec<_> = (0..4)
+            .map(|_| {
+                s.spawn(|| {
+                    start.wait();
+                    e.dre(&["deps"])
+                })
+            })
+            .collect();
+        racers.into_iter().map(|t| t.join().unwrap()).collect()
+    });
+    for r in &runs {
+        r.ok();
+    }
+    let installs = runs.iter().filter(|r| r.stdout.contains("Installed")).count();
+    assert_eq!(installs, 1, "{runs:?}");
+    assert!(e.installed("1.1.0"));
+}
+
+#[test]
+fn plugin_install_refuses_an_unreadable_lockfile() {
+    let e = Env::new(DECLARED);
+    let broken = "<<<<<<< HEAD\nplugins: {}\n=======\n>>>>>>> other\n";
+    std::fs::write(e.p("project/dre.lock"), broken).unwrap();
+    for cmd in ["install", "update"] {
+        e.dre(&["plugin", cmd, "fixture"]).failed().says("dre.lock");
+        assert_eq!(e.lock(), broken);
+    }
+    assert!(!e.installed("1.1.0"));
+}
+
+#[test]
 fn a_lockfile_pins_the_exact_version_on_another_machine() {
     let e = Env::new(DECLARED);
     e.dre(&["deps"]).ok();

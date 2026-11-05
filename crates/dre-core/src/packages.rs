@@ -223,6 +223,13 @@ pub fn sync(root: &Path, install: bool, mut log: impl FnMut(&str)) -> Result<(),
     if diags.has_errors() {
         return Ok(()); // reported with the project load
     }
+    // Parallel runs of one project install one at a time: a later one finds the package
+    // installed instead of deleting and copying it again under the first one.
+    let _installing = if decls.iter().any(|d| matches!(d.source, Source::Git { .. })) {
+        Some(crate::fs::install_lock(&root.join(DEPS_DIR)).map_err(|e| vec![e])?)
+    } else {
+        None
+    };
     let mut lock = Lock::load(root).map_err(|e| vec![e])?;
     let mut errors = Vec::new();
     let mut changed = false;
@@ -337,7 +344,10 @@ fn install_git(root: &Path, url: &str, checkout: &str) -> Result<(String, String
         let name = manifest_name(&tmp)?;
         let dst = installed_dir(root, &name);
         remove_dir_force(&dst);
-        copy_tree(&tmp, &dst).map_err(|e| format!("can't install into {}: {e}", dst.display()))?;
+        if let Err(e) = copy_tree(&tmp, &dst) {
+            remove_dir_force(&dst);
+            return Err(format!("can't install into {}: {e}", dst.display()));
+        }
         crate::fs::write_atomic(&dst.join(INSTALLED_COMMIT), commit.as_bytes()).map_err(|e| e.to_string())?;
         Ok((name, commit))
     })();
@@ -358,7 +368,8 @@ fn base_name(url: &str) -> String {
         .collect()
 }
 
-/// Copy `from` into `to`, leaving out `.git`.
+/// Copy `from` into `to`, leaving out `.git`. A symlink (or any other non-file) is refused:
+/// copying it would copy whatever it points at, such as a file outside the package.
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
@@ -367,10 +378,16 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
             continue;
         }
         let dst = to.join(e.file_name());
-        if e.file_type()?.is_dir() {
+        let kind = e.file_type()?;
+        if kind.is_dir() {
             copy_tree(&e.path(), &dst)?;
-        } else {
+        } else if kind.is_file() {
             std::fs::copy(e.path(), dst)?;
+        } else {
+            return Err(std::io::Error::other(format!(
+                "{} is a symlink or special file; packages may only contain files and folders",
+                e.path().display()
+            )));
         }
     }
     Ok(())

@@ -342,7 +342,9 @@ fn retry_failed_redoes_only_the_failed_rows_from_the_saved_results() {
         &["statements", "--retry-failed", &first, "--keep-runs", "5"],
     )
     .ok()
-    .says("1 succeeded, 0 skipped, 0 failed");
+    .says("1 succeeded, 0 skipped, 0 failed")
+    .says("a retry doesn't replace it")
+    .lacks("a run for a later instant is current");
     assert!(p.path("out/102-bob.csv").is_file());
     // Rows that succeeded the first time aren't sent again.
     assert!(!p.path("out/101-ann.csv").exists());

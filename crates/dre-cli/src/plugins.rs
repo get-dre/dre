@@ -121,7 +121,22 @@ pub fn install(
     };
     let source_key = source.lock_key();
     let declared_req = declared.as_ref().map(|r| r.req());
-    let mut lock = project.as_ref().map(|p| Lock::load(p.root()).unwrap_or_default());
+    let dir = dre_core::plugins::plugins_dir(ctx.env(), project.as_ref().map(|p| p.root()));
+    let _installing = match dre_core::fs::install_lock(&dir) {
+        Ok(f) => f,
+        Err(e) => {
+            printer.error(&e);
+            return crate::exit::failed();
+        }
+    };
+    // A dre.lock that can't be read is refused, never replaced by one holding this package.
+    let mut lock = match project.as_ref().map(|p| Lock::load(p.root())).transpose() {
+        Ok(l) => l,
+        Err(e) => {
+            printer.error(&format!("{e}; fix or remove it first"));
+            return crate::exit::failed();
+        }
+    };
     // The declared constraint always applies; a CLI constraint narrows it further.
     let req = match (&declared_req, &cli_req) {
         (Some(d), Some(c)) => {
@@ -152,7 +167,6 @@ pub fn install(
         ));
         return crate::exit::failed();
     };
-    let dir = dre_core::plugins::plugins_dir(ctx.env(), project.as_ref().map(|p| p.root()));
     let installed = if source.is_default() {
         manager::install_linked(ctx, &dir, package, version, None)
     } else {

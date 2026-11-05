@@ -1354,16 +1354,34 @@ fn clean(ctx: &Context, a: CleanArgs) -> ExitCode {
             }
         };
         let mut removed = 0;
+        let host = dre_core::runs::host_name(ctx.env());
         for report in std::fs::read_dir(t.dir.join("run"))
             .into_iter()
             .flatten()
             .flatten()
         {
             for binding in std::fs::read_dir(report.path()).into_iter().flatten().flatten() {
-                if binding.path().is_dir() {
-                    removed += dre_core::runs::BindingRuns::new(&binding.path())
-                        .prune(keep)
-                        .len();
+                if !binding.path().is_dir() {
+                    continue;
+                }
+                // Under the Binding's lock: never under a run or release that's using its folders.
+                let runs = dre_core::runs::BindingRuns::new(&binding.path());
+                let now = chrono::Utc::now();
+                match runs.lock(&dre_core::runs::new_run_id(now), now, &host) {
+                    Ok(_guard) => removed += runs.prune(keep).len(),
+                    Err(e) => {
+                        let why = match e {
+                            dre_core::runs::LockError::Held(h) => format!("{} holds its lock", h.describe()),
+                            dre_core::runs::LockError::Unreadable(p) => {
+                                format!("its lock at {} is unreadable", p.display())
+                            }
+                            dre_core::runs::LockError::Io(e) => format!("its lock can't be taken: {e}"),
+                        };
+                        eprintln!(
+                            "Skipped {}: {why}",
+                            dre_core::slash_relative(root, &binding.path()).display()
+                        );
+                    }
                 }
             }
         }

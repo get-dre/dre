@@ -174,6 +174,61 @@ fn a_git_package_installs_into_dre_deps_and_pins_its_commit() {
     assert!(p.read("dre.lock").contains("revision: v2"));
 }
 
+/// A project depending on a `dre_utils` git repo at tag v1 (made by `fill`), and its URL.
+fn git_package_project(fill: impl FnOnce(&Path)) -> TestProject {
+    let p = project(&[REPORT[0], REPORT[1]]);
+    let repo = p.root().join("../repo");
+    write_package(&repo);
+    fill(&repo);
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "v1"]);
+    git(&repo, &["tag", "v1"]);
+    let url = repo.to_string_lossy().replace('\\', "/");
+    p.write(
+        "dependencies.yml",
+        &format!("{DEPS}packages:\n  - git: {url}\n    revision: v1\n"),
+    );
+    p
+}
+
+#[test]
+fn parallel_deps_install_a_git_package_once() {
+    let p = git_package_project(|_| {});
+    let start = std::sync::Barrier::new(4);
+    let runs: Vec<common::Run> = std::thread::scope(|s| {
+        let racers: Vec<_> = (0..4)
+            .map(|_| {
+                s.spawn(|| {
+                    start.wait();
+                    p.dre("deps", &[])
+                })
+            })
+            .collect();
+        racers.into_iter().map(|t| t.join().unwrap()).collect()
+    });
+    for r in &runs {
+        r.ok();
+    }
+    let installs = runs
+        .iter()
+        .filter(|r| r.stdout.contains("package `dre_utils`"))
+        .count();
+    assert_eq!(installs, 1, "{runs:?}");
+    p.dre("run", &["r"]).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_git_package_with_a_symlink_is_refused() {
+    let p = git_package_project(|repo| {
+        std::fs::write(repo.join("../secret.txt"), "not for macros").unwrap();
+        std::os::unix::fs::symlink("../../secret.txt", repo.join("macros/k.sql")).unwrap();
+    });
+    p.dre("deps", &[]).failed().says("macros/k.sql is a symlink");
+    assert!(!p.path("dre_deps/packages/dre_utils/macros/k.sql").exists());
+}
+
 #[test]
 fn package_problems_are_reported() {
     let p = project(&[

@@ -94,6 +94,28 @@ fn clean_prune_removes_old_runs_and_keeps_the_rest() {
 }
 
 #[test]
+fn clean_prune_skips_a_binding_whose_lock_is_held() {
+    let p = project("flags:\n  keep_runs: 4\n");
+    run_times(&p, 2, &["daily"], &[]);
+    let lock = p.root().join("target/run/daily/default/lock");
+    // A `dre release` on another host holds it.
+    std::fs::write(
+        &lock,
+        r#"{"run_id": "20260101T000000Z-abcd", "host": "elsewhere", "pid": 1, "started_at": "2026-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    let out = p.dre("clean", &["--prune", "--keep-runs", "1"]);
+    assert_eq!(out.code, 0, "{out:?}");
+    assert!(out.stderr.contains("Skipped target/run/daily/default"), "{out:?}");
+    assert!(out.stderr.contains("on elsewhere"), "{out:?}");
+    assert_eq!(runs(&p).len(), 2);
+    assert!(lock.is_file(), "the holder's lock stays");
+    std::fs::remove_file(&lock).unwrap();
+    p.dre("clean", &["--prune", "--keep-runs", "1"]).ok();
+    assert_eq!(runs(&p).len(), 1);
+}
+
+#[test]
 fn a_bad_keep_runs_is_a_config_error() {
     let p = project("flags:\n  keep_runs: 0\n");
     let out = p.dre("validate", &[]);

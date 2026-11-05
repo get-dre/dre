@@ -78,9 +78,12 @@ So several runs can share one target path safely:
 - **The same report and Set never run twice at once.** A second `dre run` of it finds the `lock`,
   stops at once and changes nothing (no files deleted, nothing delivered, the drift snapshot left
   alone); its error names the run in progress. Different reports run in parallel freely. A lock
-  left by a process on this machine that has gone (a crash, a kill) is taken over with a warning;
-  one from another machine (a shared folder) is never guessed about: `dre unlock <report>
-  [--binding <set>]` shows it and removes it.
+  left by a process on this machine that has gone (a crash, a kill, a restarted container that
+  reuses the host name and process id) is taken over with a warning; one from another machine (a
+  shared folder) is never guessed about: `dre unlock <report> [--binding <set>]` shows it and
+  removes it. `dre clean --prune` skips a report or Set whose lock is held.
+- **Parallel runs of one project install plugins and git packages one at a time**: a later run
+  waits, then uses what the first one installed.
 - **A crash leaves the previous run current**, and only an unfinished folder behind, which the
   next run removes.
 - **An older run never replaces a newer one.** A rerun for an earlier instant (`DRE_RUN_AT`) than
