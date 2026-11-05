@@ -32,6 +32,8 @@ name: Release
 # uploads the wheels already attached to that DRE release to PyPI, and builds and publishes
 # nothing else. With `-f tag=registry` it only brings the registry index up to date.
 #
+# With `-f tag=site`, only rebuild getdre.com from its latest published content.
+#
 # Dry run: `gh workflow run release.yml --ref <branch> -f tag=<tag> -f dry_run=true` runs the
 # release of <tag> (a version not released yet is fine; the tag needn't exist) from that branch,
 # up to everything that publishes: the security scan, the builds, checksums, `cargo publish
@@ -45,7 +47,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "An existing DRE release whose attached wheels to upload to PyPI (e.g. v0.1.0), or `registry` to update the plugin index; with dry_run, the release to try (e.g. duckdb-v1.2.0)"
+        description: "An existing DRE release whose attached wheels to upload to PyPI (e.g. v0.1.0), or `registry` to update the plugin index, or `site` to rebuild getdre.com; with dry_run, the release to try (e.g. duckdb-v1.2.0)"
         required: true
       dry_run:
         description: "Build and check the release of `tag` from this branch without publishing anything"
@@ -512,8 +514,10 @@ jobs:
     # A stable DRE release changes what the docs, plugin catalogue and changelog show.
     needs: [plan, publish, package-managers]
     if: >-
-      always() && needs.publish.result == 'success' && needs.package-managers.result == 'success' &&
-      needs.plan.outputs.kind == 'core' && needs.plan.outputs.prerelease != 'true' && !inputs.dry_run
+      always() && !inputs.dry_run &&
+      ((needs.publish.result == 'success' && needs.package-managers.result == 'success' &&
+        needs.plan.outputs.kind == 'core' && needs.plan.outputs.prerelease != 'true') ||
+       (github.event_name == 'workflow_dispatch' && inputs.tag == 'site'))
     runs-on: ubuntu-latest
     steps:
       - name: Call the Cloudflare Pages deploy hook
@@ -685,7 +689,9 @@ jobs:
 
   release-wheels:
     name: Wheels from ${{ inputs.tag }}
-    if: github.event_name == 'workflow_dispatch' && inputs.tag != 'registry' && !inputs.dry_run
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.tag != 'registry' &&
+      inputs.tag != 'site' && !inputs.dry_run
     runs-on: ubuntu-latest
     permissions:
       contents: write
