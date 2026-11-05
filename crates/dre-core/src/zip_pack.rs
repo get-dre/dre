@@ -33,6 +33,34 @@ pub struct ZipSpec {
     pub encryption: Encryption,
 }
 
+impl ZipSpec {
+    /// Pack `files` flat into the zip `to`, with this entry's password and encryption.
+    pub fn build(&self, to: &Path, files: &[PathBuf]) -> Result<(), String> {
+        build(to, files, self.password.as_deref(), self.encryption)
+    }
+}
+
+/// A destination entry's zip name: from its `path`, else a message's `attachment_name`, else
+/// `<stem>.zip`.
+pub fn entry_zip_name(
+    path: Option<&str>,
+    options: &serde_json::Map<String, serde_json::Value>,
+    stem: &str,
+) -> Result<String, String> {
+    zip_name(
+        path.or(options.get("attachment_name").and_then(serde_json::Value::as_str)),
+        stem,
+    )
+}
+
+/// What a destination entry sends: its zip when it zips, else the output's `files`.
+pub fn sent_files<'a>(zip: Option<&PathBuf>, files: impl IntoIterator<Item = &'a PathBuf>) -> Vec<PathBuf> {
+    match zip {
+        Some(z) => vec![z.clone()],
+        None => files.into_iter().cloned().collect(),
+    }
+}
+
 /// The zip's file name: the last part of the destination's `path`, else `<output>.zip`.
 /// An error when the path ends in another extension.
 pub fn zip_name(path: Option<&str>, output: &str) -> Result<String, String> {

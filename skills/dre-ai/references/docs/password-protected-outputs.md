@@ -96,7 +96,8 @@ output:
 
 `secret_columns:` on a query entry lists columns whose values are secrets. Their values become
 `*****` everywhere DRE reports: the console, `dre.log`, `run_results.json`, `rows.jsonl`,
-`--preview`, error messages, and `--output-json` (which is what dre-mcp answers from). They're
+`--preview`, error messages, `--output-json` (which is what dre-mcp answers from), and the
+results a per-row run saves for `--retry-failed` (so a retry runs the queries again). They're
 never masked in what DRE delivers: the PDFs, zips and messages, and the held files waiting for
 `dre release`, are the data. A password read with `env_var()` in `password:` or
 `zip.password` is masked the same way.

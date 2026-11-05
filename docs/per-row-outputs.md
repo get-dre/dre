@@ -62,6 +62,13 @@ have the same key, or would write the same file name, so rows never overwrite ea
 destination with a `path` must use `each.*` in it, or `dre validate` fails; pathless
 destinations (email, Slack) are exempt.
 
+Rendered remote paths must differ too: a row whose destination path another row already
+delivered to in the run (or another Set's row, when Bindings run at once) fails, naming that
+row. A path that a row's values give a `..`, an absolute start or a drive (`C:`), or a Windows
+device name (`CON`, `NUL`), is refused and that row fails; what the YAML itself writes there is
+kept. A rendered `file_name` must be a single file name; on Windows it also can't hold a `:` or
+be a device name.
+
 ## When a row fails
 
 | `for_each.on_row_error` | A row fails to render or deliver |
@@ -168,9 +175,11 @@ renders and delivers **only** that run's failed and never-started rows, from tho
 with no query, so retried members get the same figures as the rest of the batch. The retry is
 its own run folder (`retry_of` in its `run_results.json`, shown by `dre history`), doesn't become
 the current run, leaves the original's `rows.jsonl` untouched, and skips the report's other
-outputs. Retrying again (of either run) never re-sends a row that succeeded. A run that was
-pruned (`keep_runs`) can't be retried; with `for_each.keep_results: false` nothing is saved, and
-a retry runs the queries again, with a warning.
+outputs. Retrying again (of either run) never re-sends a row that succeeded, and a failed row
+goes again only to the destinations it failed on (one it reached or held isn't sent twice). A
+run that was pruned (`keep_runs`) can't be retried; with `for_each.keep_results: false` nothing
+is saved, and a retry runs the queries again, with a warning. The same goes when a query has
+`secret_columns`: they're saved masked, so a retry runs the queries again.
 
 `--only-keys 101,102` and `--limit-rows 10` make only some rows (recorded as `partial`).
 

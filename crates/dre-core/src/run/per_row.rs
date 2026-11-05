@@ -40,6 +40,16 @@ use crate::run_results::{FailedKey, ForEachResult, RowDelivery, RowFile, RowReco
 pub(super) struct Retry {
     pub original: String,
     pub done: HashMap<String, std::collections::HashSet<String>>,
+    pub sent: Sent,
+}
+
+/// Per output stem and unfinished row, what each destination (by index) already got: never
+/// sent again.
+pub(super) type Sent = HashMap<String, HashMap<String, Vec<Option<RowDelivery>>>>;
+
+/// A delivery a retry doesn't redo: it went, was held for `dre release`, or delivers nowhere.
+fn gone(d: &RowDelivery) -> bool {
+    matches!(d.status.as_str(), "delivered" | "held" | "not_delivered")
 }
 
 /// A row that's finished: never made again by `--retry-failed`. A message skipped because its
@@ -67,6 +77,13 @@ struct RowDest {
     zip: Option<crate::zip_pack::ZipSpec>,
     /// Where the row's zip for this entry is built; delivered instead of the row's files.
     zip_file: Option<PathBuf>,
+    /// Why the rendered path is refused: the row's values lead it out of its folder. The
+    /// row fails.
+    #[serde(default)]
+    refused: Option<String>,
+    /// `--retry-failed`: what the run being redone already sent here; not sent again.
+    #[serde(default)]
+    sent: Option<RowDelivery>,
 }
 
 /// A run folder's saved query results, for `--retry-failed`.
@@ -152,6 +169,26 @@ struct Shared<'a> {
     rows_file: Mutex<File>,
     progress: Progress,
     processes: super::processes::Pool,
+    /// Bindings running at once never deliver to the same file.
+    store: &'a crate::engine::RunStore,
+    label: String,
+    /// The rows' remote paths so far, by destination profile and path: the row that has each.
+    claims: Mutex<HashMap<String, String>>,
+}
+
+impl Shared<'_> {
+    /// Claim `profile`'s `remote` path for row `key`; who already has it, if another row or
+    /// Binding.
+    fn claim(&self, profile: &str, remote: &str, key: &str) -> Option<String> {
+        if let Some(other) = self.store.claim(profile, remote, &self.label) {
+            return Some(format!("`{other}`"));
+        }
+        let mut claims = self.claims.lock().unwrap();
+        let owner = claims
+            .entry(format!("{profile}\u{0}{remote}"))
+            .or_insert_with(|| key.to_string());
+        (owner != key).then(|| format!("row `{owner}`"))
+    }
 }
 
 /// Rows done so far, sent to the UI as each one finishes.
@@ -354,7 +391,7 @@ impl BindingRun<'_> {
                     .map_err(|e| failed(format!("`file_name`: {}", e.message)))?
                     .trim()
                     .to_string();
-                if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+                if !crate::for_each::plain_file_name(&name) {
                     return Err(failed(format!(
                         "`file_name` rendered `{name}` for key `{key}`; it must be a file name, without folders"
                     )));
@@ -477,6 +514,9 @@ impl BindingRun<'_> {
             pacer: crate::rate::Pacer::default(),
             rows_file: Mutex::new(rows_file),
             processes: self.processes.clone(),
+            store: self.store,
+            label: self.label(),
+            claims: Mutex::default(),
             progress: Progress {
                 output: label.to_string(),
                 total: total as u64,
@@ -635,7 +675,8 @@ impl BindingRun<'_> {
     fn hold_rows(&mut self, oi: usize, records: &[Done]) {
         for (job, r) in records {
             for (d, rd) in job.dests.iter().zip(&r.deliveries) {
-                if rd.status != "held" {
+                // Held by the run being redone: its `dre release` sends it.
+                if rd.status != "held" || d.sent.is_some() {
                     continue;
                 }
                 self.held.push(crate::release::HeldEntry {
@@ -684,7 +725,8 @@ impl BindingRun<'_> {
         let path = self.run_dir.join(format!("{stem}.done.json"));
         let mut keys: Vec<&String> = all.iter().collect();
         keys.sort();
-        std::fs::write(&path, serde_json::to_string(&keys).unwrap_or_default()).map_err(|e| e.to_string())?;
+        crate::fs::write_atomic(&path, serde_json::to_string(&keys).unwrap_or_default().as_bytes())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -808,12 +850,23 @@ impl BindingRun<'_> {
                 ),
             ));
         }
-        let done = self.rows_done(&original);
+        let (done, sent) = self.rows_done(&original);
         self.retry = Some(Retry {
             original: original.clone(),
             done,
+            sent,
         });
         let snapshot = self.runs.run_dir(&original).join(SNAPSHOT_DIR);
+        let masked: Vec<String> = crate::saved::read_index(&snapshot)
+            .map(|i| i.results.into_iter().flat_map(|r| r.masked_columns).collect())
+            .unwrap_or_default();
+        if !masked.is_empty() {
+            self.ui.warn(&format!(
+                "  run {original} saved its results with `secret_columns` ({}) masked, so the queries run again: the retried rows may show newer data than the rest",
+                masked.join(", ")
+            ));
+            return Ok(None);
+        }
         if snapshot.join(crate::saved::INDEX).is_file() {
             self.ui.step(
                 Level::Info,
@@ -846,41 +899,58 @@ impl BindingRun<'_> {
     }
 
     /// The rows of each per-row output (by its stem) that run `original` and its earlier
-    /// retries finished.
-    fn rows_done(&self, original: &str) -> HashMap<String, std::collections::HashSet<String>> {
+    /// retries finished, and what the unfinished rows' destinations already got. Each retry's
+    /// `rows.jsonl` is read as well as its `done.json`: a retry stopped part-way wrote only the
+    /// first.
+    fn rows_done(&self, original: &str) -> (HashMap<String, std::collections::HashSet<String>>, Sent) {
         let read = |run: &str| -> Option<Json> {
             let text = std::fs::read_to_string(self.runs.run_dir(run).join("run_results.json")).ok()?;
             serde_json::from_str(&text).ok()
         };
+        // The run, then its retries, oldest first.
+        let mut runs = vec![original.to_string()];
+        runs.extend(self.runs.list().into_iter().filter(|run| {
+            read(run).is_some_and(|r| r.get("retry_of").and_then(Json::as_str) == Some(original))
+        }));
         let mut done: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
-        let original_dir = self.runs.run_dir(original);
+        let mut sent: Sent = HashMap::new();
         for (oi, o) in self.b.outputs.iter().enumerate() {
             if o.for_each.is_none() {
                 continue;
             }
             let stem = self.output_stem(oi);
             let set = done.entry(stem.clone()).or_default();
-            if let Ok(text) = std::fs::read_to_string(original_dir.join(format!("{stem}.rows.jsonl"))) {
-                for line in text.lines() {
-                    if let Ok(r) = serde_json::from_str::<RowRecord>(line)
-                        && finished(&r)
+            let rows = sent.entry(stem.clone()).or_default();
+            for run in &runs {
+                let dir = self.runs.run_dir(run);
+                if let Ok(text) = std::fs::read_to_string(dir.join(format!("{stem}.rows.jsonl"))) {
+                    for r in text
+                        .lines()
+                        .filter_map(|l| serde_json::from_str::<RowRecord>(l).ok())
                     {
-                        set.insert(r.key);
+                        if finished(&r) {
+                            set.insert(r.key);
+                            continue;
+                        }
+                        let got = rows.entry(r.key).or_default();
+                        for (i, d) in r.deliveries.into_iter().enumerate() {
+                            if got.len() <= i {
+                                got.resize(i + 1, None);
+                            }
+                            if gone(&d) {
+                                got[i] = Some(d);
+                            }
+                        }
                     }
                 }
-            }
-            // Earlier retries of the same run.
-            for run in self.runs.list() {
-                if read(&run).is_some_and(|r| r.get("retry_of").and_then(Json::as_str) == Some(original))
-                    && let Ok(text) =
-                        std::fs::read_to_string(self.runs.run_dir(&run).join(format!("{stem}.done.json")))
+                if let Ok(text) = std::fs::read_to_string(dir.join(format!("{stem}.done.json")))
                     && let Ok(keys) = serde_json::from_str::<Vec<String>>(&text)
                 {
                     set.extend(keys);
                 }
             }
         }
-        done
+        (done, sent)
     }
 
     /// The name a per-row output's folder and sidecar take: its `name:`, else the report's.
@@ -945,9 +1015,23 @@ impl BindingRun<'_> {
         }
         let ctx = self.row_context(plan, row, &kept, &mut job)?;
         self.row_options(plan.oi, &ctx, &mut job)?;
+        let sent = self
+            .retry
+            .as_ref()
+            .and_then(|r| r.sent.get(&self.output_stem(plan.oi))?.get(&job.key))
+            .cloned();
         for idx in 0..o.destinations.len() {
-            let d = self.row_destination(plan, idx, &ctx, &job)?;
+            let mut d = self.row_destination(plan, idx, &ctx, &job)?;
+            d.sent = sent.as_ref().and_then(|s| s.get(idx).cloned().flatten());
             job.dests.push(d);
+        }
+        // Before anything is made: with `on_row_error: fail` no row delivers.
+        if let Some(why) = job.dests.iter().find_map(|d| d.refused.clone()) {
+            job.pre = Some(RowRecord {
+                reason: None,
+                ..pre_record(&job.key, "failed", "", Some((Code::DeliveryFailed, why)))
+            });
+            return Ok(job);
         }
         if job.dests.iter().any(|d| d.attach_missing) {
             job.pre = Some(pre_record(&job.key, "skipped", "attachment_failed", None));
@@ -1146,6 +1230,12 @@ impl BindingRun<'_> {
                 }),
                 None => None,
             };
+            let refused = d.path.as_deref().zip(path.as_deref()).and_then(|(source, p)| {
+                let why = crate::for_each::path_escape(source, p)?;
+                Some(mask.apply(&format!(
+                    "destination `{profile}`: path `{p}` refused: the row's values give it {why}"
+                )))
+            });
             let mut dest = RowDest {
                 idx,
                 profile: profile.clone(),
@@ -1157,6 +1247,8 @@ impl BindingRun<'_> {
                 attach_missing,
                 zip,
                 zip_file: None,
+                refused,
+                sent: None,
             };
             dest.zip_file = zip_file(plan, job, &dest)?;
             Ok(dest)
@@ -1225,13 +1317,8 @@ fn zip_file(plan: &RowPlan<'_>, job: &RowJob, d: &RowDest) -> Result<Option<Path
         .and_then(|(f, _)| f.file_stem())
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| job.key.clone());
-    let name = crate::zip_pack::zip_name(
-        d.path
-            .as_deref()
-            .or(d.options.get("attachment_name").and_then(Json::as_str)),
-        &stem,
-    )
-    .map_err(|e| format!("destination `{}`: {e}", d.profile))?;
+    let name = crate::zip_pack::entry_zip_name(d.path.as_deref(), &d.options, &stem)
+        .map_err(|e| format!("destination `{}`: {e}", d.profile))?;
     let shared = job.dests.iter().find(|x| {
         x.zip == d.zip && x.attach == d.attach && x.zip_file.as_ref().is_some_and(|f| f.ends_with(&name))
     });
@@ -1483,6 +1570,11 @@ fn deliver_row(
             location: None,
             error: None,
         };
+        if let Some(sent) = &d.sent {
+            held |= sent.status == "held";
+            deliveries.push(sent.clone());
+            continue;
+        }
         if d.hold || shared.hold_all {
             held = true;
             deliveries.push(record("held"));
@@ -1500,13 +1592,18 @@ fn deliver_row(
         {
             return None;
         }
-        let local: Vec<PathBuf> = match &d.zip_file {
-            Some(z) => vec![z.clone()],
-            None => job.files.iter().map(|(f, _)| f.clone()).collect(),
+        let local = crate::zip_pack::sent_files(d.zip_file.as_ref(), job.files.iter().map(|(f, _)| f));
+        let claim = |remote: &str| match shared.claim(&d.profile, remote, &job.key) {
+            Some(other) => Err(Fail::new(
+                Code::DeliveryFailed,
+                job.mask.apply(&taken(&other, remote, &d.profile)),
+            )),
+            None => Ok(()),
         };
         let request = Request::new(&d.profile, d.path.as_deref(), &d.options, &local)
             .message(job.message.as_ref(), &d.attach)
-            .format(&shared.format);
+            .format(&shared.format)
+            .claim(&claim);
         let mut r = record("delivered");
         match deliverer.deliver(request) {
             Ok(Some(sent)) => r.location = Some(job.mask.apply(&sent.location)),
@@ -1531,6 +1628,13 @@ fn deliver_row(
             error: None,
         },
     })
+}
+
+/// Why a row can't deliver to `remote`: `other` (a row, or a Binding running at once) did.
+fn taken(other: &str, remote: &str, profile: &str) -> String {
+    format!(
+        "{other} delivers to `{remote}` on destination `{profile}` in this run too; each row needs its own path (put `each.*` in it, and the Set when Bindings run at once)"
+    )
 }
 
 /// The address a pathless destination sends to, for the record: `to`, `channel`, `webhook`...
@@ -1613,7 +1717,7 @@ fn make_zips(job: &RowJob) -> Result<(), String> {
         }
         let mut files: Vec<PathBuf> = job.files.iter().map(|(f, _)| f.clone()).collect();
         files.extend(d.attach.iter().cloned());
-        crate::zip_pack::build(to, &files, z.password.as_deref(), z.encryption)
+        z.build(to, &files)
             .map_err(|e| format!("destination `{}`: {e}", d.profile))?;
         built.push(to);
     }

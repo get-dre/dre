@@ -62,6 +62,8 @@ default `channel`, and `api_url` (default `https://slack.com/api`) for a proxy. 
 | `message` | The post's text. |
 
 Give exactly one of `channel` or `user`. If you give neither, the profile's `channel` is used.
+One that's given but empty (a per-row `"{{ each.channel }}"` whose row has none) fails that
+delivery: it never falls back to the profile's channel.
 
 ```yaml
 destination:

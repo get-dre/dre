@@ -195,7 +195,12 @@ impl Target {
         let s = |m: &Map<String, Value>, k: &str| -> Result<Option<String>> {
             match m.get(k) {
                 None | Some(Value::Null) => Ok(None),
-                Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
+                // Set but empty (a per-row value that rendered to nothing): never the
+                // profile's default channel, which may be another audience.
+                Some(Value::String(s)) if s.trim().is_empty() => Err(format!(
+                    "slack option `{k}` is empty; give it a value, or leave it out to use the profile's `channel`"
+                )
+                .into()),
                 Some(Value::String(s)) => Ok(Some(s.trim().to_string())),
                 Some(v) => Err(format!("slack option `{k}` must be a string, got {v}").into()),
             }

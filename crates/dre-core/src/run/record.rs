@@ -138,7 +138,16 @@ impl BindingRun<'_> {
         };
         for r in &self.produced {
             let file = format!("{}.arrows", safe_name(&r.query));
-            crate::saved::spool_to_stream(&r.spool, &dir.join(&file))?;
+            // Secret columns are saved masked: the folder outlives the run (`keep_runs`).
+            let secret = self.secret_columns(&r.query);
+            let masked = r.spool.with_extension("masked.arrow");
+            let spool = if secret.is_empty() {
+                &r.spool
+            } else {
+                crate::secret_columns::masked_copy(&r.spool, &masked, &secret)?;
+                &masked
+            };
+            crate::saved::spool_to_stream(spool, &dir.join(&file))?;
             index.results.push(crate::saved::SavedResult {
                 query: r.query.clone(),
                 name: r.name.clone(),
@@ -148,8 +157,8 @@ impl BindingRun<'_> {
                     .ok()
                     .map(|h| h.trim().to_string()),
                 file,
-                // The run folder keeps the real values: a retry delivers what they feed.
-                masked_columns: Vec::new(),
+                // A retry can't deliver what these feed: it runs the queries again.
+                masked_columns: secret,
             });
         }
         crate::saved::write_index(&dir, &index).map_err(|e| e.to_string())?;

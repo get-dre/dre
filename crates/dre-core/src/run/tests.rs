@@ -1183,3 +1183,312 @@ fn reused_plugins_log_to_the_current_bindings_event_block() {
     assert_eq!(logs.get("east").unwrap(), &["written", "sent"]);
     assert_eq!(logs.get("west").unwrap(), &["written", "sent"]);
 }
+
+/// Members 1, 2, ... with a `dir` each and a `pw` (a secret column).
+fn members_in(dirs: &[&str]) -> RecordBatch {
+    RecordBatch::try_from_iter([
+        (
+            "member_id",
+            Arc::new(Int64Array::from_iter_values(1..=dirs.len() as i64)) as arrow::array::ArrayRef,
+        ),
+        (
+            "dir",
+            Arc::new(StringArray::from_iter_values(dirs.iter().copied())) as arrow::array::ArrayRef,
+        ),
+        (
+            "pw",
+            Arc::new(StringArray::from_iter_values(
+                (1..=dirs.len()).map(|i| format!("pw-secret-{i}")),
+            )) as arrow::array::ArrayRef,
+        ),
+    ])
+    .unwrap()
+}
+
+/// A host whose `members` are [`members_in`] `dirs`, with `drop` scripted by `destination`.
+fn host_in(dirs: &[&str], destination: Script) -> MemoryHost {
+    MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS]).rows("select * from members", members_in(dirs)),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", destination)
+        .plugin(Kind::Destination, "shelf", Script::new(&[]))
+}
+
+/// `--retry-failed` of the Binding's one run so far.
+fn retry_of(dir: &TempDir) -> RunOptions {
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let [run_id] = runs.list().try_into().expect("one run");
+    retry_run(run_id)
+}
+
+fn retry_run(run_id: String) -> RunOptions {
+    RunOptions {
+        mode: Mode {
+            results: Results::Retry(run_id),
+            ..Mode::default()
+        },
+        // Run ids of one second sort by a random suffix: keep the retries too.
+        keep_runs: Some(10),
+        ..options()
+    }
+}
+
+const TWO_DESTS: &str = "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+    \x20 for_each: {query: members, key: member_id}\n\
+    \x20 destination:\n\
+    \x20   - {profile: outbox, path: \"out/{{ each.member_id }}.csv\"}\n\
+    \x20   - {profile: archive, path: \"arc/{{ each.member_id }}.csv\"}\n";
+
+#[test]
+fn a_retry_resends_only_to_the_destinations_that_failed() {
+    let host = host(Script::new(&[]).fail_on(Call::Deliver, "out/101.csv", "the mailbox is full"));
+    let ctx = context(&host);
+    let (dir, project) = project(TWO_DESTS, &ctx);
+    assert!(run_once(&ctx, &project, &options()).failed());
+    assert_eq!(calls_of(&host, "Deliver").len(), 4);
+    // Row 101 reached the archive; only its outbox delivery failed.
+    let retry_host = self::host(Script::new(&[]));
+    let second = run_once(&context(&retry_host), &project, &retry_of(&dir));
+    assert!(!second.failed(), "{:?}", second.outcomes);
+    assert_eq!(
+        calls_of(&retry_host, "Deliver"),
+        ["destination/drop Deliver out/101.csv"]
+    );
+}
+
+#[test]
+fn a_retry_reads_the_rows_an_earlier_retry_finished_even_without_its_done_file() {
+    let host = host(Script::new(&[]).fail_on(Call::Deliver, "out/101.csv", "the mailbox is full"));
+    let ctx = context(&host);
+    let (dir, project) = project(PER_ROW, &ctx);
+    assert!(run_once(&ctx, &project, &options()).failed());
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let [original] = runs.list().try_into().expect("one run");
+    let first = self::host(Script::new(&[]));
+    assert!(!run_once(&context(&first), &project, &retry_run(original.clone())).failed());
+    assert_eq!(
+        calls_of(&first, "Deliver"),
+        ["destination/drop Deliver out/101.csv"]
+    );
+    // The first retry stopped before it wrote `done.json`: its rows.jsonl still says 101 went.
+    let retried = runs.list().into_iter().find(|r| *r != original).unwrap();
+    std::fs::remove_file(runs.run_dir(&retried).join("letter.done.json")).unwrap();
+    let again = self::host(Script::new(&[]));
+    run_once(&context(&again), &project, &retry_run(original));
+    assert!(calls_of(&again, "Deliver").is_empty(), "{:?}", again.calls());
+}
+
+#[test]
+fn a_row_value_cannot_steer_a_destination_path_out_of_its_folder() {
+    let host = host_in(
+        &["ok", "../up", "/root", "C:x", "CON", "a\\..\\b"],
+        Script::new(&[]),
+    );
+    let ctx = context(&host);
+    let (_dir, project) = project(
+        "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"{{ each.dir }}/{{ each.member_id }}.csv\"}\n",
+        &ctx,
+    );
+    let (dir, project) = (_dir, project);
+    assert!(run_once(&ctx, &project, &options()).failed());
+    assert_eq!(calls_of(&host, "Deliver"), ["destination/drop Deliver ok/1.csv"]);
+    let s = &results_json(&dir)["output_results"][0]["for_each"];
+    assert_eq!((&s["succeeded"], &s["failed"]), (&1.into(), &5.into()), "{s}");
+    let keys = s["failed_keys"].as_array().unwrap();
+    assert!(
+        keys.iter()
+            .all(|k| k["message"].as_str().unwrap().contains("refused")),
+        "{s}"
+    );
+}
+
+#[test]
+fn a_held_row_whose_path_leaves_its_folder_is_refused_not_held() {
+    let host = host_in(&["../up"], Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(
+        "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"{{ each.dir }}/{{ each.member_id }}.csv\", hold: true}\n",
+        &ctx,
+    );
+    assert!(run_once(&ctx, &project, &options()).failed());
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let run = runs.run_dir(&runs.list().into_iter().last().unwrap());
+    let held = std::fs::read_to_string(run.join("held.json")).unwrap_or_default();
+    assert!(!held.contains("up"), "{held}");
+}
+
+#[test]
+fn a_refused_path_with_on_row_error_fail_delivers_no_row() {
+    let host = host_in(&["ok", "../up"], Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(
+        "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id, on_row_error: fail}\n\
+         \x20 destination: {profile: outbox, path: \"{{ each.dir }}/{{ each.member_id }}.csv\"}\n",
+        &ctx,
+    );
+    assert!(run_once(&ctx, &project, &options()).failed());
+    assert!(calls_of(&host, "Deliver").is_empty());
+}
+
+#[test]
+fn a_literal_parent_or_absolute_path_in_the_yaml_still_delivers() {
+    let host = host_in(&["a", "b"], Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(
+        "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"/srv/../out/{{ each.dir }}.csv\"}\n",
+        &ctx,
+    );
+    let summary = run_once(&ctx, &project, &options());
+    assert!(!summary.failed(), "{:?}", summary.outcomes);
+    assert_eq!(calls_of(&host, "Deliver").len(), 2);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_name_with_a_drive_or_a_device_name_is_refused_on_windows() {
+    for value in ["C:x", "CON", "nul.txt", "report.csv:hidden"] {
+        let host = host_in(&[value], Script::new(&[]));
+        let ctx = context(&host);
+        let (_dir, project) = project(
+            "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+             \x20 file_name: \"{{ each.dir }}\"\n\
+             \x20 for_each: {query: members, key: member_id}\n",
+            &ctx,
+        );
+        let summary = run_once(&ctx, &project, &options());
+        assert!(summary.failed(), "{value}");
+        assert!(calls_of(&host, "Write").is_empty(), "{value}");
+    }
+}
+
+#[test]
+fn rows_rendering_the_same_path_fail_the_second_instead_of_overwriting() {
+    let host = host_in(&["x", "x", "y"], Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(
+        "queries: [members]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"out/{{ each.dir }}.csv\"}\n",
+        &ctx,
+    );
+    let (dir, project) = (_dir, project);
+    assert!(run_once(&ctx, &project, &options()).failed());
+    assert_eq!(
+        calls_of(&host, "Deliver"),
+        [
+            "destination/drop Deliver out/x.csv",
+            "destination/drop Deliver out/y.csv"
+        ]
+    );
+    let s = &results_json(&dir)["output_results"][0]["for_each"];
+    assert_eq!(s["failed"], 1, "{s}");
+    let message = s["failed_keys"][0]["message"].as_str().unwrap();
+    assert!(message.contains("delivers to `out/x.csv`"), "{s}");
+}
+
+#[test]
+fn sets_running_at_once_cannot_deliver_rows_to_the_same_path() {
+    let host = host_in(&["x"], Script::new(&[]));
+    let ctx = context(&host);
+    let (_dir, project) = project(
+        "queries: [members]\nsets: [{name: east}, {name: west}]\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"out/{{ each.dir }}.csv\"}\n",
+        &ctx,
+    );
+    let opts = RunOptions {
+        set: Some("all".into()),
+        threads: Some(2),
+        ..options()
+    };
+    let summary = run_once(&ctx, &project, &opts);
+    assert!(summary.failed());
+    assert_eq!(calls_of(&host, "Deliver"), ["destination/drop Deliver out/x.csv"]);
+}
+
+#[test]
+fn per_row_saved_results_mask_secret_columns_and_a_retry_runs_the_queries_again() {
+    let host = host_in(
+        &["a", "b"],
+        Script::new(&[]).fail_on(Call::Deliver, "out/1.csv", "full"),
+    );
+    let ctx = context(&host);
+    let (dir, project) = project(
+        "queries:\n  - {query: members, secret_columns: [pw]}\noutput:\n  name: letter\n  format: csv\n\
+         \x20 for_each: {query: members, key: member_id}\n\
+         \x20 destination: {profile: outbox, path: \"out/{{ each.member_id }}.csv\"}\n",
+        &ctx,
+    );
+    assert!(run_once(&ctx, &project, &options()).failed());
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let results = runs
+        .run_dir(&runs.list().into_iter().next().unwrap())
+        .join("results");
+    for f in std::fs::read_dir(&results).unwrap() {
+        let bytes = std::fs::read(f.unwrap().path()).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("pw-secret"));
+    }
+    let again = host_in(&["a", "b"], Script::new(&[]));
+    let second = run_once(&context(&again), &project, &retry_of(&dir));
+    assert!(!second.failed(), "{:?}", second.outcomes);
+    // The saved `pw` is `*****`: the retry read the members again instead.
+    assert_eq!(calls_of(&again, "Execute").len(), 1, "{:?}", again.calls());
+    assert_eq!(
+        calls_of(&again, "Deliver"),
+        ["destination/drop Deliver out/1.csv"]
+    );
+}
+
+#[test]
+fn a_release_record_masks_the_secrets_a_destination_error_echoes() {
+    let host = host(Script::new(&[]).fail_on(Call::Deliver, "out/detail.csv", "denied for tok-s3cret-value"));
+    let ctx = Context::new(
+        Env::from_vars([("DRE_TEST_TOKEN", "tok-s3cret-value")]),
+        Arc::new(host.clone()),
+    );
+    let (dir, project) = project_with_profiles(
+        "queries: [summary]\noutput:\n  name: detail\n  format: csv\n\
+         \x20 destination: {profile: outbox, path: out/detail.csv, hold: true}\n",
+        &PROFILES.replace(
+            "dev: {type: drop}",
+            "dev: {type: drop, token: \"{{ env_var('DRE_TEST_TOKEN') }}\"}",
+        ),
+        &ctx,
+    );
+    assert!(!run_once(&ctx, &project, &options()).failed());
+    let runs = crate::runs::BindingRuns::new(&dir.path().join("target/run/pack/default"));
+    let run_id = runs.list().into_iter().last().unwrap();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let released = crate::release::release(
+        &ctx,
+        &project,
+        &crate::release::ReleaseOptions {
+            report: "pack".into(),
+            binding: "default".into(),
+            run_id,
+            only_keys: None,
+            exclude_keys: None,
+            by: "tester".into(),
+            rate: None,
+            cancel: CancelToken::new(),
+        },
+        &Events::new(tx),
+    )
+    .unwrap();
+    assert!(released.failed());
+    let record =
+        std::fs::read_to_string(runs.run_dir(&released.release_id).join("run_results.json")).unwrap();
+    assert!(record.contains("denied for"), "{record}");
+    assert!(!record.contains("tok-s3cret-value"), "{record}");
+}
