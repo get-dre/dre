@@ -19,7 +19,7 @@ newest, pre-releases included). A folder you don't own, such as `/usr/local/bin`
 
 <!-- published-snippet:install -->
 ```bash
-curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION=v0.11.0 DRE_INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://getdre.com/install.sh | sudo env DRE_VERSION=v0.11.1 DRE_INSTALL_DIR=/usr/local/bin sh
 ```
 <!-- /published-snippet:install -->
 

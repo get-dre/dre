@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://getdre.com/install.sh | DRE_VERSION=v0.11.0 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: curl -fsSL https://getdre.com/install.sh | DRE_VERSION=v0.11.1 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: dre validate
       - run: scheduler/refresh.sh
         env:
