@@ -498,7 +498,7 @@ jobs:
   package-managers:
     name: Homebrew and Scoop
     needs: [plan, publish]
-    if: needs.plan.outputs.kind == 'core' && !inputs.dry_run
+    if: always() && needs.publish.result == 'success' && needs.plan.outputs.kind == 'core' && !inputs.dry_run
     # Tested for every DRE release; pushed to the tap and bucket from release candidates on.
     uses: ./.github/workflows/package-managers.yml
     with:
@@ -511,7 +511,9 @@ jobs:
     name: Rebuild getdre.com
     # A stable DRE release changes what the docs, plugin catalogue and changelog show.
     needs: [plan, publish, package-managers]
-    if: needs.plan.outputs.kind == 'core' && needs.plan.outputs.prerelease != 'true' && !inputs.dry_run
+    if: >-
+      always() && needs.publish.result == 'success' && needs.package-managers.result == 'success' &&
+      needs.plan.outputs.kind == 'core' && needs.plan.outputs.prerelease != 'true' && !inputs.dry_run
     runs-on: ubuntu-latest
     steps:
       - name: Call the Cloudflare Pages deploy hook
@@ -524,10 +526,39 @@ jobs:
           fi
           curl -fsS -X POST "$HOOK" >/dev/null
 
+  # Verify packaged source while the platform binaries build. Both jobs check out the
+  # same commit, without build caches; publishing below only skips this completed build.
+  crates-verify:
+    name: Verify crates.io packages
+    needs: [plan, security]
+    if: needs.plan.outputs.kind == 'core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      # Packages and verifies the crates whose version isn't on crates.io yet, together, so dre-core
+      # can build against an unpublished dre-protocol.
+      - name: Verify source packages
+        run: |
+          new=()
+          for crate in dre-protocol dre-core dre-cli; do
+            version="$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')"
+            if curl -sfo /dev/null -A "dre-release (github.com/${{ github.repository }})" "https://crates.io/api/v1/crates/$crate/$version"; then
+              echo "$crate $version is already on crates.io"
+            else
+              new+=(-p "$crate")
+            fi
+          done
+          if [[ ${#new[@]} -gt 0 ]]; then cargo publish --dry-run --locked "${new[@]}"; fi
+
   crates:
     name: Publish to crates.io
-    needs: [plan, build]
-    if: needs.plan.outputs.kind == 'core'
+    needs: [plan, build, attest, crates-verify]
+    if: >-
+      always() && needs.plan.outputs.kind == 'core' && needs.build.result == 'success' &&
+      needs.attest.result == 'success' && needs.crates-verify.result == 'success'
     runs-on: ubuntu-latest
     # Trusted publishing: crates.io trusts this workflow (release.yml in get-dre/dre) for
     # dre-protocol, dre-core and dre-cli, and hands it a short-lived token. No stored secret.
@@ -543,21 +574,6 @@ jobs:
       - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         if: env.DRY_RUN != 'true'
         id: auth
-      # Packages and verifies the crates whose version isn't on crates.io yet, together, so dre-core
-      # can build against an unpublished dre-protocol.
-      - name: Dry run
-        if: env.DRY_RUN == 'true'
-        run: |
-          new=()
-          for crate in dre-protocol dre-core dre-cli; do
-            version="$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')"
-            if curl -sfo /dev/null -A "dre-release (github.com/${{ github.repository }})" "https://crates.io/api/v1/crates/$crate/$version"; then
-              echo "$crate $version is already on crates.io"
-            else
-              new+=(-p "$crate")
-            fi
-          done
-          if [[ ${#new[@]} -gt 0 ]]; then cargo publish --dry-run --locked "${new[@]}"; fi
       # dre-protocol has its own version: it's published only when that version is new. dre-core
       # and dre-cli carry DRE's. `cargo publish` waits for each to be in the index before the next.
       - name: Publish dre-protocol, dre-core and dre-cli
@@ -570,14 +586,15 @@ jobs:
             if curl -sfo /dev/null -A "dre-release (github.com/${{ github.repository }})" "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is already on crates.io"
             else
-              cargo publish -p "$crate" --locked
+              cargo publish -p "$crate" --locked --no-verify
             fi
           done
 
   pypi:
     name: PyPI wheels
     needs: [plan, publish]
-    if: needs.plan.outputs.kind == 'core'
+    # publish joins mutually exclusive Rust/Java jobs; bypass their skipped ancestors.
+    if: always() && needs.publish.result == 'success' && needs.plan.outputs.kind == 'core'
     runs-on: ubuntu-latest
     permissions:
       contents: write
