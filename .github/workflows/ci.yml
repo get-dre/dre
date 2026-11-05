@@ -187,6 +187,7 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 .github/scripts/schema_docs.py check
+      - run: python3 .github/scripts/test_release_workflow.py
       - run: python3 .github/scripts/test_registry_index.py
       - run: python3 .github/scripts/test_published_docs.py
       - run: python3 .github/scripts/published_docs.py check
