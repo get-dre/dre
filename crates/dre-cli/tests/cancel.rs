@@ -252,3 +252,34 @@ fn a_bad_timeout_is_refused() {
         "{out:?}"
     );
 }
+
+#[test]
+fn a_timeout_too_large_for_a_duration_is_refused() {
+    let p = project("rows 1");
+    let out = p.dre("run", &["--timeout", "100000000000000000000"]);
+    assert_eq!(out.code, 2, "{out:?}");
+    assert!(
+        out.stderr.contains("--timeout must be a duration")
+            || out.stdout.contains("--timeout must be a duration"),
+        "{out:?}"
+    );
+    std::fs::write(
+        p.path("dre_project.yml"),
+        "name: acme_reports\ndefault_profile: fixture\nflags: {run_timeout: 1e20}\n",
+    )
+    .unwrap();
+    let out = p.dre("validate", &[]);
+    assert_ne!(out.code, 101, "{out:?}");
+    assert!(
+        format!("{}{}", out.stdout, out.stderr).contains("run_timeout"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn a_timeout_past_what_milliseconds_fit_in_never_fires() {
+    // 18,446,744,073,709,552 s is 2^64 ms plus 384 ms: truncated, it would time out at once.
+    let p = project("sleep 1");
+    let out = p.dre("run", &["--timeout", "18446744073709552s"]);
+    assert_eq!(out.code, 0, "{out:?}");
+}

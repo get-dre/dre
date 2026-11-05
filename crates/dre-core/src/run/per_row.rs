@@ -1442,7 +1442,33 @@ fn run_jobs<E>(
             processes: shared.processes.lease(&shared.events),
         },
         |w, _, job| {
-            let record = run_job(shared, &job, w)?;
+            // A bug in one row fails that row, not every Binding of the run.
+            let record =
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_job(shared, &job, w))) {
+                    Ok(record) => record?,
+                    Err(panic) => {
+                        // Its plugins may be part-way through a request: the next row starts fresh ones.
+                        let broken = std::mem::replace(
+                            w,
+                            Worker {
+                                processes: shared.processes.lease(&shared.events),
+                            },
+                        );
+                        broken.processes.discard();
+                        let why = panic
+                            .downcast_ref::<&str>()
+                            .map(|s| (*s).to_string())
+                            .or_else(|| panic.downcast_ref::<String>().cloned())
+                            .unwrap_or_default();
+                        row_failed(
+                            &job,
+                            &Code::RunFailed.to_string(),
+                            format!("internal error (a bug in DRE; please report it): {why}"),
+                            Vec::new(),
+                            Vec::new(),
+                        )
+                    }
+                };
             report_row(shared, &job, &record);
             Some((job, record))
         },

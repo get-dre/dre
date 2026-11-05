@@ -294,7 +294,7 @@ fn weekday(d: &str) -> bool {
 }
 
 fn byday(d: &str) -> Option<()> {
-    let (num, day) = d.split_at(d.len().checked_sub(2)?);
+    let (num, day) = d.split_at_checked(d.len().checked_sub(2)?)?;
     if !weekday(day) {
         return None;
     }

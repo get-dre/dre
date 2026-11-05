@@ -183,9 +183,7 @@ impl Rules {
 pub fn parse_duration(v: &Value) -> Result<Duration, String> {
     let bad = || format!("must be a duration such as `30s`, `5m` or a number of seconds, got {v}");
     if let Some(n) = v.as_f64() {
-        return (n >= 0.0 && n.is_finite())
-            .then(|| Duration::from_secs_f64(n))
-            .ok_or_else(bad);
+        return Duration::try_from_secs_f64(n).map_err(|_| bad());
     }
     let s = v.as_str().ok_or_else(bad)?.trim();
     let (num, unit) = s.split_at(
@@ -200,7 +198,7 @@ pub fn parse_duration(v: &Value) -> Result<Duration, String> {
         "h" => n * 3600.0,
         _ => return Err(bad()),
     };
-    Ok(Duration::from_secs_f64(secs))
+    Duration::try_from_secs_f64(secs).map_err(|_| bad())
 }
 
 /// The timeouts every network plugin shares (`connect_timeout`, `timeout`), for its
@@ -572,13 +570,14 @@ pub fn deliver_with(
 
 /// About 1s, then 4s, then 16s, give or take a quarter.
 fn backoff(attempt: u32) -> Duration {
-    let base = 4f64.powi(attempt as i32 - 1);
+    let base = 4f64.powi(attempt.saturating_sub(1).min(64) as i32);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     let jitter = 0.75 + (nanos % 1000) as f64 / 2000.0;
-    Duration::from_secs_f64(base * jitter)
+    // Past ~2^64 seconds (attempt 33 or so) it's longer than any `max_retry_wait`.
+    Duration::try_from_secs_f64(base * jitter).unwrap_or(Duration::MAX)
 }
 
 /// One try: the final path, or why it failed.

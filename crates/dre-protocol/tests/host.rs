@@ -397,3 +397,155 @@ fn the_conformance_command_checks_any_plugin_executable() {
     assert!(text.contains("✓ source/fixture: describe is answered"), "{text}");
     assert!(!run(&[]).status.success());
 }
+
+/// A result set's layout for a `write`.
+fn one_set() -> Vec<dre_protocol::msg::ResultSetMeta> {
+    vec![serde_json::from_value(json!({"name": "t", "query": "q", "result_index": 1})).unwrap()]
+}
+
+/// The last count `rx` gets before it goes quiet for a second (or its sender is done): how far
+/// a sender gets before the pipe pushes back.
+fn settled(rx: &std::sync::mpsc::Receiver<usize>) -> usize {
+    let mut last = 0;
+    while let Ok(i) = rx.recv_timeout(Duration::from_secs(1)) {
+        last = i;
+    }
+    last
+}
+
+const BATCHES: usize = 200;
+
+/// Stream [`BATCHES`] batches of 512 KiB each into the `stall` format plugin from a background
+/// thread, which ends when the write does. Returns the plugin's canceller, the thread, and how
+/// many batches it got through before the plugin pushed back.
+fn stalled_write() -> (
+    dre_protocol::host::Canceller,
+    std::thread::JoinHandle<Result<(), HostError>>,
+    usize,
+) {
+    let mut p = PluginProcess::spawn_env(fixture(), quiet(), &[("DRE_FIXTURE_MODE", "stall")]).unwrap();
+    p.ask_for(Some(dre_protocol::PluginId::new(Kind::Format, "stall")));
+    p.handshake((MIN_VERSION, MAX_VERSION), Duration::from_secs(10))
+        .unwrap();
+    let canceller = p.canceller();
+    p.write_begin("out", "stall", Map::new(), one_set(), None)
+        .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![arrow::datatypes::Field::new(
+            "n",
+            arrow::datatypes::DataType::Int64,
+            false,
+        )]));
+        let batches = (0..BATCHES).map(|i| {
+            let _ = tx.send(i);
+            arrow::array::RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(Int64Array::from_iter_values(0..65_536))],
+            )
+            .unwrap()
+        });
+        p.write_result_set(&schema, batches)
+    });
+    let sent = settled(&rx);
+    (canceller, writer, sent)
+}
+
+#[test]
+fn a_format_plugin_that_stops_reading_pushes_back_on_core() {
+    let (canceller, writer, sent) = stalled_write();
+    canceller.kill();
+    let _ = writer.join();
+    // The SDK queues a few frames and the pipe a little: never the whole result set.
+    assert!(
+        sent < 40,
+        "core sent {sent} of {BATCHES} batches to a plugin that read one"
+    );
+}
+
+#[test]
+fn cancel_returns_while_core_is_blocked_writing_to_the_plugin() {
+    let (canceller, writer, sent) = stalled_write();
+    assert!(sent < BATCHES - 1, "the write never blocked");
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let c = canceller.clone();
+    std::thread::spawn(move || {
+        c.cancel();
+        let _ = done_tx.send(());
+    });
+    let returned = done_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    canceller.kill();
+    assert!(writer.join().unwrap().is_err(), "a killed plugin's write fails");
+    assert!(returned, "cancel waited for the blocked write");
+}
+
+#[test]
+fn core_pushes_back_on_a_source_faster_than_it_reads() {
+    let (sent_tx, sent_rx) = std::sync::mpsc::channel();
+    let sink: LogSink = Arc::new(move |_, line| {
+        if let Some(i) = line.strip_prefix("fixture: sent ") {
+            let _ = sent_tx.send(i.parse().unwrap());
+        }
+    });
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let reader = std::thread::spawn(move || {
+        let mut rows = 0;
+        let mut first = true;
+        let e = p.execute(&format!("flood {BATCHES}"), None, |_, b| {
+            if std::mem::take(&mut first) {
+                let _ = go_rx.recv();
+            }
+            rows += b.num_rows();
+            Ok(())
+        });
+        e.map(|_| rows)
+    });
+    let sent = settled(&sent_rx);
+    go_tx.send(()).unwrap();
+    let rows = reader.join().unwrap().unwrap();
+    assert!(
+        sent < 40,
+        "the plugin sent {sent} of {BATCHES} batches while core read one"
+    );
+    assert_eq!(rows, BATCHES * 65_536, "every row arrives once core reads again");
+}
+
+#[test]
+fn stderr_keeps_flowing_after_bytes_that_are_not_utf8() {
+    let (sink, lines) = recording();
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    p.execute("bytes", None, |_, _| Ok(())).unwrap();
+    p.execute("log still here", None, |_, _| Ok(())).unwrap();
+    assert!(p.stderr_sync().wait(Duration::from_secs(5)));
+    let lines = lines.lock().unwrap().clone();
+    for want in [
+        "fixture: \u{fffd}\u{fffd} is not UTF-8",
+        "fixture: after bad bytes",
+        "still here",
+    ] {
+        assert!(lines.iter().any(|l| l == want), "{want:?} missing from {lines:?}");
+    }
+}
+
+#[test]
+fn a_leftover_stderr_writer_does_not_keep_the_log_sink_alive() {
+    let marker = Arc::new(());
+    let held = marker.clone();
+    let sink: LogSink = Arc::new(move |_, _| {
+        let _ = &held;
+    });
+    let mut p = PluginProcess::start(fixture(), sink).unwrap();
+    p.open(Map::new(), false).unwrap();
+    p.execute("orphan", None, |_, _| Ok(())).unwrap();
+    drop(p);
+    // A run's events end when the last sink is gone, so a sink kept by the stderr forwarder
+    // of a plugin whose helper still holds its stderr would keep `dre run` from returning.
+    assert_eq!(
+        Arc::strong_count(&marker),
+        1,
+        "the stderr forwarder still holds the log sink"
+    );
+}

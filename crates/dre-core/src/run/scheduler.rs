@@ -58,6 +58,9 @@ struct State<T> {
     on: BTreeMap<String, usize>,
     /// Resources a job has used to the end.
     warm: BTreeSet<String>,
+    /// Workers still taking jobs: one that panicked is gone, and with none left the producer
+    /// stops rather than wait for room in the queue forever.
+    live: usize,
 }
 
 /// How often a waiting thread looks at the cancel token, which has no way to wake it.
@@ -128,6 +131,7 @@ impl Scheduler {
             closed: false,
             on: BTreeMap::new(),
             warm: BTreeSet::new(),
+            live: self.workers,
         });
         let wake = Condvar::new();
         let done = Mutex::new(Vec::new());
@@ -135,6 +139,10 @@ impl Scheduler {
         std::thread::scope(|s| {
             for _ in 0..self.workers {
                 s.spawn(|| {
+                    let _live = Live {
+                        state: &state,
+                        wake: &wake,
+                    };
                     let mut w = worker();
                     while let Some((i, job)) = self.take(&state, &wake, cancel) {
                         // Frees the job's resources even if it panics, so the others go on.
@@ -211,8 +219,11 @@ impl Scheduler {
                 }
             };
             let mut st = state.lock().unwrap();
-            while st.pending.len() >= self.queue && !cancel.is_cancelled() {
+            while st.pending.len() >= self.queue && st.live > 0 && !cancel.is_cancelled() {
                 st = wake.wait_timeout(st, POLL).unwrap().0;
+            }
+            if st.live == 0 {
+                break;
             }
             st.pending.push((i, job));
             wake.notify_all();
@@ -281,6 +292,19 @@ struct Running<'s, T> {
 impl<T> Drop for Running<'_, T> {
     fn drop(&mut self) {
         self.scheduler.finish(self.state, self.wake, &self.uses);
+    }
+}
+
+/// A worker taking jobs; it leaves when it's done or a job panics.
+struct Live<'s, T> {
+    state: &'s Mutex<State<T>>,
+    wake: &'s Condvar,
+}
+
+impl<T> Drop for Live<'_, T> {
+    fn drop(&mut self) {
+        self.state.lock().unwrap().live -= 1;
+        self.wake.notify_all();
     }
 }
 
@@ -497,6 +521,27 @@ mod tests {
             )
         }));
         assert!(ran.is_err());
+    }
+
+    #[test]
+    fn a_job_that_panics_ends_the_run_even_with_a_bounded_queue() {
+        // With its one worker gone, nothing makes room in the queue for the producer.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ran = std::panic::catch_unwind(|| {
+                Scheduler::new(1).queue(2).threaded().run(
+                    jobs((0..10).map(|i| (vec![], i))),
+                    &CancelToken::new(),
+                    || (),
+                    |_, _, n| {
+                        assert_ne!(n, 0, "the first job breaks");
+                        Some(n)
+                    },
+                )
+            });
+            let _ = tx.send(ran.is_err());
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Ok(true));
     }
 
     #[test]

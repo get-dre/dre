@@ -10,8 +10,8 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, channel};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use arrow::array::RecordBatch;
@@ -308,18 +308,34 @@ pub struct Canceller {
 }
 
 impl Canceller {
-    /// Send `cancel` for the request running now, if any. Returns whether one was sent.
+    /// Send `cancel` for the request running now, if any, without waiting on a write in
+    /// progress. Returns whether one was sent (or will be, once that write is done).
     pub fn cancel(&self) -> bool {
         let id = self.current.load(Ordering::SeqCst);
         if id == 0 {
             return false;
         }
-        // A poisoned lock means a writer panicked mid-frame: nothing more can be sent.
-        self.stdin.lock().is_ok_and(|mut stdin| {
+        let send = move |stdin: &mut Option<BufWriter<ChildStdin>>| {
             stdin
                 .as_mut()
                 .is_some_and(|w| frame::write_json(w, &Envelope::new(Some(id), Request::Cancel {})).is_ok())
-        })
+        };
+        match self.stdin.try_lock() {
+            Ok(mut stdin) => send(&mut stdin),
+            // Core is writing to a plugin that may not be reading: send once that write is done,
+            // so the caller (a signal watcher with a kill deadline to keep) never waits on it.
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let stdin = self.stdin.clone();
+                std::thread::spawn(move || {
+                    if let Ok(mut stdin) = stdin.lock() {
+                        send(&mut stdin);
+                    }
+                });
+                true
+            }
+            // A poisoned lock means a writer panicked mid-frame: nothing more can be sent.
+            Err(std::sync::TryLockError::Poisoned(_)) => false,
+        }
     }
 
     /// Kill the plugin process.
@@ -352,6 +368,77 @@ pub enum Execution {
     Result { schema: SchemaRef, rows: u64 },
 }
 
+/// How many Arrow frames the plugin may send ahead of core: the reader waits beyond that, so a
+/// source faster than core's spool never piles its whole result set up in memory. JSON frames
+/// (replies, `log`, `progress`) are never held back, so a plugin logging while core writes to it
+/// can't deadlock against the limit.
+const QUEUED_BATCHES: usize = 16;
+
+/// Arrow frames queued and not yet taken, and whether core has stopped taking any.
+#[derive(Default)]
+struct Room {
+    queued: Mutex<(usize, bool)>,
+    freed: Condvar,
+}
+
+impl Room {
+    /// Wait until another Arrow frame may be queued; false once core has gone.
+    fn take(&self) -> bool {
+        let mut q = self.queued.lock().unwrap();
+        while q.0 >= QUEUED_BATCHES && !q.1 {
+            q = self.freed.wait(q).unwrap();
+        }
+        q.0 += 1;
+        !q.1
+    }
+
+    fn give(&self) {
+        self.queued.lock().unwrap().0 -= 1;
+        self.freed.notify_all();
+    }
+
+    fn close(&self) {
+        self.queued.lock().unwrap().1 = true;
+        self.freed.notify_all();
+    }
+}
+
+/// The frames the plugin sent, as read by the reader thread.
+struct Frames {
+    rx: Receiver<std::result::Result<Frame, FrameError>>,
+    room: Arc<Room>,
+}
+
+impl Frames {
+    fn took(&self, f: std::result::Result<Frame, FrameError>) -> std::result::Result<Frame, FrameError> {
+        if matches!(f, Ok(Frame::Arrow(_))) {
+            self.room.give();
+        }
+        f
+    }
+
+    fn recv(&self) -> std::result::Result<std::result::Result<Frame, FrameError>, ()> {
+        self.rx.recv().map(|f| self.took(f)).map_err(|_| ())
+    }
+
+    fn recv_timeout(
+        &self,
+        t: Duration,
+    ) -> std::result::Result<std::result::Result<Frame, FrameError>, RecvTimeoutError> {
+        self.rx.recv_timeout(t).map(|f| self.took(f))
+    }
+
+    fn try_recv(&self) -> std::result::Result<std::result::Result<Frame, FrameError>, TryRecvError> {
+        self.rx.try_recv().map(|f| self.took(f))
+    }
+}
+
+impl Drop for Frames {
+    fn drop(&mut self) {
+        self.room.close();
+    }
+}
+
 pub struct PluginProcess {
     label: String,
     path: PathBuf,
@@ -359,8 +446,10 @@ pub struct PluginProcess {
     child: Arc<Mutex<Child>>,
     /// Shared with [`Canceller`]s; `None` once closed.
     stdin: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
-    rx: Receiver<std::result::Result<Frame, FrameError>>,
+    rx: Frames,
     log: LogSink,
+    /// The stderr forwarder's sink, dropped when the forwarder outlives the plugin.
+    stderr_sink: Arc<Mutex<Option<LogSink>>>,
     /// The last request id given out.
     last_id: u64,
     /// The request running now (0: none).
@@ -496,11 +585,19 @@ impl PluginProcess {
         let stdin = Arc::new(Mutex::new(child.stdin.take().map(BufWriter::new)));
 
         let (tx, rx) = channel();
+        let room = Arc::new(Room::default());
+        let rx = Frames {
+            rx,
+            room: room.clone(),
+        };
         std::thread::spawn(move || {
             let mut r = BufReader::new(stdout);
             loop {
                 let f = frame::read_frame(&mut r);
                 let stop = f.is_err();
+                if matches!(f, Ok(Frame::Arrow(_))) && !room.take() {
+                    break;
+                }
                 if tx.send(f).is_err() || stop {
                     break;
                 }
@@ -509,7 +606,8 @@ impl PluginProcess {
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let tail = stderr.clone();
         let who = label.clone();
-        let sink = log.clone();
+        let stderr_sink = Arc::new(Mutex::new(Some(log.clone())));
+        let sink = stderr_sink.clone();
         let stderr_sync = StderrSync {
             progress: Arc::default(),
             pipe: raw_pipe(&stderr_pipe),
@@ -520,9 +618,18 @@ impl PluginProcess {
                 pipe: stderr_pipe,
                 progress: progress.clone(),
             });
-            for line in reader.by_ref().lines() {
-                let Ok(line) = line else { break };
-                sink(&who, &line);
+            let mut buf = Vec::new();
+            // Bytes that aren't UTF-8 (a native library's message) are logged lossily: stopping
+            // would close the pipe and kill the plugin on its next write.
+            while reader.read_until(b'\n', &mut buf).is_ok_and(|n| n > 0) {
+                let line = String::from_utf8_lossy(&buf)
+                    .trim_end_matches(['\n', '\r'])
+                    .to_string();
+                buf.clear();
+                let sink = sink.lock().unwrap().clone();
+                if let Some(sink) = sink {
+                    sink(&who, &line);
+                }
                 let mut t = tail.lock().unwrap();
                 if t.len() == STDERR_TAIL {
                     t.pop_front();
@@ -543,6 +650,7 @@ impl PluginProcess {
             stdin,
             rx,
             log,
+            stderr_sink,
             last_id: 0,
             current,
             stderr,
@@ -1350,6 +1458,10 @@ impl PluginProcess {
             }
             if t.is_finished() {
                 let _ = t.join();
+            } else {
+                // Something the plugin started still holds its stderr. Leave the forwarder
+                // reading, but without the run's sink, whose owners wait for every copy to go.
+                self.stderr_sink.lock().unwrap().take();
             }
         }
     }
