@@ -20,8 +20,7 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT: &str = "current";
 pub const LOCK: &str = "lock";
 pub const RUNS: &str = "runs";
-/// The OS lock held while a lock is checked and taken (it ends in `.tmp`, so it is never moved
-/// into a legacy run).
+/// The OS lock held while a Binding lock is checked and taken.
 const CHECKING: &str = ".lock-checking.tmp";
 
 /// The run ids whose Binding lock this process holds.

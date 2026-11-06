@@ -147,7 +147,7 @@ Search this index for the question's terms, then open the linked page. These loc
 ## Upgrading
 
 - [Updating DRE](docs/updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
-  Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `dre`, `dre-cli`.
+  Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `atomic`, `connections:`, `dependencies.yml`, `dre`, `dre-cli`, `extensions:`, `packages.yml`, `packages:`, `plugin.json`, `plugins:`, `provides`, `retries`, `sha256`, `sources:`.
 - [New in 0.10](docs/new-in-0.10.md): JDBC sources use operator-managed Java, and MiniJinja updates change several template results.
   Terms/options: `JAVA_HOME`, `PATH`, `document`, `dre-protocol`, `str.find`, `str.format`, `str.rfind`.
 - [New in 0.9](docs/new-in-0.9.md): Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects.
