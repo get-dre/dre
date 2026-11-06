@@ -33,6 +33,10 @@ mvn -B -f java/jdbc/pom.xml package
 python3 java/jdbc/test_protocol.py
 ```
 
+The repository's `.mvn/maven.config` allows five retries for temporary repository throttling,
+with a 60-second maximum retry delay. CI also caches Maven dependencies and checks recovery
+against a local throttled repository before building; `-C` keeps checksum failures fatal.
+
 The protocol suite compares every `describe` field and the sorted `hello` capabilities with
 `describe.json`, using the built JAR directly without compiling Rust plugins. After changing
 metadata, rebuild and run

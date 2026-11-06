@@ -56,6 +56,12 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertIn('jdbc_dependencies.py check', ci)
         self.assertIn('mvn" -B -C -f "$JAVA_DIR/pom.xml" package', JOBS['build-jdbc'])
 
+    def test_jdbc_ci_caches_dependencies_and_checks_throttling(self):
+        ci = WORKFLOW.with_name('ci.yml').read_text()
+        jdbc = re.search(r'^  jdbc:\n(.*?)(?=^  [\w-]+:|\Z)', ci, re.M | re.S)[1]
+        self.assertIn('cache: maven', jdbc)
+        self.assertIn('python3 .github/scripts/test_maven_throttle.py', jdbc)
+
     def test_installer_curl_refuses_insecure_redirects(self):
         installer = WORKFLOW.parents[2] / 'install.sh'
         for line in installer.read_text().splitlines():
