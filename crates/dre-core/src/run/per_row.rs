@@ -1191,9 +1191,10 @@ impl BindingRun<'_> {
             .expect("the pool is made before rendering")
             .connections
             .clone();
-        renderer.set_destination(
-            crate::render::Connections::profile(&*connections, &profile, Some("destination")).ok(),
-        );
+        let destination =
+            crate::render::Connections::profile(&*connections, &profile, Some("destination")).ok();
+        let email = destination.as_ref().is_some_and(|d| d.kind == "email");
+        renderer.set_destination(destination);
         let rendered = (|| -> Result<RowDest, Fail> {
             let path = match &d.path {
                 Some(p) => Some(
@@ -1204,10 +1205,25 @@ impl BindingRun<'_> {
                 None => None,
             };
             let mut options = JsonMap::new();
-            for (k, v) in &d.options {
-                let v = render_json_with(&renderer, file, v, ctx).map_err(|e| {
+            for (k, source) in &d.options {
+                let v = render_json_with(&renderer, file, source, ctx).map_err(|e| {
                     format!("destination `{profile}` option `{k}`: {}", mask.apply(&e.message))
                 })?;
+                if email && matches!(k.as_str(), "to" | "cc" | "bcc") && has_template(source) {
+                    let comma = match &v {
+                        Json::String(s) => s.contains(','),
+                        Json::Array(a) => a.iter().filter_map(Json::as_str).any(|s| s.contains(',')),
+                        _ => false,
+                    };
+                    if comma {
+                        return Err(Fail::new(
+                            Code::RenderFailed,
+                            format!(
+                                "destination `{profile}` option `{k}`: a per-row email recipient must not contain a comma; use separate list entries for multiple recipients"
+                            ),
+                        ));
+                    }
+                }
                 options.insert(k.clone(), v);
             }
             let (attach, attach_missing) = row_attachments(&plan.attached, &d.attach, &job.key);

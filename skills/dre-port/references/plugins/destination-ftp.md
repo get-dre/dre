@@ -220,7 +220,7 @@ name free. Put a date or a period in delivery paths so different runs don't coll
 
 ### Uploads under a temporary name
 
-The `local`, `sftp` and `ftp` destinations write a file as `.<name>.dre-part` in the same folder,
+The `local`, `sftp` and `ftp` destinations write a file as `.<name>.<unique>.dre-part` in the same folder,
 then rename it to its final name, so a dropped connection or a stopped run never leaves a
 half-written file where a receiving system may pick it up. Two options, per destination entry:
 

@@ -102,6 +102,7 @@ struct Memory {
     retry_after: Option<Duration>,
     break_rename: bool,
     ops: Vec<String>,
+    temps: Vec<(String, String)>,
 }
 
 impl Store for Memory {
@@ -110,6 +111,26 @@ impl Store for Memory {
     }
 
     fn write(&mut self, _local: &Path, remote: &str, exclusive: bool) -> Result<(), StoreError> {
+        if let Some(stem) = remote.strip_suffix(".dre-part") {
+            let (base, token) = stem
+                .rsplit_once('.')
+                .ok_or_else(|| StoreError::Failed("missing unique token".into()))?;
+            let parts: Vec<&str> = token.split('-').collect();
+            if parts.len() != 3
+                || parts
+                    .iter()
+                    .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+                || self.temps.iter().any(|(raw, _)| raw == remote)
+            {
+                return Err(StoreError::Failed(
+                    "temporary name must have a fresh pid-time-sequence token".into(),
+                ));
+            }
+            self.temps.push((
+                remote.into(),
+                format!("{base}.<temp-{}>.dre-part", self.temps.len() + 1),
+            ));
+        }
         self.ops.push(format!(
             "write {remote}{}",
             if exclusive { " exclusive" } else { "" }
@@ -200,6 +221,7 @@ fn run_case(c: &Case) -> Result<(), String> {
         retry_after: c.faults.retry_after.map(Duration::from_secs_f64),
         break_rename: c.faults.break_rename,
         ops: Vec::new(),
+        temps: Vec::new(),
     };
     for l in &c.deliveries {
         let d = deliver_with(&mut store, Path::new("new"), &l.remote, &rules, &mut |_| {})
@@ -255,8 +277,19 @@ fn run_case(c: &Case) -> Result<(), String> {
     {
         return Err(format!("took {attempts} tries, expected {n}"));
     }
+    let normalized: Vec<String> = store
+        .ops
+        .iter()
+        .map(|op| {
+            let mut op = op.clone();
+            for (raw, token) in &store.temps {
+                op = op.replace(raw, token);
+            }
+            op
+        })
+        .collect();
     if let Some(ops) = &x.ops
-        && &store.ops != ops
+        && &normalized != ops
     {
         return Err(format!("store calls {:?}, expected {ops:?}", store.ops));
     }

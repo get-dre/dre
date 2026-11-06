@@ -33,6 +33,13 @@
         ]
       },
       {
+        "name": "formula_guard",
+        "type": "boolean",
+        "description": "prefix formula-leading text cells with an apostrophe",
+        "required": false,
+        "default": true
+      },
+      {
         "name": "header",
         "type": "boolean",
         "description": "write the column names first",
@@ -105,6 +112,13 @@
           "strings",
           "none"
         ]
+      },
+      {
+        "name": "formula_guard",
+        "type": "boolean",
+        "description": "prefix formula-leading text cells with an apostrophe",
+        "required": false,
+        "default": true
       },
       {
         "name": "header",

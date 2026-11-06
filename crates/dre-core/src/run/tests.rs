@@ -1555,3 +1555,87 @@ fn a_lookup_quote_in_backslash_literals_keeps_the_statements_apart() {
     assert_eq!(executed.len(), 2, "{executed:?}");
     assert!(executed.iter().any(|c| c.contains(r"'O\'Brien'")), "{executed:?}");
 }
+
+#[test]
+fn per_row_email_refuses_recipient_values_containing_commas() {
+    for recipient in ["to", "cc", "bcc"] {
+        for (kind, value, address, fails) in [
+            (
+                "email",
+                "\"{{ each.name }}\"",
+                "ann@example.com, outsider@example.com",
+                true,
+            ),
+            (
+                "email",
+                "[\"{{ each.name }}\"]",
+                "ann@example.com, outsider@example.com",
+                true,
+            ),
+            ("email", "\"{{ each.name }}\"", "ann@example.com", false),
+            (
+                "email",
+                "[\"{{ each.name }}\", boss@example.com]",
+                "ann@example.com",
+                false,
+            ),
+            ("email", "\"ann@example.com, boss@example.com\"", "ignored", false),
+            (
+                "drop",
+                "\"{{ each.name }}\"",
+                "ann@example.com, outsider@example.com",
+                false,
+            ),
+        ] {
+            let rows = RecordBatch::try_from_iter([
+                (
+                    "member_id",
+                    Arc::new(Int64Array::from(vec![101])) as arrow::array::ArrayRef,
+                ),
+                (
+                    "name",
+                    Arc::new(StringArray::from(vec![address])) as arrow::array::ArrayRef,
+                ),
+            ])
+            .unwrap();
+            let host = host(Script::new(&[]))
+                .plugin(
+                    Kind::Source,
+                    "mem",
+                    Script::new(&[dre_protocol::CAP_SESSIONS]).rows("select * from members", rows),
+                )
+                .plugin(Kind::Destination, "email", Script::new(&[]));
+            let ctx = context(&host);
+            let report = format!(
+                "queries: [members]\noutput:\n  name: letter\n  format: csv\n  for_each: {{query: members, key: member_id}}\n  destination: {{profile: outbox, {recipient}: {value}}}\n"
+            );
+            let (_dir, project) = project_with_profiles(
+                &report,
+                &PROFILES.replace("type: drop", &format!("type: {kind}")),
+                &ctx,
+            );
+            let result = run_once(&ctx, &project, &options());
+            assert_eq!(
+                result.failed(),
+                fails,
+                "{recipient} {kind} {value}: {:?}",
+                result.outcomes
+            );
+            assert_eq!(
+                calls_of(&host, "Deliver").len(),
+                usize::from(!fails),
+                "{:?}",
+                host.calls()
+            );
+            if fails {
+                assert!(
+                    result.outcomes[0]
+                        .error
+                        .as_deref()
+                        .unwrap()
+                        .contains("must not contain a comma")
+                );
+            }
+        }
+    }
+}

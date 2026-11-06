@@ -3,6 +3,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,7 +79,7 @@ func TestLegacyAndAtomicDelivery(t *testing.T) {
 	if _, err := run(s, rules(IfExistsOverwrite, true)); err != nil || s.files["out/r.xlsx"] != "new" || len(s.files) != 1 {
 		t.Fatalf("%v %v", err, s.files)
 	}
-	if s.log[0] != "write out/.r.xlsx.dre-part false" {
+	if !strings.HasPrefix(s.log[0], "write out/.r.xlsx.") || !strings.HasSuffix(s.log[0], ".dre-part false") {
 		t.Fatal(s.log)
 	}
 	// A dropped rename leaves nothing behind.
@@ -91,7 +92,7 @@ func TestLegacyAndAtomicDelivery(t *testing.T) {
 	r.TempDir = "../staging"
 	s = newFake(allCaps)
 	run(s, r)
-	if s.log[0] != "write out/../staging/.r.xlsx.dre-part false" {
+	if !strings.HasPrefix(s.log[0], "write out/../staging/.r.xlsx.") {
 		t.Fatal(s.log)
 	}
 }
