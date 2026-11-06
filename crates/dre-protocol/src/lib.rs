@@ -29,6 +29,7 @@
 /// the SDK sends to core as `log` messages.
 pub use log;
 
+pub mod catalog;
 pub mod connection;
 pub mod delivery;
 pub mod frame;
@@ -38,6 +39,7 @@ pub mod options;
 pub mod plugin;
 pub mod schema;
 pub mod sessions;
+pub mod sql;
 pub mod style;
 pub mod util;
 

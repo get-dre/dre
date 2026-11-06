@@ -347,6 +347,10 @@ pub trait ResultSink {
 }
 
 pub trait Source {
+    /// SQL rules used by `dre query`; absent metadata disables that command.
+    fn sql_dialect(&self) -> Option<crate::sql::SqlDialect> {
+        None
+    }
     fn connection_fields(&self) -> Vec<ConnectionField> {
         Vec::new()
     }
@@ -1032,6 +1036,10 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             option_fields: h.option_fields(),
             identifier_quote,
             string_literal,
+            sql_dialect: match h {
+                Handler::Source(s) => s.sql_dialect(),
+                _ => None,
+            },
             message_limit,
             single_writer,
         });

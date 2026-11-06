@@ -1,6 +1,7 @@
 {
   "source/databricks": {
     "capabilities": [
+      "catalog",
       "check",
       "load",
       "sessions",
@@ -111,7 +112,43 @@
       }
     ],
     "option_fields": [],
-    "identifier_quote": "`"
+    "identifier_quote": "`",
+    "sql_dialect": {
+      "parser": "databricks",
+      "identifier_quote": "`",
+      "identifier_case": "insensitive",
+      "literal_style": "hex",
+      "hex_literal": "decode(unhex('{hex}'), 'UTF-8')",
+      "denied_functions": [
+        "read_files",
+        "read_kafka",
+        "read_kinesis",
+        "read_pubsub",
+        "read_pulsar",
+        "read_state_metadata",
+        "read_statestore",
+        "cloud_files_state",
+        "http_request",
+        "java_method",
+        "reflect",
+        "secret",
+        "try_secret",
+        "list_secrets",
+        "ai_query"
+      ],
+      "file_formats": [
+        "parquet",
+        "csv",
+        "json",
+        "text",
+        "delta",
+        "orc",
+        "avro",
+        "binaryFile",
+        "xml"
+      ],
+      "read_only_notice": "SQL validation; use a read-only Databricks database role"
+    }
   },
   "destination/databricks": {
     "capabilities": [
@@ -232,7 +269,6 @@
         "name": "if_exists",
         "type": "string",
         "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
-        "required": false,
         "default": "overwrite",
         "choices": [
           "overwrite",

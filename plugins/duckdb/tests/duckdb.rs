@@ -171,3 +171,28 @@ fn sandboxed_sessions_reach_no_files_and_cannot_unlock_settings() {
     );
     assert_eq!(rows(&mut p, "select 42"), Some(1));
 }
+
+#[test]
+fn catalog_returns_native_comments_and_keeps_quoted_names_as_data() {
+    let mut p = open(":memory:", false);
+    rows(
+        &mut p,
+        "create schema \"odd'{table}\"; create table \"odd'{table}\".\"odd'{schema}\" (id integer); comment on table \"odd'{table}\".\"odd'{schema}\" is 'table comment'; comment on column \"odd'{table}\".\"odd'{schema}\".id is 'column comment'",
+    );
+    let catalog = p
+        .catalog(vec!["\"odd'{table}\".\"odd'{schema}\"".into()], vec![])
+        .unwrap();
+    assert_eq!(catalog["schema_version"], "dre/catalog/v1");
+    assert_eq!(catalog["tables"][0]["name"], "odd'{schema}");
+    assert_eq!(catalog["tables"][0]["description"], "table comment");
+    assert_eq!(
+        catalog["tables"][0]["columns"][0]["description"],
+        "column comment"
+    );
+    assert!(
+        p.catalog(vec!["missing_table".into()], vec![])
+            .unwrap_err()
+            .to_string()
+            .contains("missing or not visible")
+    );
+}

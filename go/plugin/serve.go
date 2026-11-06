@@ -129,6 +129,8 @@ type Role struct {
 	// StringLiteral, when set, tells core how to spell a string holding ' or \ in SQL it writes
 	// (an inlined lookup): "backslash" for a database without chr(). Empty: chr(39)/chr(92).
 	StringLiteral string
+	// SQLDialect is required to enable core read-only query validation.
+	SQLDialect *SQLDialect
 	// Open starts a source session from the profile target's fields.
 	Open func(conn map[string]any) (Session, error)
 	// OpenReadOnly, when set, starts a session that refuses to change data, for an `open` with
@@ -655,7 +657,7 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 	case "describe":
 		s.send(&describeReply{
 			envelope: newEnvelope("describe"), ConnectionFields: nonNil(s.role.Fields),
-			IdentifierQuote: s.role.IdentifierQuote, StringLiteral: s.role.StringLiteral,
+			IdentifierQuote: s.role.IdentifierQuote, StringLiteral: s.role.StringLiteral, SQLDialect: s.role.SQLDialect,
 		})
 		return nil
 	case "open":
@@ -682,6 +684,26 @@ func (s *server) handle(t string, req map[string]json.RawMessage) error {
 		s.db = db
 		s.dbMu.Unlock()
 		s.send(newOK())
+		return nil
+	case "catalog":
+		var r struct {
+			Tables  []string `json:"tables"`
+			Schemas []string `json:"schemas"`
+		}
+		if json.Unmarshal(mustObject(req), &r) != nil {
+			return fmt.Errorf("unsupported request `catalog`")
+		}
+		c, ok := s.db.(interface {
+			Catalog([]string, []string) (any, error)
+		})
+		if !ok {
+			return fmt.Errorf("source does not support catalog metadata")
+		}
+		value, err := c.Catalog(r.Tables, r.Schemas)
+		if err != nil {
+			return err
+		}
+		s.send(&catalogReply{envelope: newEnvelope("catalog"), Catalog: value})
 		return nil
 	case "execute":
 		var r struct {

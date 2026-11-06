@@ -941,6 +941,17 @@
               ],
               "description": "Source: how core spells a string holding `'` or `\\` when it writes one into SQL (an\ninlined lookup): absent or `chr` for `chr(39)`/`chr(92)`, `backslash` for `\\'`/`\\\\`\ninside the quotes (a database without `chr()`, such as ClickHouse)."
             },
+            "sql_dialect": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlDialect"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source-owned SQL grammar, literal rules and read-only policy."
+            },
             "message_limit": {
               "type": [
                 "integer",
@@ -1444,6 +1455,78 @@
         }
       ],
       "description": "What a value must be."
+    },
+    "SqlDialect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parser": {
+          "$ref": "#/$defs/SqlParser"
+        },
+        "identifier_quote": {
+          "type": "string"
+        },
+        "identifier_case": {
+          "$ref": "#/$defs/IdentifierCase"
+        },
+        "literal_style": {
+          "type": "string",
+          "description": "`doubling` or `hex`; hex requires exactly one `{hex}` in `hex_literal`."
+        },
+        "hex_literal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "denied_functions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Formats which accept backtick-quoted file paths in place of a relation."
+        },
+        "read_only_notice": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "When no read-only session exists, the database permission boundary to show the user."
+        }
+      },
+      "required": [
+        "parser",
+        "identifier_quote",
+        "identifier_case",
+        "literal_style",
+        "denied_functions",
+        "file_formats"
+      ],
+      "description": "Source-owned rules for `dre query` and catalogue consumers.\nAll safety fields are required: a missing or unknown policy fails closed."
+    },
+    "SqlParser": {
+      "type": "string",
+      "enum": [
+        "duckdb",
+        "postgres",
+        "databricks"
+      ],
+      "description": "The parser grammar used to validate a query before execution."
+    },
+    "IdentifierCase": {
+      "type": "string",
+      "enum": [
+        "insensitive",
+        "lower_unless_quoted",
+        "upper_unless_quoted"
+      ],
+      "description": "How unquoted identifiers match stored names."
     },
     "SingleWriter": {
       "type": "object",

@@ -20,7 +20,6 @@ pub mod context;
 pub mod data_tests;
 pub(crate) mod delivery;
 pub mod diag;
-pub mod dialect;
 pub mod engine;
 pub mod error;
 pub mod fonts;

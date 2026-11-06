@@ -208,6 +208,9 @@ pub enum Response {
         /// inside the quotes (a database without `chr()`, such as ClickHouse).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         string_literal: Option<String>,
+        /// Source-owned SQL grammar, literal rules and read-only policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sql_dialect: Option<crate::sql::SqlDialect>,
         /// Destination advertising `message`: the most characters a message may have in the
         /// service, after translation. Core shows it next to a message's length in a preview.
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -144,7 +144,7 @@ func TestTheDestinationRoleSpeaksTheProtocol(t *testing.T) {
 		t.Fatal("RoleFor")
 	}
 	c := plugintest.Start(t, pkg, destinationRole)
-	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t"})
+	c.Send(map[string]any{"type": "hello", "min_version": 1, "max_version": 1, "core_version": "t"})
 	if r := c.Reply(); r["kind"] != "destination" || r["name"] != "databricks" {
 		t.Fatalf("%v", r)
 	}

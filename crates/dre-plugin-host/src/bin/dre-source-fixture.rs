@@ -50,6 +50,9 @@ struct Fixture {
 }
 
 impl Source for Fixture {
+    fn sql_dialect(&self) -> Option<dre_protocol::sql::SqlDialect> {
+        Some(fixture_dialect())
+    }
     fn identifier_quote(&self) -> Option<&'static str> {
         Some("\"")
     }
@@ -288,6 +291,7 @@ fn close_probe() -> ! {
                 option_fields: Vec::new(),
                 identifier_quote: Some("\"".into()),
                 string_literal: None,
+                sql_dialect: Some(fixture_dialect()),
                 message_limit: None,
                 single_writer: None,
             },
@@ -342,5 +346,18 @@ impl Destination for Inbox {
         _connection: &Map<String, Value>,
     ) -> dre_protocol::plugin::Result<String> {
         Ok(format!("inbox:{}", local.display()))
+    }
+}
+
+fn fixture_dialect() -> dre_protocol::sql::SqlDialect {
+    dre_protocol::sql::SqlDialect {
+        parser: dre_protocol::sql::SqlParser::Duckdb,
+        identifier_quote: "\"".into(),
+        identifier_case: dre_protocol::sql::IdentifierCase::Insensitive,
+        literal_style: "doubling".into(),
+        hex_literal: None,
+        denied_functions: vec!["read_text".into(), "fixture_external".into()],
+        file_formats: Vec::new(),
+        read_only_notice: None,
     }
 }

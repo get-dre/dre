@@ -175,6 +175,7 @@ pub struct Description {
     pub identifier_quote: Option<String>,
     /// How a source wants string literals spelled (`chr` when absent; `backslash`).
     pub string_literal: Option<String>,
+    pub sql_dialect: Option<dre_protocol::sql::SqlDialect>,
     /// A message destination's length limit, in characters.
     pub message_limit: Option<u64>,
     /// A source's field naming a file only one process may write at a time.
@@ -1035,6 +1036,7 @@ impl PluginProcess {
                 option_fields,
                 identifier_quote,
                 string_literal,
+                sql_dialect,
                 message_limit,
                 single_writer,
             } => Ok(Description {
@@ -1042,6 +1044,7 @@ impl PluginProcess {
                 option_fields,
                 identifier_quote,
                 string_literal,
+                sql_dialect,
                 message_limit,
                 single_writer,
             }),
