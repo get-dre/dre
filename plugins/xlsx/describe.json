@@ -68,6 +68,10 @@
         "required": false,
         "default": "hh:mm:ss"
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "xlsx",
+      "layout": "workbook"
+    }
   }
 }

@@ -188,8 +188,8 @@ fn extension_override_and_no_extension() {
     p.dre("run", &["r"]).ok();
     assert!(p.path("target/run/r/default/r.dat").is_file());
 
-    let p = project("queries: [total]\noutput: {format: xlsx, extension: xls}\n");
+    let p = project("queries: [accounts, total]\noutput: {format: xlsx, extension: xls}\n");
     p.dre("validate", &[])
         .failed()
-        .says("`extension` doesn't apply to xlsx");
+        .says("`extension` doesn't apply to workbook formats");
 }

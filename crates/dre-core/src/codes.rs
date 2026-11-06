@@ -538,13 +538,13 @@ codes! {
         "Constraints are semver requirements such as `1.2.0`, `>=1.0` or `^1`.";
     ConflictingPluginConstraints = "conflicting-plugin-constraints", Config,
         "Two declarations of a plugin allow no common version.",
-        "A package declared in several files must have constraints some version satisfies. Align them.";
+        "Repeated declarations in dependencies.yml must have constraints some version satisfies. Align them.";
     ConflictingPluginSources = "conflicting-plugin-sources", Config,
         "A plugin is declared with two sources.",
         "Every declaration of a package must agree on where it comes from (`github:`, `local:`, `registry:`).";
     MovedPluginDeclaration = "moved-plugin-declaration", Config,
         "Plugins are declared under an old key.",
-        "Plugin packages are declared under `plugins:` (usually in dependencies.yml), not `destinations:`, `formats:` or a list of names under `sources:`.";
+        "Plugin packages are declared under `plugins:` in dependencies.yml, not `destinations:`, `formats:` or a list of names under `sources:`.";
     UndeclaredPlugin = "undeclared-plugin", Plugin,
         "The project uses a plugin no declared package provides.",
         "A connection type, format or destination type needs a plugin package listed under `plugins:`. Add the package the message names, then run `dre deps`.";
@@ -559,10 +559,10 @@ codes! {
         "Downloading or verifying a plugin package failed. The message has the reason (network, checksum, no build for this platform).";
     OptionsUnchecked = "options-unchecked", Plugin,
         "A plugin's options weren't checked.",
-        "The plugin is too old to describe its options, or couldn't be asked. Run `dre plugin update` to get a version that checks them.";
+        "The plugin could not supply valid option or format metadata. Update it with `dre plugin update`. Missing format properties omit file predictions and prevent file rendering.";
     InvalidPackages = "invalid-packages", Config,
         "`packages:` is wrong.",
-        "`packages:` (in dependencies.yml or packages.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.";
+        "`packages:` (in dependencies.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.";
     InvalidPackage = "invalid-package", Config,
         "A macro package is broken.",
         "The package's folder or manifest couldn't be read. The message has the reason.";
@@ -577,7 +577,7 @@ codes! {
         "A local package's folder doesn't exist, or a git package isn't installed; run `dre deps`.";
     MisplacedPackages = "misplaced-packages", Config,
         "`packages:` is in the wrong file.",
-        "Macro packages are declared in dependencies.yml or packages.yml at the project root.";
+        "Macro packages are declared in dependencies.yml at the project root.";
     PackageNameClash = "package-name-clash", Config,
         "A macro package's name is already taken.",
         "Package names are Jinja variables, so one can't share a name with a DRE function, a project macro or the project itself.";

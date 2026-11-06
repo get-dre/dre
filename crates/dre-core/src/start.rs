@@ -91,7 +91,7 @@ fn load_command(
             console.error(&error);
             return None;
         }
-        if req.install && !sync_plugins(ctx, &project, true, false, console) {
+        if req.install && !sync_plugins(ctx, project, true, false, console) {
             return None;
         }
     }
@@ -234,17 +234,7 @@ pub fn check_project(
     let mut diags = Diagnostics::default();
     check_plugin_uses(ctx, project, install, &mut diags);
     if checks == Checks::PluginUsesAndOptions && !diags.has_errors() {
-        for report in project.reports() {
-            for output in report.bindings.iter().flat_map(|binding| &binding.outputs) {
-                if !crate::formats::Format::of(output).known() {
-                    diags.error(crate::codes::Code::InvalidOutputOption, Some(report.file.clone()), None,
-                        format!("format `{}` has no resolved format_properties; update or install its plugin before running", output.format));
-                }
-            }
-        }
-        if !diags.has_errors() {
-            crate::options::check(ctx, project, false, &mut diags);
-        }
+        crate::options::check(ctx, project, false, &mut diags);
     }
     for d in diags.sorted() {
         console.diagnostic(d);

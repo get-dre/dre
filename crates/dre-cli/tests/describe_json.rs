@@ -33,6 +33,9 @@ fn descriptor(exe: &Path, id: &PluginId) -> Value {
         "connection_fields": d.connection_fields,
         "option_fields": d.option_fields,
     });
+    if let Some(properties) = d.format_properties {
+        v["format_properties"] = json!(properties);
+    }
     if let Some(q) = d.identifier_quote {
         v["identifier_quote"] = json!(q);
     }

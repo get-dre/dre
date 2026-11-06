@@ -1205,11 +1205,16 @@ fn format_properties(
             let properties = description?
                 .format_properties
                 .ok_or_else(|| "describe reply has no format_properties; update the plugin".to_string())?;
-            if properties.extension.contains(['/', '\\', '.'])
-                || properties.extension.chars().any(char::is_whitespace)
+            if properties
+                .extension
+                .contains(['/', '\\', '.', ':', '<', '>', '"', '|', '?', '*'])
+                || properties
+                    .extension
+                    .chars()
+                    .any(|c| c.is_whitespace() || c.is_control())
             {
                 return Err(
-                    "format_properties.extension must contain no dot, path separator or whitespace".into(),
+                    "format_properties.extension must contain no dot, path separator, whitespace, control character or reserved filename character".into(),
                 );
             }
             Ok(properties)

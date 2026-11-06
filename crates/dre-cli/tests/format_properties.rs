@@ -147,3 +147,42 @@ fn local_format_metadata_resolves_before_validation_and_manifest() {
     p.dre_env("run", &[], &env).ok();
     assert!(p.path("target/run/r/default/r.data").exists());
 }
+
+#[test]
+fn missing_properties_allow_commands_that_do_not_format_files() {
+    let p = project();
+    let env = [("DRE_FIXTURE_NO_PROPERTIES", "1")];
+    p.dre_env("compile", &["--no-auto-install"], &env).ok();
+    p.dre_env("test", &["--no-auto-install"], &env).ok();
+    assert!(!p.path("target/run/r/default/r.data").exists());
+    assert!(!p.path("target/run/r/default/r").exists());
+}
+
+#[test]
+fn missing_properties_fail_real_runs_before_opening_the_source() {
+    let p = project();
+    let opened = p.path("source-opened");
+    let opened = opened.to_str().unwrap();
+    let env = [
+        ("DRE_FIXTURE_NO_PROPERTIES", "1"),
+        ("DRE_FIXTURE_PID_FILE", opened),
+    ];
+    let result = p.dre_env("run", &["--no-auto-install"], &env);
+    result.failed();
+    assert_eq!(result.code, 1, "{result:?}");
+    assert!(!std::path::Path::new(opened).exists());
+    assert!(result.stdout.contains("format_properties"), "{result:?}");
+}
+
+#[test]
+fn plugin_extensions_cannot_select_a_windows_stream() {
+    let p = project();
+    let env = [("DRE_FIXTURE_EXTENSION", "data:stream")];
+    let result = p.dre_env("validate", &["--no-auto-install"], &env);
+    result.ok();
+    assert!(
+        result.stdout.contains("format_properties.extension"),
+        "{result:?}"
+    );
+    p.dre_env("run", &["--no-auto-install"], &env).failed();
+}

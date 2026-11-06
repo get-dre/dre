@@ -915,6 +915,17 @@
               "type": "string",
               "const": "describe"
             },
+            "format_properties": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FormatProperties"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Format-owned file and template behavior. Required for file-output planning."
+            },
             "connection_fields": {
               "type": "array",
               "items": {
@@ -1288,6 +1299,48 @@
         "destination"
       ]
     },
+    "FormatProperties": {
+      "type": "object",
+      "properties": {
+        "extension": {
+          "type": "string",
+          "description": "File extension without the dot; an empty string means no extension."
+        },
+        "layout": {
+          "$ref": "#/$defs/FormatLayout"
+        }
+      },
+      "required": [
+        "extension",
+        "layout"
+      ],
+      "description": "A format's file and template contract, supplied by its plugin rather than its name."
+    },
+    "FormatLayout": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "single_table",
+          "description": "One result set per file; several queries split into sibling files."
+        },
+        {
+          "type": "string",
+          "const": "multiple_tables",
+          "description": "Several result sets in one file, without a core template context."
+        },
+        {
+          "type": "string",
+          "const": "workbook",
+          "description": "Sheets and cell bindings in a workbook template."
+        },
+        {
+          "type": "string",
+          "const": "document",
+          "description": "One document whose template receives the run context."
+        }
+      ],
+      "description": "How core groups result sets and supplies templates for a format."
+    },
     "ConnectionField": {
       "type": "object",
       "properties": {
@@ -1513,6 +1566,7 @@
     "SqlParser": {
       "type": "string",
       "enum": [
+        "generic",
         "duckdb",
         "postgres",
         "databricks"

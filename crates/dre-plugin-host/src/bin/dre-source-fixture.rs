@@ -310,7 +310,7 @@ fn close_probe() -> ! {
                 option_fields: Vec::new(),
                 identifier_quote: Some("\"".into()),
                 string_literal: None,
-                sql_dialect: Some(fixture_dialect()),
+                sql_dialect: Some(Box::new(fixture_dialect())),
                 message_limit: None,
                 single_writer: None,
             },

@@ -1048,7 +1048,7 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             identifier_quote,
             string_literal,
             sql_dialect: match h {
-                Handler::Source(s) => s.sql_dialect(),
+                Handler::Source(s) => s.sql_dialect().map(Box::new),
                 _ => None,
             },
             message_limit,

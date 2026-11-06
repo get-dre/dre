@@ -4,6 +4,10 @@
       "validate"
     ],
     "connection_fields": [],
-    "option_fields": []
+    "option_fields": [],
+    "format_properties": {
+      "extension": "parquet",
+      "layout": "single_table"
+    }
   }
 }

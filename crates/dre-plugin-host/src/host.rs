@@ -1047,7 +1047,7 @@ impl PluginProcess {
                 option_fields,
                 identifier_quote,
                 string_literal,
-                sql_dialect,
+                sql_dialect: sql_dialect.map(|policy| *policy),
                 message_limit,
                 single_writer,
             }),

@@ -85,6 +85,22 @@ A new run no longer automatically moves files from the old flat Binding folder i
 `runs/*-legacy/` folder. Existing files remain in place; new runs use their own run folders.
 Archive old outputs explicitly before cleaning the target directory.
 
+### Update plugin metadata before adopting the candidate
+
+Core now reads file layout and suffixes from `format_properties`, rather than a table of format
+names. Candidate minimum versions are CSV 1.2.0, document 1.6.0, fixed_width 1.1.0, parquet 1.1.0
+and XLSX 1.2.0. Install those versions when published, then update the project's plugin pins.
+Without valid properties, validation warns and omits file predictions; commands that render
+files refuse before opening a source. Compile and data-test commands can still proceed.
+Custom format plugins must describe an extension and layout through the SDK's format properties.
+
+`dre query` now requires a source-owned `sql_dialect` policy. DuckDB 1.4.0, PostgreSQL 1.6.0 and
+Databricks 1.4.0 provide it. Older source plugins, ClickHouse and generic JDBC cannot run
+`dre query` until they supply that policy. Ordinary report execution is unaffected; JDBC's
+native catalogue discovery remains available. Custom sources must provide validated grammar,
+identifier and literal rules, plus their read-only execution policy. See the
+[protocol](protocol.md) for these metadata contracts.
+
 SDK callers of Rust `Rules::legacy()` or Go `LegacyRules()` must select their intended rules
 explicitly. To preserve direct writes without retries, start from the default rules, set
 `atomic` to false and `retries` to zero. This does not change the default delivery rules.

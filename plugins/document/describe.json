@@ -20,7 +20,11 @@
         "required": false,
         "default": true
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "html",
+      "layout": "document"
+    }
   },
   "format/pdf": {
     "capabilities": [
@@ -97,6 +101,10 @@
           "error"
         ]
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "pdf",
+      "layout": "document"
+    }
   }
 }

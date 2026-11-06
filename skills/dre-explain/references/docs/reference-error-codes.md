@@ -87,7 +87,7 @@ Declare each package once, at one revision.
 
 Two declarations of a plugin allow no common version.
 
-A package declared in several files must have constraints some version satisfies. Align them.
+Repeated declarations in dependencies.yml must have constraints some version satisfies. Align them.
 
 ### conflicting-plugin-sources
 
@@ -243,7 +243,7 @@ The package's folder or manifest couldn't be read. The message has the reason.
 
 `packages:` is wrong.
 
-`packages:` (in dependencies.yml or packages.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.
+`packages:` (in dependencies.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.
 
 ### invalid-plugin-declaration
 
@@ -339,7 +339,7 @@ A Jinja template in SQL or YAML has a syntax error: an unclosed `{{` or `{%`, an
 
 `packages:` is in the wrong file.
 
-Macro packages are declared in dependencies.yml or packages.yml at the project root.
+Macro packages are declared in dependencies.yml at the project root.
 
 ### missing-field
 
@@ -369,7 +369,7 @@ A template file doesn't exist.
 
 Plugins are declared under an old key.
 
-Plugin packages are declared under `plugins:` (usually in dependencies.yml), not `destinations:`, `formats:` or a list of names under `sources:`.
+Plugin packages are declared under `plugins:` in dependencies.yml, not `destinations:`, `formats:` or a list of names under `sources:`.
 
 ### no-connection
 
@@ -418,12 +418,6 @@ With Sets, each Set chooses its connection; give the report one or the other.
 The project uses profiles but there's no profiles.yml.
 
 DRE looks for profiles.yml in `--profiles-dir`, `DRE_PROFILES_DIR`, the project directory, then `~/.dre`. Create one with `dre init`, or point DRE at yours.
-
-### profiles-sources-renamed
-
-profiles.yml uses the old `sources:` section.
-
-DRE 0.2 renamed profiles.yml's `sources:` to `connections:`. Rename it.
 
 ### ref-cycle
 
@@ -635,7 +629,7 @@ The format plugin failed to write the output (bad options, a template it can't f
 
 A plugin's options weren't checked.
 
-The plugin is too old to describe its options, or couldn't be asked. Run `dre plugin update` to get a version that checks them.
+The plugin could not supply valid option or format metadata. Update it with `dre plugin update`. Missing format properties omit file predictions and prevent file rendering.
 
 ### plugin-install-failed
 

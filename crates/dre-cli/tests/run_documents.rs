@@ -103,12 +103,12 @@ fn validate_reports_template_problems() {
 #[test]
 fn template_bindings_are_for_xlsx_only() {
     let p = project(
-        "queries: [total]\noutput: {format: html, template: {file: statement.html, bindings: [{sheet: S, cell: A1, value: x}]}}\n",
+        "queries: [total, holdings]\nvars: {client: Acme, terms: Net 30 days}\noutput: {format: html, template: {file: statement.html, bindings: [{sheet: S, cell: A1, value: x}]}}\n",
         &[],
     );
     p.dre("validate", &[])
         .failed()
-        .says("`output.template.bindings` is for xlsx templates");
+        .says("`output.template.bindings` is for workbook templates");
 }
 
 #[test]

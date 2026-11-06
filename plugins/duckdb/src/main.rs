@@ -379,6 +379,27 @@ fn main() {
     serve_source(about, DuckDb::default())
 }
 
+impl DuckDb {
+    fn catalog_rows(&mut self, sql: &str) -> Result<Vec<Value>> {
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| {
+            let mut stmt = conn.prepare(sql)?;
+            let mut rows = stmt.query([])?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next()? {
+                let values = (0..row.as_ref().column_count())
+                    .map(|i| row.get::<_, Option<String>>(i).map(Value::from))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                out.push(Value::Array(values));
+                if out.len() >= 100_000 {
+                    break;
+                }
+            }
+            Ok(out)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -448,26 +469,5 @@ mod tests {
     fn finds_the_leading_keyword_past_comments() {
         assert_eq!(leading_keyword("  -- c\n /* x */ Insert into t"), "insert");
         assert_eq!(leading_keyword("(select 1)"), "(");
-    }
-}
-
-impl DuckDb {
-    fn catalog_rows(&mut self, sql: &str) -> Result<Vec<Value>> {
-        let Session { conn, interrupter } = self.session()?;
-        interrupter.run(|| {
-            let mut stmt = conn.prepare(sql)?;
-            let mut rows = stmt.query([])?;
-            let mut out = Vec::new();
-            while let Some(row) = rows.next()? {
-                let values = (0..row.as_ref().column_count())
-                    .map(|i| row.get::<_, Option<String>>(i).map(Value::from))
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                out.push(Value::Array(values));
-                if out.len() >= 100_000 {
-                    break;
-                }
-            }
-            Ok(out)
-        })
     }
 }
