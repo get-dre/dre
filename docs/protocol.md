@@ -294,6 +294,55 @@ field, prompted or not, is one templates can't read. Format plugins return an em
 those values; `min` and `max` bound a number, inclusive. It may be omitted when the plugin
 takes no options.
 
+#### File-format metadata
+
+A file format's `describe` reply must supply `format_properties` for DRE 0.12:
+
+```json
+{"type":"describe","id":1,"connection_fields":[],"option_fields":[],
+ "format_properties":{"extension":"csv","layout":"single_table"}}
+```
+
+`extension` is a bare suffix without any dot, `/`, `\`, whitespace or control character.
+It also rejects the reserved Windows filename characters `:`, `<`, `>`, `"`, `|`, `?` and `*`.
+An empty string means no extension. These rules apply to the plugin's metadata, before file
+prediction; do not send a full filename or a leading dot. `layout` declares behavior
+independently of the plugin's name:
+
+| Layout | Core behavior |
+|---|---|
+| `single_table` | A file holds one query result; several results split into separate files. |
+| `multiple_tables` | One file receives all the output's query results. |
+| `workbook` | One workbook receives the results; workbook sheet/template-binding checks apply. |
+| `document` | The renderer receives the document context; its template controls the sections shown. |
+
+Core resolves these properties from the selected, pinned plugin before predicting files or
+checking format-specific settings. It never guesses traits from a format name. Missing or
+invalid metadata produces an `options-unchecked` warning and omits file predictions; file
+rendering fails before source queries rather than using guessed behavior. Compilation and
+data-test-only commands do not require file-format metadata. The built-in message output is
+independent of this file-format contract.
+
+#### Source SQL policy
+
+Sources enabling `dre query` supply `sql_dialect` in `describe`. The policy names a parser
+(`generic`, `duckdb`, `postgres` or `databricks`), `identifier_quote`, `identifier_case`
+(`insensitive`, `lower_unless_quoted` or `upper_unless_quoted`), `literal_style` (`doubling` or
+`hex`), and explicit `denied_functions` and `file_formats` lists. Empty lists are explicit
+policies; omitted safety fields and unknown policy keys are invalid. `identifier_quote` must
+be a double quote or a backtick. Entries in `denied_functions` and `file_formats` must be
+nonempty ASCII letters, digits or underscores. A hex policy supplies `hex_literal` with
+exactly one `{hex}` placeholder; a doubling policy leaves it out. `read_only_notice` is optional
+and, when present, must contain non-whitespace text; it documents the permission boundary
+when the source cannot provide a database-enforced read-only session. Missing or invalid
+policies refuse `dre query`; they never enable a permissive default. A separately advertised
+`identifier_quote` must agree with the policy.
+
+The SDKs transport these fields without changing protocol 1. The Rust SDK exposes
+`SqlDialect` and `SqlCatalog`; source plugins own native catalogue queries and the `catalog`
+exchange remains capability-gated. Core validates the returned `dre/catalog/v1` document and
+opens a read-only catalogue session when the source advertises `read_only`.
+
 `identifier_quote` (sources only) is the character the database quotes identifiers with: `"` for
 DuckDB and Postgres, a backtick for Databricks. Core quotes the parts of a
 [source](sources.md) that ask for it (`quoting:`) with this character, doubling it inside a name.
