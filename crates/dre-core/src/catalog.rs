@@ -69,10 +69,13 @@ fn plugin_catalog(
             .mask_source_error(&e.to_string(), false)
             .into_owned()
     };
+    let open = if process.has(dre_protocol::CAP_READ_ONLY) {
+        Open::ReadOnly
+    } else {
+        Open::ReadWrite
+    };
     let result = (|| {
-        process
-            .open(connection, Open::ReadWrite)
-            .map_err(|e| (true, masked(e)))?;
+        process.open(connection, open).map_err(|e| (true, masked(e)))?;
         let mut value = process
             .catalog(request.tables.clone(), request.schemas.clone())
             .map_err(|e| (true, masked(e)))?;
@@ -158,6 +161,56 @@ fn validate_plugin_catalog(value: &Value, request: &Request) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_prefers_read_only_sessions_and_closes_failed_requests() {
+        use crate::plugin_host::memory::{Call, MemoryHost, Script};
+        use std::sync::Arc;
+
+        for (capabilities, expected) in [
+            (
+                vec![dre_protocol::CAP_CATALOG, dre_protocol::CAP_READ_ONLY],
+                "ReadOnly",
+            ),
+            (vec![dre_protocol::CAP_CATALOG], "ReadWrite"),
+        ] {
+            for failure in [Call::Open, Call::Catalog] {
+                let script = Script::new(&capabilities).fail(failure, 1, "fixture failure");
+                let host = MemoryHost::new().plugin(dre_protocol::Kind::Source, "fixture", script);
+                let ctx = crate::Context::new(crate::Env::default(), Arc::new(host.clone()));
+                let dir = tempfile::tempdir().unwrap();
+                std::fs::write(
+                    dir.path().join("dre_project.yml"),
+                    "name: catalogue\nallow_unmanaged: true\n",
+                )
+                .unwrap();
+                let (project, diags) = crate::project::load_with(dir.path(), &Default::default(), &ctx);
+                assert!(!diags.has_errors(), "{:?}", diags.sorted());
+                let target = crate::profiles::ProfileTarget {
+                    kind: "fixture".into(),
+                    fields: serde_json::Map::new(),
+                };
+                let error = plugin_catalog(
+                    &ctx,
+                    &project.unwrap(),
+                    "warehouse",
+                    &target,
+                    &Request {
+                        tables: vec!["orders".into()],
+                        schemas: vec![],
+                    },
+                )
+                .unwrap_err();
+                assert!(error.1.contains("fixture failure"), "{error:?}");
+                let calls = host.calls();
+                assert!(
+                    calls.contains(&format!("source/fixture Open {expected}")),
+                    "{calls:?}"
+                );
+                assert_eq!(calls.last().unwrap(), "source/fixture Close");
+            }
+        }
+    }
+
     #[test]
     fn incomplete_plugin_catalogs_return_errors_without_panicking() {
         let request = Request {
