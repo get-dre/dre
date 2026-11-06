@@ -9,7 +9,7 @@
 //! the partially updated collection.
 //!
 //! A mutating method on an immutable `[]` or `{}` literal (or a `var()` value) is refused with a
-//! hint to use `list()` / `dict()`; see [`unknown_method`].
+//! hint to use `list()` / `dict()`; see `unknown_method`.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
