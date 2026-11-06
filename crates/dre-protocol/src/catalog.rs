@@ -129,14 +129,10 @@ fn parts(name: &str, dialect: &SqlDialect) -> Result<Vec<String>, String> {
         .iter()
         .map(|part| {
             part.as_ident()
-                .map(|id| {
-                    if dialect.identifier_case == IdentifierCase::LowerUnlessQuoted
-                        && id.quote_style.is_none()
-                    {
-                        id.value.to_ascii_lowercase()
-                    } else {
-                        id.value.clone()
-                    }
+                .map(|id| match (dialect.identifier_case, id.quote_style) {
+                    (IdentifierCase::LowerUnlessQuoted, None) => id.value.to_ascii_lowercase(),
+                    (IdentifierCase::UpperUnlessQuoted, None) => id.value.to_ascii_uppercase(),
+                    _ => id.value.clone(),
                 })
                 .ok_or_else(|| "relation identifiers must be literal".into())
         })
@@ -314,6 +310,33 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn uppercase_dialects_fold_only_unquoted_names() {
+        let mut dialect = dialect();
+        dialect.identifier_case = IdentifierCase::UpperUnlessQuoted;
+        assert_eq!(
+            parts("shop.sales.orders", &dialect).unwrap(),
+            ["SHOP", "SALES", "ORDERS"]
+        );
+        assert_eq!(
+            parts("\"shop\".\"Sales\".\"orders\"", &dialect).unwrap(),
+            ["shop", "Sales", "orders"]
+        );
+        let filters = filter(&dialect, &[], &["sales".into(), "\"Sales\"".into()], "SHOP").unwrap();
+        assert!(filters.contains("table_schema='SALES'"), "{filters}");
+        assert!(filters.contains("table_schema='Sales'"), "{filters}");
+        let wanted = vec![(
+            "\"orders\"".into(),
+            "SHOP".into(),
+            "SALES".into(),
+            "orders".into(),
+        )];
+        let found = vec![json!({"catalog":"SHOP", "schema":"SALES", "name":"orders"})];
+        check_found(&dialect, &wanted, &found, "warehouse").unwrap();
+        let wrong_case = vec![json!({"catalog":"SHOP", "schema":"SALES", "name":"ORDERS"})];
+        assert!(check_found(&dialect, &wanted, &wrong_case, "warehouse").is_err());
     }
 
     #[test]

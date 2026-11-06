@@ -90,11 +90,11 @@ impl SqlDialect {
             format!("'{}'", value.replace('\'', "''"))
         }
     }
+    /// Compare resolved identifiers after unquoted names have been folded by the parser.
     pub fn same_name(&self, written: &str, actual: &str) -> bool {
         match self.identifier_case {
             IdentifierCase::Insensitive => written.eq_ignore_ascii_case(actual),
-            IdentifierCase::LowerUnlessQuoted => written == actual,
-            IdentifierCase::UpperUnlessQuoted => written.to_ascii_uppercase() == actual,
+            IdentifierCase::LowerUnlessQuoted | IdentifierCase::UpperUnlessQuoted => written == actual,
         }
     }
     pub fn denies(&self, function: &str) -> bool {
