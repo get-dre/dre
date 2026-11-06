@@ -1,7 +1,7 @@
-exit: 1
+exit: 0
 {
   "schema_version": "dre/validate/v1",
-  "ok": false,
+  "ok": true,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
     "exists": true,
@@ -10,7 +10,14 @@ exit: 1
   "target": {
     "name": "dev",
     "from": "default",
-    "profiles": []
+    "profiles": [
+      {
+        "role": "connection",
+        "profile": "local_dev",
+        "target": "dev",
+        "deliver": true
+      }
+    ]
   },
   "settings": [
     {
@@ -54,18 +61,37 @@ exit: 1
       "source": "default"
     }
   ],
-  "errors": 1,
+  "errors": 0,
   "warnings": 0,
-  "diagnostics": [
+  "diagnostics": [],
+  "compiled": [
     {
-      "severity": "error",
-      "code": "removed-key",
-      "message": "`plugins:` must be declared in dependencies.yml at the project root; move this declaration there",
-      "file": "reports/ops/daily/daily.yml",
-      "line": 2
+      "report": "daily",
+      "set": null,
+      "compiled": [
+        "target/compiled/daily/default/summary.sql"
+      ],
+      "profile": "local_dev",
+      "queries": [
+        {
+          "query": "summary",
+          "connection": "local_dev",
+          "type": "duckdb",
+          "target": "dev"
+        }
+      ],
+      "target": "dev",
+      "outputs": [
+        {
+          "name": null,
+          "format": "csv",
+          "output": "target/run/daily/default/runs/<run id>/daily.csv",
+          "destinations": []
+        }
+      ],
+      "schedules": []
     }
   ],
-  "compiled": [],
   "project": {
     "plugins": [
       {
@@ -73,7 +99,7 @@ exit: 1
         "source": {
           "type": "registry"
         },
-        "version": "^0"
+        "version": "^0, >=0.1"
       },
       {
         "package": "duckdb",
@@ -81,10 +107,17 @@ exit: 1
           "type": "registry"
         },
         "version": ">=0.0"
+      },
+      {
+        "package": "xlsx",
+        "source": {
+          "type": "registry"
+        },
+        "version": "*"
       }
     ],
     "project": {
-      "checksum": "527820ad3e7bd91eac355ddfbdeb2681bc9965132a734f6cd119d65a2012d876",
+      "checksum": "7fe4cdfc9be1e78b06ec78e0b182f84cf84391b27b37d1bda21dc8dd7465e8ce",
       "default_profile": "local_dev",
       "name": "acme_reports",
       "target": "dev"
@@ -117,13 +150,10 @@ exit: 1
             "vars": {}
           }
         ],
-        "checksum": "32c9aeb70056c0b839c162f7f6ae49904bbbf509b95be367453731ee4441fa14",
+        "checksum": "ac06113b61585413234694ec2ba62feaa155ac846931c17f22bce11705e16206",
         "depends_on": {
           "sources": []
         },
-        "errors": [
-          "error[removed-key]: reports/ops/daily/daily.yml:2: `plugins:` must be declared in dependencies.yml at the project root; move this declaration there"
-        ],
         "file": "reports/ops/daily/daily.yml",
         "folder": [
           "ops",
@@ -139,7 +169,7 @@ exit: 1
           }
         ],
         "tags": [],
-        "valid": false
+        "valid": true
       }
     },
     "schedules": {},

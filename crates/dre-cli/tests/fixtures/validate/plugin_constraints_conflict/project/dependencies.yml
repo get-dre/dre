@@ -1,3 +1,4 @@
 plugins:
   - duckdb: ">=2.0"
   - csv
+  - duckdb: "<1.0"

@@ -1,3 +1,1 @@
 queries: [summary]
-plugins:
-  - duckdb: "<1.0"
