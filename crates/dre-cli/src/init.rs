@@ -1,6 +1,6 @@
 //! `dre init` (interactive onboarding) and `dre new` (scaffold a project).
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -190,6 +190,68 @@ struct Prompter<R: BufRead> {
     input: R,
 }
 
+/// Restore terminal echo even when reading fails or setup unwinds.
+struct QuietInput {
+    #[cfg(unix)]
+    mode: libc::termios,
+    #[cfg(windows)]
+    mode: u32,
+}
+
+impl QuietInput {
+    fn new() -> Result<Option<Self>, String> {
+        if !std::io::stdin().is_terminal() {
+            return Ok(None);
+        }
+        #[cfg(unix)]
+        // SAFETY: stdin is a terminal; tcgetattr initializes mode before it is read.
+        unsafe {
+            let mut mode = std::mem::MaybeUninit::uninit();
+            if libc::tcgetattr(libc::STDIN_FILENO, mode.as_mut_ptr()) != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            let mode = mode.assume_init();
+            let mut quiet = mode;
+            quiet.c_lflag &= !libc::ECHO;
+            if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &quiet) != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(Some(Self { mode }))
+        }
+        #[cfg(windows)]
+        // SAFETY: the console APIs validate the standard input handle and mode pointer.
+        unsafe {
+            use windows_sys::Win32::System::Console::{
+                ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+            };
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            let mut mode = 0;
+            if GetConsoleMode(handle, &mut mode) == 0
+                || SetConsoleMode(handle, mode & !ENABLE_ECHO_INPUT) == 0
+            {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(Some(Self { mode }))
+        }
+    }
+}
+
+impl Drop for QuietInput {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: mode came from tcgetattr on this terminal.
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.mode);
+        }
+        #[cfg(windows)]
+        // SAFETY: mode came from GetConsoleMode on this standard input handle.
+        unsafe {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode};
+            SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), self.mode);
+        }
+    }
+}
+
 impl<R: BufRead> Prompter<R> {
     fn ask(&mut self, q: &str, default: Option<&str>) -> Result<String, String> {
         match default {
@@ -324,6 +386,7 @@ fn connection<R: BufRead>(
     let mut m = Mapping::new();
     for f in fields.iter().filter(|f| !f.manual) {
         let inherited = source
+            .filter(|_| !f.secret)
             .filter(|s| f.same_as_source.as_deref() == Some(s.kind))
             .and_then(|s| {
                 s.fields
@@ -334,7 +397,7 @@ fn connection<R: BufRead>(
         let default = if let Some((_, v)) = inherited {
             Some(v.to_string())
         } else if f.secret {
-            Some(format!("{{{{ env_var('{}') }}}}", env_name(profile, &f.name)))
+            Some(env_name(profile, &f.name))
         } else {
             f.default.as_ref().map(|d| match d {
                 serde_json::Value::String(s) => s.clone(),
@@ -357,7 +420,13 @@ fn connection<R: BufRead>(
             );
         }
         loop {
-            let mut v = p.input(default.as_deref())?;
+            let quiet = if f.secret { QuietInput::new()? } else { None };
+            let input = p.input(default.as_deref());
+            if quiet.is_some() {
+                eprintln!();
+            }
+            drop(quiet);
+            let mut v = input?;
             if v.is_empty() && f.required {
                 eprintln!("    `{}` is required.", f.name);
                 continue;
@@ -366,7 +435,7 @@ fn connection<R: BufRead>(
                 break;
             }
             // A secret is stored only as `env_var('NAME')`, never as typed.
-            if f.secret && !v.contains("{{") {
+            if f.secret {
                 let is_name = v
                     .chars()
                     .next()
@@ -580,7 +649,7 @@ fn init_inner(
     let profile = p.ask("Name for this connection profile", Some("warehouse"))?;
     let target = p.ask("Target (environment) name", Some("dev"))?;
     eprintln!("\nConnection details for `{}`.", source.name());
-    eprintln!("Secrets default to an env_var() reference; type a value to store it instead.\n");
+    eprintln!("For secrets, enter only an environment variable name; DRE stores an env_var() reference.\n");
     let conn = connection(&mut p, &profile, &fields, None)?;
     add_profile(
         &profiles_path,

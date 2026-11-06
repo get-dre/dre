@@ -226,11 +226,12 @@ fn init_stores_a_secret_only_as_an_environment_variable() {
     let d = tempfile::tempdir().unwrap();
     registry(d.path());
     // A typed password is refused; a bare name becomes `env_var('NAME')`.
-    let answers = "fixture\nwarehouse\n\ndata.duckdb\nhunter2!\nMY_TOKEN\n\nn\n";
+    let answers = "fixture\nwarehouse\n\ndata.duckdb\nhunter2!\n{{ 'embedded-secret' }}\nMY_TOKEN\n\nn\n";
     dre(d.path(), &["init"], answers)
         .ok()
         .says("environment variable")
-        .lacks("hunter2!");
+        .lacks("hunter2!")
+        .lacks("embedded-secret");
     let profiles = std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap();
     assert!(
         profiles.contains("token: \"{{ env_var('MY_TOKEN') }}\""),
