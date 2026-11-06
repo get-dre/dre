@@ -1034,3 +1034,18 @@ fn current_release_archives_with_top_level_package_executables_install() {
     e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
     assert!(e.installed("1.1.0"));
 }
+
+#[test]
+fn a_checksum_without_a_platform_is_rejected_before_install() {
+    let e = Env::new(DECLARED);
+    let checksum = sha(&std::fs::read(e.p("registry/fixture-1.1.0")).unwrap());
+    std::fs::write(
+        e.p("project/dre.lock"),
+        format!("plugins:\n  fixture:\n    version: 1.1.0\n    sha256:\n      '': '{checksum}'\n"),
+    )
+    .unwrap();
+    e.dre(&["deps"])
+        .failed()
+        .says("every checksum must name its platform");
+    assert!(!e.installed("1.1.0"));
+}

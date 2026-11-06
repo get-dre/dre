@@ -275,3 +275,18 @@ fn init_preserves_an_existing_profiles_file_it_cannot_read_as_text() {
         .says("can't read");
     assert_eq!(std::fs::read(&path).unwrap(), original);
 }
+
+#[test]
+fn init_refuses_the_removed_sources_section_without_editing_it() {
+    let d = tempfile::tempdir().unwrap();
+    registry(d.path());
+    let path = d.path().join("dot-dre/profiles.yml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = "# retained profile\nsources:\n  old:\n    targets:\n      dev: {type: fixture}\n";
+    std::fs::write(&path, original).unwrap();
+    dre(d.path(), &["init"], "fixture\nnew\n\ndata.duckdb\n\nn\n")
+        .failed()
+        .says("`sources:` was removed")
+        .says("`connections:`");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+}
