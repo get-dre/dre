@@ -7,8 +7,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::{Kind, PluginId};
 use object_store::{ObjectStore, ObjectStoreExt};
 use serde_json::{Map, Value, json};

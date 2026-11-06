@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use dre_protocol::conformance::{self, Options, Session};
+use dre_plugin_host::conformance::{self, Options, Session};
 use serde_json::{Map, Value};
 
 fn session(path: &str) -> Result<Session, String> {

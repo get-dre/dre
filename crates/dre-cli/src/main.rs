@@ -514,7 +514,7 @@ struct CompileArgs {
 }
 
 fn main() -> ExitCode {
-    dre_protocol::host::set_core_version(dre_core::version());
+    dre_plugin_host::host::set_core_version(dre_core::version());
     let cli = Cli::parse();
     // The one place DRE reads its environment: every command gets it through `ctx`.
     let ctx = Context::subprocess(Env::from_process());
@@ -1032,7 +1032,7 @@ fn plugin_list(ctx: &Context) -> ExitCode {
         );
         return exit::ok();
     }
-    let quiet: dre_protocol::host::LogSink = std::sync::Arc::new(|_, _| {});
+    let quiet: dre_plugin_host::host::LogSink = std::sync::Arc::new(|_, _| {});
     let mut rows = vec![[
         "PACKAGE".to_string(),
         "PROVIDES".into(),

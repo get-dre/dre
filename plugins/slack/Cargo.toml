@@ -14,5 +14,6 @@ serde_json.workspace = true
 ureq = "3"
 
 [dev-dependencies]
+dre-plugin-host.workspace = true
 tempfile.workspace = true
 form_urlencoded = "1"

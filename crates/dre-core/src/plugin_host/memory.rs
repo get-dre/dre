@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
-use dre_protocol::host::{Description, Execution, HostError, LogSink, PluginInfo};
+use dre_plugin_host::host::{Description, Execution, HostError, LogSink, PluginInfo};
 use dre_protocol::{Kind, PluginId};
 use serde_json::{Map, Value};
 

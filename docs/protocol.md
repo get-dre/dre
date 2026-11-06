@@ -563,8 +563,33 @@ works with core 0.3: on version 0 they send no ids and log to stderr with the pr
 shows (`info: `, `warning: `).
 
 The protocol version is a single integer. Core and plugins release independently, so each side
-states the range it supports and the handshake picks the highest common version. Adding a new
-optional field to a message does not change the version; anything else does.
+states the range it supports and the handshake picks the highest common version.
+
+Within a wire version, optional fields may be added only when their absence preserves the old
+behavior and peers ignore fields they do not recognize. New requests, replies and exchanges
+must be gated by an advertised capability or an explicit request opt-in before either peer
+sends them. For example, `need_fonts` is allowed only after `write.font_requests: true`.
+A peer must continue to serve the existing exchange when the other peer does not opt in.
+
+Removing or renaming messages or fields, adding required fields, changing existing meanings,
+or changing framing or Arrow encoding requires a new wire version. A plugin built for wire
+version 1 continues to work with hosts supporting version 1 under these rules.
+
+The Rust SDK package version is separate from the wire version. `Request` and `Response` are
+`#[non_exhaustive]`: downstream matches must include a wildcard. This permits Rust enum
+additions; it does not make unknown wire messages valid or bypass capability negotiation.
+
+`dre-protocol` contains the plugin SDK, frames, messages and language-neutral conformance
+fixtures. Process management and the Rust conformance runner live in `dre-plugin-host`.
+When upgrading from SDK 0.11 to 0.12, plugin tests add `dre-plugin-host` as a dev-dependency
+and replace `dre_protocol::host` and `dre_protocol::conformance` imports with
+`dre_plugin_host::host` and `dre_plugin_host::conformance`. Plugin implementations continue
+to depend on `dre-protocol`; existing plugin binaries need no rebuild for this split.
+
+`dre-core` and `dre-plugin-host` are implementation libraries for the matching CLI release;
+their Rust APIs carry no stability guarantee. Integrations should use the CLI and published
+JSON contracts, and plugins should use the protocol. Core's template and run internals are
+not an embedding API.
 
 ## Conformance
 
@@ -590,8 +615,8 @@ contract:
 
 ### Running the suite on your plugin
 
-Build your plugin, then run the `dre-conformance` command from the `dre-protocol` crate
-(`cargo install dre-protocol`) against the executable:
+Build your plugin, then run the `dre-conformance` command from the `dre-plugin-host` crate
+(`cargo install dre-plugin-host`) against the executable:
 
 ```text
 dre-conformance ./dre-plugin-mydb --session session.json
@@ -617,7 +642,7 @@ source given a session file: a connection that opens, and a statement per role.
 `rows` returns at least 3 rows; `slow` runs for at least a few seconds. Leave out a role your
 database can't express; the cases that need it are skipped.
 
-In Rust, `dre_protocol::conformance::assert_conforms(path)` (or `assert_conforms_with` with
+In Rust, `dre_plugin_host::conformance::assert_conforms(path)` (or `assert_conforms_with` with
 `conformance::Options`, for a session or environment variables) fails a test on any failed
 case. In Go, `plugintest.Conformance(t, pkg, plugintest.Options{})` (module
 `github.com/get-dre/dre/go/plugin`, which embeds a copy of the cases) runs the same cases against

@@ -11,8 +11,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dre_protocol::host::{Execution, LogSink, PluginProcess};
-use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS, Kind, PluginId, conformance};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{Execution, LogSink, PluginProcess};
+use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS, Kind, PluginId};
 use serde_json::json;
 
 /// The packages' directory: `DRE_TEST_GO_PLUGINS`, or the packages built here with `go build`.

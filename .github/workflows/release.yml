@@ -3,7 +3,7 @@ name: Release
 # Two kinds of release, by tag:
 #
 #   v<version>            DRE itself: the `dre` CLI for each platform, install.sh, the
-#                         `dre-cli` wheels for PyPI, dre-protocol/dre-core/dre-cli on crates.io,
+#                         `dre-cli` wheels for PyPI, Rust SDK/host/core/CLI on crates.io,
 #                         and the Homebrew formula and Scoop manifest (package-managers.yml).
 #                         E.g. v0.1.0, v0.1.0-rc.1.
 #   <package>-v<version>  one plugin package, which then goes into the registry index that `dre`
@@ -551,7 +551,7 @@ jobs:
       - name: Verify source packages
         run: |
           new=()
-          for crate in dre-protocol dre-core dre-cli; do
+          for crate in dre-protocol dre-plugin-host dre-core dre-cli; do
             version="$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')"
             if curl -sfo /dev/null -A "dre-release (github.com/${{ github.repository }})" "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is already on crates.io"
@@ -568,8 +568,8 @@ jobs:
       always() && needs.plan.outputs.kind == 'core' && needs.build.result == 'success' &&
       needs.attest.result == 'success' && needs.crates-verify.result == 'success'
     runs-on: ubuntu-latest
-    # Trusted publishing: crates.io trusts this workflow (release.yml in get-dre/dre) for
-    # dre-protocol, dre-core and dre-cli, and hands it a short-lived token. No stored secret.
+    # Trusted publishing: each crate must trust release.yml in get-dre/dre on crates.io.
+    # Configure dre-plugin-host before its first release; no stored token is used.
     permissions:
       contents: read
       id-token: write
@@ -584,12 +584,12 @@ jobs:
         id: auth
       # dre-protocol has its own version: it's published only when that version is new. dre-core
       # and dre-cli carry DRE's. `cargo publish` waits for each to be in the index before the next.
-      - name: Publish dre-protocol, dre-core and dre-cli
+      - name: Publish dre-protocol, dre-plugin-host, dre-core and dre-cli
         if: env.DRY_RUN != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
-          for crate in dre-protocol dre-core dre-cli; do
+          for crate in dre-protocol dre-plugin-host dre-core dre-cli; do
             version="$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')"
             if curl -sfo /dev/null -A "dre-release (github.com/${{ github.repository }})" "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is already on crates.io"

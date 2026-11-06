@@ -107,7 +107,7 @@ jobs:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run Oracle protocol conformance and typed fixture
-        run: cargo test -p dre-protocol --test jdbc
+        run: cargo test -p dre-plugin-host --test jdbc
         env:
           DRE_TEST_JDBC_DATABASE: oracle
           DRE_TEST_JDBC_URL: jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1
@@ -115,7 +115,7 @@ jobs:
           DRE_TEST_JDBC_USER: dre_fixture
           DRE_TEST_JDBC_PASSWORD: DreFixture39_x
       - name: Run SQL Server protocol conformance and typed fixture
-        run: cargo test -p dre-protocol --test jdbc
+        run: cargo test -p dre-plugin-host --test jdbc
         env:
           DRE_TEST_JDBC_DATABASE: sqlserver
           DRE_TEST_JDBC_URL: jdbc:sqlserver://127.0.0.1:1433

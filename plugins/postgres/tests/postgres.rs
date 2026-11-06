@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use arrow::array::{Array, AsArray, RecordBatch};
 use arrow::datatypes::{DataType, Decimal128Type, Int32Type, TimeUnit};
-use dre_protocol::host::{Execution, LogSink, PluginProcess};
-use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, conformance};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{Execution, LogSink, PluginProcess};
+use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS};
 use serde_json::{Map, Value, json};
 
 fn bin() -> &'static Path {
@@ -573,7 +574,7 @@ fn a_cancel_stops_the_query_on_the_server() {
         started.elapsed()
     );
     match err {
-        dre_protocol::host::HostError::Plugin { kind, message, .. } => {
+        dre_plugin_host::host::HostError::Plugin { kind, message, .. } => {
             assert_eq!(kind.as_deref(), Some("cancelled"), "{message}");
             assert!(message.contains("cancel"), "{message}");
         }

@@ -1,5 +1,11 @@
 //! The DRE plugin protocol, version 1.
 //!
+//! Process hosting belongs to `dre-plugin-host`, outside the plugin SDK:
+//!
+//! ```compile_fail
+//! use dre_protocol::host::PluginProcess;
+//! ```
+//!
 //! Plugins ship in packages: one executable, `dre-plugin-<package>`, serving every plugin the
 //! package provides (a single plugin may also be named `dre-<kind>-<name>`). It talks to DRE core
 //! over stdin/stdout in length-prefixed frames. Each frame is a JSON control message or an Arrow IPC stream; plugins
@@ -7,15 +13,14 @@
 //!
 //! - [`frame`]: the wire format.
 //! - [`msg`]: every control message.
-//! - [`host`]: the core side: spawning a plugin, the handshake, requests.
 //! - [`plugin`]: the SDK plugin authors use to serve requests.
 //! - [`options`]: the options a plugin declares, and how they're checked.
-//! - [`conformance`]: checks any plugin binary against the protocol, from the language-neutral
-//!   fixture cases in `conformance/`.
 //! - [`schema`]: the JSON Schema of every message, published as `conformance/schema.json`.
 //! - [`sessions`]: OAuth sessions plugins keep in `~/.dre/oauth_sessions.json`.
 //! - [`markdown`]: the portable Markdown subset of messages, and its translations.
 //! - [`delivery`]: the delivery and network rules every file destination shares.
+//!
+//! Host processes and the conformance runner live in the `dre-plugin-host` crate.
 
 // A public function that can panic says when in a `# Panics` section (CI denies warnings).
 #![warn(clippy::missing_panics_doc)]
@@ -24,13 +29,9 @@
 /// the SDK sends to core as `log` messages.
 pub use log;
 
-pub mod conformance;
 pub mod connection;
 pub mod delivery;
 pub mod frame;
-#[cfg(target_os = "linux")]
-mod fuse_fds;
-pub mod host;
 pub mod markdown;
 pub mod msg;
 pub mod options;

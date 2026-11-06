@@ -1,6 +1,6 @@
 //! A single read-only query on a configured connection, for external integrations.
 
-use dre_protocol::host::{Execution, LogSink};
+use dre_plugin_host::host::{Execution, LogSink};
 use serde_json::{Value, json};
 use sqlparser::ast::{
     Expr, ObjectName, Query, SetExpr, Statement, TableFactor, Visit, Visitor, visit_statements,
@@ -203,7 +203,7 @@ fn session_result(
             target.kind
         ));
     }
-    let masked = |e: dre_protocol::host::HostError| {
+    let masked = |e: dre_plugin_host::host::HostError| {
         ctx.secrets()
             .mask_source_error(&e.to_string(), false)
             .into_owned()

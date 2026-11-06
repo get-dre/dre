@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Date32Array, Float64Array, Int64Array, RecordBatch, StringArray};
 use dre_core::document::{Check, Context, RunInfo};
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::{ColumnOptions, ResultSetMeta};
 use dre_protocol::{Kind, PluginId};
 use serde_json::{Value, json};
