@@ -115,8 +115,11 @@ format_options:
 | `html`, `pdf` | `max_rows`; html `embed_assets`; pdf `page_size`, `orientation`, `margins`, `author`, `subject`, `password`; `template` (see [PDF and HTML documents](plugin-document.md)) |
 | `message` (built in, no plugin) | `text` or `file`, `title`, `max_rows` (see [The `message` format](#the-message-format)) |
 
-Every format but xlsx also takes `extension`: the output file's extension (`aba`, `dat`, ...), or
-`""` for none. The file is written the same way; only its name changes.
+Outputs also take `extension`: the output file's extension (`aba`, `dat`, ...), or `""` for
+none. Formats declaring workbook layout, including xlsx, reject this override. The file is
+written the same way; only its name changes. Format plugins declare their default suffix and
+layout through [file-format metadata](protocol.md#file-format-metadata); core does not infer
+these properties from a plugin's name.
 
 - Timestamps with a timezone are written in their zone with the offset,
   `2026-01-01 11:00:00+11:00`; timestamps without one as `2026-01-01 00:00:00`.
