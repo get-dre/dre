@@ -27,7 +27,7 @@ use crate::project::{
 };
 
 /// The manifest format's version.
-pub const SCHEMA_VERSION: &str = "dre/manifest/v3";
+pub const SCHEMA_VERSION: &str = "dre/manifest/v4";
 /// The manifest's file name in the target folder.
 pub const FILE: &str = "manifest.json";
 
@@ -92,7 +92,7 @@ type Map = JsonMap<String, Json>;
 #[derive(Serialize, JsonSchema)]
 #[schemars(title = "DRE project manifest")]
 pub struct Manifest {
-    /// The format's version: `dre/manifest/v3` (DRE 0.4). Version 2 (DRE 0.2) had `"schema": 2` instead.
+    /// The format's version: `dre/manifest/v4` (DRE 0.12). Version 3 retained legacy first-output fields.
     #[schemars(schema_with = "manifest_version")]
     pub schema_version: &'static str,
     /// The DRE version that wrote it.
@@ -213,10 +213,6 @@ pub struct ManifestBinding {
     /// Fully merged: project < folders < report < Set.
     pub vars: Map,
     pub queries: Vec<ManifestQuery>,
-    /// The first output; every output is under `outputs`.
-    pub output: ManifestOutput,
-    /// Every output's destinations, in delivery order.
-    pub destinations: Vec<ManifestDestination>,
     /// Every output, in declared order.
     pub outputs: Vec<ManifestOutput>,
     /// The schedules that run this Binding.
@@ -242,9 +238,8 @@ pub struct ManifestOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub template: Option<String>,
-    /// In delivery order. (Absent on a Binding's `output`.)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub destinations: Option<Vec<ManifestDestination>>,
+    /// In delivery order.
+    pub destinations: Vec<ManifestDestination>,
 }
 
 #[derive(Serialize, JsonSchema, Clone)]
@@ -521,20 +516,9 @@ fn binding(b: &Binding) -> ManifestBinding {
                 options: o.options.clone(),
                 extension: o.extension.clone(),
                 template: o.template.as_ref().map(|t| t.file.clone()),
-                destinations: Some(destinations),
+                destinations,
             }
         })
-        .collect();
-    let output = outputs
-        .first()
-        .map(|o| ManifestOutput {
-            destinations: None,
-            ..o.clone()
-        })
-        .unwrap_or_default();
-    let destinations = outputs
-        .iter()
-        .flat_map(|o| o.destinations.clone().unwrap_or_default())
         .collect();
     ManifestBinding {
         set: b.set.clone(),
@@ -545,8 +529,6 @@ fn binding(b: &Binding) -> ManifestBinding {
             .iter()
             .map(|q| query(q, parsed.and_then(|p| p.query(&q.query))))
             .collect(),
-        output,
-        destinations,
         outputs,
         schedules: b.schedules.clone(),
     }
@@ -872,7 +854,11 @@ mod tests {
     }
 
     fn profiles(b: &ManifestBinding) -> Vec<&str> {
-        b.destinations.iter().map(|d| d.profile.as_str()).collect()
+        b.outputs
+            .iter()
+            .flat_map(|o| &o.destinations)
+            .map(|d| d.profile.as_str())
+            .collect()
     }
 
     #[test]

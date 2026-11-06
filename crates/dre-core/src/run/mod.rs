@@ -237,12 +237,7 @@ pub struct BindingPlan {
     /// Each query's connection, its type and the sources it reads.
     pub queries: Vec<PlannedQuery>,
     pub target: String,
-    pub format: String,
-    /// The file written under `target/run/` (a single-table format writes one per result set
-    /// when there are several).
-    pub output: PathBuf,
-    pub destinations: Vec<PlannedDestination>,
-    /// Every output (the fields above repeat the first one).
+    /// Every output, in declared order.
     pub outputs: Vec<PlannedOutput>,
     pub schedules: Vec<String>,
 }

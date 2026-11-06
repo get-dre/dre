@@ -162,7 +162,7 @@ fn history_lists_runs_and_finds_the_latest_files() {
         "{}",
         out.stdout
     );
-    assert!(out.stdout.contains("success"), "{}", out.stdout);
+    assert!(out.stdout.contains("succeeded"), "{}", out.stdout);
     let path = p.dre("history", &["daily", "--latest", "--path"]);
     assert_eq!(path.stdout.trim(), format!("target/run/daily/default/runs/{id}"));
     let json = p.dre("history", &["daily", "--output", "json"]);

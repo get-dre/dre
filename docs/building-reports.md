@@ -443,7 +443,8 @@ dre compile -s tag:finance --set all --var region=AU --timezone Australia/Sydney
 inside the shell argument when it resembles a boolean: `--var flag='"false"'` keeps text.
 `--timezone` overrides report timezones. `--all-targets` checks even unused profile entries;
 `--strict` also fails on warnings. `--json` on validation gives tools structured problems,
-while `--log-format json` gives a stream of diagnostic events.
+while `--log-format json` gives a stream of diagnostic events. Both include a
+[`schema_version`](manifest.md#json-validation-and-log-events) for integrations.
 
 Run the tutorial example from its project directory:
 

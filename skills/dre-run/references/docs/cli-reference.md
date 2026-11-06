@@ -82,7 +82,7 @@ dre run [OPTIONS] [SELECTOR]...
 | `--set <SET>` |  | Run one Set (declared, or ad hoc with --profile/--var), or `all` of a report's Sets. |
 | `--schedule <NAME>` |  | Run the Bindings a schedules.yml entry targets, with its vars. Pass the scheduled instant through DRE_RUN_AT (or the date through DRE_RUN_DATE) so reruns render the same. With a selector and/or --set, run just those of its Bindings. |
 | `--profile <PROFILE>` |  | Use this connection instead of the inherited one (report, Set, folder `+profile`, `default_profile`), e.g. for an ad hoc Set. A query's own `profile:` or a source's wins. |
-| `--output-name <OUTPUT_NAME>` |  | Override the output file name for this run (the first output, with several). |
+| `--output-name <OUTPUT_NAME>` |  | Override the first output's file name in each Binding. Not for outputs with for_each. |
 | `--output-path <OUTPUT_PATH>` |  | Override the full output (delivery) path for this run: one Binding whose first output has one destination. |
 | `--no-deliver` |  | Keep normal outputs locally without delivering them to any destination. |
 | `--output-json <DIR>` |  | Write typed JSON rows per query and isolate this run's outputs/history in DIR. |

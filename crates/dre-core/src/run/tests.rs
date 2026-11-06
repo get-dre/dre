@@ -472,7 +472,7 @@ fn compiling_renders_the_sql_and_runs_nothing() {
         _ => None,
     });
     assert_eq!(
-        plan.unwrap().destinations[0].path.as_deref(),
+        plan.unwrap().outputs[0].destinations[0].path.as_deref(),
         Some("out/detail.csv")
     );
     // A compile makes no run folder.
@@ -664,7 +664,7 @@ fn a_failed_delivery_is_recorded_with_its_code() {
     assert_eq!(o.status, Status::Error);
     assert_eq!(o.error_code, Some(Code::DeliveryFailed.into()));
     let r = results_json(&dir);
-    assert_eq!(r["status"], "error");
+    assert_eq!(r["status"], "failed");
     assert_eq!(r["output_results"][0]["status"], "failed");
     assert_eq!(r["deliveries"][0]["error_code"], "delivery-failed");
 }

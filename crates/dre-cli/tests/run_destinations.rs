@@ -80,7 +80,7 @@ fn a_list_delivers_to_every_destination_and_records_each() {
     assert_eq!(ds[1]["type"], "fixture");
     assert_eq!(ds[1]["status"], "delivered");
     assert_eq!(ds[1]["location"], "fixture:archive/daily.csv");
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn a_failed_destination_does_not_stop_the_next_one() {
     assert_eq!(p.read("out/daily.csv"), "n\r\n1\r\n");
     assert!(deliveries(&rec).is_empty());
     let r = results(&p);
-    assert_eq!(r["status"], "error");
+    assert_eq!(r["status"], "failed");
     assert_eq!(r["deliveries"][0]["status"], "failed");
     assert_eq!(r["error_code"], "delivery-failed");
     assert_eq!(r["deliveries"][0]["error_code"], "delivery-failed");
@@ -143,7 +143,7 @@ fn a_deliver_false_entry_is_not_delivered_and_the_others_are() {
     assert!(deliveries(&rec).is_empty());
     assert_eq!(p.read("out/daily.csv"), "n\r\n1\r\n");
     let r = results(&p);
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
     assert_eq!(r["deliveries"][0]["status"], "not_delivered");
     assert_eq!(r["deliveries"][1]["status"], "delivered");
 }

@@ -1,5 +1,6 @@
 exit: 0
 {
+  "schema_version": "dre/validate/v1",
   "ok": true,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
@@ -80,9 +81,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/daily_summary/default/runs/<run id>/daily_summary.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -109,9 +107,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/quarterly_filing/default/runs/<run id>/quarterly_filing.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -150,11 +145,6 @@ exit: 0
       "daily_summary": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -203,11 +193,6 @@ exit: 0
       "quarterly_filing": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -257,7 +242,7 @@ exit: 0
       }
     },
     "schedules": {},
-    "schema_version": "dre/manifest/v3",
+    "schema_version": "dre/manifest/v4",
     "sources": {},
     "version": "$VERSION"
   }

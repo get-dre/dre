@@ -60,7 +60,7 @@ fn bindings_on_a_target_with_threads_run_at_once() {
         .iter()
         .map(|r| {
             let j = p.json(&format!("target/run/{r}/default/run_results.json"));
-            assert_eq!(j["status"], "success", "{r}");
+            assert_eq!(j["status"], "succeeded", "{r}");
             let start = chrono::DateTime::parse_from_rfc3339(j["started_at"].as_str().unwrap())
                 .unwrap()
                 .timestamp_millis();

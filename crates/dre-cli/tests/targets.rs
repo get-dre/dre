@@ -67,7 +67,7 @@ fn each_profile_uses_its_own_target_without_flags() {
     assert_eq!(r["deliveries"][0]["profile"], "inbox");
     assert_eq!(r["deliveries"][0]["status"], "not_delivered");
     assert_eq!(r["deliveries"][0]["target"], "dev");
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
 }
 
 #[test]

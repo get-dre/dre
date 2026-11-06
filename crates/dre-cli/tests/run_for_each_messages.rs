@@ -241,7 +241,7 @@ fn held_deliveries_are_released_later_byte_for_byte_and_once() {
         .says("2 held");
     assert!(deliveries(&rec).is_empty());
     let r = p.json("target/run/statements/default/run_results.json");
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
     assert_eq!(r["output_results"][0]["status"], "held");
     assert_eq!(r["output_results"][0]["for_each"]["held"], 2);
     let id = run_id(&p);
@@ -301,6 +301,10 @@ fn release_by_keys_and_a_plain_output() {
         .collect();
     assert_eq!(releases.len(), 3);
     assert!(releases.iter().all(|r| r["released_by"].is_string()));
+    for release in &releases {
+        assert_eq!(release["status"], "succeeded");
+        assert_eq!(release["schema_version"], "dre/run-results/v2");
+    }
     p.dre("release", &["statements", "--run", "20990101T000000Z-zzzz"])
         .failed()
         .says("has no run");

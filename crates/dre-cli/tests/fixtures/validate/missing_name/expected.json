@@ -1,5 +1,6 @@
 exit: 2
 {
+  "schema_version": "dre/validate/v1",
   "ok": false,
   "profiles": null,
   "target": null,

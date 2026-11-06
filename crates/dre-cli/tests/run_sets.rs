@@ -179,11 +179,11 @@ fn a_failed_binding_does_not_stop_the_others() {
         .says("1 succeeded, 1 failed");
     assert_eq!(
         p.json("target/run/monthly/client_a/run_results.json")["status"],
-        "error"
+        "failed"
     );
     assert_eq!(
         p.json("target/run/monthly/client_b/run_results.json")["status"],
-        "success"
+        "succeeded"
     );
 }
 

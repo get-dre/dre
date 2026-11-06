@@ -82,6 +82,16 @@ pub fn plan<'a>(
     if opts.output_path.is_some() {
         check_output_path(&selected).map_err(|e| Error::new(Code::InvalidSelector, e))?;
     }
+    if opts.output_name.is_some()
+        && selected
+            .iter()
+            .any(|(_, b)| b.outputs.first().is_some_and(|o| o.for_each.is_some()))
+    {
+        return Err(Error::new(
+            Code::InvalidSelector,
+            "--output-name can't replace a first output with `for_each`; set its `file_name` instead",
+        ));
+    }
     let bindings = parse(ctx, project, opts, selected);
     // Every profile the run uses needs an entry for it, before anything runs.
     let targets =

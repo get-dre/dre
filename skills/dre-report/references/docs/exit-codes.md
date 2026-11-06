@@ -23,6 +23,8 @@ Every `dre` command uses the same codes:
 A busy Binding makes the run exit `75`, including when other Bindings completed. Otherwise,
 a run where some reports failed and others delivered exits `1`. Each Binding's
 `run_results.json` says which. Cancellation and timeout codes take precedence.
+Binding results and JSON `binding_end` events use `succeeded` or `failed`, matching per-row
+results; cancellation and timeout remain `cancelled` and `timed_out`.
 
 For `dre validate`, `dre compile`, `dre deps` and `dre ls`, `1` means the command ran and found
 problems and `2` means it couldn't run (no project, bad flags). Warnings exit `0`; `dre validate

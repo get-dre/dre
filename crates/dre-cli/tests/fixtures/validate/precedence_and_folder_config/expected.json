@@ -1,5 +1,6 @@
 exit: 0
 {
+  "schema_version": "dre/validate/v1",
   "ok": true,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
@@ -88,9 +89,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/bare/default/runs/<run id>/bare.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -117,9 +115,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "xlsx",
-      "output": "target/run/filing/client_a/runs/<run id>/filing.xlsx",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -146,9 +141,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/ledger/default/runs/<run id>/ledger.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -194,13 +186,6 @@ exit: 0
       "bare": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {
-                "delimiter": ";"
-              }
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -254,11 +239,6 @@ exit: 0
       "filing": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "xlsx",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -316,13 +296,6 @@ exit: 0
       "ledger": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {
-                "delimiter": ";"
-              }
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -378,7 +351,7 @@ exit: 0
       }
     },
     "schedules": {},
-    "schema_version": "dre/manifest/v3",
+    "schema_version": "dre/manifest/v4",
     "sources": {},
     "version": "$VERSION"
   }

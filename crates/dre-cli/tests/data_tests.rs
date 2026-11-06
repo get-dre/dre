@@ -234,9 +234,9 @@ fn a_set_can_override_checks_and_a_failed_binding_does_not_stop_another() {
         .says("1 total · 0 pass, 0 warn, 1 fail, 0 error, 0 skipped");
     let bad = p.json("target/run/r/bad/run_results.json");
     let good = p.json("target/run/r/good/run_results.json");
-    assert_eq!(bad["status"], "error");
+    assert_eq!(bad["status"], "failed");
     assert_eq!(bad["tests"][0]["failures"], 7);
-    assert_eq!(good["status"], "success");
+    assert_eq!(good["status"], "succeeded");
     assert!(good.get("tests").is_none());
     assert_eq!(good["result_sets"][0]["rows"], 7);
 }
@@ -428,7 +428,7 @@ fn warnings_allow_later_queries_formatting_and_delivery_but_test_never_produces_
         p.dre(command, &["r"]).ok().says("WARN").says("PASS");
         let result = p.json("target/run/r/default/run_results.json");
         assert_eq!(result["params"]["command"], command);
-        assert_eq!(result["status"], "success");
+        assert_eq!(result["status"], "succeeded");
         assert_eq!(result["tests"][0]["status"], "warn");
         assert_eq!(result["tests"][0]["failures"], 7);
         assert_eq!(result["tests"][0]["severity"], "warn");
@@ -465,7 +465,10 @@ fn failed_build_collects_checks_skips_outputs_and_delivers_only_independent_sets
     assert_eq!(bad["outputs"], serde_json::json!([]));
     assert_eq!(bad["deliveries"], serde_json::json!([]));
     assert!(!p.path("target/run/r/bad/report.csv").exists());
-    assert_eq!(p.json("target/run/r/good/run_results.json")["status"], "success");
+    assert_eq!(
+        p.json("target/run/r/good/run_results.json")["status"],
+        "succeeded"
+    );
     assert_eq!(
         std::fs::read_to_string(record.path().join("deliveries.jsonl"))
             .unwrap()

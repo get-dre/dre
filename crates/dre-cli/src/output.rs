@@ -23,6 +23,9 @@ use crate::progress::{RowMeter, describe, short_name};
 use dre_core::secrets::Secrets;
 use serde_json::json;
 
+/// The contract shared by every `--log-format json` event.
+const EVENTS_SCHEMA_VERSION: &str = "dre/events/v1";
+
 // Protect strings and keys while they still hold literal values, including JSON fragments
 // embedded in ordinary log lines. Text masking cannot recover values after JSON escaping.
 fn protected_json<T: serde::Serialize>(secrets: &Secrets, value: &T) -> String {
@@ -497,6 +500,7 @@ impl Inner {
     }
 
     fn json(&self, mut v: serde_json::Value) {
+        v["schema_version"] = json!(EVENTS_SCHEMA_VERSION);
         v["ts"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         let line = self
             .secrets
