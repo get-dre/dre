@@ -166,7 +166,7 @@ func TestRetryTriesAgainOnlyOnTemporaryErrors(t *testing.T) {
 	sleep := func(d time.Duration) { waits = append(waits, d) }
 	takeAttempts()
 	n := 0
-	v, err := retryWith(3, "post", sleep, func() (string, error) {
+	v, err := retryWith(Rules{Retries: 3}, "post", sleep, func() (string, error) {
 		n++
 		if n < 3 {
 			return "", &TemporaryError{Err: errors.New("HTTP 503"), RetryAfter: 2 * time.Second}
@@ -180,17 +180,32 @@ func TestRetryTriesAgainOnlyOnTemporaryErrors(t *testing.T) {
 		t.Fatal("attempts")
 	}
 	n = 0
-	_, err = retryWith(3, "post", sleep, func() (string, error) { n++; return "", errors.New("HTTP 401") })
+	_, err = retryWith(Rules{Retries: 3}, "post", sleep, func() (string, error) { n++; return "", errors.New("HTTP 401") })
 	if n != 1 || err.Error() != "HTTP 401" {
 		t.Fatal(n, err)
 	}
 	n = 0
-	_, err = retryWith(1, "post", sleep, func() (string, error) {
+	_, err = retryWith(Rules{Retries: 1}, "post", sleep, func() (string, error) {
 		n++
 		return "", &TemporaryError{Err: errors.New("HTTP 503")}
 	})
 	if n != 2 || err.Error() != "HTTP 503" {
 		t.Fatal(n, err)
+	}
+	// max_retry_wait caps a server's Retry-After and the backoff alike.
+	waits = nil
+	_, err = retryWith(Rules{Retries: 8, MaxRetryWait: 5 * time.Second}, "post", sleep, func() (string, error) {
+		return "", &TemporaryError{Err: errors.New("HTTP 429"), RetryAfter: time.Hour}
+	})
+	if err == nil || len(waits) != 8 || waits[0] != 5*time.Second {
+		t.Fatal(err, waits)
+	}
+	waits = nil
+	retryWith(Rules{Retries: 8, MaxRetryWait: 5 * time.Second}, "post", sleep, func() (string, error) {
+		return "", &TemporaryError{Err: errors.New("reset")}
+	})
+	if len(waits) != 8 || waits[7] != 5*time.Second {
+		t.Fatal(waits)
 	}
 	if RetryAfter(" 7 ") != 7*time.Second || RetryAfter("Wed, 21 Oct") != 0 {
 		t.Fatal("Retry-After")

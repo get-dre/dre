@@ -1,6 +1,6 @@
 //! The shared statement splitter is its own seam: validation and the run path both use it.
 
-use dre_core::sqlsplit::{StatementKind, classify, split};
+use dre_core::sqlsplit::{StatementKind, classify, split, split_with};
 
 fn texts(sql: &str) -> Vec<String> {
     split(sql).into_iter().map(|s| s.text).collect()
@@ -94,4 +94,23 @@ fn classifies_everything_else_as_not_allowed() {
     ] {
         assert!(!classify(bad).is_read_only_safe(), "should be refused: {bad}");
     }
+}
+
+#[test]
+fn backslash_escapes_are_read_only_for_sources_that_ask_for_them() {
+    let sql = r"select 'O\'Brien; x', `a\`b;` from t; select 'c:\\'; select 2";
+    let got: Vec<String> = split_with(sql, true).into_iter().map(|s| s.text).collect();
+    assert_eq!(
+        got,
+        vec![
+            r"select 'O\'Brien; x', `a\`b;` from t",
+            r"select 'c:\\'",
+            "select 2"
+        ]
+    );
+    // Standard SQL: a backslash is an ordinary character, so `'c:\'` ends at its quote.
+    assert_eq!(
+        texts(r"select 'c:\'; select 2"),
+        vec![r"select 'c:\'", "select 2"]
+    );
 }

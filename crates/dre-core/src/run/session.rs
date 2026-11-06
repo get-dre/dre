@@ -213,6 +213,15 @@ impl Pool {
         Ok(self.target(name)?.kind)
     }
 
+    /// Whether a connection's plugin asks for backslash string literals, so its SQL splits
+    /// with backslash escapes inside quotes.
+    pub(super) fn backslash_escapes(&self, name: &str) -> bool {
+        self.kind(name)
+            .ok()
+            .and_then(|k| self.connections.string_literal(&k).ok().flatten())
+            .is_some_and(|s| s == "backslash")
+    }
+
     pub(super) fn session(&self, name: &str) -> Result<Arc<Mutex<Session>>, String> {
         if let Some(s) = self.sessions.lock().unwrap().get(name) {
             return Ok(s.clone());
@@ -267,6 +276,12 @@ impl PoolRunner {
         )?;
         self.pool.session(name)
     }
+
+    fn backslash_escapes(&self, profile: Option<&str>) -> bool {
+        profile
+            .or(self.default.as_deref())
+            .is_some_and(|name| self.pool.backslash_escapes(name))
+    }
 }
 
 impl QueryRunner for PoolRunner {
@@ -277,7 +292,7 @@ impl QueryRunner for PoolRunner {
         // An unmanaged report may only read, and run_query() runs before the file's own
         // statements are checked, so it gets the same rule up front.
         if s.unmanaged
-            && let Some(bad) = sqlsplit::split(sql)
+            && let Some(bad) = sqlsplit::split_with(sql, self.backslash_escapes(profile))
                 .into_iter()
                 .find(|st| sqlsplit::classify(&st.text) != StatementKind::Read)
         {

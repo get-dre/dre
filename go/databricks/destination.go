@@ -5,14 +5,17 @@ package main
 // client_secret), so one set of credentials, and one OAuth session per workspace, serves both.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/get-dre/dre/go/plugin"
 )
@@ -28,6 +31,28 @@ func deliveryOptions() []plugin.OptionField {
 func rulesFor(conn, opts map[string]any) (plugin.Rules, error) {
 	r, _, err := plugin.RulesFrom(plugin.DefaultRules(), conn, opts, nil)
 	return r, err
+}
+
+// uploads is the running delivery's context, which core's cancel ends (destinationRole.Cancel).
+var uploads plugin.Request
+
+// uploadClient is one delivery's HTTP client: the profile's connect_timeout and timeout (for the
+// response to start), with every request ending when ctx does.
+func uploadClient(ctx context.Context, r plugin.Rules) *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: r.ConnectTimeout, KeepAlive: 30 * time.Second}).DialContext
+	t.ResponseHeaderTimeout = r.Timeout
+	return &http.Client{Transport: withContext{ctx, t}}
+}
+
+// withContext sends each request under ctx.
+type withContext struct {
+	ctx  context.Context
+	next http.RoundTripper
+}
+
+func (w withContext) RoundTrip(req *http.Request) (*http.Response, error) {
+	return w.next.RoundTrip(req.WithContext(w.ctx))
 }
 
 // temporary marks a request's failure trying again may fix: a 429 or 503 (with its

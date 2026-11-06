@@ -149,7 +149,7 @@ func TestTheDestinationRoleSpeaksTheProtocol(t *testing.T) {
 		t.Fatalf("%v", r)
 	}
 	c.Send(map[string]any{"type": "describe"})
-	if names := plugintest.FieldNames(c.Reply()); names != "host,auth_type,token,client_id,client_secret,profile,scopes,redirect_port,retries" {
+	if names := plugintest.FieldNames(c.Reply()); names != "host,auth_type,token,client_id,client_secret,profile,scopes,redirect_port,retries,connect_timeout,timeout,retry_wait,max_retry_wait" {
 		t.Fatalf("%v", names)
 	}
 	c.Send(map[string]any{"type": "deliver", "local_path": "/x", "remote_path": "/Volumes/c/s/v/x", "connection": map[string]any{"host": "h"}, "options": map[string]any{"to": "x"}})

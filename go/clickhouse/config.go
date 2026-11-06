@@ -180,6 +180,18 @@ func tlsConfig(conn map[string]any) (*tls.Config, error) {
 }
 
 // validateConnection checks what the field declarations can't: keys that only go together.
+// cleartextWarning is a warning when the password would cross the network unencrypted: no
+// `secure`, no SSH tunnel, and a host that isn't this machine; "" otherwise.
+func cleartextWarning(conn map[string]any) string {
+	secure, _ := plugin.Bool(conn, "secure", false)
+	_, tunnelled := conn["ssh"].(map[string]any)
+	host := plugin.Optional(conn, "host")
+	if secure || tunnelled || plugin.Optional(conn, "password") == "" || host == "" || plugin.Loopback(host) {
+		return ""
+	}
+	return fmt.Sprintf("the password goes to %s unencrypted; set `secure: true` to connect with TLS", host)
+}
+
 func validateConnection(conn map[string]any) []string {
 	var errs []string
 	set := func(k string) bool { v, ok := conn[k]; return ok && v != nil }

@@ -10,6 +10,7 @@ package main
 // created. A 429, 503 or dropped connection is tried again (`retries`).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,7 +31,8 @@ func volumesFields() []plugin.Field {
 			out = append(out, c)
 		}
 	}
-	return out
+	// Timeouts for the Files API, and the cap on waits between tries.
+	return append(append(out, plugin.TimeoutFields()...), plugin.DeliveryFields()[3:]...)
 }
 
 func deliverToVolume(local, remote string, conn, opts map[string]any) (string, error) {
@@ -40,7 +42,7 @@ func deliverToVolume(local, remote string, conn, opts map[string]any) (string, e
 	parts := strings.Split(strings.TrimLeft(remote, "/"), "/")
 	bad := len(parts) < 5 || parts[0] != "Volumes"
 	for _, p := range parts {
-		bad = bad || p == ""
+		bad = bad || p == "" || p == "." || p == ".."
 	}
 	if bad {
 		return "", fmt.Errorf("`%s` must be /Volumes/<catalog>/<schema>/<volume>/<file>", remote)
@@ -73,11 +75,13 @@ func deliverToVolume(local, remote string, conn, opts map[string]any) (string, e
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{}
+	ctx, done := uploads.Start(context.Background())
+	defer done()
+	client := uploadClient(ctx, rules)
 	// Directories under the volume (the volume itself must exist).
 	if len(parts) > 5 {
 		dir := "/" + strings.Join(parts[:len(parts)-1], "/")
-		_, err := plugin.Retry(rules.Retries, "creating "+dir, func() (struct{}, error) {
+		_, err := plugin.Retry(rules, "creating "+dir, func() (struct{}, error) {
 			return struct{}{}, volumeRequest(client, base+"/api/2.0/fs/directories"+percentEncode(dir, true), a, "")
 		})
 		if err != nil {

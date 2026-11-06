@@ -75,10 +75,35 @@ func checkSSH(s map[string]any) []string {
 type tunnel struct {
 	settings map[string]any
 	timeout  time.Duration
-	once     sync.Once
-	client   *ssh.Client
-	agent    net.Conn // the SSH agent's socket, with use_agent
-	err      error
+	mu       sync.Mutex
+	client   *ssh.Client // nil until connected, and again after a failed dial
+	agent    net.Conn    // the SSH agent's socket, with use_agent
+	err      error       // the last failure connecting
+}
+
+// bastion is the SSH connection, connecting (again) when there's none: a failure isn't kept
+// for the rest of the run.
+func (t *tunnel) bastion() (*ssh.Client, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.client == nil {
+		if t.agent != nil {
+			t.agent.Close()
+			t.agent = nil
+		}
+		t.client, t.err = t.connect()
+	}
+	return t.client, t.err
+}
+
+// drop closes c after a dial through it failed, so the next dial reconnects.
+func (t *tunnel) drop(c *ssh.Client) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.client == c {
+		c.Close()
+		t.client = nil
+	}
 }
 
 // dialer is a DialContext for the driver: every connection to addr goes through the bastion,
@@ -86,12 +111,13 @@ type tunnel struct {
 // native protocol; over HTTP, net/http does).
 func (t *tunnel) dialer(tlsConf *tls.Config) func(ctx context.Context, addr string) (net.Conn, error) {
 	return func(ctx context.Context, addr string) (net.Conn, error) {
-		t.once.Do(func() { t.client, t.err = t.connect() })
-		if t.err != nil {
-			return nil, t.err
-		}
-		c, err := t.client.DialContext(ctx, "tcp", addr)
+		client, err := t.bastion()
 		if err != nil {
+			return nil, err
+		}
+		c, err := client.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			t.drop(client)
 			return nil, fmt.Errorf("the SSH bastion can't reach %s: %v", addr, err)
 		}
 		if tlsConf == nil {
@@ -111,10 +137,15 @@ func (t *tunnel) dialer(tlsConf *tls.Config) func(ctx context.Context, addr stri
 }
 
 func (t *tunnel) closeIfSet() {
-	if t != nil && t.agent != nil {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.agent != nil {
 		t.agent.Close()
 	}
-	if t != nil && t.client != nil {
+	if t.client != nil {
 		t.client.Close()
 	}
 }

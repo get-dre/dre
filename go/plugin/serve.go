@@ -466,10 +466,17 @@ func (s *server) failure(err error) *errorReply {
 	return m
 }
 
+// maxRecord is the largest encoded Arrow batch one frame holds.
+var maxRecord = maxFrame - 1
+
 func (s *server) sendRecord(rec arrow.RecordBatch) error {
 	b, err := EncodeRecord(rec)
 	if err != nil {
 		return err
+	}
+	// Too large is the plugin's mistake, not core gone: say so instead of exiting.
+	if len(b) > maxRecord {
+		return &Error{Kind: "plugin", Message: fmt.Sprintf("a batch of %d rows is %d bytes, more than one frame holds (%d); the plugin must send smaller batches", rec.NumRows(), len(b), maxRecord)}
 	}
 	s.outMu.Lock()
 	err = WriteFrame(s.out, TagArrow, b)

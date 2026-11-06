@@ -139,6 +139,7 @@ const DATABRICKS: Dialect = Dialect {
         "java_method",
         "reflect",
         "secret",
+        "try_secret",
         "list_secrets",
         "ai_query",
     ],

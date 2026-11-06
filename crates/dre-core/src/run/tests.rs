@@ -1513,3 +1513,45 @@ fn a_release_record_masks_the_secrets_a_destination_error_echoes() {
     assert!(record.contains("denied for"), "{record}");
     assert!(!record.contains("tok-s3cret-value"), "{record}");
 }
+
+/// A source that asks for backslash string literals (as ClickHouse does) gets `O'Brien` from a
+/// lookup as `'O\'Brien'`, and the statements around it still split where they should.
+#[test]
+fn a_lookup_quote_in_backslash_literals_keeps_the_statements_apart() {
+    let description = dre_protocol::host::Description {
+        string_literal: Some("backslash".into()),
+        ..Default::default()
+    };
+    let host = MemoryHost::new()
+        .plugin(
+            Kind::Source,
+            "mem",
+            Script::new(&[dre_protocol::CAP_SESSIONS])
+                .rows("select * from x", summary())
+                .description(description),
+        )
+        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Destination, "drop", Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, _) = project(ONE_FILE, &ctx);
+    std::fs::create_dir_all(dir.path().join("lookups")).unwrap();
+    std::fs::write(dir.path().join("lookups/owners.csv"), "name\nO'Brien\n").unwrap();
+    std::fs::write(
+        dir.path().join("reports/pack/summary.sql"),
+        "create temporary table x as select * from {{ ref('owners') }}; select * from x",
+    )
+    .unwrap();
+    let project = crate::project::load_with(dir.path(), &Default::default(), &ctx)
+        .0
+        .unwrap();
+    let summary = run_once(&ctx, &project, &options());
+    assert_eq!(
+        summary.outcomes[0].status,
+        Status::Success,
+        "{:?}",
+        summary.outcomes
+    );
+    let executed = calls_of(&host, "Execute");
+    assert_eq!(executed.len(), 2, "{executed:?}");
+    assert!(executed.iter().any(|c| c.contains(r"'O\'Brien'")), "{executed:?}");
+}

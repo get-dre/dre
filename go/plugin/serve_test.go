@@ -118,7 +118,7 @@ func (f *fakeDB) Run(sql string, fn func(plugin.Result) error) error {
 		return &plugin.Error{Kind: "auth", Code: "bad-token", Message: "the token was refused"}
 	case "busy":
 		// Fails with a temporary error every time, so only a cancel ends the retries.
-		_, err := plugin.Retry(100, "running busy", func() (struct{}, error) {
+		_, err := plugin.Retry(plugin.Rules{Retries: 100}, "running busy", func() (struct{}, error) {
 			return struct{}{}, &plugin.TemporaryError{Err: errors.New("busy")}
 		})
 		return err
@@ -552,5 +552,24 @@ func TestAReadOnlyOpenUsesTheRolesReadOnlyOpener(t *testing.T) {
 	c.Reply()
 	if fmt.Sprint(opened) != "[ro rw ro sandbox]" {
 		t.Fatalf("%v", opened)
+	}
+}
+
+func TestABatchTooLargeForAFrameIsAnErrorNotAnExit(t *testing.T) {
+	c, _ := start(t)
+	c.Hello()
+	c.Send(map[string]any{"type": "open", "id": 1, "connection": map[string]any{}, "read_only": false})
+	if r := c.Reply(); r["type"] != "ok" {
+		t.Fatalf("open: %v", r)
+	}
+	defer plugin.SetMaxRecord(100)()
+	c.Send(map[string]any{"type": "execute", "id": 2, "sql": "select three batches"})
+	if r := c.Reply(); r["type"] != "result" {
+		t.Fatalf("execute: %v", r)
+	}
+	plugintest.ExpectError(t, c.Reply(), "more than one frame holds")
+	c.Send(map[string]any{"type": "describe", "id": 3})
+	if r := c.Reply(); r["type"] != "describe" {
+		t.Fatalf("after the error: %v", r)
 	}
 }

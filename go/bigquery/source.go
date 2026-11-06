@@ -123,7 +123,7 @@ func open(conn map[string]any) (_ *session, err error) {
 		s.client.Close()
 		return nil, err
 	}
-	_, err = plugin.Retry(rules.Retries, "starting the BigQuery session", func() (struct{}, error) {
+	_, err = plugin.Retry(rules, "starting the BigQuery session", func() (struct{}, error) {
 		err := s.startSession()
 		if err != nil && (transient(err) || plugin.IsConnectionError(err)) {
 			return struct{}{}, &plugin.TemporaryError{Err: err}
@@ -359,7 +359,7 @@ func tempTableSQL(table string, schema *arrow.Schema, recs []arrow.RecordBatch) 
 }
 
 func quote(ident string) string {
-	return "`" + strings.ReplaceAll(ident, "`", "\\`") + "`"
+	return "`" + strings.NewReplacer(`\`, `\\`, "`", "\\`").Replace(ident) + "`"
 }
 
 // literal is one cell as a GoogleSQL literal.

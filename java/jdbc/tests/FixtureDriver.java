@@ -68,14 +68,31 @@ public final class FixtureDriver implements Driver {
           case "getSchema" -> "SALES SCHEMA";
           case "getCatalog" -> "fixture";
           case "getMetaData" -> meta;
-          case "createStatement" -> Proxy.newProxyInstance(FixtureDriver.class.getClassLoader(), new Class<?>[]{Statement.class},
+          case "createStatement" -> {
+            // `insert then select` answers an update count first, then its rows (as SQL Server
+            // does without SET NOCOUNT ON); anything else one update count.
+            String[] sql = {""};
+            boolean[] moved = {false};
+            yield Proxy.newProxyInstance(FixtureDriver.class.getClassLoader(), new Class<?>[]{Statement.class},
               (statement, operation, values) -> switch (operation.getName()) {
                 case "setFetchSize" -> null;
-                case "execute" -> false;
-                case "getLargeUpdateCount" -> 0L;
-                case "close" -> throw new SQLException("close failed " + secret, "HY000", 999);
+                case "execute" -> {
+                  sql[0] = (String) values[0];
+                  yield false;
+                }
+                case "getLargeUpdateCount" -> moved[0] ? -1L : sql[0].equals("insert then select") ? 1L : 0L;
+                case "getMoreResults" -> {
+                  moved[0] = true;
+                  yield sql[0].equals("insert then select");
+                }
+                case "getResultSet" -> result(new String[]{"N"}, new Object[][]{{"a"}, {"b"}});
+                case "close" -> {
+                  if (sql[0].equals("synthetic update")) throw new SQLException("close failed " + secret, "HY000", 999);
+                  yield null;
+                }
                 default -> throw new SQLFeatureNotSupportedException("not used by this fixture");
               });
+          }
           default -> throw new SQLFeatureNotSupportedException("not used by this fixture");
         });
   }
@@ -99,8 +116,20 @@ public final class FixtureDriver implements Driver {
               Object value = rows[at.get() - 1][column - 1];
               yield value == null ? 0 : value instanceof Number number ? number.intValue() : Integer.parseInt(value.toString());
             }
+            case "wasNull" -> false;
+            case "getMetaData" -> Proxy.newProxyInstance(FixtureDriver.class.getClassLoader(), new Class<?>[]{ResultSetMetaData.class},
+                (meta, call, index) -> switch (call.getName()) {
+                  case "getColumnCount" -> columns.length;
+                  case "getColumnLabel", "getColumnName" -> columns[(Integer) index[0] - 1];
+                  case "getColumnType" -> Types.VARCHAR;
+                  case "getColumnTypeName" -> "VARCHAR";
+                  case "getPrecision", "getScale" -> 0;
+                  case "getColumnDisplaySize" -> 10;
+                  case "isNullable" -> ResultSetMetaData.columnNullable;
+                  default -> throw new SQLFeatureNotSupportedException("not used by this fixture: " + call.getName());
+                });
             case "close" -> null;
-            default -> throw new SQLFeatureNotSupportedException("not used by this fixture");
+            default -> throw new SQLFeatureNotSupportedException("not used by this fixture: " + method.getName());
           };
         });
   }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -87,5 +89,37 @@ func TestHostKeyCheck(t *testing.T) {
 	}
 	if cb, err := hostKeyCheck(map[string]any{"known_hosts_path": malformed}); err == nil || cb != nil || !strings.Contains(err.Error(), "can't read known_hosts "+malformed) {
 		t.Fatalf("malformed known_hosts: %v", err)
+	}
+}
+
+// A failed bastion connection is tried again on the next dial, not kept for the whole run.
+func TestTheTunnelReconnectsAfterAFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan struct{}, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- struct{}{}
+			c.Close() // the bastion drops the connection before the handshake
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	tun := &tunnel{settings: map[string]any{"host": "127.0.0.1", "port": port, "username": "u", "password": "p",
+		"host_key_fingerprint": "SHA256:x"}, timeout: 5 * time.Second}
+	dial := tun.dialer(nil)
+	for range 2 {
+		if _, err := dial(context.Background(), "clickhouse:8123"); err == nil {
+			t.Fatal("dialed through a bastion that drops every connection")
+		}
+	}
+	if len(accepted) != 2 {
+		t.Fatalf("the bastion was reached %d times, want 2", len(accepted))
 	}
 }

@@ -295,12 +295,13 @@ func takeAttempts() int {
 	return max(int(attempts.Swap(0)), 1)
 }
 
-// Retry runs f, trying again while it returns a *TemporaryError, up to retries more times, with
-// backoff (about 1s, then 4s, then 16s) or the server's Retry-After. Each retry is logged at
-// info level, naming what; a step that needed several tries is reported to core. Return a
-// plain error for a failure trying again won't fix, or that might repeat something already done.
-func Retry[T any](retries int, what string, f func() (T, error)) (T, error) {
-	return retryWith(retries, what, sleepUnlessCancelled, f)
+// Retry runs f, trying again while it returns a *TemporaryError, up to r.Retries more times,
+// waiting r.Wait: the server's Retry-After or the backoff (about 1s, then 4s, then 16s), never
+// more than r.MaxRetryWait. Each retry is logged at info level, naming what; a step that needed
+// several tries is reported to core. Return a plain error for a failure trying again won't fix,
+// or that might repeat something already done.
+func Retry[T any](r Rules, what string, f func() (T, error)) (T, error) {
+	return retryWith(r, what, sleepUnlessCancelled, f)
 }
 
 // sleepUnlessCancelled waits d, returning early when core cancels the running request.
@@ -310,7 +311,8 @@ func sleepUnlessCancelled(d time.Duration) {
 	}
 }
 
-func retryWith[T any](retries int, what string, sleep func(time.Duration), f func() (T, error)) (T, error) {
+func retryWith[T any](r Rules, what string, sleep func(time.Duration), f func() (T, error)) (T, error) {
+	retries := r.Retries
 	for attempt := 1; ; attempt++ {
 		v, err := f()
 		noteAttempts(attempt)
@@ -322,10 +324,7 @@ func retryWith[T any](retries int, what string, sleep func(time.Duration), f fun
 			}
 			return v, err
 		}
-		wait := temp.RetryAfter
-		if wait == 0 {
-			wait = backoff(attempt)
-		}
+		wait := r.Wait(attempt, temp.RetryAfter)
 		slog.Info(fmt.Sprintf("%s: %v; trying again in %ds (attempt %d of %d)", what, temp.Err, int(wait.Seconds()), attempt+1, retries+1))
 		sleep(wait)
 		if Cancelled() {

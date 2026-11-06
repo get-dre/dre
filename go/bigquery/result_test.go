@@ -198,3 +198,12 @@ func TestTempTableSQLTypesEveryColumnAndEscapes(t *testing.T) {
 		t.Fatalf("%s", empty)
 	}
 }
+
+// A lookup header ending in a backslash can't escape its closing backtick.
+func TestColumnNamesEscapeBackslashes(t *testing.T) {
+	for name, want := range map[string]string{`Dept\Team`: "`Dept\\\\Team`", `x\`: "`x\\\\`", "a`b": "`a\\`b`", "x\\`; drop": "`x\\\\\\`; drop`"} {
+		if got := quote(name); got != want {
+			t.Errorf("%s: %s, want %s", name, got, want)
+		}
+	}
+}

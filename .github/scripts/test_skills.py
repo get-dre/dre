@@ -416,7 +416,8 @@ class Topics(unittest.TestCase):
 
 class JavaPackage(unittest.TestCase):
     def test_version_and_describe_metadata_come_from_the_java_directory(self):
-        self.assertEqual(skills.package_version("jdbc"), "1.0.0")
+        pom = (skills.ROOT / "java/jdbc/pom.xml").read_text()
+        self.assertIn(f"<artifactId>dre-plugin-jdbc</artifactId>\n  <version>{skills.package_version('jdbc')}</version>", pom)
         replies = skills.describe_files()
         self.assertIn("source/jdbc", replies)
         self.assertEqual(replies["source/jdbc"]["connection_fields"][0]["name"], "url")

@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	dbsql "github.com/databricks/databricks-sql-go"
@@ -29,9 +28,8 @@ import (
 type databricks struct {
 	db   *sql.DB
 	conn *sql.Conn
-	// cancel stops the running statement (see Cancel); nil between statements.
-	mu     sync.Mutex
-	cancel context.CancelFunc
+	// Request cancels the running statement (see Cancel).
+	plugin.Request
 }
 
 func newDatabricks(conn map[string]any) (*databricks, error) {
@@ -95,7 +93,7 @@ func newDatabricks(conn map[string]any) (*databricks, error) {
 	stop := waiting(fmt.Sprintf("the SQL warehouse %s", path))
 	// Tried again (`retries`) only while connecting; the connector itself waits for a stopped
 	// warehouse to start.
-	cn, err := plugin.Retry(rules.Retries, "connecting to Databricks", func() (*sql.Conn, error) {
+	cn, err := plugin.Retry(rules, "connecting to Databricks", func() (*sql.Conn, error) {
 		cn, err := db.Conn(context.Background())
 		if err != nil && plugin.IsConnectionError(err) {
 			return nil, &plugin.TemporaryError{Err: err}
@@ -113,16 +111,8 @@ func newDatabricks(conn map[string]any) (*databricks, error) {
 // Run executes one statement. The connector's Arrow (v12) batches are handed on as arrow-go v18
 // ones through IPC (bridge.go).
 func (d *databricks) Run(query string, fn func(plugin.Result) error) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	d.mu.Lock()
-	d.cancel = cancel
-	d.mu.Unlock()
-	defer func() {
-		d.mu.Lock()
-		d.cancel = nil
-		d.mu.Unlock()
-		cancel()
-	}()
+	ctx, done := d.Start(context.Background())
+	defer done()
 	err := d.conn.Raw(func(dc any) error {
 		q, ok := dc.(driver.QueryerContext)
 		if !ok {
@@ -154,12 +144,8 @@ func (d *databricks) Run(query string, fn func(plugin.Result) error) error {
 // Cancel stops the running statement: the connector cancels it on the warehouse when its
 // context ends. Called when core cancels the request.
 func (d *databricks) Cancel() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.cancel != nil {
-		d.cancel()
-		slog.Info("asked Databricks to cancel the running statement")
-	}
+	d.Request.Cancel()
+	slog.Info("asked Databricks to cancel the running statement")
 }
 
 // Check runs EXPLAIN. A planning error is reported inside the plan text rather than failing,
@@ -177,7 +163,9 @@ func (d *databricks) Check(query string) (string, error) {
 
 // explain returns EXPLAIN's plan text; Databricks sends it one line per row.
 func (d *databricks) explain(query string) (string, error) {
-	rows, err := d.conn.QueryContext(context.Background(), "EXPLAIN "+query)
+	ctx, done := d.Start(context.Background())
+	defer done()
+	rows, err := d.conn.QueryContext(ctx, "EXPLAIN "+query)
 	if err != nil {
 		return "", cleanErr(err)
 	}
@@ -351,6 +339,10 @@ func reachable(base string) error {
 	u, err := url.Parse(base)
 	if err != nil || u.Hostname() == "" {
 		return fmt.Errorf("`host` %q isn't a workspace address", base)
+	}
+	// Tokens and client secrets go to the host; plain HTTP is only for a local test server.
+	if u.Scheme == "http" && !plugin.Loopback(u.Hostname()) {
+		return fmt.Errorf("`host` %q uses http://, which would send the credentials unencrypted; use https://", base)
 	}
 	req := &http.Request{URL: u}
 	if p, err := http.ProxyFromEnvironment(req); err != nil || p != nil {

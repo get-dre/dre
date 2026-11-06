@@ -1158,7 +1158,8 @@ fn add_ref(
                     .env()
                     .template_from_named_str(&file, &format!("{import}{src}"))?
                     .render(())?;
-                let statements = crate::sqlsplit::split(&rendered);
+                let backslash = lookups.style().ok() == Some(lookups::StringLiteral::Backslash);
+                let statements = crate::sqlsplit::split_with(&rendered, backslash);
                 match statements.as_slice() {
                     [one] => Ok(Value::from(format!("(\n{}\n)", one.text))),
                     _ => Err(Error::new(

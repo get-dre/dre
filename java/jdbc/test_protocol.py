@@ -196,6 +196,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn('vendor code 999', reply['message'])
         self.assertEqual(self.request(type='describe')['type'], 'describe')
 
+    def test_rows_after_an_update_count_are_the_result(self):
+        self.assertEqual(self.request(type='open', connection=self.config)['type'], 'ok')
+        reply = self.request(type='execute', sql='insert then select')
+        self.assertEqual(reply['type'], 'result', reply)
+        self.assertEqual(reply['columns'], ['N'])
+        length, = struct.unpack('>I', self.plugin.read(4))
+        self.assertEqual(self.plugin.read(length)[0], ord('A'))
+        end = self.plugin.receive()
+        self.assertEqual((end['type'], end['rows']), ('result_end', 2), end)
+
     def test_eof_ends_process(self):
         self.plugin.process.stdin.close()
         self.assertEqual(self.plugin.process.wait(timeout=10), 0)
