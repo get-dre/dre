@@ -354,7 +354,7 @@ fn choices(index: &Index, kind: PluginKind) -> Vec<Choice<'_>> {
 
 /// The environment variable a secret defaults to: `dre-demo` + `token` → `DRE_DEMO_TOKEN`.
 fn env_name(profile: &str, field: &str) -> String {
-    format!("{profile}_{field}")
+    let mut name: String = format!("{profile}_{field}")
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
@@ -363,7 +363,11 @@ fn env_name(profile: &str, field: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    if name.starts_with(|c: char| c.is_ascii_digit()) {
+        name.insert(0, '_');
+    }
+    name
 }
 
 /// The connection profile just set up, whose values a destination on the same platform can reuse.
@@ -529,7 +533,11 @@ fn add_profile(
     kind: &str,
     fields: Mapping,
 ) -> Result<(), String> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("can't read {}: {e}", path.display())),
+    };
     let parsed = dre_core::config::node::parse(&existing).ok().map(|n| n.to_json());
     // A DRE 0.1 file keeps its connections under `sources:`; add to that rather than start a
     // second section.
