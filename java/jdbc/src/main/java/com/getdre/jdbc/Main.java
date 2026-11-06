@@ -94,17 +94,17 @@ public final class Main {
     if (hello == null || !hello.path("type").asText().equals("hello")) {
       throw new IOException("expected hello");
     }
-    int min = hello.path("min_version").asInt(0);
+    int min = hello.path("min_version").asInt(1);
     int max = hello.path("max_version").asInt(1);
-    if (min > max || min > 1 || max < 0) {
-      send(null, "version_mismatch", "min_version", 0, "max_version", 1);
+    if (min > max || min > 1 || max < 1) {
+      send(null, "version_mismatch", "min_version", 1, "max_version", 1);
       throw new IOException("unsupported protocol");
     }
     if (hello.has("plugin") && !hello.path("plugin").asText().equals("source/jdbc")) {
       send(null, "error", "kind", "plugin", "code", "jdbc/unknown-plugin", "message", "this package provides source/jdbc");
       throw new IOException("unknown plugin");
     }
-    send(null, "hello", "protocol_version", Math.min(max, 1), "kind", "source", "name", "jdbc",
+    send(null, "hello", "protocol_version", 1, "kind", "source", "name", "jdbc",
         "version", Main.class.getPackage().getImplementationVersion(), "capabilities", List.of("sessions", "catalog", "validate"), "provides", List.of("source/jdbc"));
     JsonNode message;
     while ((message = read()) != null) {
