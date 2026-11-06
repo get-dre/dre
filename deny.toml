@@ -18,9 +18,8 @@ yanked = "warn"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# PDF table headers repeat only in this pinned revision, not the crates.io release (0.40.0).
-# Remove this allowance when plugins/document moves back to a crates.io release.
-allow-git = ["https://github.com/fulgur-rs/fulgur"]
+# No git dependencies today; add one here only with a pinned `rev`.
+allow-git = []
 required-git-spec = "rev"
 
 [licenses]

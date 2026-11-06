@@ -81,6 +81,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require master and passing CI
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_trust.py "$GITHUB_REPOSITORY" "$GITHUB_SHA"
       - id: plan
         shell: bash  # with pipefail: a rejected tag fails here, not in the build
         run: python3 .github/scripts/release_plan.py "$TAG" | tee -a "$GITHUB_OUTPUT"
@@ -253,7 +258,8 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           "$JAVA_HOME/bin/java" -version
-          "$RUNNER_TEMP/maven/bin/mvn" -B -f "$JAVA_DIR/pom.xml" package
+          "$RUNNER_TEMP/maven/bin/mvn" -B -C -f "$JAVA_DIR/pom.xml" package
+          MAVEN="$RUNNER_TEMP/maven/bin/mvn" python3 .github/scripts/jdbc_dependencies.py check
           launcher=java/jdbc/launcher/dre-plugin-jdbc
           if [[ "$PLATFORM" == windows-* ]]; then
             rustc --edition=2021 --target "$TARGET" java/jdbc/launcher/dre-plugin-jdbc.rs \
@@ -486,15 +492,13 @@ jobs:
           persist-credentials: false
       - name: Update the registry index
         run: |
-          if ! gh release view registry >/dev/null 2>&1; then
-            gh release create registry --prerelease --latest=false --target "$GITHUB_SHA" \
-              --title "Plugin registry" \
-              --notes "The plugin package index that \`dre\` reads (packages.json). See docs/registry.md. Not a release of DRE."
-          fi
-          # packages.json is the index of plugin packages. index.json, the plugin index DRE
-          # 0.0.1-alpha-6 and earlier read, is left as it is, so those versions keep working.
-          gh release download registry -p packages.json -D registry || true
+          # Only a confirmed 404 permits bootstrapping; all other failures stop publication.
+          python3 .github/scripts/registry_index.py --download "$GITHUB_REPOSITORY" registry/packages.json
           python3 .github/scripts/registry_index.py registry/packages.json "$GITHUB_REPOSITORY" > packages.json
+          if [[ ! -f registry/packages.json ]]; then
+            gh release create registry --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Plugin registry" --notes "Plugin package index; see docs/registry.md."
+          fi
           gh release upload registry packages.json --clobber
 
   package-managers:

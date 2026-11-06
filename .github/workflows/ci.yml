@@ -81,7 +81,8 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - run: mvn -B -f java/jdbc/pom.xml package
+      - run: mvn -B -C -f java/jdbc/pom.xml package
+      - run: python3 .github/scripts/jdbc_dependencies.py check
       - name: Check JDBC protocol and committed describe.json
         run: python3 java/jdbc/test_protocol.py
       - run: python3 java/jdbc/test_package.py
@@ -189,6 +190,9 @@ jobs:
       - run: python3 .github/scripts/schema_docs.py check
       - run: python3 .github/scripts/test_release_workflow.py
       - run: python3 .github/scripts/test_registry_index.py
+      - run: python3 .github/scripts/test_release_trust.py
+      - run: python3 .github/scripts/test_cla.py
+      - run: python3 .github/scripts/test_jdbc_dependencies.py
       - run: python3 .github/scripts/test_published_docs.py
       - run: python3 .github/scripts/published_docs.py check
       - run: python3 .github/scripts/test_docs_sections.py

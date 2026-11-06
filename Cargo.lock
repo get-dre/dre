@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "dre-cli"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "dre-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "arrow 59.3.0",
  "calamine",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-document"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2993,16 +2993,18 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fulgur"
-version = "0.40.0"
-source = "git+https://github.com/fulgur-rs/fulgur?rev=8392d70ff2f79866250246d1659ed7abc6583cbb#8392d70ff2f79866250246d1659ed7abc6583cbb"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30c98b4a3583d5292c46e838e5599fab410b85d4f7925ea5bfef40ba99481fc3"
 dependencies = [
  "fulgur-blitz",
 ]
 
 [[package]]
 name = "fulgur-blitz"
-version = "0.40.0"
-source = "git+https://github.com/fulgur-rs/fulgur?rev=8392d70ff2f79866250246d1659ed7abc6583cbb#8392d70ff2f79866250246d1659ed7abc6583cbb"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3481f5503d130817acdb2e3a802960075674435b20a43d204f162443842bf171"
 dependencies = [
  "blitz-dom",
  "blitz-html",
@@ -3031,8 +3033,9 @@ dependencies = [
 
 [[package]]
 name = "fulgur-core"
-version = "0.40.0"
-source = "git+https://github.com/fulgur-rs/fulgur?rev=8392d70ff2f79866250246d1659ed7abc6583cbb#8392d70ff2f79866250246d1659ed7abc6583cbb"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75ebe31e98a676c6a95dad17e68e1a26a8cb8eaf211c0bc8aa9588ddc44c0932"
 dependencies = [
  "getrandom 0.4.3",
  "image",
