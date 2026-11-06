@@ -94,7 +94,8 @@ Rows render and deliver `for_each.concurrency` at a time (default 4; `--row-conc
 `DRE_ROW_CONCURRENCY` override it), each worker reusing its plugin processes from row to row.
 This is separate from `--threads`, and opens no extra warehouse connections.
 `rate:` on a destination entry paces its deliveries across every worker, to stay under an SMTP
-relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`, spaced
+relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`
+(units: `s`/`sec`/`second`, `m`/`min`/`minute`, `h`/`hr`/`hour`, or their plurals), spaced
 evenly (`60/minute` sends one a second). `burst: 20` lets up to 20 go back to back while keeping
 the same average. `burst` must be between 1 and 4294967295. `dre run --rate` and
 `dre release --rate` override every destination's rate for one command. If a service still says

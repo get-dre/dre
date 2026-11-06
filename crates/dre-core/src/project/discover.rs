@@ -74,6 +74,9 @@ impl Loader {
             self.global_files.insert(yf.display.clone());
         }
         let timings_file = yf.display.file_name() == Some(std::ffi::OsStr::new(TIMINGS_FILE));
+        let sets_file = ["sets.yml", "sets.yaml"]
+            .iter()
+            .any(|f| yf.display.file_name() == Some(std::ffi::OsStr::new(f)));
         match &yf.value {
             Value::Null => {}
             Value::Array(items)
@@ -121,12 +124,15 @@ impl Loader {
                 if rest.is_empty() {
                     return;
                 }
-                let looks_like_report = rest.contains_key("queries") || rest.contains_key("name");
+                // Outside reports/, `name:` makes a config fragment only when every other key is
+                // a report key: a docker-compose.yml's `name:` and `services:` aren't one.
+                let looks_like_report = rest.contains_key("queries")
+                    || (rest.contains_key("name") && rest.keys().all(|k| REPORT_KEYS.contains(&k.as_str())));
                 if !in_reports && (timings_file || is_timing_registry(&rest)) {
                     timings.push(yf.clone());
                 } else if in_reports || looks_like_report {
                     self.report_fragment(yf.clone(), rest, fragments);
-                } else if is_set_registry(&rest) {
+                } else if sets_file || is_set_registry(&rest) {
                     sets.push(yf.clone());
                 } else {
                     self.diags.warning(

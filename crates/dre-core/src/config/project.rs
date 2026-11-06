@@ -57,6 +57,9 @@ pub struct ProjectFile {
     /// Whether a per-row output's destination values rendered from `each.*` (addresses, paths) are masked in the console, logs, `run_results.json` and `rows.jsonl`. A `for_each` block's own `mask_row_values` wins.
     #[schemars(extend("default" = true))]
     pub mask_row_values: Option<Located<Loose<bool>>>,
+    /// Whether a `.sql` file under `reports/` that no YAML lists in `queries:` (and no `ref()` uses) runs as an unmanaged report, for quick tests. Off by default: such a file is an error, so a leftover query is never run or delivered by accident.
+    #[schemars(extend("default" = false))]
+    pub allow_unmanaged: Option<Located<Loose<bool>>>,
     /// The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC.
     pub timezone: Option<Located<Loose<String>>>,
     /// The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`.
@@ -123,6 +126,9 @@ pub struct Dispatch {
     /// Packages searched for the variant, first match wins: this project's name and installed packages.
     #[schemars(required, length(min = 1))]
     pub search_order: Option<Loose<Vec<Loose<String>>>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    pub unknown: UnknownKeys,
 }
 
 /// Settings for every report in this folder and the folders below it. Keys starting with `+` are settings; any other key is a subfolder.

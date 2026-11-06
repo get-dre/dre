@@ -92,7 +92,10 @@ fn project(report: &str, ctx: &Context) -> (TempDir, Project) {
 fn project_with_profiles(report: &str, profiles: &str, ctx: &Context) -> (TempDir, Project) {
     let dir = tempfile::tempdir().unwrap();
     let files = [
-        ("dre_project.yml", "name: packs\ndefault_profile: warehouse\n"),
+        (
+            "dre_project.yml",
+            "name: packs\ndefault_profile: warehouse\nallow_unmanaged: true\n",
+        ),
         ("profiles.yml", profiles),
         ("reports/pack/pack.yml", report),
         ("reports/pack/summary.sql", "select 'acme' as client, 12 as total"),
@@ -115,7 +118,7 @@ fn context(host: &MemoryHost) -> Context {
 fn options() -> RunOptions {
     RunOptions {
         // The report's SQL files would run as reports of their own.
-        selector: Some("pack".into()),
+        selector: Some("report:pack".into()),
         date: chrono::NaiveDate::from_ymd_opt(2026, 1, 25),
         ..RunOptions::default()
     }
@@ -763,7 +766,7 @@ fn three_reports(single_writer: bool) -> (MemoryHost, Context, TempDir, Project)
 /// How many workers the plan runs three Bindings on, and whether they hold their events.
 fn planned_workers(ctx: &Context, project: &Project) -> (usize, bool) {
     let opts = RunOptions {
-        selector: Some("pack a b".into()),
+        selector: Some("report:pack a b".into()),
         ..options()
     };
     let p = plan(ctx, project, &opts, &mut Recorder::default(), &mut Vec::new()).unwrap();
@@ -789,7 +792,7 @@ fn bindings_at_once_all_run_and_report_in_declaration_order() {
     for _ in 0..3 {
         let (host, ctx, _dir, project) = three_reports(false);
         let opts = RunOptions {
-            selector: Some("pack a b".into()),
+            selector: Some("report:pack a b".into()),
             ..options()
         };
         let planned: Vec<String> = plan(&ctx, &project, &opts, &mut Recorder::default(), &mut Vec::new())

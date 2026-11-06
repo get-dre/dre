@@ -170,7 +170,7 @@ exit: 1
       }
     ],
     "project": {
-      "checksum": "69dd82f8a1c39e54c656e8036959643e1cc9e27e76c7ba51b39ced8c748a1d0e",
+      "checksum": "3d10c471192ab0fa7b7c36f217219aad2846ba0e4c595ae7bd74249098e7fc4c",
       "default_profile": "local_dev",
       "name": "acme_reports",
       "target": "dev"

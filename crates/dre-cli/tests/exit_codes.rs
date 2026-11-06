@@ -84,8 +84,14 @@ fn validate_exits_1_for_problems_and_2_without_a_project() {
 
 #[test]
 fn validate_strict_turns_warnings_into_failures() {
-    // An unmanaged report: a warning.
-    let p = project(&[("reports/scratch/quick_look.sql", "select 1")]);
+    // An unmanaged report the project allows: a warning.
+    let p = project(&[
+        ("reports/scratch/quick_look.sql", "select 1"),
+        (
+            "dre_project.yml",
+            "name: acme_reports\ndefault_profile: fixture\nallow_unmanaged: true\n",
+        ),
+    ]);
     let out = p.dre("validate", &[]);
     assert_eq!(out.code, 0, "{out:?}");
     assert!(

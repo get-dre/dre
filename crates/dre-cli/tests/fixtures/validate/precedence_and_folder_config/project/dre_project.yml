@@ -13,3 +13,4 @@ reports:
       +vars: {level: regulatory}
       +output:
         format: xlsx
+allow_unmanaged: true

@@ -39,6 +39,9 @@ Then ask: "help me with dre".
    cd my_reports
    ```
 
+   For a password or token, `dre init` asks for the name of the environment variable that holds
+   it and writes `{{ env_var('NAME') }}`; it never stores the secret itself.
+
 3. Check that the project works before editing it:
 
    ```bash

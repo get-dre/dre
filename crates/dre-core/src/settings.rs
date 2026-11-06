@@ -153,8 +153,18 @@ pub fn flag_or_env(
 
 /// `DRE_RUN_DATE`: `run.date`, when it's a valid date.
 pub fn run_date(env: &Env) -> Option<chrono::NaiveDate> {
-    env.setting(RUN_DATE)
-        .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+    check_run_date(env).ok().flatten()
+}
+
+/// `DRE_RUN_DATE`, refusing a value that isn't a `YYYY-MM-DD` date, so a backfill never quietly
+/// runs as today. Checked before any project command starts.
+pub fn check_run_date(env: &Env) -> Result<Option<chrono::NaiveDate>, String> {
+    match env.setting(RUN_DATE) {
+        Some(v) => chrono::NaiveDate::parse_from_str(&v, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| format!("DRE_RUN_DATE: `{v}` isn't a YYYY-MM-DD date (e.g. 2026-09-01)")),
+        None => Ok(None),
+    }
 }
 
 /// `DRE_RUN_AT`: the instant a scheduled run was scheduled for (RFC 3339). Checked before any

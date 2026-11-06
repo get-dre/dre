@@ -121,6 +121,21 @@ impl Loader {
                 true
             }
         };
+        self.allow_unmanaged = match pf.allow_unmanaged {
+            None => false,
+            Some(de::Located {
+                value: Loose::Ok(b), ..
+            }) => b,
+            Some(v) => {
+                self.diags.error(
+                    Code::InvalidField,
+                    file.clone(),
+                    v.line(),
+                    "`allow_unmanaged` must be true or false",
+                );
+                false
+            }
+        };
         let mask_row_values = match pf.mask_row_values {
             None => true,
             Some(de::Located {
@@ -488,6 +503,17 @@ impl Loader {
         for e in list {
             let (ns, order) = match e {
                 Loose::Ok(e) => {
+                    for k in &e.unknown.0 {
+                        self.diags.error(
+                            Code::UnknownKey,
+                            Some(file.to_path_buf()),
+                            Some(k.line),
+                            format!(
+                                "unknown key `{}` in a `dispatch` entry; it has `macro_namespace` and `search_order`",
+                                k.name
+                            ),
+                        );
+                    }
                     let ns = e.macro_namespace.and_then(|n| n.ok().cloned());
                     let order: Option<Vec<String>> = e
                         .search_order

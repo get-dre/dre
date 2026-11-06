@@ -31,6 +31,9 @@ pub struct SetConfig {
     pub vars: Option<Loose<JsonMap>>,
     /// The locale for this Set's number filters (`fr-FR`), above the report's.
     pub locale: Option<Loose<String>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    pub unknown: UnknownKeys,
 }
 
 /// The timings file, `timings.yml`: timing names mapped to timings that any schedule can use with `timing: <name>`.

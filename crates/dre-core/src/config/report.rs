@@ -208,6 +208,8 @@ pub struct SetQuery {
     /// Checks of this query's saved result, run by `dre test`, never by `dre run`. Each entry maps one test name, optionally qualified by package, to `arguments`, `config` and optional `query_results` references to earlier saved queries in this Binding.
     pub data_tests: Option<Loose<Vec<std::collections::BTreeMap<String, crate::data_tests::Settings>>>>,
     pub secret_columns: Option<Loose<Vec<String>>>,
+    #[serde(rename = "$unknown", default)]
+    pub unknown: UnknownKeys,
 }
 
 fn any_map(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -245,7 +247,7 @@ fn set_queries(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
                         "secret_columns": {"type": "array", "items": {"type": "string"}, "description": "Columns whose values are masked in DRE's logs, results and previews, added to the query's own."}
                     },
                     "required": ["query"],
-                    "additionalProperties": true
+                    "additionalProperties": false
                 }
             ]
         }
@@ -284,7 +286,7 @@ pub struct Output {
     pub for_each: Option<Loose<OneOf<ForEach, bool>>>,
     /// A per-row output's file name, with Jinja (`"{{ each.member_id }}_statement.pdf"`). Default: the row's key and the format's extension, under a folder named after the output.
     pub file_name: Option<Loose<String>>,
-    /// When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md.
+    /// When every query of the output returns no rows: `skip` (default) writes and delivers nothing, recorded as `skipped` with reason `no_data`; `continue` writes and delivers it empty, with a warning; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md.
     pub on_empty: Option<Loose<crate::no_data::OnEmpty>>,
     /// File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx.
     #[serde(default)]
@@ -404,6 +406,9 @@ pub struct Template {
     pub file: Option<Loose<String>>,
     /// xlsx only: where each query's data goes in the template. Default: none, so the template is copied as it is.
     pub bindings: Option<Loose<Vec<Loose<TemplateBinding>>>>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    pub unknown: UnknownKeys,
 }
 
 /// One block of data in an xlsx template: a table of a query's result, or a single cell.

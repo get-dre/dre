@@ -375,7 +375,7 @@
         },
         {
           "type": "string",
-          "description": "Drop the query's tab or file; for an output: write and deliver nothing.",
+          "description": "Drop the query's tab or file; for an output (the default): write and deliver nothing.",
           "const": "skip"
         },
         {
@@ -521,7 +521,7 @@
           "description": "A per-row output's file name, with Jinja (`\"{{ each.member_id }}_statement.pdf\"`). Default: the row's key and the format's extension, under a folder named after the output."
         },
         "on_empty": {
-          "description": "When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See \"When there's no data\" in docs/building-reports.md.",
+          "description": "When every query of the output returns no rows: `skip` (default) writes and delivers nothing, recorded as `skipped` with reason `no_data`; `continue` writes and delivers it empty, with a warning; `fail` fails the run. A query's own `on_empty` wins. See \"When there's no data\" in docs/building-reports.md.",
           "$ref": "#/$defs/OnEmpty"
         },
         "extension": {
@@ -836,7 +836,7 @@
                 "required": [
                   "query"
                 ],
-                "additionalProperties": true
+                "additionalProperties": false
               }
             ]
           }

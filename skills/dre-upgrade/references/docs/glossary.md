@@ -83,7 +83,8 @@ installing dependencies. A project can use the default registry or specify anoth
 ## Report
 
 A [YAML declaration of SQL queries and outputs](building-reports.md).
-An SQL file without a report declaration is an unmanaged report, intended for quick tests.
+An SQL file without a report declaration is an unmanaged report, intended for quick tests. It
+runs only when `allow_unmanaged: true` in `dre_project.yml`; otherwise it's an error.
 
 ## run_results.json
 

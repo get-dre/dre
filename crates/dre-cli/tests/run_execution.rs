@@ -29,7 +29,7 @@ fn project(files: &[(&str, &str)]) -> TestProject {
     let mut all = vec![
         (
             "dre_project.yml",
-            "name: acme_reports\ndefault_profile: warehouse\n",
+            "name: acme_reports\ndefault_profile: warehouse\nallow_unmanaged: true\n",
         ),
         ("dependencies.yml", PLUGINS),
     ];
@@ -112,7 +112,7 @@ fn a_tab_with_no_rows_still_gets_its_column_names() {
     let p = project(&[
         (
             "reports/fin/r/r.yml",
-            "queries:\n  - {query: none, tab_name: Nothing yet}\noutput: {format: xlsx}\n",
+            "queries:\n  - {query: none, tab_name: Nothing yet}\noutput: {format: xlsx, on_empty: continue}\n",
         ),
         (
             "reports/fin/r/none.sql",
@@ -465,7 +465,7 @@ fn unmanaged_reports_open_read_only_unless_they_create_temp_objects() {
     let p = project(&[
         (
             "dre_project.yml",
-            "name: acme_reports\ndefault_profile: fixture\n",
+            "name: acme_reports\ndefault_profile: fixture\nallow_unmanaged: true\n",
         ),
         ("reports/scratch/reads.sql", "select 1 as n"),
     ]);
