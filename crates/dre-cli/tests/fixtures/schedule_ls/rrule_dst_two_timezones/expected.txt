@@ -61,7 +61,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "new_york_0230"
         ],
@@ -90,7 +90,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "sydney_0230"
         ],
@@ -119,7 +119,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "new_york_0230"
         ],
@@ -148,7 +148,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "sydney_0230"
         ],
@@ -177,7 +177,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "new_york_0230"
         ],
@@ -206,7 +206,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "sydney_0230"
         ],

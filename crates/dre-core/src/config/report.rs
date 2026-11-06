@@ -11,6 +11,7 @@ use serde::de::IgnoredAny;
 use super::de::{Located, Loose, Map, Maybe, OneOf, UnknownKeys};
 
 type JsonMap = serde_json::Map<String, serde_json::Value>;
+type Destinations = OneOf<Destination, Vec<Loose<Destination>>>;
 
 /// One `queries:` item: a query's name, or a query with settings.
 pub type QueryItem = Located<Loose<OneOf<String, QueryEntry>>>;
@@ -265,15 +266,18 @@ pub struct Output {
     /// Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs.
     #[schemars(length(min = 1))]
     pub queries: Option<Loose<Vec<String>>>,
-    /// A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`.
+    /// A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. `null` clears an inherited condition.
     #[serde(default)]
     #[schemars(schema_with = "string_or_bool")]
-    pub when: Option<Loose<OneOf<String, bool>>>,
-    /// Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path.
+    pub when: Maybe<Option<Loose<OneOf<String, bool>>>>,
+    /// Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. `null` clears inherited destinations.
     #[serde(default)]
     #[schemars(schema_with = "destination_or_list")]
-    pub destination: Option<Loose<OneOf<Destination, Vec<Loose<Destination>>>>>,
-    pub template: Option<Loose<Template>>,
+    pub destination: Maybe<Option<Loose<Destinations>>>,
+    /// A template for xlsx, html or pdf. `null` clears an inherited template.
+    #[serde(default)]
+    #[schemars(schema_with = "template_or_null")]
+    pub template: Maybe<Option<Loose<Template>>>,
     /// One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md.
     #[serde(default)]
     #[schemars(schema_with = "for_each_or_false")]
@@ -434,7 +438,7 @@ pub struct TemplateBinding {
 }
 
 fn string_or_bool(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"type": ["string", "boolean"]})
+    schemars::json_schema!({"type": ["string", "boolean", "null"], "x-dre-null": true})
 }
 
 fn extension(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -445,8 +449,13 @@ fn extension(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 fn destination_or_list(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let destination = g.subschema_for::<Destination>();
     schemars::json_schema!({
-        "oneOf": [destination, {"type": "array", "minItems": 1, "items": destination}]
+        "oneOf": [destination, {"type": "array", "minItems": 1, "items": destination}, {"type": "null"}], "x-dre-null": true
     })
+}
+
+fn template_or_null(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let template = g.subschema_for::<Template>();
+    schemars::json_schema!({"oneOf": [template, {"type": "null"}], "x-dre-null": true})
 }
 
 fn attach(_: &mut schemars::SchemaGenerator) -> schemars::Schema {

@@ -322,7 +322,7 @@ impl RunSummary {
     }
 
     /// The exit code (see docs/exit-codes.md): 130, 143 or 124 for a cancelled or timed-out run;
-    /// 2 when nothing ran because the selection or a profile is wrong; 1 when a Binding failed;
+    /// 75 when a Binding is busy; 2 when the selection or a profile is wrong; 1 when a Binding failed;
     /// else 0.
     pub fn exit_code(&self) -> u8 {
         if let Some(r) = self.cancelled {
@@ -337,6 +337,12 @@ impl RunSummary {
             .iter()
             .filter(|o| matches!(o.status, Status::Error | Status::Cancelled | Status::TimedOut))
             .collect();
+        if failed
+            .iter()
+            .any(|o| o.error_code == Some(ErrorCode::Core(Code::RunInProgress)))
+        {
+            return 75;
+        }
         // Every Binding that failed was refused before it started (already running): nothing ran.
         if !failed.is_empty()
             && failed.iter().all(|o| {

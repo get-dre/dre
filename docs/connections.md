@@ -213,7 +213,7 @@ connections:
   running Bindings, and each Binding's lines print together when it finishes.
 - Peak memory grows with `threads` (a large xlsx is built in memory): lower it if a run uses too
   much.
-- Only `dre run` runs Bindings at once; `dre validate --live`, `dre compile` and `--dry-run` run
+- `dre run`, `dre test` and `dre build` run Bindings at once; `dre validate --live` and `dre compile` run
   them one at a time.
 
 ## In templates

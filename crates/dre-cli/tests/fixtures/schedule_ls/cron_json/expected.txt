@@ -91,7 +91,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "close_monthly"
         ],
@@ -122,7 +122,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "flash_daily"
         ],
@@ -151,7 +151,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "regulatory"
         ],
@@ -182,7 +182,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "flash_daily"
         ],
@@ -211,7 +211,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "regulatory"
         ],

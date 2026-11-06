@@ -161,7 +161,7 @@ fn run_query_feeds_rendering_on_the_bindings_own_session_even_in_dry_run() {
             "select {{ region_columns() }} from regions\n",
         ),
     ]);
-    p.dre("run", &["pivot", "--dry-run"]).ok();
+    p.dre("compile", &["pivot"]).ok();
     assert_eq!(
         p.read("target/compiled/pivot/default/pq.sql"),
         "select sum(case when region = 'amer' then amount end) as amer, sum(case when region = 'apac' then amount end) as apac, \

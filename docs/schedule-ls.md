@@ -101,7 +101,7 @@ expand. Use `--split` when your scheduler tracks each report/Set separately, and
       ],
       "vars": {"period": "month"},
       "invocation": {
-        "argv": ["dre", "run", "--schedule", "close_monthly"],
+        "argv": ["dre", "build", "--schedule", "close_monthly"],
         "env": {"DRE_RUN_AT": "2026-09-30T20:00:00Z", "DRE_RUN_DATE": "2026-10-01"}
       }
     }
@@ -130,7 +130,7 @@ expand. Use `--split` when your scheduler tracks each report/Set separately, and
 
 ### Identity and change
 
-- A schedule is identified by its name, the same name `dre run --schedule` takes. A rename is a
+- A schedule is identified by its name, the same name `dre build --schedule` takes. A rename is a
   removal plus an addition.
 - A schedule missing from a `complete` listing has been removed or renamed: retire its future
   occurrences.
@@ -144,7 +144,7 @@ retried and tracked on its own. The key adds `/<report>/<binding>`, `bindings` h
 the invocation narrows the run to it:
 
 ```json
-"argv": ["dre", "run", "--schedule", "close_monthly", "-s", "sales_summary", "--set", "client_a"]
+"argv": ["dre", "build", "--schedule", "close_monthly", "-s", "sales_summary", "--set", "client_a"]
 ```
 
 That run keeps the schedule's vars and timezone, and renders exactly what the same Binding renders
@@ -153,7 +153,7 @@ in the full scheduled run.
 ### Problems
 
 A rule that can't be expanded (`schedule-not-expandable`, e.g. a rule part that doesn't fit its
-`FREQ`) is listed under problems, without occurrences; `dre run --schedule` still runs it.
+`FREQ`) is listed under problems, without occurrences; `dre build --schedule` still runs it.
 
 These are errors, so the project doesn't load and `dre schedule ls` stops (on 0.1.x they were
 warnings, listed here as problems):

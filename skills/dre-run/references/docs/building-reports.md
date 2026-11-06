@@ -456,9 +456,18 @@ Use `-v` or `--verbose` for each step (`--log-level debug` is equivalent), `-q` 
 for only errors and the final summary, or `--log-level info` for normal output. `--color always`
 keeps ANSI color for a terminal recorder; `--color never` keeps saved logs plain.
 
+## Clear inherited output settings
+
+Since 0.12, `destination: null`, `when: null` and `template: null` clear the inherited value
+from `default_output`, folder `+output` or the report's output. Omitting a key keeps inheritance.
+For example, `output: {destination: null, when: null}` keeps the file locally and removes an
+inherited condition. A Set can use the same overrides.
+
 ## Preview, backfill and accept an intentional schema change
 
-`dre run monthly --dry-run` renders SQL without executing report queries. Templates calling
+Since 0.12, `dre compile` replaces the removed dry-run flag on `dre run`.
+
+`dre compile monthly` renders SQL without executing report queries. Templates calling
 `run_query()` or `columns()` can still connect while rendering. Use `--preview` (100 rows by
 default) or `--preview 10` to execute a sample and inspect files without delivery.
 

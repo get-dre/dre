@@ -135,7 +135,7 @@ fn profile_reads_any_profile_and_output_paths_can_use_both() {
         "select '{{ profile('cloud').account }}', '{{ profile('reports_s3').type }}', '{{ profile('shared', role='destination').type }}'\n",
     );
     assert_eq!(compiled(&p, &[]), "select 'acme', 'local', 'local'\n");
-    let r = p.dre_env("run", &["-s", "monthly", "--dry-run", "-s", "monthly"], &[SECRET]);
+    let r = p.dre_env("compile", &["-s", "monthly"], &[SECRET]);
     r.ok();
     p.dre_env("validate", &["-s", "monthly"], &[SECRET])
         .ok()

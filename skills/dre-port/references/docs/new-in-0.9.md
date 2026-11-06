@@ -44,7 +44,7 @@ those files. Filter or aggregate in SQL when you need fewer copies; a document's
   `fixed_width`. Per-row splitting rejects a query name containing `/`.
 - `dre plugin list` gives a different error when a package manifest names no plugin. Git macro
   packages clone into temporary `dre_deps/.clone-*` folders.
-- With JSON logs, a template query that fails during `dre compile` or `dre run --dry-run` has
+- With JSON logs, a template query that fails during `dre compile` has
   `error_code: compile-needs-run`, rather than `run-failed`.
 - An output key set to `null` in a layer inherits the outer value. For example,
   `destination: null` in a Set inherits the report's destination.

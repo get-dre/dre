@@ -71,9 +71,10 @@ pub fn plan<'a>(
     }
     let selected = match &opts.schedule {
         Some(name) => {
-            if project.schedule(name).is_none() {
+            let Some(entry) = project.schedule(name) else {
                 return Err(Error::new(Code::InvalidSelector, unknown_schedule(project, name)));
-            }
+            };
+            check_firing(project, entry, opts)?;
             schedule_bindings(project, name, opts).map_err(|e| Error::new(Code::InvalidSelector, e))?
         }
         None => select(project, opts, sink, refused)?,
@@ -371,6 +372,55 @@ fn schedule_bindings<'a>(
         ));
     }
     Ok(picked)
+}
+
+/// Refuse dispatches that the schedule would not emit. A plain report run is the manual path.
+fn check_firing(
+    project: &Project,
+    entry: &crate::project::ScheduleEntry,
+    opts: &RunOptions,
+) -> Result<(), Error> {
+    let refused = |reason: &str| {
+        Error::new(
+            Code::InvalidSelector,
+            format!(
+                "schedule `{}` {reason}; run its reports directly for a manual run",
+                entry.name
+            ),
+        )
+    };
+    if !entry.enabled {
+        return Err(refused("is paused"));
+    }
+    let tz = crate::occurrences::firing_tz(project, entry);
+    if let Some(at) = opts.scheduled_at {
+        let to = at
+            .checked_add_signed(chrono::Duration::seconds(1))
+            .ok_or_else(|| refused("has an out-of-range firing instant"))?;
+        let window = crate::occurrences::Window { from: at, to };
+        let fired = crate::occurrences::expand(&entry.schedule, tz, &window).map_err(|e| refused(&e))?;
+        if !fired.contains(&at) {
+            return Err(refused("does not fire at DRE_RUN_AT"));
+        }
+    } else {
+        let date = opts
+            .date
+            .unwrap_or_else(|| chrono::Utc::now().with_timezone(&tz).date_naive());
+        let excluded = entry
+            .schedule
+            .get("except")
+            .and_then(Json::as_array)
+            .is_some_and(|dates| dates.iter().any(|d| d.as_str() == Some(&date.to_string())));
+        let added = entry
+            .schedule
+            .get("also")
+            .and_then(Json::as_array)
+            .is_some_and(|dates| dates.iter().any(|d| d.as_str() == Some(&date.to_string())));
+        if excluded && !added {
+            return Err(refused("excludes this date"));
+        }
+    }
+    Ok(())
 }
 
 /// The usage error for `--schedule` with a name that isn't declared.

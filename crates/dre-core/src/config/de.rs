@@ -214,6 +214,16 @@ pub enum Maybe<T> {
     Given(T),
 }
 
+impl<T> Maybe<Option<T>> {
+    /// Read the resolved value after inheritance has been applied.
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Self::Absent => None,
+            Self::Given(value) => value,
+        }
+    }
+}
+
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Maybe<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         T::deserialize(d).map(Maybe::Given)

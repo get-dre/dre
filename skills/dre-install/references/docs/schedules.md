@@ -26,7 +26,7 @@ report can have several, each with its own vars:
 ```
 
 ```bash
-DRE_RUN_AT=2026-08-31T20:00:00Z dre run --schedule close_monthly
+DRE_RUN_AT=2026-08-31T20:00:00Z dre build --schedule close_monthly
 ```
 
 `--schedule` runs exactly the Bindings that schedule targets. Its `vars` sit above the report's and
@@ -102,6 +102,11 @@ schedule-name rule. An unknown timing is an error and an unused one a warning. T
 
 ## Skip dates, add dates, pause
 
+Since 0.12, schedule invocations use `dre build`, so data tests run before outputs and delivery.
+A scheduled run with `DRE_RUN_AT` must match a firing in the schedule’s timezone. With only
+`DRE_RUN_DATE` (or today there), exception dates are refused; `also` wins over `except`.
+These checks apply to both `dre run --schedule` and `dre build --schedule`.
+
 ```yaml
 - name: weekday_flash
   report: sales_summary
@@ -121,8 +126,8 @@ schedule-name rule. An unknown timing is an error and an unused one a warning. T
   one time of day: a cron with one minute and hour, `at`, or a rule with one `BYHOUR`. A date it
   already fires on is still one firing, and a date in both lists fires.
 - `enabled: false` pauses a schedule without deleting it. It keeps its name and settings,
-  `dre schedule ls` lists it as paused with no occurrences, and `dre run --schedule` still runs it
-  by hand.
+  `dre schedule ls` lists it as paused with no occurrences. Both `dre run --schedule` and
+  `dre build --schedule` refuse paused schedules. Select the reports directly for a manual run.
 
 ## Run one report or Set of a schedule
 
@@ -130,7 +135,7 @@ A schedule that runs several Bindings can run just one of them, keeping the sche
 timezone:
 
 ```bash
-dre run --schedule close_monthly -s sales_summary --set client_b
+dre build --schedule close_monthly -s sales_summary --set client_b
 ```
 
 Selecting something the schedule doesn't run is an error that lists what it does run. This is the
