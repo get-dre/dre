@@ -191,7 +191,7 @@ Capabilities:
 | Capability | Meaning |
 |---|---|
 | `sessions` | Source: one session (connection) is held across every request until `close`, so temp tables and session settings persist. Core refuses to run a Binding with more than one statement on a source without it. |
-| `read_only` | Source: honours `read_only: true` on `open`. Required by `dre query`, except for Databricks; see the session limits below. |
+| `read_only` | Source: honours `read_only: true` on `open`. Used by `dre query` and catalogue discovery; see the session limits below. |
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
 | `catalog` | Source: can discover accessible relations through native database metadata. |
@@ -303,11 +303,8 @@ A file format's `describe` reply must supply `format_properties` for DRE 0.12:
  "format_properties":{"extension":"csv","layout":"single_table"}}
 ```
 
-`extension` is a bare suffix without any dot, `/`, `\`, whitespace or control character.
-It also rejects the reserved Windows filename characters `:`, `<`, `>`, `"`, `|`, `?` and `*`.
-An empty string means no extension. These rules apply to the plugin's metadata, before file
-prediction; do not send a full filename or a leading dot. `layout` declares behavior
-independently of the plugin's name:
+`extension` has no leading dot, path separator, embedded dot or whitespace; an empty string
+means no extension. `layout` declares behavior independently of the plugin's name:
 
 | Layout | Core behavior |
 |---|---|
@@ -329,11 +326,8 @@ Sources enabling `dre query` supply `sql_dialect` in `describe`. The policy name
 (`generic`, `duckdb`, `postgres` or `databricks`), `identifier_quote`, `identifier_case`
 (`insensitive`, `lower_unless_quoted` or `upper_unless_quoted`), `literal_style` (`doubling` or
 `hex`), and explicit `denied_functions` and `file_formats` lists. Empty lists are explicit
-policies; omitted safety fields and unknown policy keys are invalid. `identifier_quote` must
-be a double quote or a backtick. Entries in `denied_functions` and `file_formats` must be
-nonempty ASCII letters, digits or underscores. A hex policy supplies `hex_literal` with
-exactly one `{hex}` placeholder; a doubling policy leaves it out. `read_only_notice` is optional
-and, when present, must contain non-whitespace text; it documents the permission boundary
+policies; omitted safety fields are invalid. A hex policy supplies `hex_literal` with exactly
+one `{hex}` placeholder. `read_only_notice` is optional; it documents the permission boundary
 when the source cannot provide a database-enforced read-only session. Missing or invalid
 policies refuse `dre query`; they never enable a permissive default. A separately advertised
 `identifier_quote` must agree with the policy.
@@ -413,10 +407,11 @@ This is an engine restriction, not an operating-system sandbox. The Rust SDK's
 `open_sandboxed` defaults to read-only `open`; the Go SDK falls back to `OpenReadOnly`.
 Authors must override those hooks for additional engine restrictions.
 
-`dre query` requires the `read_only` capability and sends both flags as true. Databricks is
-the current exception: it opens a normal session after core's single-SELECT SQL checks.
-Use a read-only database role there; SQL validation does not replace database permissions.
-Other sources without `read_only` are refused. Older plugins may ignore `sandbox`, so database
+`dre query` requires a valid `sql_dialect` policy. When `read_only` is advertised it sends
+both flags as true. A policy with an explicit `read_only_notice` may instead use a normal
+session after the single-query checks; Databricks uses this path. Use a read-only database
+role there: SQL validation does not replace database permissions. Sources with neither
+read-only support nor an explicit policy notice are refused. Older plugins may ignore `sandbox`, so database
 permissions remain the access boundary even when the source supports read-only sessions.
 
 ```json

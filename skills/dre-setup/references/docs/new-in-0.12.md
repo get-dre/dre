@@ -56,6 +56,21 @@ also omit their old root format/output/destination aliases. A busy selected Bind
 `--output-name` refuses a per-row first output instead of silently ignoring the override.
 Use the output's per-row naming configuration instead.
 
+## Plugin-owned format and SQL behavior
+
+Core no longer infers file extensions, query grouping, workbook rules or document context
+from a format's name. File plugins must advertise `format_properties`. The candidate versions
+are CSV 1.2.0, document 1.6.0, fixed_width 1.1.0, parquet 1.1.0 and XLSX 1.2.0; install their
+releases before upgrading core. These versions are prerequisites, not a claim that this
+unreleased candidate or its plugins have been published.
+
+Read-only query validation uses the source's `sql_dialect` policy. DuckDB 1.4.0, PostgreSQL
+1.6.0 and Databricks 1.4.0 supply that policy and native catalogue discovery. A source without
+it cannot serve `dre query`, even when it supports a read-only connection; this currently
+includes ClickHouse and generic JDBC. JDBC's native catalogue discovery remains available.
+No missing policy falls back to generic SQL validation. See the [plugin protocol](protocol.md)
+for custom-plugin migration and the exact metadata contract.
+
 ## Legacy configuration and storage
 
 The `sources:` alias for profile `connections:`, `packages.yml` as a dependency filename,

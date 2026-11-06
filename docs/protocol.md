@@ -191,7 +191,7 @@ Capabilities:
 | Capability | Meaning |
 |---|---|
 | `sessions` | Source: one session (connection) is held across every request until `close`, so temp tables and session settings persist. Core refuses to run a Binding with more than one statement on a source without it. |
-| `read_only` | Source: honours `read_only: true` on `open`. Required by `dre query`, except for Databricks; see the session limits below. |
+| `read_only` | Source: honours `read_only: true` on `open`. Used by `dre query` and catalogue discovery; see the session limits below. |
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
 | `catalog` | Source: can discover accessible relations through native database metadata. |
@@ -413,10 +413,11 @@ This is an engine restriction, not an operating-system sandbox. The Rust SDK's
 `open_sandboxed` defaults to read-only `open`; the Go SDK falls back to `OpenReadOnly`.
 Authors must override those hooks for additional engine restrictions.
 
-`dre query` requires the `read_only` capability and sends both flags as true. Databricks is
-the current exception: it opens a normal session after core's single-SELECT SQL checks.
-Use a read-only database role there; SQL validation does not replace database permissions.
-Other sources without `read_only` are refused. Older plugins may ignore `sandbox`, so database
+`dre query` requires a valid `sql_dialect` policy. When `read_only` is advertised it sends
+both flags as true. A policy with an explicit `read_only_notice` may instead use a normal
+session after the single-query checks; Databricks uses this path. Use a read-only database
+role there: SQL validation does not replace database permissions. Sources with neither
+read-only support nor an explicit policy notice are refused. Older plugins may ignore `sandbox`, so database
 permissions remain the access boundary even when the source supports read-only sessions.
 
 ```json
