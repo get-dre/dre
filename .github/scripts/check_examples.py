@@ -266,7 +266,8 @@ def check(dre, plugins, names):
                 run(project, "run", "--set", "all")
             else:
                 run(project, "run")
-            assert all(r["status"] == "success" for r in records(project))
+            expected_status = "succeeded" if have >= (0, 12, 0) else "success"
+            assert all(r["status"] == expected_status for r in records(project))
             print(name + ": validated and ran locally")
 
         for name in ("tutorial", "regional-reports"):
