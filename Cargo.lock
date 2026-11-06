@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "dre-protocol"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "arrow 59.3.0",
  "libc",

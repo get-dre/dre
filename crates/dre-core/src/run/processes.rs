@@ -69,6 +69,13 @@ pub(super) struct Lease {
     fallback: LogSink,
 }
 
+impl Lease {
+    /// Close these processes instead of handing them to the next worker.
+    pub fn discard(mut self) {
+        self.processes.take();
+    }
+}
+
 impl Deref for Lease {
     type Target = Processes;
     fn deref(&self) -> &Self::Target {

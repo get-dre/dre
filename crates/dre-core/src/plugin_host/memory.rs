@@ -47,6 +47,8 @@ pub struct Script {
     /// `(call, detail, message)`: every such call with this detail (what [`MemoryHost::calls`]
     /// shows after the call's name) fails with `message`, whatever order calls arrive in.
     failures_on: Vec<(Call, String, String)>,
+    /// `(call, detail)`: every such call panics, as a bug in core would.
+    panics_on: Vec<(Call, String)>,
     /// How long each such call takes; a cancel ends the wait early with an error.
     delays: BTreeMap<Call, Duration>,
     logs: BTreeMap<Call, String>,
@@ -85,6 +87,12 @@ impl Script {
     pub fn fail_on(mut self, call: Call, detail: &str, message: &str) -> Script {
         self.failures_on
             .push((call, detail.to_string(), message.to_string()));
+        self
+    }
+
+    /// Every `call` whose detail is `detail` panics.
+    pub fn panic_on(mut self, call: Call, detail: &str) -> Script {
+        self.panics_on.push((call, detail.to_string()));
         self
     }
 
@@ -301,6 +309,14 @@ impl Scripted {
             .iter()
             .find(|(c, at, _)| *c == call && *at == n)
             .map(|(_, _, message)| message);
+        if self
+            .script
+            .panics_on
+            .iter()
+            .any(|(c, d)| *c == call && d == detail)
+        {
+            panic!("scripted panic on {call:?} {detail}");
+        }
         let by_detail = self
             .script
             .failures_on

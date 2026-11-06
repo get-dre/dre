@@ -786,3 +786,18 @@ fn masked_schema_name_collisions_remain_distinct_and_detect_drift() {
     );
     p.dre("run", &["secret"]).failed().says("changed type");
 }
+
+#[test]
+fn a_byday_ending_in_a_multibyte_character_is_an_invalid_day() {
+    for day in ["MO\u{2026}", "\u{20ac}"] {
+        let schedules =
+            format!("- name: weekly\n  report: sales_summary\n  rrule: \"FREQ=WEEKLY;BYDAY={day}\"\n");
+        let p = project(&[("schedules.yml", &schedules)]);
+        let v = p.dre("validate", &[]);
+        assert_ne!(v.code, 101, "{v:?}");
+        assert!(
+            format!("{}{}", v.stdout, v.stderr).contains(&format!("`BYDAY` has an invalid day `{day}`")),
+            "{v:?}"
+        );
+    }
+}

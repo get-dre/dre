@@ -223,12 +223,12 @@ fn fetch_http(
 
 /// About 1s, then 4s, give or take a quarter.
 fn backoff(attempt: u32) -> Duration {
-    let base = 4f64.powi(attempt as i32 - 1);
+    let base = 4f64.powi(attempt.saturating_sub(1).min(64) as i32);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    Duration::from_secs_f64(base * (0.75 + f64::from(nanos % 1000) / 2000.0))
+    Duration::try_from_secs_f64(base * (0.75 + f64::from(nanos % 1000) / 2000.0)).unwrap_or(Duration::MAX)
 }
 
 fn fetch_once(env: &Env, url: &str, idle: Duration) -> Result<Vec<u8>, Try> {

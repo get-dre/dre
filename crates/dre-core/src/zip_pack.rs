@@ -132,9 +132,9 @@ pub fn build(
         };
         w.start_file(name.as_str(), opts)
             .map_err(|e| format!("can't add {name} to the zip: {e}"))?;
-        let bytes = std::fs::read(f).map_err(|e| format!("can't read {}: {e}", f.display()))?;
-        w.write_all(&bytes)
-            .map_err(|e| format!("can't add {name} to the zip: {e}"))?;
+        // Streamed, so a big output never sits in memory whole.
+        let mut file = File::open(f).map_err(|e| format!("can't read {}: {e}", f.display()))?;
+        std::io::copy(&mut file, &mut w).map_err(|e| format!("can't add {name} to the zip: {e}"))?;
     }
     w.finish()
         .map_err(|e| format!("can't write {}: {e}", to.display()))?

@@ -163,6 +163,27 @@ const PER_ROW: &str = "queries: [members]\noutput:\n  name: letter\n  format: cs
     \x20 destination: {profile: outbox, path: \"out/{{ each.member_id }}.csv\"}\n";
 
 #[test]
+fn a_row_whose_job_panics_fails_alone() {
+    let host = host(Script::new(&[]).panic_on(Call::Deliver, "out/101.csv"));
+    let ctx = context(&host);
+    let (dir, project) = project(PER_ROW, &ctx);
+    let summary = run_once(&ctx, &project, &options());
+    assert!(summary.failed());
+    assert!(
+        host.calls()
+            .contains(&"destination/drop Deliver out/102.csv".to_string())
+    );
+    let fe = &results_json(&dir)["output_results"][0]["for_each"];
+    assert_eq!(
+        (fe["succeeded"].as_u64(), fe["failed"].as_u64()),
+        (Some(1), Some(1)),
+        "{fe}"
+    );
+    let rows = std::fs::read_to_string(dir.path().join(fe["sidecar"].as_str().unwrap())).unwrap();
+    assert!(rows.contains("internal error"), "{rows}");
+}
+
+#[test]
 fn a_retry_delivers_only_the_rows_whose_destination_failed() {
     // Rows deliver on concurrent workers, in no set order: fail member 101's letter by its
     // path, never by call order.

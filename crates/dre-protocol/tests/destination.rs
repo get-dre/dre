@@ -151,3 +151,23 @@ fn a_failed_delivery_is_reported_and_the_plugin_keeps_serving() {
     p.deliver_files(&[f.file("a.csv", "1")], f.connection(), Map::new())
         .unwrap();
 }
+
+#[test]
+fn huge_durations_are_refused_and_long_backoffs_stop_at_the_cap() {
+    use dre_protocol::delivery::{Rules, parse_duration};
+    for v in [
+        json!(1e20),
+        json!("100000000000000000000"),
+        json!("100000000000000000000h"),
+    ] {
+        assert!(parse_duration(&v).is_err(), "{v} was accepted");
+    }
+    let rules = Rules::default();
+    for attempt in [33, 40, 1000, u32::MAX] {
+        assert_eq!(
+            rules.wait(attempt, None),
+            rules.max_retry_wait,
+            "attempt {attempt}"
+        );
+    }
+}

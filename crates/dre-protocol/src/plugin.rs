@@ -18,7 +18,7 @@
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::array::RecordBatch;
@@ -657,9 +657,13 @@ impl Input {
     }
 }
 
+/// How many frames core has sent that the plugin hasn't taken yet: core waits beyond that, so a
+/// slow format plugin never holds a whole result set in memory.
+const QUEUED_FRAMES: usize = 16;
+
 /// Read stdin into `tx`, acting on `cancel` at once rather than queueing it behind the request
 /// it cancels. End of input cancels the running request too: core has gone.
-fn read_stdin(tx: Sender<std::result::Result<Frame, FrameError>>) {
+fn read_stdin(tx: SyncSender<std::result::Result<Frame, FrameError>>) {
     let mut r = BufReader::new(std::io::stdin());
     loop {
         let f = frame::read_frame(&mut r);
@@ -802,7 +806,7 @@ pub fn serve_package(mut plugins: Vec<Plugin>) -> ! {
     assert!(!plugins.is_empty(), "a package serves at least one plugin");
     // Take stdout for frames before anything else can print to it.
     shared();
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = std::sync::mpsc::sync_channel(QUEUED_FRAMES);
     std::thread::spawn(move || read_stdin(tx));
     let mut input = Input { rx };
     let mut out = Output;

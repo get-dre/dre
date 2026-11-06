@@ -9,6 +9,7 @@
 //! - `die`: logs to stderr and exits 5 at start
 //! - `no_sessions`: a normal source that doesn't advertise `sessions`
 //! - `no_check`: a normal source that doesn't advertise `check`
+//! - `stall`: a `stall` format plugin that reads one batch of a `write`, then never reads again
 //! - `close_probe`: speaks the protocol by hand, outside the SDK: answers `hello`, `open` and
 //!   `describe`, fails every `execute` with ``fixture can't run `<sql>` ``, and on a protocol `close`
 //!   after an `open` writes `close` to `$DRE_FIXTURE_CLOSE_FILE`. End of input writes nothing, so
@@ -25,7 +26,10 @@
 //! `log <text>`, `log_prefix <text>`, `panic`, `sleep N` (up to N seconds, until cancelled; the
 //! cancel hook logs `fixture: cancel hook`), `stubborn N` (N seconds, ignoring cancel), `slog <text>` (a `log` message at info, with a
 //! field), `progress` (two progress messages), `coded` (an error with kind `auth` and code
-//! `bad-token`). `check` accepts anything except `bad`.
+//! `bad-token`), `flood N` (N batches of 65,536 rows, logging `fixture: sent <i>` to stderr after
+//! each), `bytes` (a stderr line that isn't UTF-8, then `fixture: after bad bytes`), `orphan` (starts
+//! a copy of itself in `silent` mode that keeps the plugin's stderr open for a minute).
+//! `check` accepts anything except `bad`.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -35,7 +39,8 @@ use arrow::datatypes::{DataType, Field, Schema};
 use dre_protocol::msg::ConnectionField;
 use dre_protocol::msg::LogLevel;
 use dre_protocol::plugin::{
-    About, Destination, ErrorKind, Plugin, PluginError, ResultSink, Source, serve_package, serve_source,
+    About, Destination, ErrorKind, Format, Plugin, PluginError, ResultSets, ResultSink, Source, WriteRequest,
+    serve_format, serve_package, serve_source,
 };
 use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
 use serde_json::{Map, Value};
@@ -107,6 +112,36 @@ impl Source for Fixture {
                     i = end;
                 }
                 Ok(())
+            }
+            "flood" => {
+                let n: usize = arg.parse()?;
+                let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
+                out.begin(schema.clone())?;
+                for i in 0..n {
+                    let b = RecordBatch::try_new(
+                        schema.clone(),
+                        vec![Arc::new(Int64Array::from_iter_values(0..65_536))],
+                    )?;
+                    if !out.batch(b)? {
+                        break;
+                    }
+                    eprintln!("fixture: sent {i}");
+                }
+                Ok(())
+            }
+            "bytes" => {
+                let mut err = std::io::stderr();
+                err.write_all(b"fixture: \xff\xfe is not UTF-8\n")?;
+                err.write_all(b"fixture: after bad bytes\n")?;
+                out.no_result(None)
+            }
+            "orphan" => {
+                std::process::Command::new(std::env::current_exe()?)
+                    .env("DRE_FIXTURE_MODE", "silent")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .spawn()?;
+                out.no_result(None)
             }
             "none" => out.no_result(Some(0)),
             "log" => {
@@ -194,6 +229,7 @@ fn main() {
             std::process::exit(5);
         }
         Ok("close_probe") => close_probe(),
+        Ok("stall") => serve_format(About::new("stall", env!("CARGO_PKG_VERSION")), Stall),
         _ => {}
     }
     if std::env::var("DRE_FIXTURE_MODE").as_deref() == Ok("no_check") {
@@ -268,6 +304,24 @@ fn close_probe() -> ! {
             _ => Response::error("close_probe: unsupported request"),
         };
         let _ = dre_protocol::frame::write_json(&mut out, &Envelope::new(id, reply));
+    }
+}
+
+/// The `stall` format: takes one batch, then stops reading, like a plugin stuck on a slow disk.
+struct Stall;
+
+impl Format for Stall {
+    fn write(
+        &mut self,
+        _req: &WriteRequest,
+        sets: &mut ResultSets<'_>,
+    ) -> dre_protocol::plugin::Result<Vec<String>> {
+        if let Some(mut set) = sets.next_set()? {
+            set.next_batch()?;
+        }
+        loop {
+            std::thread::park();
+        }
     }
 }
 
