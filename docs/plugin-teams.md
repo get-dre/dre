@@ -53,8 +53,8 @@ destinations:
 To create the webhook: in Teams, open the channel's **...** menu > **Workflows**, choose **Post
 to a channel when a webhook request is received**, pick the team and channel, and copy the URL
 it shows. The message arrives as a card: the title in bold, then the text, with bold, italics,
-links and bullets. Teams has no destination options. A message over 15,000 characters is cut
-short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
+links and bullets. Teams has no destination options. A message over 15,000 characters (or a card over
+24,000 bytes, as non-Latin text reaches sooner) is cut short with a note (the full text is in the run's `.md` file and `run_results.json`), with a
 warning. A post Teams rate-limits or answers 503 to is tried again (see [Tries again](plugins.md#tries-again)).
 
 ## Adapt a headline to Teams

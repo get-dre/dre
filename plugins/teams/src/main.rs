@@ -16,8 +16,10 @@ use dre_protocol::plugin::{About, Delivery, Destination, Result, conn_required, 
 use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY};
 use serde_json::{Map, Value, json};
 
-/// The longest text posted, in characters: well inside Teams' 28 KB card limit.
+/// The longest text posted, in characters.
 const MESSAGE_LIMIT: u64 = 15_000;
+/// Teams caps a card at 28 KB; a character takes up to 4 bytes, so the card is measured too.
+const CARD_BYTES: usize = 24_000;
 const CUT_MARKER: &str = "\n… _(cut short: the full message is in the run's .md file)_";
 
 struct Teams;
@@ -46,13 +48,23 @@ impl Destination for Teams {
             return Err(FILES_REFUSED.into());
         }
         let url = conn_required(&d.connection, "webhook_url")?;
-        let (text, cut) = markdown::fit(&m.text, MESSAGE_LIMIT as usize, CUT_MARKER, markdown::to_teams);
+        let mut limit = MESSAGE_LIMIT as usize;
+        let (card, cut) = loop {
+            let (text, cut) = markdown::fit(&m.text, limit, CUT_MARKER, markdown::to_teams);
+            let card = card(&m.title, &text);
+            let bytes = card.to_string().len();
+            if bytes <= CARD_BYTES || limit == 0 {
+                break (card, cut);
+            }
+            // Shrink in proportion to the overshoot (at least one character) and fit again.
+            limit = (limit * CARD_BYTES / bytes).min(limit - 1);
+        };
         if cut {
             dre_protocol::log::warn!(
-                "the message is over the teams limit of {MESSAGE_LIMIT} characters; it was cut short"
+                "the message is over the teams limit of {MESSAGE_LIMIT} characters or {CARD_BYTES} bytes; it was cut short"
             );
         }
-        post(url, &card(&m.title, &text), &d.connection)?;
+        post(url, &card, &d.connection)?;
         Ok("teams channel (webhook)".into())
     }
 

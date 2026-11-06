@@ -610,3 +610,21 @@ fn attached_files_go_with_the_message_in_one_post() {
     let files: Value = serde_json::from_str(&done[0].form["files"]).unwrap();
     assert_eq!(files, json!([{"id": "F1", "title": "detail.xlsx"}]));
 }
+
+#[test]
+fn a_title_over_the_limit_is_cut_short_too() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let title = "t".repeat(5_000);
+    post(
+        &message(&f, &title, "body"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9"}),
+    )
+    .unwrap();
+    let done = calls_to(&calls, "files.completeUploadExternal");
+    let comment = &done[0].form["initial_comment"];
+    assert!(comment.chars().count() <= 4_000, "{}", comment.chars().count());
+    assert!(comment.starts_with("*ttt"), "{comment}");
+}

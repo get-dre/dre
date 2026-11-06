@@ -183,7 +183,7 @@ fn build(
         Kind::Azure => {
             let mut b = MicrosoftAzureBuilder::new()
                 .with_client_options(client.clone())
-                .with_retry(no_retry)
+                .with_retry(no_retry.clone())
                 .with_container_name(bucket);
             let mut account = conn_str(c, "account_name").map(str::to_string);
             let mut endpoint = conn_str(c, "endpoint").map(str::to_string);
@@ -214,6 +214,7 @@ fn build(
             } else if conn_bool(c, "use_managed_identity").unwrap_or(false) {
                 b = MicrosoftAzureBuilder::from_env()
                     .with_client_options(client)
+                    .with_retry(no_retry)
                     .with_container_name(bucket);
             } else if conn_bool(c, "use_azure_cli").unwrap_or(false) {
                 b = b.with_config(AzureConfigKey::UseAzureCli, "true");
@@ -460,6 +461,32 @@ struct ObjStore<'a> {
     store: Arc<dyn ObjectStore>,
 }
 
+/// The part size of a multipart upload, and the largest file sent in one PUT.
+const PART_SIZE: usize = 8 * 1024 * 1024;
+
+impl ObjStore<'_> {
+    /// Stream `local` up in parts, so memory stays flat however large the file is.
+    async fn stream(
+        &self,
+        local: &Path,
+        path: ObjectPath,
+        location: &str,
+    ) -> std::result::Result<(), StoreError> {
+        let mut file = tokio::fs::File::open(local)
+            .await
+            .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
+        let attributes = content_type_attribute(path.as_ref());
+        let mut w = BufWriter::with_capacity(self.store.clone(), path, PART_SIZE).with_attributes(attributes);
+        if let Err(e) = tokio::io::copy(&mut file, &mut w).await {
+            let _ = w.abort().await;
+            return Err(store_error(&format!("upload to {location}"), &e));
+        }
+        w.shutdown()
+            .await
+            .map_err(|e| store_error(&format!("upload to {location}"), &e))
+    }
+}
+
 impl Store for ObjStore<'_> {
     fn caps(&self) -> Caps {
         Caps {
@@ -476,8 +503,21 @@ impl Store for ObjStore<'_> {
         }
         let path = ObjectPath::from(key);
         self.rt.block_on(async {
+            let size = tokio::fs::metadata(local)
+                .await
+                .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?
+                .len();
+            // A conditional upload, refused when an object has the name, is one PUT of the whole
+            // file: object_store has no conditional multipart upload. So a larger file is
+            // checked for, then streamed up in parts like any other.
+            if exclusive && size > PART_SIZE as u64 {
+                return match self.store.head(&path).await {
+                    Ok(_) => Err(StoreError::Exists),
+                    Err(object_store::Error::NotFound { .. }) => self.stream(local, path, &location).await,
+                    Err(e) => Err(store_error(&format!("looking for {key}"), &e)),
+                };
+            }
             if exclusive {
-                // A conditional upload: refused when an object has the name.
                 let bytes = tokio::fs::read(local)
                     .await
                     .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
@@ -493,18 +533,7 @@ impl Store for ObjStore<'_> {
                     Err(e) => Err(store_error(&format!("upload to {location}"), &e)),
                 };
             }
-            let mut file = tokio::fs::File::open(local)
-                .await
-                .map_err(|e| StoreError::Failed(format!("can't read {}: {e}", local.display())))?;
-            let mut w = BufWriter::with_capacity(self.store.clone(), path, 8 * 1024 * 1024)
-                .with_attributes(content_type_attribute(key));
-            if let Err(e) = tokio::io::copy(&mut file, &mut w).await {
-                let _ = w.abort().await;
-                return Err(store_error(&format!("upload to {location}"), &e));
-            }
-            w.shutdown()
-                .await
-                .map_err(|e| store_error(&format!("upload to {location}"), &e))
+            self.stream(local, path, &location).await
         })
     }
 

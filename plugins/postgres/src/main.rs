@@ -413,10 +413,21 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
     cfg.application_name("dre");
     let mode = conn_str(c, "sslmode").unwrap_or("prefer");
     let mut tls = native_tls::TlsConnector::builder();
-    if let Some(root) = conn_str(c, "sslrootcert") {
+    let root = conn_str(c, "sslrootcert");
+    if let Some(root) = root {
+        // Like libpq, `sslrootcert` replaces the system's CAs: only its certificates are trusted.
+        // It may be a bundle (AWS RDS's `global-bundle.pem` holds over 100).
         let pem = std::fs::read(dre_ssh::expand_home(root))
             .map_err(|e| format!("can't read sslrootcert {root}: {e}"))?;
-        tls.add_root_certificate(native_tls::Certificate::from_pem(&pem)?);
+        let certs = native_tls::Certificate::stack_from_pem(&pem)
+            .map_err(|e| format!("can't read sslrootcert {root}: {e}"))?;
+        if certs.is_empty() {
+            return Err(format!("sslrootcert {root} holds no PEM certificate").into());
+        }
+        for cert in certs {
+            tls.add_root_certificate(cert);
+        }
+        tls.disable_built_in_roots(true);
     }
     let tls = match mode {
         "disable" => {
@@ -436,6 +447,11 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
             Some(tls.build()?)
         }
         "verify-ca" => {
+            // Without the host name check, trusting any public CA would accept any site's
+            // certificate, so the CA must be named.
+            if root.is_none() {
+                return Err("`sslmode: verify-ca` needs `sslrootcert`, the CA certificate to trust".into());
+            }
             cfg.ssl_mode(SslMode::Require);
             tls.danger_accept_invalid_hostnames(true);
             Some(tls.build()?)

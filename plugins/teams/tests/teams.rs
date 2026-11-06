@@ -208,3 +208,16 @@ fn an_over_limit_message_is_cut_short_with_a_marker() {
     let total: usize = t[1..].iter().map(|l| l.chars().count() + 1).sum();
     assert!(total <= LIMIT as usize + 1, "{total}");
 }
+
+#[test]
+fn the_limit_counts_bytes_so_a_long_japanese_message_is_cut_short() {
+    let (base, posts) = fake_webhook();
+    // 3 bytes a character in UTF-8: 15,000 characters would be about 45 KB.
+    let long: String = (0..1_000).map(|i| format!("売上レポートの行 {i:04}\n")).collect();
+    post(&message("売上", &long), &format!("{base}/hook")).unwrap();
+    let posts = posts.lock().unwrap();
+    let card = &posts[0].1;
+    assert!(texts(card).last().unwrap().contains("cut short"));
+    let bytes = serde_json::to_vec(card).unwrap().len();
+    assert!(bytes <= 28 * 1024, "{bytes}");
+}

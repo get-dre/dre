@@ -7,7 +7,7 @@
 //! FTPS data connections resume the control connection's TLS session, as most servers require
 //! (vsftpd's `require_ssl_reuse`). A failed upload removes the partial remote file when it can.
 
-use std::net::ToSocketAddrs;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 
 use dre_protocol::msg::{ConnectionField, FieldKind};
@@ -29,7 +29,8 @@ struct Ftp;
 
 /// Connects to the first of `host`'s addresses that answers, like `TcpStream::connect` does:
 /// `localhost` resolves to both `::1` and `127.0.0.1`, and a server may listen on only one.
-/// `rules` gives the connect timeout and the control connection's no-progress timeout.
+/// `rules` gives the connect timeout and the no-progress timeout, for the control connection and
+/// passive data connections.
 fn connect(host: &str, port: u16, rules: &Rules) -> std::result::Result<RustlsFtpStream, String> {
     let mut last = None;
     for addr in (host, port)
@@ -40,7 +41,14 @@ fn connect(host: &str, port: u16, rules: &Rules) -> std::result::Result<RustlsFt
             Ok(ftp) => {
                 let _ = ftp.get_ref().set_read_timeout(Some(rules.timeout));
                 let _ = ftp.get_ref().set_write_timeout(Some(rules.timeout));
-                return Ok(ftp);
+                let (connect_timeout, timeout) = (rules.connect_timeout, rules.timeout);
+                return Ok(ftp.passive_stream_builder(move |addr| {
+                    let s = TcpStream::connect_timeout(&addr, connect_timeout)
+                        .map_err(suppaftp::FtpError::ConnectionError)?;
+                    let _ = s.set_read_timeout(Some(timeout));
+                    let _ = s.set_write_timeout(Some(timeout));
+                    Ok(s)
+                }));
             }
             Err(e) => last = Some(e),
         }
@@ -128,7 +136,10 @@ fn upload(
 ) -> Result<String> {
     let host = conn_required(c, "host")?;
     let port: u16 = match c.get("port") {
-        Some(Value::Number(n)) => n.as_u64().unwrap_or(21) as u16,
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .ok_or("`port` must be a port number")?,
         Some(Value::String(s)) => s.parse().map_err(|_| format!("invalid `port` `{s}`"))?,
         _ => 21,
     };
@@ -136,6 +147,11 @@ fn upload(
     let tls = conn_str(c, "tls").unwrap_or("none");
     if !matches!(tls, "none" | "explicit") {
         return Err(format!("unknown `tls` `{tls}` (none or explicit)").into());
+    }
+    if tls == "none" && conn_str(c, "password").is_some_and(|p| !p.is_empty()) {
+        dre_protocol::log::warn!(
+            "FTP sends the password and the file in plain text; set `tls: explicit` (FTPS) if the server supports it."
+        );
     }
     let (rules, _) = Rules::from_settings(Rules::default(), c, options, &[])?;
     let mut store = FtpStore {

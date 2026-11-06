@@ -372,7 +372,7 @@ fn sslmodes_encrypt_and_verify_like_libpq() {
     let e = try_open(tls_conn(json!({"sslmode": "verify-ca"})).unwrap())
         .err()
         .unwrap();
-    assert!(e.contains("can't connect to Postgres at"), "{e}");
+    assert!(e.contains("`sslmode: verify-ca` needs `sslrootcert`"), "{e}");
     // `verify-full` also checks the host name.
     let e = try_open(tls_conn(json!({"sslmode": "verify-full", "sslrootcert": ca})).unwrap())
         .err()

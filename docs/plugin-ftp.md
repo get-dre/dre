@@ -54,7 +54,8 @@ Set in the report's `output.destination` entry.
 ## Notes
 
 `host`, `port` (21), `username`, `password`, `passive` (default true), and `tls`: `none` or
-`explicit` (FTPS). `tls_accept_invalid_certs` allows self-signed server certificates.
+`explicit` (FTPS). With `tls: none` the password and the file cross the network in plain text,
+and a password gives a warning. `tls_accept_invalid_certs` allows self-signed server certificates.
 
 Paths are relative to the folder the login starts in; a leading `/` means the server's root,
 which on many servers isn't the login folder (`/reports/x.csv` vs `reports/x.csv`). FTPS data
