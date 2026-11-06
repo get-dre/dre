@@ -386,12 +386,18 @@ fn connection<R: BufRead>(
     let mut m = Mapping::new();
     for f in fields.iter().filter(|f| !f.manual) {
         let inherited = source
-            .filter(|_| !f.secret)
             .filter(|s| f.same_as_source.as_deref() == Some(s.kind))
             .and_then(|s| {
                 s.fields
                     .get(f.name.as_str())
                     .and_then(Value::as_str)
+                    .and_then(|v| {
+                        if f.secret {
+                            v.strip_prefix("{{ env_var('")?.strip_suffix("') }}")
+                        } else {
+                            Some(v)
+                        }
+                    })
                     .map(|v| (s.profile, v))
             });
         let default = if let Some((_, v)) = inherited {

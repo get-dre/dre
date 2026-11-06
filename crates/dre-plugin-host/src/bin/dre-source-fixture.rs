@@ -59,7 +59,9 @@ impl Source for Fixture {
             // `same_as_source` matters for the `inbox` destination, which has these fields too.
             ConnectionField::new("path", "where the data lives").same_as_source("fixture"),
             ConnectionField::new("fail", "make `open` fail, with this message").manual(),
-            ConnectionField::new("token", "secret").secret(),
+            ConnectionField::new("token", "secret")
+                .secret()
+                .same_as_source("fixture"),
             // `dre init` must not ask for this one.
             ConnectionField::new("token_text", "the token as text")
                 .secret()
