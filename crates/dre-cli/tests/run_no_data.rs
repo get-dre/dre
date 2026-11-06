@@ -45,8 +45,20 @@ fn output_result(p: &TestProject) -> serde_json::Value {
 }
 
 #[test]
-fn default_continue_writes_an_empty_file_with_headers_and_warns() {
+fn default_skip_writes_and_delivers_nothing() {
     let p = project("queries: [exceptions]\noutput: {format: csv}\n");
+    p.dre("run", &["r"])
+        .ok()
+        .says("no data: `exceptions` returned no rows");
+    let o = output_result(&p);
+    assert_eq!(o["status"], "skipped");
+    assert_eq!(o["reason"], "no_data");
+    assert!(o["files"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn continue_writes_an_empty_file_with_headers_and_warns() {
+    let p = project("queries: [exceptions]\noutput: {format: csv, on_empty: continue}\n");
     p.dre("run", &["r"])
         .ok()
         .says("`exceptions` returned no rows; the output is written empty");
@@ -139,7 +151,7 @@ fn a_set_overrides_on_empty() {
 #[test]
 fn empty_files_keep_their_schema() {
     // parquet: a valid file with the full schema and no rows.
-    let p = project("queries: [exceptions]\noutput: {format: parquet}\n");
+    let p = project("queries: [exceptions]\noutput: {format: parquet, on_empty: continue}\n");
     p.dre("run", &["r"]).ok();
     let f = std::fs::File::open(p.path("target/run/r/default/r.parquet")).unwrap();
     let b = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(f).unwrap();
@@ -150,7 +162,7 @@ fn empty_files_keep_their_schema() {
         0
     );
     // xlsx: the tab with its column names.
-    let p = project("queries: [exceptions]\noutput: {format: xlsx}\n");
+    let p = project("queries: [exceptions]\noutput: {format: xlsx, on_empty: continue}\n");
     p.dre("run", &["r"]).ok();
     let mut wb: Xlsx<_> = open_workbook(p.path("target/run/r/default/r.xlsx")).unwrap();
     let range = wb.worksheet_range("exceptions").unwrap();
@@ -167,7 +179,7 @@ fn empty_files_keep_their_schema() {
     assert_eq!(range.height(), 1);
     // fixed_width: the header record with `header: true`, else empty.
     let p = project(
-        "queries: [exceptions]\noutput:\n  format: fixed_width\n  header: true\n  line_ending: \"\\n\"\n  columns:\n    - {name: id, width: 3}\n    - {name: reason, width: 6}\n",
+        "queries: [exceptions]\noutput:\n  format: fixed_width\n  on_empty: continue\n  header: true\n  line_ending: \"\\n\"\n  columns:\n    - {name: id, width: 3}\n    - {name: reason, width: 6}\n",
     );
     p.dre("run", &["r"]).ok();
     assert_eq!(p.read("target/run/r/default/r.txt"), "id reason\n");

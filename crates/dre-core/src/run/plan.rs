@@ -79,6 +79,9 @@ pub fn plan<'a>(
         }
         None => select(project, opts, sink, refused)?,
     };
+    if opts.output_path.is_some() {
+        check_output_path(&selected).map_err(|e| Error::new(Code::InvalidSelector, e))?;
+    }
     let bindings = parse(ctx, project, opts, selected);
     // Every profile the run uses needs an entry for it, before anything runs.
     let targets =
@@ -90,6 +93,28 @@ pub fn plan<'a>(
         scheduler,
         at_once,
     })
+}
+
+/// `--output-path` replaces one delivery path, so the run must deliver exactly one file to
+/// exactly one place: one Binding whose first output isn't per-row and has one destination.
+fn check_output_path(selected: &[(&Report, Binding)]) -> Result<(), String> {
+    let [(_, b)] = selected else {
+        return Err(format!(
+            "--output-path needs a run of exactly one Binding, but this one has {}; select one report (and `--set <name>`)",
+            selected.len()
+        ));
+    };
+    match b.outputs.first() {
+        Some(o) if o.for_each.is_some() => Err(
+            "--output-path can't replace a per-row output's paths (its first output has `for_each`)".into(),
+        ),
+        Some(o) if o.destinations.len() == 1 => Ok(()),
+        Some(o) => Err(format!(
+            "--output-path needs the first output to have exactly one destination, but it has {}",
+            o.destinations.len()
+        )),
+        None => Err("--output-path: the Binding has no output".into()),
+    }
 }
 
 /// The selected reports' Bindings: their Sets resolved first (prompts happen here), so progress
@@ -443,7 +468,23 @@ pub fn choose_bindings(
         Some("all") => report.bindings.clone(),
         Some(name) => match report.binding(name) {
             Some(b) => vec![b.clone()],
-            None => vec![ad_hoc(project, report, name)],
+            // An ad hoc Set is named in sets.yml, or completed by `--profile`/`--var`; any
+            // other name is a typo that would run the report's base data under it.
+            None if project.set(name).is_some() || opts.profile.is_some() || !opts.vars.is_empty() => {
+                vec![ad_hoc(project, report, name)]
+            }
+            None => {
+                let names: Vec<&str> = report.bindings.iter().filter_map(|b| b.set.as_deref()).collect();
+                let declared = if names.is_empty() {
+                    "it declares no Sets".to_string()
+                } else {
+                    format!("its Sets: {}", names.join(", "))
+                };
+                return Err(format!(
+                    "report `{}` has no Set `{name}` ({declared}) and sets.yml doesn't declare it; for an ad hoc Set, pass `--profile` or `--var` too",
+                    report.name
+                ));
+            }
         },
         None if !report.has_sets => report.bindings.clone(),
         None => {

@@ -244,12 +244,13 @@ struct RunArgs {
     /// (`dre run a b` runs both). Runs every report when omitted.
     selector: Vec<String>,
     /// What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted
-    /// folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
+    /// folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several
+    /// match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
     #[arg(short = 's', long = "select", value_name = "SELECTOR", num_args = 1.., action = clap::ArgAction::Append, conflicts_with = "selector")]
     select: Vec<String>,
     #[command(flatten)]
     project: ProjectArgs,
-    /// Run one Set (declared or ad hoc), or `all` of a report's Sets.
+    /// Run one Set (declared, or ad hoc with --profile/--var), or `all` of a report's Sets.
     #[arg(long)]
     set: Option<String>,
     /// Run the Bindings a schedules.yml entry targets, with its vars. Pass the scheduled
@@ -264,7 +265,8 @@ struct RunArgs {
     /// Override the output file name for this run (the first output, with several).
     #[arg(long)]
     output_name: Option<String>,
-    /// Override the full output (delivery) path for this run (the first output, with several).
+    /// Override the full output (delivery) path for this run: one Binding whose first output
+    /// has one destination.
     #[arg(long)]
     output_path: Option<String>,
     /// Keep normal outputs locally without delivering them to any destination.
@@ -473,7 +475,8 @@ struct ValidateArgs {
     /// may sign in, to compile.
     selector: Vec<String>,
     /// What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted
-    /// folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
+    /// folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several
+    /// match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
     #[arg(short = 's', long = "select", value_name = "SELECTOR", num_args = 1.., action = clap::ArgAction::Append, conflicts_with = "selector")]
     select: Vec<String>,
     #[command(flatten)]
@@ -503,12 +506,13 @@ struct CompileArgs {
     /// Compiles every report when omitted.
     selector: Vec<String>,
     /// What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted
-    /// folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
+    /// folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several
+    /// match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`).
     #[arg(short = 's', long = "select", value_name = "SELECTOR", num_args = 1.., action = clap::ArgAction::Append, conflicts_with = "selector")]
     select: Vec<String>,
     #[command(flatten)]
     project: ProjectArgs,
-    /// Compile one Set (declared or ad hoc), or `all` of a report's Sets.
+    /// Compile one Set (declared, or ad hoc with --profile/--var), or `all` of a report's Sets.
     #[arg(long)]
     set: Option<String>,
 }
@@ -539,7 +543,7 @@ fn main() -> ExitCode {
         return exit::not_started();
     }
     if project_args.is_some()
-        && let Err(e) = settings::run_at(env)
+        && let Err(e) = settings::run_at(env).and_then(|_| settings::check_run_date(env))
     {
         printer.error(&e);
         return exit::not_started();

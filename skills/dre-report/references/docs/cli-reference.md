@@ -37,7 +37,7 @@ dre validate [OPTIONS] [SELECTOR]...
 
 | Option | Default | Description |
 |---|---|---|
-| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
+| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
 | `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
@@ -71,7 +71,7 @@ dre run [OPTIONS] [SELECTOR]...
 
 | Option | Default | Description |
 |---|---|---|
-| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
+| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
 | `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
@@ -79,11 +79,11 @@ dre run [OPTIONS] [SELECTOR]...
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
 | `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
-| `--set <SET>` |  | Run one Set (declared or ad hoc), or `all` of a report's Sets. |
+| `--set <SET>` |  | Run one Set (declared, or ad hoc with --profile/--var), or `all` of a report's Sets. |
 | `--schedule <NAME>` |  | Run the Bindings a schedules.yml entry targets, with its vars. Pass the scheduled instant through DRE_RUN_AT (or the date through DRE_RUN_DATE) so reruns render the same. With a selector and/or --set, run just those of its Bindings. |
 | `--profile <PROFILE>` |  | Use this connection instead of the inherited one (report, Set, folder `+profile`, `default_profile`), e.g. for an ad hoc Set. A query's own `profile:` or a source's wins. |
 | `--output-name <OUTPUT_NAME>` |  | Override the output file name for this run (the first output, with several). |
-| `--output-path <OUTPUT_PATH>` |  | Override the full output (delivery) path for this run (the first output, with several). |
+| `--output-path <OUTPUT_PATH>` |  | Override the full output (delivery) path for this run: one Binding whose first output has one destination. |
 | `--no-deliver` |  | Keep normal outputs locally without delivering them to any destination. |
 | `--output-json <DIR>` |  | Write typed JSON rows per query and isolate this run's outputs/history in DIR. |
 | `--from-results <DIR>` |  | Re-render the outputs from results saved with `--output-json DIR`, without running any query or opening a connection; implies --no-deliver. For designing a template. |
@@ -190,7 +190,7 @@ dre compile [OPTIONS] [SELECTOR]...
 
 | Option | Default | Description |
 |---|---|---|
-| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths. Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
+| `-s, --select <SELECTOR>` |  | What to select (dbt's `--select`): report names, `tag:<tag>`, folder names or dotted folder paths (`report:<name>` or `folder:<path>` when a name is ambiguous). Several match any of them: `-s a b`, `-s a,b`, `-s a -s b` (or `"a;b"`). |
 | `--project-dir <PROJECT_DIR>` | `.` | Project directory (default: the current directory). |
 | `--profiles-dir <PROFILES_DIR>` |  | Directory holding profiles.yml (default: $DRE_PROFILES_DIR, then the project directory if it has a profiles.yml, then ~/.dre). Environment: `DRE_PROFILES_DIR`. |
 | `--no-auto-install` |  | Fail instead of installing declared plugins that are missing. |
@@ -198,7 +198,7 @@ dre compile [OPTIONS] [SELECTOR]...
 | `--target-path <PATH>` |  | Where DRE writes its generated files (default: $DRE_TARGET_PATH, then `target_path` in dre_project.yml, then target/). A local or mounted path, absolute or relative to the project root. Unrelated to `--target`. Environment: `DRE_TARGET_PATH`. |
 | `--var <NAME=VALUE>` |  | Set a variable for `var()`, overriding every other level: `--var name=value`. The value is YAML 1.2 (`false`, `5`, `[a, b]` are typed); quote it to keep text: `--var x='"false"'`. |
 | `--timezone <TIMEZONE>` |  | The run's timezone (IANA name, e.g. Australia/Sydney), above every `timezone:` setting (default: $DRE_TIMEZONE). Environment: `DRE_TIMEZONE`. |
-| `--set <SET>` |  | Compile one Set (declared or ad hoc), or `all` of a report's Sets. |
+| `--set <SET>` |  | Compile one Set (declared, or ad hoc with --profile/--var), or `all` of a report's Sets. |
 
 Example:
 

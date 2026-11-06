@@ -33,10 +33,6 @@ fn project(report: &str) -> (TestProject, std::path::PathBuf) {
                 "reports/c/pack/members.sql",
                 "select * from members order by member_id",
             ),
-            (
-                "reports/c/pack/balances.sql",
-                "select member_id, 10 * member_id as balance from members",
-            ),
         ],
         &profiles,
     );
@@ -192,6 +188,10 @@ fn each_row_gets_its_own_zip_and_password() {
         "queries: [{query: members, secret_columns: [zip_password]}, balances]\noutput:\n\
          \x20 - name: statement\n    format: csv\n    queries: [members, balances]\n    for_each: {query: members, key: member_id}\n\
          \x20   destination: {profile: outbox, path: \"out/{{ each.member_id }}.zip\", zip: {password: \"{{ each.zip_password }}\"}}\n",
+    );
+    p.write(
+        "reports/c/pack/balances.sql",
+        "select member_id, 10 * member_id as balance from members",
     );
     let run = p.dre("run", &["pack", "-v", "--row-concurrency", "1"]);
     run.ok().says("2 succeeded");

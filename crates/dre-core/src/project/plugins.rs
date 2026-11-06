@@ -346,6 +346,18 @@ impl Loader {
                 what: format!("format `{fmt}` is used by {ctx}{note}"),
             });
         }
+        // A `format_options` key is a format too: a typo (`cvs:`) must not pass silently.
+        for fmt in self.format_options.keys() {
+            if used.formats.contains_key(fmt) || crate::formats::Format::new(fmt).is_message() {
+                continue;
+            }
+            uses.push(PluginUse {
+                plugin: PluginId::new(PluginKind::Format, fmt.clone()),
+                file: Some(PathBuf::from(super::PROJECT_FILE)),
+                line: None,
+                what: format!("`format_options` sets options for format `{fmt}`"),
+            });
+        }
         project.plugin_uses = uses;
     }
 

@@ -32,7 +32,8 @@ fn project(report: &str, extra: &[(&str, &str)]) -> TestProject {
     p
 }
 
-const REPORT: &str = "queries: [members, holdings]\noutput:\n  name: statement\n  format: csv\n  for_each: {query: members, key: member_id}\n\
+// `on_empty: continue`: a member with no holdings still gets an (empty) statement.
+const REPORT: &str = "queries: [members, holdings]\noutput:\n  name: statement\n  format: csv\n  on_empty: continue\n  for_each: {query: members, key: member_id}\n\
 \x20 destination: {profile: outbox, path: \"out/{{ each.member_id }}-{{ each.name | lower }}.csv\"}\n";
 
 fn results(p: &TestProject) -> serde_json::Value {
@@ -213,7 +214,7 @@ fn on_row_error_fail_delivers_nothing_when_a_row_fails() {
     let p = project(
         &REPORT
             .replace("key: member_id}", "key: member_id, on_row_error: fail}")
-            .replace("format: csv", "format: csv\n  on_empty: fail"),
+            .replace("on_empty: continue", "on_empty: fail"),
         &[],
     );
     // Member 103 has no holdings: with `on_empty: fail` that row fails, so nobody's is delivered.
@@ -224,10 +225,7 @@ fn on_row_error_fail_delivers_nothing_when_a_row_fails() {
 
 #[test]
 fn on_empty_applies_per_row() {
-    let p = project(
-        &REPORT.replace("format: csv", "format: csv\n  on_empty: skip"),
-        &[],
-    );
+    let p = project(&REPORT.replace("on_empty: continue", "on_empty: skip"), &[]);
     p.dre("run", &["statements"])
         .ok()
         .says("2 succeeded, 1 skipped, 0 failed");
@@ -243,7 +241,7 @@ fn on_empty_applies_per_row() {
 #[test]
 fn an_empty_driver_makes_nothing() {
     let p = project(
-        &REPORT.replace("format: csv", "format: csv\n  on_empty: skip"),
+        &REPORT.replace("on_empty: continue", "on_empty: skip"),
         &[(
             "reports/members/statements/members.sql",
             "select 1 as member_id, 'x' as name where false",

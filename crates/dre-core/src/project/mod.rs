@@ -121,6 +121,7 @@ pub const PROJECT_KEYS: &[&str] = &[
     "dispatch",
     "mask_secrets",
     "mask_row_values",
+    "allow_unmanaged",
     "timezone",
     "locale",
     "week_start",
@@ -1125,6 +1126,7 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
         opts: opts.clone(),
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
+        allow_unmanaged: false,
         default_output: None,
         scope: None,
         report_owners: BTreeMap::new(),
@@ -1149,6 +1151,8 @@ struct Loader {
     diags: Diagnostics,
     /// `format_options:` from the project file: per format, defaults under every output of it.
     format_options: Mapping,
+    /// `allow_unmanaged:` from the project file: a `.sql` file no YAML lists may run.
+    allow_unmanaged: bool,
     /// `default_output:` from the project file: the output every report starts from, over the
     /// built-in one.
     default_output: Option<OutputConfig>,
@@ -1204,6 +1208,28 @@ struct Discovered {
 }
 
 impl Loader {
+    /// A `--var` whose name no project file mentions can't be read by `var()`: a typo that would
+    /// quietly fall back to the template's default.
+    fn warn_unused_vars(&mut self, files: &[PathBuf]) {
+        let mut unseen: BTreeSet<&String> = self.opts.vars.keys().collect();
+        for f in files {
+            if unseen.is_empty() {
+                break;
+            }
+            if let Ok(text) = std::fs::read_to_string(self.root.join(f)) {
+                unseen.retain(|name| !text.contains(name.as_str()));
+            }
+        }
+        for name in unseen {
+            self.diags.warning(
+                Code::UnusedVar,
+                None,
+                None,
+                format!("--var {name}: no project file mentions `{name}`, so no `var()` reads it; check the spelling"),
+            );
+        }
+    }
+
     /// Resolve [`LoadOptions::select`] into the reports later checks cover.
     fn limit_to_selection(&mut self, project: &Project) {
         let catalog = self
@@ -1346,6 +1372,7 @@ impl Loader {
         project.folders = found.folders.clone();
         project.templates.macros = found.macros.clone();
         project.files = found.sources.clone();
+        self.warn_unused_vars(&found.sources);
         let declared = packages::declared(&self.root, &mut self.diags);
         project.templates.packages = packages::resolve(&self.root, &declared, &mut self.diags);
         self.check_macro_namespaces(&project);
@@ -1471,6 +1498,18 @@ impl Loader {
                     format!(
                         "unmanaged report `{name}` has the same name as the report declared in {}; report names must be unique project-wide",
                         other.display()
+                    ),
+                );
+                continue;
+            }
+            // A leftover query must never run or deliver by accident: unmanaged reports are opt-in.
+            if !self.allow_unmanaged {
+                self.diags.error(
+                    Code::UnmanagedReport,
+                    Some(path.clone()),
+                    None,
+                    format!(
+                        "`{name}.sql` isn't listed in any report's `queries:`, so it would run as an unmanaged report; list it in a report YAML, delete it, or set `allow_unmanaged: true` in dre_project.yml to run such files for quick tests"
                     ),
                 );
                 continue;
@@ -1657,6 +1696,7 @@ fn test_loader(root: &Path) -> Loader {
         opts: LoadOptions::default(),
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
+        allow_unmanaged: false,
         default_output: None,
         scope: None,
         report_owners: BTreeMap::new(),

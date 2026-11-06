@@ -114,7 +114,7 @@ How a report's result is written and where it goes. Besides the keys below, each
 | `template` | map (see below) or null |  | A template for xlsx, html or pdf. `null` clears an inherited template. |
 | `for_each` | map (see below) or any |  | One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md. |
 | `file_name` | string |  | A per-row output's file name, with Jinja (`"{{ each.member_id }}_statement.pdf"`). Default: the row's key and the format's extension, under a folder named after the output. |
-| `on_empty` | string |  | When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md. |
+| `on_empty` | string |  | When every query of the output returns no rows: `skip` (default) writes and delivers nothing, recorded as `skipped` with reason `no_data`; `continue` writes and delivers it empty, with a warning; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md. |
 | `extension` | string or boolean or null |  | File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
@@ -208,7 +208,6 @@ A query with settings.
 | `data_tests` | list of map |  | Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
-| _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `var_schema.<name>`
 

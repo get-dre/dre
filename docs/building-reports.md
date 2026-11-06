@@ -370,9 +370,13 @@ says what an output does then, so "the data was empty" is never mistaken for "DR
 
 | `on_empty` | When every query of the output returns no rows | Exit code | `run_results.json` |
 |---|---|---|---|
-| `continue` (default) | written and delivered empty, with a warning naming the queries | 0 | the output's status, `no_data: [queries]` |
-| `skip` | nothing is written or delivered; a "skipped" line names the queries | 0 | `status: skipped`, `reason: no_data` |
+| `skip` (default) | nothing is written or delivered; a "skipped" line names the queries | 0 | `status: skipped`, `reason: no_data` |
+| `continue` | written and delivered empty, with a warning naming the queries | 0 | the output's status, `no_data: [queries]` |
 | `fail` | the run fails before anything is written or delivered | 1 | `error_code: no-data` |
+
+**Breaking in 0.12:** the default was `continue`, so an empty result went out to its
+recipients. Now nothing is sent: the output is recorded `skipped` with reason `no_data`. To send
+empty files as before, set `on_empty: continue` (on `default_output` for the whole project).
 
 Set it on an output, or on a query entry for that query alone. It's inherited like other output
 keys (`default_output`, a folder's `+output`, the report, a Set), so a Set can make one client's
@@ -483,9 +487,14 @@ recipient accepts the intentional column change. A new target path has no previo
 so use the normal persistent target path for the accepted run.
 
 `--output-name corrected.xlsx` changes the first output's filename; `--output-path` replaces
-its delivery path. With multiple outputs these flags do not rename every output.
+its delivery path. With multiple outputs these flags do not rename every output. Since 0.12
+`--output-path` refuses a run that isn't exactly one Binding whose first output has one
+destination and no `for_each`.
 `--profile alternate` replaces only the inherited connection: an explicit query/source profile
-still wins. For an ad hoc variant, pass `--set trial --profile warehouse --var region=AU`.
+still wins. For an ad hoc variant, pass `--set trial --profile warehouse --var region=AU`. Since
+0.12 a `--set` name the report doesn't declare is an error unless sets.yml declares it or
+`--profile`/`--var` complete it, so a typo never runs the base data under a Set's name. A `--var`
+name that no project file mentions gets an `unused-var` warning.
 
 Bound unattended runs with `--timeout 30m`, retain their artifacts with `--keep-runs 7`, and
 use `--threads 2` to run up to two Bindings at once. Queries within a Binding remain ordered.

@@ -39,7 +39,7 @@ fn files() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "dre_project.yml",
-            "name: acme_reports\ndefault_profile: warehouse\ntimezone: UTC\nvars: {level: project, region: emea}\n\
+            "name: acme_reports\ndefault_profile: warehouse\ntimezone: UTC\nallow_unmanaged: true\nvars: {level: project, region: emea}\n\
              reports:\n  finance:\n    +vars: {level: folder}\n",
         ),
         ("dependencies.yml", "plugins:\n  - duckdb\n  - csv\n"),
@@ -238,7 +238,7 @@ fn secrets_are_masked_unless_masking_is_off() {
     let p = project();
     p.write(
         "dre_project.yml",
-        "name: acme_reports\ndefault_profile: warehouse\nvars: {token: hunter2-very-secret}\n",
+        "name: acme_reports\ndefault_profile: warehouse\nallow_unmanaged: true\nvars: {token: hunter2-very-secret}\n",
     );
     p.dre_env("compile", &[], &[("DRE_SECRET_TOKEN", "hunter2-very-secret")])
         .ok();
@@ -251,7 +251,7 @@ fn secrets_are_masked_unless_masking_is_off() {
 
     p.write(
         "dre_project.yml",
-        "name: acme_reports\ndefault_profile: warehouse\nvars: {token: hunter2-very-secret}\nmask_secrets: false\n",
+        "name: acme_reports\ndefault_profile: warehouse\nallow_unmanaged: true\nvars: {token: hunter2-very-secret}\nmask_secrets: false\n",
     );
     p.dre_env("compile", &[], &[("DRE_SECRET_TOKEN", "hunter2-very-secret")])
         .ok();
@@ -375,6 +375,7 @@ fn every_manifest_json_surface_redacts_escaped_secrets() {
         r#"name: acme_reports
 default_profile: warehouse
 timezone: UTC
+allow_unmanaged: true
 vars:
   token: "q\"\\\n\té"
 "#,

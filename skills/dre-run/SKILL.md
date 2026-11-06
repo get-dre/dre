@@ -332,7 +332,8 @@ Read the error: DRE names the report, Binding, file and line. Then:
   `on_orphan_rows: fail`.
 - **`dre release` refuses a file:** it changed since the run (its SHA-256 differs), or the run
   was pruned (`keep_runs`). Run again and review the new files.
-- **No data:** an output skipped with `no_data` did what its `on_empty: skip` says; a run that
+- **No data:** an output skipped with `no_data` did what its `on_empty: skip` (the default since
+  DRE 0.12; `on_empty: continue` sends empty files) says; a run that
   failed with `no-data` had `on_empty: fail` (`topics/no-data.md`).
 - **A plugin can't be installed or started:** `dre deps` installs the project's plugins and says
   what failed; the machine must reach GitHub.

@@ -351,14 +351,35 @@ fn connection<R: BufRead>(
         if !f.choices.is_empty() {
             eprintln!("    One of: {}", f.choices.join(", "));
         }
+        if f.secret {
+            eprintln!(
+                "    A secret: enter the name of the environment variable that holds it (never the value)."
+            );
+        }
         loop {
-            let v = p.input(default.as_deref())?;
+            let mut v = p.input(default.as_deref())?;
             if v.is_empty() && f.required {
                 eprintln!("    `{}` is required.", f.name);
                 continue;
             }
             if v.is_empty() {
                 break;
+            }
+            // A secret is stored only as `env_var('NAME')`, never as typed.
+            if f.secret && !v.contains("{{") {
+                let is_name = v
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !is_name {
+                    eprintln!(
+                        "    That isn't an environment variable name; secrets aren't stored in profiles.yml. Enter the variable's name, e.g. {}.",
+                        env_name(profile, &f.name)
+                    );
+                    continue;
+                }
+                v = format!("{{{{ env_var('{v}') }}}}");
             }
             // Checked as the plugin will check it: a choice, or a whole number.
             if !f.choices.is_empty() && !f.choices.contains(&v) && !v.contains("{{") {
@@ -507,10 +528,22 @@ fn add_profile(
     }
     let mut text = lines.join("\n");
     text.push('\n');
+    // The splice can't follow every hand-written layout (a comment after the section key, other
+    // indentation): write only a file that still parses and holds the new profile.
+    let added = dre_core::config::node::parse(&text)
+        .ok()
+        .is_some_and(|n| n.to_json().get(section).and_then(|s| s.get(name)).is_some());
+    if !added {
+        return Err(format!(
+            "can't add the profile to {} without changing its layout; add this block by hand under `{section}:`:\n{block}",
+            path.display()
+        ));
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, text).map_err(|e| format!("can't write {}: {e}", path.display()))
+    dre_core::fs::write_atomic(path, text.as_bytes())
+        .map_err(|e| format!("can't write {}: {e}", path.display()))
 }
 
 /// `dre init`.

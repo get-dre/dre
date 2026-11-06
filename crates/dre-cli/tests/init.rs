@@ -220,3 +220,41 @@ fn a_new_project_runs_end_to_end() {
         "report,run_date,message\r\nhello,2026-01-25,Hello from DRE\r\n"
     );
 }
+
+#[test]
+fn init_stores_a_secret_only_as_an_environment_variable() {
+    let d = tempfile::tempdir().unwrap();
+    registry(d.path());
+    // A typed password is refused; a bare name becomes `env_var('NAME')`.
+    let answers = "fixture\nwarehouse\n\ndata.duckdb\nhunter2!\nMY_TOKEN\n\nn\n";
+    dre(d.path(), &["init"], answers)
+        .ok()
+        .says("environment variable")
+        .lacks("hunter2!");
+    let profiles = std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap();
+    assert!(
+        profiles.contains("token: \"{{ env_var('MY_TOKEN') }}\""),
+        "{profiles}"
+    );
+    assert!(!profiles.contains("hunter2"), "{profiles}");
+}
+
+#[test]
+fn init_refuses_to_corrupt_a_hand_edited_file() {
+    for existing in [
+        "connections:   # prod + dev\n  old:\n    targets:\n      dev: {type: duckdb}\n",
+        "connections:\n    old:\n        targets:\n            dev: {type: duckdb}\n",
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        registry(d.path());
+        std::fs::create_dir_all(d.path().join("dot-dre")).unwrap();
+        std::fs::write(d.path().join("dot-dre/profiles.yml"), existing).unwrap();
+        dre(d.path(), &["init"], "fixture\nnew\n\ndata.duckdb\n\n\nn\n")
+            .failed()
+            .says("add this block by hand");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap(),
+            existing
+        );
+    }
+}
