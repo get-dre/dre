@@ -112,6 +112,12 @@ updated any more.)
   `plugin.json` and launches only the manifest's executable.
 - `sha256` is the hex SHA-256 of the downloaded file. A download that doesn't match is discarded
   and the install fails. Signatures come after V1.
+- `yanked: true` (with a `yank_reason`) withdraws a version: DRE never picks it for a new install
+  or update, and a `dre.lock` that already pins it keeps working. First-party yanks are listed in
+  `.github/scripts/registry_yanks.json` (`{"<package>": {"<version>": "<reason>"}}`); each index
+  update applies them.
+- Registry and artifact URLs must be `https://` (plain `http://` only on loopback), and a
+  download is refused above 512 MiB.
 
 An index in the earlier schema 1 still works: each entry there is one plugin, with `kind` and
 `name` in place of `provides`, and reads as a package of that one plugin, named after it. Its
@@ -208,7 +214,9 @@ GitHub Release (a pre-release when the version has a suffix such as `-rc.1`), an
 releases DRE itself and touches no package. What each first-party package provides, and its
 description, is in `.github/scripts/packages.json`.
 
-The index update adds every package release it doesn't list yet, not only the one just made, so
+The index update adds only releases built by `release.yml` from a `master` commit with passing
+CI: it checks each new archive's attestation (`gh attestation verify`). It adds every package
+release it doesn't list yet, not only the one just made, so
 several packages can be tagged at once. `gh workflow run release.yml -f tag=registry` runs it on
 its own.
 

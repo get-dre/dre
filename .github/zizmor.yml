@@ -4,12 +4,7 @@ rules:
   dangerous-triggers:
     ignore:
       # The CLA bot has to comment on and set a status for pull requests from forks. It runs no
-      # code from the pull request (no checkout), only the pinned bot action.
-      - cla.yml
-  archived-uses:
-    ignore:
-      # The CLA bot's repository is archived but the action still works; it's pinned by SHA and
-      # holds only this workflow's token. To replace when a maintained equivalent is chosen.
+      # code from the pull request; checkout uses the protected default branch only.
       - cla.yml
   artipacked:
     ignore:

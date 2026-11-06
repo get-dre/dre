@@ -80,6 +80,10 @@ pub struct IndexVersion {
     /// Plugin protocol version this release speaks.
     #[serde(default)]
     pub protocol: u32,
+    /// Withdrawn by the registry: never picked for a new install or update. A `dre.lock` that
+    /// already pins it keeps working.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub yanked: bool,
     /// Platform (see [`platform`]) → artifact.
     pub artifacts: std::collections::BTreeMap<String, Artifact>,
 }
@@ -170,6 +174,15 @@ fn is_github(env: &Env, url: &str) -> bool {
 /// slow but healthy download finishes), and are tried 3 times on connection errors, timeouts,
 /// 429 (honouring `Retry-After`) and 5xx.
 pub fn fetch(ctx: &Context, url: &str) -> Result<Vec<u8>, String> {
+    if url.starts_with("http://") {
+        let uri: ureq::http::Uri = url.parse().map_err(|e| format!("invalid URL: {e}"))?;
+        let host = uri.host().unwrap_or_default().trim_matches(['[', ']']);
+        let loopback =
+            host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        if !loopback {
+            return Err("downloads require HTTPS (HTTP is allowed only on loopback)".into());
+        }
+    }
     if url.starts_with("http://") || url.starts_with("https://") {
         return fetch_http(ctx.env(), url, ctx.http_timeout(), &mut std::thread::sleep);
     }
@@ -182,6 +195,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Seconds a download may receive nothing, by default.
 pub const DEFAULT_HTTP_TIMEOUT: u64 = 60;
 const ATTEMPTS: u32 = 3;
+/// Maximum compressed archive or registry response size, independent of Content-Length.
+const MAX_DOWNLOAD_BYTES: usize = 512 * 1024 * 1024;
 
 /// Why one try failed.
 enum Try {
@@ -232,7 +247,11 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 fn fetch_once(env: &Env, url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
+    let secure = url.starts_with("https://");
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        .https_only(secure)
+        // Loopback HTTP must not redirect to an insecure remote host.
+        .max_redirects(if secure { 10 } else { 0 })
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_recv_response(Some(idle))
         .http_status_as_error(false)
@@ -283,6 +302,15 @@ fn fetch_once(env: &Env, url: &str, idle: Duration) -> Result<Vec<u8>, Try> {
     if !(200..300).contains(&status) {
         return Err(Try::Fail(format!("HTTP {status}")));
     }
+    if resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .is_some_and(|n| n > MAX_DOWNLOAD_BYTES as u64)
+    {
+        return Err(Try::Fail("download exceeds 512 MiB limit".into()));
+    }
     read_with_idle_timeout(resp.into_body().into_reader(), idle)
 }
 
@@ -311,7 +339,12 @@ fn read_with_idle_timeout(
     loop {
         match rx.recv_timeout(idle) {
             Ok(Ok(c)) if c.is_empty() => return Ok(body),
-            Ok(Ok(c)) => body.extend_from_slice(&c),
+            Ok(Ok(c)) => {
+                if c.len() > MAX_DOWNLOAD_BYTES - body.len() {
+                    return Err(Try::Fail("download exceeds 512 MiB limit".into()));
+                }
+                body.extend_from_slice(&c);
+            }
             Ok(Err(e)) => {
                 return Err(Try::Again {
                     why: e.to_string(),
@@ -371,8 +404,8 @@ impl Index {
 }
 
 impl IndexPackage {
-    /// The highest version matching `req` that has an artifact for this platform and speaks a
-    /// protocol this core supports. Pre-releases only when no stable version matches (see
+    /// The highest version matching `req` that has an artifact for this platform, speaks a
+    /// protocol this core supports and isn't yanked. Pre-releases only when no stable version matches (see
     /// [`prefer_stable`]).
     pub fn best(&self, req: &VersionReq) -> Option<&IndexVersion> {
         let plat = platform();
@@ -381,6 +414,7 @@ impl IndexPackage {
             .iter()
             .filter(|v| (dre_protocol::MIN_VERSION..=dre_protocol::MAX_VERSION).contains(&v.protocol))
             .filter(|v| v.artifacts.contains_key(&plat))
+            .filter(|v| !v.yanked)
             .collect();
         prefer_stable(usable, req, |v| &v.version)
     }
@@ -599,6 +633,7 @@ fn github_index(ctx: &Context, repo: &str, name: &str) -> Result<Index, String> 
             versions.push(IndexVersion {
                 version,
                 protocol: dre_protocol::MAX_VERSION,
+                yanked: false,
                 artifacts,
             });
         }

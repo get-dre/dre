@@ -22,6 +22,10 @@ import pathlib
 import re
 import sys
 import urllib.request
+import urllib.error
+from release_trust import verify_archive
+
+YANKS = json.loads(pathlib.Path(__file__).with_name("registry_yanks.json").read_text())
 
 PROTOCOL = 0
 SCHEMA = 2
@@ -48,7 +52,7 @@ def releases(repo):
         page += 1
 
 
-def artifacts(release, package, version, extension=False):
+def artifacts(release, package, version, extension=False, repo=None):
     """The release's archives with their SHA256SUMS checksums; None if it isn't complete. An
     extension archive's `<archive>.minisig` asset, when published, goes in as its `minisig`."""
     assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
@@ -67,10 +71,30 @@ def artifacts(release, package, version, extension=False):
         if m:
             if name not in sums:
                 return None
+            if not extension:
+                verify_archive(repo, release['tag_name'], name, get(url), sums[name])
             out[m.group(1)] = {"url": url, "sha256": sums[name]}
             if extension and name + ".minisig" in assets:
                 out[m.group(1)]["minisig"] = get(assets[name + ".minisig"]).decode()
     return out or None
+
+
+def download_existing(repo, path):
+    """Only a missing release/asset permits a fresh index, never a failed download."""
+    try:
+        release = json.loads(get(f'{API}/repos/{repo}/releases/tags/registry'))
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return
+        raise
+    asset = next((a for a in release['assets'] if a['name'] == 'packages.json'), None)
+    if asset is None:
+        raise ValueError('registry release exists without packages.json; recover it explicitly')
+    body = get(asset['browser_download_url'])
+    json.loads(body)  # Never write a partial or invalid index.
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
 
 
 def main(old_path, repo):
@@ -91,8 +115,8 @@ def main(old_path, repo):
             continue
         p = by_name.setdefault(package, {"name": package, "versions": []})
         if any(v["version"] == version for v in p["versions"]):
-            continue
-        found = artifacts(release, package, version)
+            continue  # Already indexed (and verified then).
+        found = artifacts(release, package, version, repo=repo)
         if not found:
             print(f"skipping {release['tag_name']}: no complete set of archives and checksums", file=sys.stderr)
             continue
@@ -100,6 +124,13 @@ def main(old_path, repo):
         print(f"added {package} {version} ({', '.join(found)})", file=sys.stderr)
 
     for name, p in by_name.items():
+        for version in p['versions']:
+            reason = YANKS.get(name, {}).get(version['version'])
+            if reason:
+                version.update(yanked=True, yank_reason=reason)
+            else:
+                version.pop('yanked', None)
+                version.pop('yank_reason', None)
         if name in packages:
             p["description"] = packages[name]["description"]
             p["provides"] = packages[name]["provides"]
@@ -131,4 +162,7 @@ def main(old_path, repo):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    if sys.argv[1] == '--download':
+        download_existing(*sys.argv[2:])
+    else:
+        main(*sys.argv[1:])

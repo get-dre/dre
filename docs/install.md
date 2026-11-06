@@ -92,7 +92,9 @@ Every DRE and plugin release, from 0.4.0, publishes three things next to each ar
   modules included, for your vulnerability scanner. The SBOMs are attested too.
 
 `install.sh`, `dre system update` and plugin installs check the checksums; they don't check
-attestations yet.
+attestations yet, so a checksum fetched from the same place as the file guards against corruption,
+not tampering. To verify an archive yourself, run `gh attestation verify <archive> --repo
+get-dre/dre`. `install.sh` fetches over HTTPS only.
 
 These checks identify official releases; they impose no restriction on building or running
 modified DRE. A fork that publishes its own attestations can use its own repository and release

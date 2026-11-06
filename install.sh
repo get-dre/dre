@@ -35,11 +35,11 @@ esac
 # curl's `api` keeps an error response's body (no -f): GitHub's API says what went wrong there.
 # wget drops it, so its failure gets the general message.
 if command -v curl >/dev/null 2>&1; then
-  api() { curl -sSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
-  get_to() { curl -fsSL -o "$2" "$1"; }
+  api() { curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
+  get_to() { curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
-  api() { wget -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
-  get_to() { wget -qO "$2" "$1"; }
+  api() { wget --https-only -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer $GITHUB_TOKEN"} "$1"; }
+  get_to() { wget --https-only -qO "$2" "$1"; }
 else
   fail "needs curl or wget"
 fi

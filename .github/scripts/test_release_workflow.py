@@ -37,6 +37,41 @@ def condition(job, *, published="success", managers="success", kind="core", dry=
 
 
 class ReleaseWorkflow(unittest.TestCase):
+    def test_pdf_engine_uses_the_released_crate(self):
+        root = WORKFLOW.parents[2]
+        self.assertIn('fulgur = "0.41"', (root / 'plugins/document/Cargo.toml').read_text())
+        self.assertIn('allow-git = []', (root / 'deny.toml').read_text())
+
+    def test_release_source_is_gated_before_any_build_or_publish(self):
+        self.assertIn('release_trust.py', JOBS['plan'])
+        self.assertIn('GH_TOKEN:', JOBS['plan'])
+
+    def test_registry_download_does_not_swallow_errors(self):
+        self.assertNotIn('|| true', JOBS['registry'])
+        self.assertIn('--download', JOBS['registry'])
+
+    def test_jdbc_checksums_and_dependencies_are_gated_in_ci(self):
+        ci = WORKFLOW.with_name('ci.yml').read_text()
+        self.assertIn('mvn -B -C -f java/jdbc/pom.xml package', ci)
+        self.assertIn('jdbc_dependencies.py check', ci)
+        self.assertIn('mvn" -B -C -f "$JAVA_DIR/pom.xml" package', JOBS['build-jdbc'])
+
+    def test_installer_curl_refuses_insecure_redirects(self):
+        installer = WORKFLOW.parents[2] / 'install.sh'
+        for line in installer.read_text().splitlines():
+            if line.strip().startswith(('api() { curl', 'get_to() { curl')):
+                self.assertIn("--proto '=https'", line)
+                self.assertIn("--proto-redir '=https'", line)
+                self.assertIn('--tlsv1.2', line)
+
+    def test_cla_runs_only_first_party_code_from_the_default_branch(self):
+        cla = WORKFLOW.with_name('cla.yml').read_text()
+        self.assertNotIn('contributor-assistant/github-action', cla)
+        self.assertNotIn('actions: write', cla)
+        self.assertIn('ref: master', cla)
+        self.assertIn('persist-credentials: false', cla)
+        self.assertIn('python3 .github/scripts/cla.py', cla)
+
     def test_verification_runs_alongside_builds_without_publish_credentials(self):
         self.assertEqual(field("crates-verify", "needs"), field("build", "needs"))
         self.assertNotIn("id-token: write", JOBS["crates-verify"])

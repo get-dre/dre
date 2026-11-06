@@ -1019,3 +1019,21 @@ fn sources_formats_and_destinations_blocks_point_at_plugins() {
         .says("`sources:` declares tables now (dbt's format); list plugin packages under `plugins:` instead")
         .says("`formats:` no longer declares plugins");
 }
+
+#[test]
+fn yanked_versions_are_skipped_but_existing_lock_pins_still_run() {
+    let e = Env::new("plugins: {fixture: '*'}\n");
+    assert_eq!(e.dre(&["deps"]).code, 0);
+    assert!(e.lock().contains("1.1.0"));
+    let path = e.p("registry/index.json");
+    let mut index: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    index["plugins"][0]["versions"][1]["yanked"] = true.into();
+    index["plugins"][0]["versions"][1]["yank_reason"] = "unsafe driver".into();
+    std::fs::write(&path, index.to_string()).unwrap();
+    let pinned = e.dre(&["deps"]);
+    assert_eq!(pinned.code, 0, "{}", pinned.stderr);
+    assert!(e.lock().contains("1.1.0"), "{}", e.lock());
+    let update = e.dre(&["plugin", "update", "fixture"]);
+    assert_eq!(update.code, 0, "{}", update.stderr);
+    assert!(e.lock().contains("1.0.0"), "{}", e.lock());
+}

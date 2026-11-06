@@ -1,0 +1,114 @@
+[
+  {
+    "artifact": "com.fasterxml.jackson.core:jackson-annotations:2.22",
+    "licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "sha256": "21ddb598807d3a51a876704eb979d9296e1c6a6f47ab1826ff88c6d6a127a2d0"
+  },
+  {
+    "artifact": "com.fasterxml.jackson.core:jackson-core:2.22.4",
+    "licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "sha256": "2d30c375cddea9657a1e1ef97547a2694b663b355facb4de53a097782b312d1a"
+  },
+  {
+    "artifact": "com.fasterxml.jackson.core:jackson-databind:2.22.4",
+    "licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "sha256": "d4cbf8947087f305869826801913abdc50735a1fab2074a1993e7bc67ca974a3"
+  },
+  {
+    "artifact": "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.22.4",
+    "licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "sha256": "ec961697cbd631935b6fb6f673406861c75243521fb67fec10b59f1412ac50f7"
+  },
+  {
+    "artifact": "com.google.flatbuffers:flatbuffers-java:25.2.10",
+    "licenses": [
+      "Apache License V2.0"
+    ],
+    "sha256": "587bd6c31cda747587493a113bec8602d3a0b0ca579b2b1b838ef71b19e6525d"
+  },
+  {
+    "artifact": "commons-codec:commons-codec:1.21.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "4da851cb6abfb98bfe9eb77c5e5fc47f5414fa28b94e21b7fd9a646705dc167f"
+  },
+  {
+    "artifact": "io.netty:netty-buffer:4.2.9.Final",
+    "licenses": [
+      "Apache License, Version 2.0"
+    ],
+    "sha256": "d013a96acea4889bc01ee03738d53c2e4a05e3faec14c25a92b4224c77d7a408"
+  },
+  {
+    "artifact": "io.netty:netty-common:4.2.9.Final",
+    "licenses": [
+      "Apache License, Version 2.0"
+    ],
+    "sha256": "99d965d507b09599ab2d215e940c690d4f7ce8cd97ff13776aa17eb4e0d90b8a"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-format:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "e805ea51ba8b517ec6c18a96ea83bef5cda5172a2b74419d4b48fb3584ce4504"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-jdbc:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "23203193b6b459a91d509901539687ba090d854a4c1b9a95cd3f0196d93cf112"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-memory-core:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "0d3646cc2fa9ae94e95dc8b3e0ed5a51e1df15b59dc548f359e941023471884d"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-memory-netty-buffer-patch:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "47a8d7d1c9df06b3b84a0e49815615dad86c8c91afddf5b9817ed3e777784557"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-memory-netty:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "e882e201a9a8de25f450e697491a3fb4689fb7cba9883c3323a966087fcf8c84"
+  },
+  {
+    "artifact": "org.apache.arrow:arrow-vector:19.0.0",
+    "licenses": [
+      "Apache-2.0"
+    ],
+    "sha256": "113e70317945e780050f13d17027d862d4c5d1cebe06c9fd8a5e922945bb2f8c"
+  },
+  {
+    "artifact": "org.slf4j:slf4j-api:2.0.20",
+    "licenses": [
+      "MIT"
+    ],
+    "sha256": "7e1446499b359675d8aabe6af2de86b85e72ae8a2a932c0b40d0e5ba57097439"
+  },
+  {
+    "artifact": "org.slf4j:slf4j-nop:2.0.20",
+    "licenses": [
+      "MIT"
+    ],
+    "sha256": "6522080396fb339e99bae40d329a06d18d3190dc864020ac4ca943519d0fd85b"
+  }
+]
