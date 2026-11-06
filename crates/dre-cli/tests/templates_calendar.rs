@@ -275,3 +275,85 @@ fn raise_error_stops_rendering_with_its_message() {
         .says("x must be set to something good");
     p.dre("compile", &["--var", "x=good"]).ok();
 }
+
+#[test]
+fn date_helpers_at_the_edges_fail_cleanly_instead_of_panicking() {
+    for expr in [
+        "run.now.add(seconds=9223372036854775807)",
+        "run.now.add(hours=9223372036854775807)",
+        "run.now.add(minutes=-9223372036854775807)",
+        "run.now.add(seconds=17000000000000000)",
+        "run.date.add(years=922337203685477581)",
+        "run.date.add(weeks=1317624576693539402)",
+        "run.date.add(months=4294967297)",
+        "date(262142, 12, 15).this_month",
+        "date(262142, 12, 15).days_in_month",
+        "date(262142, 12, 31).week_end",
+        "date(262142, 12, 31).next_week",
+        "date(262142, 12, 31).this_week",
+        "date(262142, 12, 31).end",
+        "date(262142, 12, 31).as_period().next",
+        "month_of(262142, 12)",
+        "year_of(262142)",
+    ] {
+        let p = project(&[(
+            "reports/finance/monthly/q.sql",
+            &format!("select '{{{{ {expr} }}}}'\n"),
+        )]);
+        let run = p.dre("compile", &[]);
+        assert!(
+            (run.code == 0 || run.code == 1) && !run.stderr.contains("panicked"),
+            "{expr}: exit {}\n{}",
+            run.code,
+            run.stderr
+        );
+    }
+    // Months past u32 used to wrap to a small number.
+    let p = project(&[(
+        "reports/finance/monthly/q.sql",
+        "select '{{ run.date.add(months=4294967297) }}'\n",
+    )]);
+    p.dre("compile", &[]).failed().says("out of range");
+}
+
+#[test]
+fn a_bad_date_fails_its_report_not_the_others() {
+    let p = project(&[
+        (
+            "reports/finance/monthly/q.sql",
+            "select '{{ run.now.add(seconds=9223372036854775807) }}' as t\n",
+        ),
+        ("reports/finance/daily/daily.yml", "queries: [d]\n"),
+        ("reports/finance/daily/d.sql", "select 1 as x\n"),
+    ]);
+    p.duckdb("data.duckdb", "select 1;");
+    p.dre("run", &["monthly", "daily"])
+        .failed()
+        .says("out of range")
+        .says("1 succeeded")
+        .lacks("panicked");
+}
+
+#[test]
+fn offset_date_text_keeps_its_zone() {
+    let p = project(&[
+        (
+            "dre_project.yml",
+            "name: acme_reports\ndefault_profile: warehouse\ntimezone: Australia/Sydney\n",
+        ),
+        (
+            "reports/finance/monthly/q.sql",
+            "select '{{ '2026-11-30T23:30:00Z' | as_date }}' as d, '{{ period('mtd', as_of='2026-11-30T23:30:00Z') }}' as p,\n\
+             '{{ ('2026-11-30T23:30:00Z' | as_datetime).date }}' as dt, '{{ '2026-11-30' | as_date }}' as plain\n",
+        ),
+    ]);
+    assert_eq!(
+        compiled(&p, &[], &[]),
+        "select '2026-12-01' as d, '2026-12-01/2026-12-01' as p,\n'2026-12-01' as dt, '2026-11-30' as plain\n"
+    );
+    let p = project(&[(
+        "reports/finance/monthly/q.sql",
+        "select '{{ '2026-11-05garbage' | as_date }}'\n",
+    )]);
+    p.dre("compile", &[]).failed().says("isn't a date");
+}

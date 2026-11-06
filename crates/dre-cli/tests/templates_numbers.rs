@@ -114,3 +114,30 @@ fn a_non_number_is_a_clear_error() {
         .failed()
         .says("`number` needs a number, but got the text \"abc\"");
 }
+
+#[test]
+fn half_cents_round_away_from_zero_and_non_finite_text_is_refused() {
+    let sql = "select '{{ 1.005 | number(2) }}' as a, '{{ 1.015 | number(2) }}' as b, '{{ 0.285 | number(2) }}' as c,\n\
+      '{{ -1.005 | number(2) }}' as d, '{{ 1.015 | currency(\"EUR\", 2) }}' as e, '{{ 9.995 | number(2) }}' as f,\n\
+      '{{ 0.0001 | number(2) }}' as g, '{{ -0.001 | number(2) }}' as h, '{{ 2.5 | number }}' as i, '{{ 1e300 | number(2) | length }}' as j\n";
+    let p = project(
+        "name: acme\ndefault_profile: warehouse\n",
+        &[("reports/kpi/kpi.sql", sql)],
+    );
+    p.dre("compile", &["kpi"]).ok();
+    assert_eq!(
+        compiled(&p, "default"),
+        "select '1.01' as a, '1.02' as b, '0.29' as c,\n'-1.01' as d, '€1.02' as e, '10.00' as f,\n\
+         '0.00' as g, '0.00' as h, '3' as i, '404' as j\n"
+    );
+    for text in ["inf", "nan", "-infinity"] {
+        let p = project(
+            "name: acme\ndefault_profile: warehouse\n",
+            &[(
+                "reports/kpi/kpi.sql",
+                &format!("select '{{{{ '{text}' | number }}}}'\n"),
+            )],
+        );
+        p.dre("compile", &["kpi"]).failed().says("needs a number");
+    }
+}

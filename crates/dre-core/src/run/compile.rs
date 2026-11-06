@@ -239,7 +239,7 @@ impl BindingRun<'_> {
                 let path = match &d.path {
                     Some(p) => Some(
                         renderer
-                            .render(&self.report.file, p)
+                            .render_value(&self.report.file, p, minijinja::Value::UNDEFINED)
                             .map_err(|e| format!("output path: {e}"))?,
                     ),
                     None => None,
@@ -255,7 +255,7 @@ impl BindingRun<'_> {
                         password: match &z.password {
                             Some(pw) => Some(
                                 renderer
-                                    .render(&self.report.file, pw)
+                                    .render_value(&self.report.file, pw, minijinja::Value::UNDEFINED)
                                     .map_err(|e| format!("destination `{profile}` `zip.password`: {e}"))?,
                             ),
                             None => None,
@@ -355,7 +355,7 @@ impl BindingRun<'_> {
 /// Render every string inside a destination option value.
 pub(super) fn render_json(renderer: &Renderer, file: &Path, v: &Json) -> Result<Json, RenderError> {
     Ok(match v {
-        Json::String(s) => Json::String(renderer.render(file, s)?),
+        Json::String(s) => Json::String(renderer.render_value(file, s, minijinja::Value::UNDEFINED)?),
         Json::Array(a) => Json::Array(
             a.iter()
                 .map(|v| render_json(renderer, file, v))

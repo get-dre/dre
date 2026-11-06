@@ -127,9 +127,10 @@ impl Locale {
 
     /// As [`Locale::number`], with or without group separators (an Excel format without `,`).
     pub fn format_number(&self, x: f64, decimals: usize, group: bool) -> String {
-        let scale = 10f64.powi(decimals as i32);
-        let rounded = (x.abs() * scale).round() / scale;
-        let text = format!("{rounded:.decimals$}");
+        if !x.is_finite() {
+            return x.to_string();
+        }
+        let text = round_half_up(x.abs(), decimals);
         let (int, frac) = match text.split_once('.') {
             Some((i, f)) => (i, Some(f)),
             None => (text.as_str(), None),
@@ -145,7 +146,7 @@ impl Locale {
             grouped.push(self.decimal);
             grouped.push_str(f);
         }
-        if x < 0.0 && rounded != 0.0 {
+        if x < 0.0 && text.bytes().any(|b| matches!(b, b'1'..=b'9')) {
             format!("-{grouped}")
         } else {
             grouped
@@ -235,15 +236,21 @@ fn to_number(secrets: &Secrets, filter: &str, v: &Value) -> Result<Option<f64>, 
         return Ok(None);
     }
     if let Some(s) = v.as_str() {
-        return s.trim().parse::<f64>().map(Some).map_err(|_| {
-            Error::new(
-                ErrorKind::InvalidOperation,
-                format!(
-                    "`{filter}` needs a number, but got the text {:?}",
-                    secrets.mask(s)
-                ),
-            )
-        });
+        return s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|x| x.is_finite())
+            .map(Some)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidOperation,
+                    format!(
+                        "`{filter}` needs a number, but got the text {:?}",
+                        secrets.mask(s)
+                    ),
+                )
+            });
     }
     f64::try_from(v.clone()).map(Some).map_err(|_| {
         Error::new(
@@ -253,6 +260,39 @@ fn to_number(secrets: &Secrets, filter: &str, v: &Value) -> Result<Option<f64>, 
             format!("`{filter}` needs a number, but got {}", v.kind()),
         )
     })
+}
+
+/// `x` (finite, not negative) rounded half away from zero to `decimals` places, on its shortest
+/// decimal text: `1.005` is `1.01`, though the binary float is a hair below it.
+fn round_half_up(x: f64, decimals: usize) -> String {
+    let text = x.to_string();
+    let (int, frac) = text.split_once('.').unwrap_or((&text, ""));
+    let mut digits: Vec<u8> = format!("{int}{frac:0<decimals$}").into_bytes();
+    let keep = int.len() + decimals;
+    let up = digits.get(keep).is_some_and(|d| *d >= b'5');
+    digits.truncate(keep);
+    if up {
+        let mut i = keep;
+        loop {
+            if i == 0 {
+                digits.insert(0, b'1');
+                break;
+            }
+            i -= 1;
+            if digits[i] == b'9' {
+                digits[i] = b'0';
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    let int_len = digits.len() - decimals;
+    let mut out = String::from_utf8(digits).expect("ASCII digits");
+    if decimals > 0 {
+        out.insert(int_len, '.');
+    }
+    out
 }
 
 fn decimals(kwargs: &Kwargs, positional: Option<u32>, default: usize) -> Result<usize, Error> {

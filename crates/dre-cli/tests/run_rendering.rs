@@ -329,3 +329,57 @@ fn loops_break_and_continue_and_maps_keep_their_written_order() {
         "literal,vars,loop\r\nlowhigh,alphaextra,023\r\n"
     );
 }
+
+#[test]
+fn null_renders_empty_in_text_and_fails_a_path() {
+    let p = project(&[
+        (
+            "reports/finance/text/text.yml",
+            "queries: [q]\noutput:\n  destination: {profile: local_fs, path: out/text.csv}\n",
+        ),
+        (
+            "reports/finance/text/q.sql",
+            "select '[{{ run.set }}]' as s, '[{{ run_query(\"select null as x\")[0].x }}]' as n\n",
+        ),
+        (
+            "reports/finance/pathy/pathy.yml",
+            "queries: [p]\noutput:\n  destination: {profile: local_fs, path: \"out/{{ run.set }}/p.csv\"}\n",
+        ),
+        ("reports/finance/pathy/p.sql", "select 1 as x\n"),
+    ]);
+    p.dre("run", &["text"]).ok();
+    assert_eq!(p.read("out/text.csv"), "s,n\r\n[],[]\r\n");
+    p.dre("run", &["pathy"]).failed().says("NULL");
+    for bad in ["out/None", "out/none", "out/p.csv"] {
+        assert!(!p.path(bad).exists(), "{bad} was written");
+    }
+}
+
+#[test]
+fn comparing_a_list_or_dict_with_itself_does_not_hang() {
+    let p = project(&[
+        ("reports/finance/self/self.yml", "queries: [q]\n"),
+        (
+            "reports/finance/self/q.sql",
+            "{% set a = list([[1]]) %}{% set k = dict(a=1) %}{% set d = dict() %}{% set _ = d.setdefault(k, 1) %}\
+             select {{ a.count(a) }} as c, {{ a.index([1]) }} as i, '[{{ d.get(d) }}]' as g, {{ d.pop(d, 0) }} as p\n",
+        ),
+    ]);
+    // A deadlock never returns: the guard turns it into a failure instead of a hung suite.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        tx.send(p.dre("compile", &["self"])).unwrap();
+        p
+    });
+    let run = rx
+        .recv_timeout(std::time::Duration::from_secs(120))
+        .expect("`dre compile` deadlocked comparing a collection with itself");
+    run.ok();
+    let p = handle.join().unwrap();
+    assert!(
+        p.read("target/compiled/self/default/q.sql")
+            .contains("select 0 as c, 0 as i, '[]' as g, 0 as p"),
+        "{}",
+        p.read("target/compiled/self/default/q.sql")
+    );
+}

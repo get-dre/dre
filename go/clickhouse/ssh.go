@@ -51,7 +51,13 @@ func checkSSH(s map[string]any) []string {
 			errs = append(errs, fmt.Sprintf("`ssh.%s` is required", k))
 		}
 	}
-	agentOn, _ := s["use_agent"].(bool)
+	agentOn, err := plugin.Bool(s, "use_agent", false)
+	if err != nil {
+		errs = append(errs, "`ssh.use_agent` must be true or false")
+	}
+	if _, err := plugin.Bool(s, "allow_rsa_keys", true); err != nil {
+		errs = append(errs, "`ssh.allow_rsa_keys` must be true or false")
+	}
 	keyPath, keyText := plugin.Optional(s, "private_key_path") != "", plugin.Optional(s, "private_key") != ""
 	switch {
 	case keyPath && keyText:
@@ -152,7 +158,7 @@ func (t *tunnel) connect() (*ssh.Client, error) {
 }
 
 func (t *tunnel) sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
-	if on, _ := s["use_agent"].(bool); on {
+	if on, _ := plugin.Bool(s, "use_agent", false); on {
 		c, err := agentConn()
 		if err != nil {
 			return nil, err
@@ -184,7 +190,8 @@ func (t *tunnel) sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't read the SSH private key: %v", err)
 	}
-	if allow, ok := s["allow_rsa_keys"].(bool); ok && !allow && signer.PublicKey().Type() == ssh.KeyAlgoRSA {
+	// An `env_var()` gives text ("false"): read it as the profile means it, never as unset.
+	if allow, _ := plugin.Bool(s, "allow_rsa_keys", true); !allow && signer.PublicKey().Type() == ssh.KeyAlgoRSA {
 		return nil, errors.New("the SSH private key is an RSA key, and `ssh.allow_rsa_keys: false` refuses RSA keys")
 	}
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil

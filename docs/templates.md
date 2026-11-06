@@ -44,6 +44,12 @@ written in: `{% for k, v in {'low': 10, 'high': 90} | items %}` gives `low` firs
 keeps its YAML order. When a lower level (a Set, `--var`) sets a variable the project already
 has, it replaces the whole value in place.
 
+A NULL (a SQL NULL in `each.*`, `row.*` or `results`, or `run.set` when the report has no Sets)
+prints as nothing. In a value that names a place (an output `path`, `file_name`, any destination
+setting, `zip.password` or a format option such as a pdf `password`) printing a NULL is an error,
+so a row's missing value can't send a file somewhere unintended: give it a fallback,
+`{{ each.region | default('unknown') }}`. Before 0.12 a NULL printed as `None`.
+
 ## Names from profiles: `connection`, `destination` and `profile()`
 
 > **Changed in 0.2.** `target.<field>` is now `connection.<field>`, `run.profile` is
@@ -195,7 +201,9 @@ messages). They round half away from zero.
 - Negative numbers start with `-`; `signed` writes `+` or a minus sign (`−`) and leaves zero
   alone. On text another filter made, `signed` adds `+` unless it's negative or zero.
 - `none` renders as nothing. Text that holds a number (`'12.5'`) is read as one; any other value
-  is an error naming the filter.
+  (`'inf'`, `'nan'` too) is an error naming the filter.
+- Rounding is half away from zero on the number as written: `1.005 | number(2)` is `1.01`, as
+  Excel's `ROUND` gives.
 - `currency` takes an ISO 4217 code. Common codes print their symbol (`€`, `$`, `£`, `¥`, `kr`,
   ...); others print the code (`CHF 12'340`).
 - `compact` uses `K`, `M`, `B` and `T` in every locale, with the locale's decimal separator.
@@ -308,7 +316,7 @@ midnight. Use `.utc` when the table stores UTC timestamps but the report is abou
 | | |
 |---|---|
 | `date('2026-03-15')`, `date(2026, 3, 15)` | A date. |
-| `'2026-03-15' \| as_date` | A date from a string var (`YYYY-MM-DD` or `YYYYMMDD`). |
+| `'2026-03-15' \| as_date` | A date from a string var (`YYYY-MM-DD` or `YYYYMMDD`). Text with a time is read as a datetime first, so `'2026-11-30T23:30:00Z' \| as_date` is 1 December in Sydney. |
 | `datetime('2026-03-15 10:30:00')`, `\| as_datetime` | A datetime, in the run's zone unless the string has an offset (`...+10:00`, `...Z`). |
 | `month_of(2026, 2)`, `quarter_of(2026, 1)`, `year_of(2026)` | A period. |
 | `week_of(2026, 12)` | Week 12 of 2026, in the project's week numbering. |

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use dre_protocol::host::{Canceller, Description, Execution, LogSink, PluginInfo, PluginProcess, StderrSync};
-use dre_protocol::msg::{DeliveryFile, Message, ResultSetMeta};
+use dre_protocol::msg::{ConnectionField, DeliveryFile, FieldKind, Message, ResultSetMeta};
 use dre_protocol::{PluginId, parse_executable_name};
 use serde_json::{Map, Value};
 
@@ -327,6 +327,7 @@ impl PluginHost for SubprocessHost {
             font_context: crate::context::Context::subprocess(self.env.clone()),
             project_http_timeout: self.project_http_timeout.clone(),
             fonts: self.fonts.clone(),
+            fields: None,
             _registration: registration,
         }))
     }
@@ -354,12 +355,44 @@ struct Subprocess {
     font_context: crate::context::Context,
     project_http_timeout: Arc<OnceLock<u64>>,
     fonts: Arc<crate::fonts::RunFonts>,
+    /// The connection fields the plugin declares, asked the first time they're needed.
+    fields: Option<Vec<ConnectionField>>,
     _registration: Registration,
 }
 
 impl Subprocess {
     fn process(&mut self) -> &mut PluginProcess {
         self.process.as_mut().expect("the process is open until close")
+    }
+
+    /// `connection` with the text of each field the plugin declares boolean (`"true"`, `"no"`)
+    /// as a boolean: a profile's `env_var()` always renders to text.
+    fn typed(&mut self, mut connection: Map<String, Value>) -> Map<String, Value> {
+        let flag = |v: &Value| v.as_str().and_then(parse_flag);
+        if !connection.values().any(|v| flag(v).is_some()) {
+            return connection;
+        }
+        if self.fields.is_none() {
+            // A plugin that can't describe itself gets the text, as before.
+            self.fields = Some(self.process().describe().unwrap_or_default());
+        }
+        for f in self.fields.iter().flatten() {
+            if f.kind == Some(FieldKind::Boolean)
+                && let Some(b) = connection.get(&f.name).and_then(flag)
+            {
+                connection.insert(f.name.clone(), Value::Bool(b));
+            }
+        }
+        connection
+    }
+}
+
+/// The boolean a setting's text means, as the plugins' own `Bool` reads it.
+fn parse_flag(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
     }
 }
 
@@ -388,10 +421,12 @@ impl Plugin for Subprocess {
         connection: Map<String, Value>,
         unresolved: Vec<String>,
     ) -> HostResult<(Vec<String>, Vec<String>)> {
+        let connection = self.typed(connection);
         self.process().validate_connection(connection, unresolved)
     }
 
     fn open(&mut self, connection: Map<String, Value>, open: Open) -> HostResult<()> {
+        let connection = self.typed(connection);
         match open {
             Open::ReadWrite => self.process().open(connection, false),
             Open::ReadOnly => self.process().open(connection, true),
@@ -452,7 +487,8 @@ impl Plugin for Subprocess {
         Ok(Written { files, warnings })
     }
 
-    fn deliver(&mut self, d: Delivery) -> HostResult<Delivered> {
+    fn deliver(&mut self, mut d: Delivery) -> HostResult<Delivered> {
+        d.connection = self.typed(std::mem::take(&mut d.connection));
         let p = self.process();
         let location = match &d.message {
             Some(m) => p.deliver_message(m, &d.files, d.connection, d.options)?,
