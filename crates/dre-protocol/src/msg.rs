@@ -9,8 +9,7 @@ use crate::{Kind, PluginId};
 
 /// A message with the id of the request it belongs to. Core numbers its requests; every reply,
 /// and every message streamed as part of a request (`result_set_end`, `finish`, `result`,
-/// `result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither
-/// does anything a protocol 0 peer sends.
+/// `result_end`, `log`, `progress`), carries that request's id. `hello` has none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // In the schema, `Request` and `Response` are each message with its envelope.
 #[schemars(rename = "{T}")]
@@ -267,8 +266,8 @@ pub enum Response {
         warning: Option<String>,
     },
     /// The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,
-    /// namespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has
-    /// neither): without a `code`, core reports the failure under its own code for the step;
+    /// namespaced by the plugin (`sftp/host-key-mismatch`). Both are optional:
+    /// without a `code`, core reports the failure under its own code for the step;
     /// a `code` without a `kind` counts as `internal`.
     Error {
         message: String,

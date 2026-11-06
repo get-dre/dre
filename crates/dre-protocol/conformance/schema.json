@@ -433,7 +433,7 @@
           "description": "Protocol 1: stop the request whose id the envelope carries. It has no reply of its own:\nthe request replies `error` with kind `cancelled`, or its usual reply if it finished\nfirst. A cancel for a request that isn't running is ignored."
         }
       ],
-      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none."
     },
     "PluginId": {
       "description": "One plugin, written `<kind>/<name>` (`destination/s3`).",
@@ -1203,7 +1203,7 @@
             "type",
             "message"
           ],
-          "description": "The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,\nnamespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has\nneither): without a `code`, core reports the failure under its own code for the step;\na `code` without a `kind` counts as `internal`."
+          "description": "The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,\nnamespaced by the plugin (`sftp/host-key-mismatch`). Both are optional:\nwithout a `code`, core reports the failure under its own code for the step;\na `code` without a `kind` counts as `internal`."
         },
         {
           "type": "object",
@@ -1267,7 +1267,7 @@
           "description": "Protocol 1, optional: how far a long request has got. Core shows it when present."
         }
       ],
-      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none."
     },
     "Kind": {
       "type": "string",
