@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -490,10 +491,12 @@ func numbered(remote string, i int) string {
 	return fmt.Sprintf("%s%s_%d%s", dir, stem, i, ext)
 }
 
-// tempPath is the temporary name for remote: .<name>.dre-part, next to it or in tempDir.
+var tempSequence atomic.Uint64
+
+// tempPath is a unique temporary name next to remote or in tempDir.
 func tempPath(remote, tempDir string) string {
 	dir, file := splitPath(remote)
-	name := "." + file + ".dre-part"
+	name := fmt.Sprintf(".%s.%d-%d-%d.dre-part", file, os.Getpid(), time.Now().UnixNano(), tempSequence.Add(1))
 	switch {
 	case tempDir == "":
 		return dir + name

@@ -2,6 +2,15 @@
   "description": "The delivery rules every file destination shares (if_exists, atomic temporary names, temp_dir, retries and backoff, numbered names), as cases both SDKs run against their delivery code with an in-memory store. The format is described in docs/protocol.md (Conformance).",
   "cases": [
     {
+      "name": "deliveries sharing a staging directory always use fresh temporary names",
+      "options": {"temp_dir": "/staging"},
+      "deliveries": [
+        {"remote": "a/report.csv", "path": "a/report.csv"},
+        {"remote": "b/report.csv", "path": "b/report.csv"},
+        {"remote": "a/report.csv", "path": "a/report.csv"}
+      ]
+    },
+    {
       "name": "legacy rules write straight to the final name",
       "base": "legacy",
       "remote": "out/r.xlsx",
@@ -15,7 +24,7 @@
       "expect": {
         "path": "out/r.xlsx",
         "attempts": 1,
-        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx replace"],
+        "ops": ["write out/.r.xlsx.<temp-1>.dre-part", "rename out/.r.xlsx.<temp-1>.dre-part out/r.xlsx replace"],
         "files": {"out/r.xlsx": "new"}
       }
     },
@@ -27,7 +36,7 @@
       "expect": {
         "error": {"kind": "delivery", "contains": "connection dropped"},
         "attempts": 1,
-        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx replace", "delete out/.r.xlsx.dre-part"],
+        "ops": ["write out/.r.xlsx.<temp-1>.dre-part", "rename out/.r.xlsx.<temp-1>.dre-part out/r.xlsx replace", "delete out/.r.xlsx.<temp-1>.dre-part"],
         "files": {}
       }
     },
@@ -38,7 +47,7 @@
       "remote": "out/r.xlsx",
       "expect": {
         "path": "out/r.xlsx",
-        "ops": ["write out/../staging/.r.xlsx.dre-part", "rename out/../staging/.r.xlsx.dre-part out/r.xlsx replace"]
+        "ops": ["write out/../staging/.r.xlsx.<temp-1>.dre-part", "rename out/../staging/.r.xlsx.<temp-1>.dre-part out/r.xlsx replace"]
       }
     },
     {
@@ -46,7 +55,7 @@
       "store": {"create_exclusive": true, "rename_no_replace": true},
       "options": {"temp_dir": "/tmp/"},
       "remote": "out/r.xlsx",
-      "expect": {"path": "out/r.xlsx", "ops": ["write /tmp/.r.xlsx.dre-part", "rename /tmp/.r.xlsx.dre-part out/r.xlsx replace"]}
+      "expect": {"path": "out/r.xlsx", "ops": ["write /tmp/.r.xlsx.<temp-1>.dre-part", "rename /tmp/.r.xlsx.<temp-1>.dre-part out/r.xlsx replace"]}
     },
     {
       "name": "if_exists error fails when the file exists",
@@ -69,7 +78,7 @@
       "remote": "out/r.xlsx",
       "expect": {
         "error": {"kind": "delivery", "code": "file-exists", "contains": "already exists"},
-        "ops": ["write out/.r.xlsx.dre-part", "rename out/.r.xlsx.dre-part out/r.xlsx", "delete out/.r.xlsx.dre-part"],
+        "ops": ["write out/.r.xlsx.<temp-1>.dre-part", "rename out/.r.xlsx.<temp-1>.dre-part out/r.xlsx", "delete out/.r.xlsx.<temp-1>.dre-part"],
         "files": {"out/r.xlsx": "old"}
       }
     },
@@ -101,10 +110,10 @@
       "expect": {
         "path": "out/r_3.xlsx",
         "ops": [
-          "write out/.r.xlsx.dre-part",
-          "rename out/.r.xlsx.dre-part out/r.xlsx",
-          "rename out/.r.xlsx.dre-part out/r_2.xlsx",
-          "rename out/.r.xlsx.dre-part out/r_3.xlsx"
+          "write out/.r.xlsx.<temp-1>.dre-part",
+          "rename out/.r.xlsx.<temp-1>.dre-part out/r.xlsx",
+          "rename out/.r.xlsx.<temp-1>.dre-part out/r_2.xlsx",
+          "rename out/.r.xlsx.<temp-1>.dre-part out/r_3.xlsx"
         ],
         "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
       }
@@ -128,11 +137,11 @@
       "expect": {
         "path": "out/r_3.xlsx",
         "ops": [
-          "write out/.r.xlsx.dre-part",
+          "write out/.r.xlsx.<temp-1>.dre-part",
           "exists out/r.xlsx",
           "exists out/r_2.xlsx",
           "exists out/r_3.xlsx",
-          "rename out/.r.xlsx.dre-part out/r_3.xlsx"
+          "rename out/.r.xlsx.<temp-1>.dre-part out/r_3.xlsx"
         ],
         "files": {"out/r.xlsx": "old", "out/r_2.xlsx": "old2", "out/r_3.xlsx": "new"}
       }
@@ -165,12 +174,12 @@
         "attempts": 3,
         "waits": [1, 2],
         "ops": [
-          "write .r.csv.dre-part",
-          "delete .r.csv.dre-part",
-          "write .r.csv.dre-part",
-          "delete .r.csv.dre-part",
-          "write .r.csv.dre-part",
-          "rename .r.csv.dre-part r.csv replace"
+          "write .r.csv.<temp-1>.dre-part",
+          "delete .r.csv.<temp-1>.dre-part",
+          "write .r.csv.<temp-2>.dre-part",
+          "delete .r.csv.<temp-2>.dre-part",
+          "write .r.csv.<temp-3>.dre-part",
+          "rename .r.csv.<temp-3>.dre-part r.csv replace"
         ],
         "files": {"r.csv": "new"}
       }

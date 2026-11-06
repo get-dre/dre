@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BooleanArray, Date32Array, Float64Array, Int64Array, RecordBatch, StringArray};
+use arrow::array::{
+    ArrayRef, BooleanArray, Date32Array, DictionaryArray, Float64Array, Int64Array, RecordBatch, StringArray,
+};
+use arrow::datatypes::Int32Type;
 use dre_protocol::conformance;
 use dre_protocol::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
@@ -213,4 +216,44 @@ fn an_error_on_the_first_of_several_batches_is_the_plugins_own() {
         !err.contains("expected `finish`") && !err.contains("255, 255"),
         "{err}"
     );
+}
+
+#[test]
+fn formula_guard_protects_text_by_default_and_can_be_disabled() {
+    let batch = RecordBatch::try_from_iter([
+        (
+            "text",
+            Arc::new(StringArray::from(vec![
+                "=1+1", "+cmd", "-cmd", "@cmd", "\tcmd", "\rcmd", "plain",
+            ])) as ArrayRef,
+        ),
+        ("number", Arc::new(Int64Array::from(vec![-2; 7])) as ArrayRef),
+        ("date", Arc::new(Date32Array::from(vec![-719893; 7])) as ArrayRef),
+    ])
+    .unwrap();
+    for format in [csv(), delimited()] {
+        let guarded =
+            String::from_utf8(write(format, json!({"header": false}), vec![batch.clone()]).unwrap()).unwrap();
+        assert_eq!(
+            guarded,
+            "'=1+1,-2,-0001-01-01\r\n'+cmd,-2,-0001-01-01\r\n'-cmd,-2,-0001-01-01\r\n'@cmd,-2,-0001-01-01\r\n'\tcmd,-2,-0001-01-01\r\n\"'\rcmd\",-2,-0001-01-01\r\nplain,-2,-0001-01-01\r\n"
+        );
+        let raw = String::from_utf8(
+            write(
+                format,
+                json!({"header": false, "formula_guard": false}),
+                vec![batch.clone()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            raw,
+            "=1+1,-2,-0001-01-01\r\n+cmd,-2,-0001-01-01\r\n-cmd,-2,-0001-01-01\r\n@cmd,-2,-0001-01-01\r\n\tcmd,-2,-0001-01-01\r\n\"\rcmd\",-2,-0001-01-01\r\nplain,-2,-0001-01-01\r\n"
+        );
+    }
+    let tags: DictionaryArray<Int32Type> = vec!["=tag", "ok"].into_iter().collect();
+    let batch = RecordBatch::try_from_iter([("tag", Arc::new(tags) as ArrayRef)]).unwrap();
+    let out = String::from_utf8(write(csv(), json!({"header": false}), vec![batch]).unwrap()).unwrap();
+    assert_eq!(out, "'=tag\r\nok\r\n");
 }

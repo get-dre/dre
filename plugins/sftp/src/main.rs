@@ -8,7 +8,7 @@
 //! settings and checks are shared with the postgres tunnel (`dre-ssh`). `connect_timeout` (30s)
 //! and `timeout` (60s without progress) bound the connection.
 //!
-//! Destination options: `atomic` (default true: upload as `.<name>.dre-part`, then rename, so a
+//! Destination options: `atomic` (default true: upload as `.<name>.<unique>.dre-part`, then rename, so a
 //! dropped connection never leaves a half-written file under the final name) and `temp_dir`
 //! (where that temporary file goes, on the same server).
 

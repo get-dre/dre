@@ -26,6 +26,7 @@ Set in a report's `output:` (or `format_options.csv` in `dre_project.yml`).
 | `delimiter` | char | `,` | Separates fields. |
 | `quote` | char | `"` | Wraps quoted fields; doubled inside them. |
 | `quoting` | string | `minimal` | Which fields are quoted: only where needed, all, text columns, or none. One of `minimal`, `all`, `strings`, `none`. |
+| `formula_guard` | boolean | `true` | Prefix formula-leading text cells with an apostrophe. |
 | `header` | boolean | `true` | Write the column names first. |
 | `line_ending` | string | `"\r\n"` | Ends each line. One of `"\n"`, `"\r\n"`. |
 | `encoding` | string | `utf-8` | Text encoding, e.g. utf-8, latin1, windows-1252. |
@@ -41,6 +42,7 @@ Set in a report's `output:` (or `format_options.delimited` in `dre_project.yml`)
 | `delimiter` | char | `,` | Separates fields. |
 | `quote` | char | `"` | Wraps quoted fields; doubled inside them. |
 | `quoting` | string | `minimal` | Which fields are quoted: only where needed, all, text columns, or none. One of `minimal`, `all`, `strings`, `none`. |
+| `formula_guard` | boolean | `true` | Prefix formula-leading text cells with an apostrophe. |
 | `header` | boolean | `true` | Write the column names first. |
 | `line_ending` | string | `"\r\n"` | Ends each line. One of `"\n"`, `"\r\n"`. |
 | `encoding` | string | `utf-8` | Text encoding, e.g. utf-8, latin1, windows-1252. |
@@ -50,6 +52,13 @@ Set in a report's `output:` (or `format_options.delimited` in `dre_project.yml`)
 <!-- END generated -->
 
 ## Writing
+
+`formula_guard` defaults to `true` for both formats. A text cell starting with `=`, `+`, `-`,
+`@`, tab or carriage return gets a leading apostrophe (`'`) before CSV quoting and encoding.
+This keeps spreadsheet applications from treating row values as formulas. Column headers are
+protected too. Numbers, booleans, dates and other typed columns are unchanged, as are nulls.
+Set `formula_guard: false` in the output or project format options when a downstream importer
+needs the original text. This opt-out also allows spreadsheet formulas through.
 
 - `quoting` (csv, delimited) picks which fields are wrapped in `quote`:
   - `minimal` (the default): only fields holding the delimiter, the quote or a line break;

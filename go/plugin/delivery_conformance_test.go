@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -60,10 +61,25 @@ type memoryStore struct {
 	retryAfter  time.Duration
 	breakRename bool
 	ops         []string
+	temps       map[string]string
 }
 
 func (s *memoryStore) Caps() Caps { return s.caps }
 func (s *memoryStore) Write(_, remote string, exclusive bool) error {
+	if strings.HasSuffix(remote, ".dre-part") {
+		re := regexp.MustCompile(`^(.*)\.[0-9]+-[0-9]+-[0-9]+\.dre-part$`)
+		match := re.FindStringSubmatch(remote)
+		if len(match) != 2 {
+			return errors.New("missing unique temporary token")
+		}
+		if s.temps == nil {
+			s.temps = map[string]string{}
+		}
+		if _, used := s.temps[remote]; used {
+			return errors.New("reused temporary name")
+		}
+		s.temps[remote] = fmt.Sprintf("%s.<temp-%d>.dre-part", match[1], len(s.temps)+1)
+	}
 	op := "write " + remote
 	if exclusive {
 		op += " exclusive"
@@ -196,7 +212,14 @@ func runDeliveryCase(c deliveryCase) error {
 	if x.Attempts != nil && attempts != *x.Attempts {
 		return fmt.Errorf("took %d tries, expected %d", attempts, *x.Attempts)
 	}
-	if x.Ops != nil && !reflect.DeepEqual(s.ops, x.Ops) {
+	normalized := append([]string(nil), s.ops...)
+	for i, op := range normalized {
+		for raw, token := range s.temps {
+			op = strings.ReplaceAll(op, raw, token)
+		}
+		normalized[i] = op
+	}
+	if x.Ops != nil && !reflect.DeepEqual(normalized, x.Ops) {
 		return fmt.Errorf("store calls %q, expected %q", s.ops, x.Ops)
 	}
 	if x.Files != nil && !reflect.DeepEqual(s.files, x.Files) {

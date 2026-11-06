@@ -5,7 +5,7 @@
 //!
 //! - `if_exists` ([`IfExists`]): replace a file already at the path, fail, or keep both by
 //!   numbering the new one (`report_2.xlsx`);
-//! - `atomic` and `temp_dir`: upload under a temporary name (`.<name>.dre-part`, in the same
+//! - `atomic` and `temp_dir`: upload under a temporary name (`.<name>.<unique>.dre-part`, in the same
 //!   folder or in `temp_dir`), then rename, so a half-written file never appears under its
 //!   final name;
 //! - `retries`: try again on a temporary error (a dropped connection, a 429 or 5xx), with
@@ -653,10 +653,17 @@ fn numbered(remote: &str, i: u32) -> String {
     format!("{dir}{stem}_{i}{ext}")
 }
 
-/// The temporary name for `remote`: `.<name>.dre-part`, next to it or in `temp_dir`.
+/// The temporary name for `remote`: `.<name>.<unique>.dre-part`, next to it or in `temp_dir`.
 fn temp_path(remote: &str, temp_dir: Option<&str>) -> String {
     let (dir, file) = split(remote);
-    let name = format!(".{file}.dre-part");
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    let name = format!(".{file}.{}-{nanos}-{sequence}.dre-part", std::process::id());
     match temp_dir {
         None => format!("{dir}{name}"),
         Some(t) if t.starts_with('/') || Path::new(t).is_absolute() => {
@@ -845,13 +852,10 @@ mod tests {
         };
         s.files.insert("out/r.xlsx".into(), "old".into());
         run(&mut s, &rules(IfExists::Overwrite, true)).unwrap();
-        assert_eq!(
-            s.log,
-            [
-                "write out/.r.xlsx.dre-part",
-                "rename out/.r.xlsx.dre-part out/r.xlsx replace"
-            ]
-        );
+        let temp = s.log[0].strip_prefix("write ").unwrap();
+        assert!(temp.starts_with("out/.r.xlsx."));
+        assert!(temp.ends_with(".dre-part"));
+        assert_eq!(s.log[1], format!("rename {temp} out/r.xlsx replace"));
         assert_eq!(s.files.keys().collect::<Vec<_>>(), ["out/r.xlsx"]);
         assert_eq!(s.files["out/r.xlsx"], "new");
     }
@@ -876,11 +880,11 @@ mod tests {
         let mut r = rules(IfExists::Overwrite, true);
         r.temp_dir = Some("../staging".into());
         run(&mut s, &r).unwrap();
-        assert_eq!(s.log[0], "write out/../staging/.r.xlsx.dre-part");
+        assert!(s.log[0].starts_with("write out/../staging/.r.xlsx."));
         r.temp_dir = Some("/tmp/".into());
         s.log.clear();
         run(&mut s, &r).unwrap();
-        assert_eq!(s.log[0], "write /tmp/.r.xlsx.dre-part");
+        assert!(s.log[0].starts_with("write /tmp/.r.xlsx."));
     }
 
     #[test]
@@ -1027,7 +1031,7 @@ mod tests {
         assert_eq!(numbered("r", 3), "r_3");
         assert_eq!(numbered("a.b/.env", 2), "a.b/.env_2");
         assert_eq!(numbered("x.tar.gz", 2), "x.tar_2.gz");
-        assert_eq!(temp_path("r.csv", None), ".r.csv.dre-part");
+        assert!(temp_path("r.csv", None).starts_with(".r.csv."));
     }
 
     #[test]

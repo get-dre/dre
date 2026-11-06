@@ -2,7 +2,7 @@
 //!
 //! Options (defaults): `delimiter` (`,`), `quote` (`"`), `quoting` (`minimal`|`all`|`strings`|`none`),
 //! `header` (true), `line_ending` (`"\r\n"`), `encoding` (`utf-8`), `null` (`""`),
-//! `byte_order_mark` (false).
+//! `byte_order_mark` (false), `formula_guard` (true).
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -32,6 +32,7 @@ struct Options {
     encoding: &'static encoding_rs::Encoding,
     null: String,
     bom: bool,
+    formula_guard: bool,
 }
 
 impl Options {
@@ -55,17 +56,27 @@ impl Options {
             encoding,
             null: s("null", ""),
             bom: b("byte_order_mark", false),
+            formula_guard: b("formula_guard", true),
         })
     }
 
-    /// `text` is whether the value comes from a column `quoting: strings` quotes.
-    fn field(&self, v: &str, text: bool, row: u64, col: &str) -> Result<String> {
+    fn field(&self, v: &str, data_type: &DataType, row: u64, col: &str) -> Result<String> {
+        let guarded;
+        let v = if self.formula_guard
+            && is_string(data_type)
+            && v.starts_with(['=', '+', '-', '@', '\t', '\r'])
+        {
+            guarded = format!("'{v}");
+            &guarded
+        } else {
+            v
+        };
         let needs =
             v.contains(&self.delimiter) || v.contains(&self.quote) || v.contains('\n') || v.contains('\r');
         let quote = match self.quoting {
             Quoting::All => true,
             Quoting::Minimal => needs,
-            Quoting::Strings => needs || text,
+            Quoting::Strings => needs || is_text(data_type),
             Quoting::None if needs => {
                 return Err(format!(
                     "row {row}, column `{col}`: the value contains the delimiter, quote or a line break, which `quoting: none` can't represent"
@@ -103,6 +114,12 @@ impl Format for Delimited {
             )
             .choices(&["minimal", "all", "strings", "none"])
             .default("minimal"),
+            OptionField::new(
+                "formula_guard",
+                Boolean,
+                "prefix formula-leading text cells with an apostrophe",
+            )
+            .default(true),
             OptionField::new("header", Boolean, "write the column names first").default(true),
             OptionField::new("line_ending", String, "ends each line")
                 .choices(&["\n", "\r\n"])
@@ -155,7 +172,7 @@ impl Format for Delimited {
         if o.header {
             let cells: Vec<String> = names
                 .iter()
-                .map(|n| o.field(n, true, 0, n))
+                .map(|n| o.field(n, &DataType::Utf8, 0, n))
                 .collect::<Result<_>>()?;
             out.line(&cells.join(&o.delimiter))?;
         }
@@ -185,12 +202,11 @@ fn write_batch(
         .iter()
         .map(|c| ArrayFormatter::try_new(c.as_ref(), fmt))
         .collect::<std::result::Result<_, _>>()?;
-    let text: Vec<bool> = batch.columns().iter().map(|c| is_text(c.data_type())).collect();
     for i in 0..batch.num_rows() {
         *row += 1;
         let mut cells = Vec::with_capacity(names.len());
-        let columns = batch.columns().iter().zip(&formatters).zip(&text).zip(names);
-        for (((col, f), &text), name) in columns {
+        let columns = batch.columns().iter().zip(&formatters).zip(names);
+        for ((col, f), name) in columns {
             if col.is_null(i) {
                 cells.push(o.null.clone());
                 continue;
@@ -201,11 +217,20 @@ fn write_batch(
             } else {
                 v
             };
-            cells.push(o.field(&v, text, *row, name)?);
+            cells.push(o.field(&v, col.data_type(), *row, name)?);
         }
         out.line(&cells.join(&o.delimiter))?;
     }
     Ok(())
+}
+
+/// String columns, plain or dictionary-encoded: the only cells `formula_guard` changes.
+fn is_string(t: &DataType) -> bool {
+    match t {
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => true,
+        DataType::Dictionary(_, v) => is_string(v),
+        _ => false,
+    }
 }
 
 /// Everything but numbers and booleans: strings, dates, times, binary, ...

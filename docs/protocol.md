@@ -89,7 +89,11 @@ or without replacing), exists, delete, and flags for what it can do in one step.
   system, used by core's `local` destination).
 - Go: `go/plugin` (`Store`, `Rules`, `Deliver`).
 
-A temporary file is named `.<name>.dre-part`, next to the final file or in `temp_dir`. With
+A temporary file is named `.<name>.<unique>.dre-part`, next to the final file or in `temp_dir`.
+The token is fresh for every upload attempt, including retries, across processes and deliveries
+sharing a staging directory. Both SDKs use a process ID, timestamp and process-local sequence.
+Conformance operation logs replace these tokens with `<temp-1>`, `<temp-2>`, and so on, in write
+order; the runner checks their shape and refuses reuse. With
 `number`, the new file is saved as `<name>_2.<ext>`, then `_3`. Where a server can't check and
 write in one step (FTP), the rules look first, then write. A file already there with `if_exists:
 error` fails with kind `delivery` and code `<plugin>/file-exists`.

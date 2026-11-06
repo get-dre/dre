@@ -52,6 +52,11 @@ output:
 `for_each` works with every format and destination, and inherits like other output keys: a Set
 can turn it on, or off with `for_each: false`. Each Set's Binding fans out on its own.
 
+Rendered email `to`, `cc` and `bcc` options refuse values containing a comma. Each row must
+supply one address per value; use separate list entries for multiple recipients. This prevents
+a row value from adding a recipient to another member's statement. Literal recipient options
+keep their usual comma-separated and list forms.
+
 ## Files
 
 Each row's file is `<output>/<key>.<ext>` in the run folder (`statement/12345.pdf`; a

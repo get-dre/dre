@@ -205,7 +205,7 @@ impl<'a> Deliverer<'a> {
         if !errors.is_empty() {
             return Err(format!("destination `{}`: {}", r.profile, errors.join("; ")).into());
         }
-        // `if_exists`, `atomic` (default true: written as `.<name>.dre-part`, then renamed) and
+        // `if_exists`, `atomic` (default true: written as `.<name>.<unique>.dre-part`, then renamed) and
         // `temp_dir`.
         let (rules, _) = dre_protocol::delivery::Rules::from_settings(
             dre_protocol::delivery::Rules {
