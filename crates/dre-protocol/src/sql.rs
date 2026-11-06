@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use sqlparser::{
     ast::Statement,
-    dialect::{DatabricksDialect, DuckDbDialect, PostgreSqlDialect},
+    dialect::{DatabricksDialect, DuckDbDialect, GenericDialect, PostgreSqlDialect},
     parser::{Parser, ParserError},
 };
 
@@ -10,6 +10,7 @@ use sqlparser::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SqlParser {
+    Generic,
     Duckdb,
     Postgres,
     Databricks,
@@ -19,6 +20,7 @@ impl SqlParser {
     /// Parse SQL using the grammar selected by a source, independently of its installed name.
     pub fn parse(self, sql: &str) -> Result<Vec<Statement>, ParserError> {
         let dialect: Box<dyn sqlparser::dialect::Dialect> = match self {
+            Self::Generic => Box::new(GenericDialect {}),
             Self::Duckdb => Box::new(DuckDbDialect {}),
             Self::Postgres => Box::new(PostgreSqlDialect {}),
             Self::Databricks => Box::new(DatabricksDialect {}),
@@ -117,6 +119,15 @@ mod tests {
 
     fn policy() -> serde_json::Value {
         json!({"parser":"postgres", "identifier_quote":"\"", "identifier_case":"lower_unless_quoted", "literal_style":"hex", "hex_literal":"convert_from(decode('{hex}', 'hex'), 'UTF8')", "denied_functions":[], "file_formats":[], "read_only_notice":null})
+    }
+
+    #[test]
+    fn a_source_can_explicitly_choose_generic_sql_grammar() {
+        let mut value = policy();
+        value["parser"] = json!("generic");
+        let dialect: SqlDialect = serde_json::from_value(value).unwrap();
+        dialect.validate().unwrap();
+        assert_eq!(dialect.parser.parse("select lower('ok')").unwrap().len(), 1);
     }
 
     #[test]
