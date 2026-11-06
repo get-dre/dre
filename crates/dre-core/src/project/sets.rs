@@ -28,6 +28,17 @@ impl Loader {
                     Loose::Ok(Some(v)) => Some(v),
                     _ => None,
                 };
+                for k in v.iter().flat_map(|v| &v.unknown.0) {
+                    self.diags.error(
+                        Code::UnknownKey,
+                        Some(yf.display.clone()),
+                        Some(k.line),
+                        format!(
+                            "Set `{name}` has unknown key `{}`; a Set in sets.yml has `profile`, `vars` and `locale` (`exclude`, `queries` and the rest go on a report's `sets:`)",
+                            k.name
+                        ),
+                    );
+                }
                 let profile = v
                     .as_ref()
                     .and_then(|v| v.profile.as_ref())
@@ -277,6 +288,14 @@ impl Loader {
                                     Some(q) => {
                                         let mut q = q.clone();
                                         if let Some(e) = settings {
+                                            for k in &e.unknown.0 {
+                                                self.diags.error(
+                                                    Code::UnknownKey,
+                                                    file.clone(),
+                                                    Some(k.line),
+                                                    format!("{ctx}: query `{qn}` has unknown key `{}`", k.name),
+                                                );
+                                            }
                                             match &e.tab_name {
                                                 None => {}
                                                 Some(Loose::Ok(s)) => q.tab_name = Some(s.clone()),

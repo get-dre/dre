@@ -88,6 +88,11 @@
       "description": "Whether a per-row output's destination values rendered from `each.*` (addresses, paths) are masked in the console, logs, `run_results.json` and `rows.jsonl`. A `for_each` block's own `mask_row_values` wins.",
       "default": true
     },
+    "allow_unmanaged": {
+      "type": "boolean",
+      "description": "Whether a `.sql` file under `reports/` that no YAML lists in `queries:` (and no `ref()` uses) runs as an unmanaged report, for quick tests. Off by default: such a file is an error, so a leftover query is never run or delivered by accident.",
+      "default": false
+    },
     "timezone": {
       "type": "string",
       "description": "The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC."

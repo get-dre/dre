@@ -189,7 +189,7 @@ Explain in this order, one short paragraph or list each, skipping what doesn't a
    per-row output: "one `<format>` per row of `<driver>`, keyed by `<key>`; each gets only its
    own rows"; the number of rows isn't known until it runs (`dre run <report> --preview` prints
    "would make N row(s)", and sends nothing).
-3. **When there's no data:** what `on_empty` (or the default, `continue`) does for each output.
+3. **When there's no data:** what `on_empty` (or the default: `skip` since DRE 0.12, `continue` before) does for each output.
    On a per-row output it applies twice: an empty driver makes nothing at all, and each row whose
    slice is empty follows it too (`skip`: that row gets no file, recorded `skipped`, reason
    `no_data`). A per-row message that attaches a skipped or failed row's file is skipped for

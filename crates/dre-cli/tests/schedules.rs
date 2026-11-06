@@ -536,6 +536,10 @@ fn splitting_sql_cannot_split_a_secret_out_of_protection() {
         "reports/ops/unmanaged_secret.sql",
         "select * from {{ env_var('DRE_SECRET_TABLE') }}\n",
     )]);
+    p.write(
+        "dre_project.yml",
+        "name: acme_reports\ndefault_profile: warehouse\nallow_unmanaged: true\n",
+    );
     let secret = "ISSUE69-SPLIT-SECRET;TAIL";
     let env = [("DRE_SECRET_TABLE", secret)];
     let r = p.dre_env(
@@ -583,6 +587,10 @@ fn secret_sql_is_masked_before_internal_summaries_are_truncated() {
         "reports/ops/unmanaged_secret.sql",
         "{% set table = env_var('DRE_SECRET_TABLE') %}\ninsert into \"{{ table }}\" values (1)\n",
     )]);
+    p.write(
+        "dre_project.yml",
+        "name: acme_reports\ndefault_profile: warehouse\nallow_unmanaged: true\n",
+    );
     let secret =
         "ISSUE69-INTERNAL-SUMMARY-0123456789abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-END";
     let env = [("DRE_SECRET_TABLE", secret)];

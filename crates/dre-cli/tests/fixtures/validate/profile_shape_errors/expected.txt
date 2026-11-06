@@ -1,8 +1,9 @@
 exit: 1
 error[invalid-profile]: $CASE/profiles/profiles.yml:5: connection profile `no_targets` needs a map of named `targets`
+error[invalid-profile]: $CASE/profiles/profiles.yml:6: connection profile `no_targets`: unknown key `path`; a profile has `target` and `targets`
 error[invalid-profile]: $CASE/profiles/profiles.yml:9: target `prod` of connection profile `no_type` has no `type`
 error[invalid-profile]: $CASE/profiles/profiles.yml:10: connection profile `old_shape` needs a map of named `targets` (`outputs:` is now `targets:`)
 error[invalid-profiles]: $CASE/profiles/profiles.yml:13: unknown profiles.yml section `wat`; profiles go under `connections:` or `destinations:`
   Profiles  $CASE/profiles/profiles.yml (from --profiles-dir)
     Target  dev (default)
-Validation failed: 4 errors, 0 warnings
+Validation failed: 5 errors, 0 warnings

@@ -72,7 +72,7 @@ fn init_installs_the_source_writes_profiles_and_scaffolds_a_project() {
     assert_eq!(
         profiles,
         "connections:\n  warehouse:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('WAREHOUSE_TOKEN') }}\"\n\n\
-         destinations:\n  inbox_out:\n    targets:\n      dev:\n        type: inbox\n        path: out\n        token: \"{{ env_var('INBOX_OUT_TOKEN') }}\"\n"
+         destinations:\n  inbox_out:\n    targets:\n      dev:\n        type: inbox\n        path: out\n        token: \"{{ env_var('WAREHOUSE_TOKEN') }}\"\n"
     );
     let p = d.path().join("my_reports");
     for f in [
@@ -104,15 +104,17 @@ fn init_installs_the_source_writes_profiles_and_scaffolds_a_project() {
 fn init_offers_the_source_values_to_a_destination_on_the_same_platform() {
     let d = tempfile::tempdir().unwrap();
     registry(d.path());
-    // Profile `my-wh`; the destination's `path` is left blank, so it takes the source's.
-    let answers = "fixture\nmy-wh\n\ndata.duckdb\n\n1\n\n\n\nn\n";
+    // Profile `123-wh` gets a valid secret variable name; the destination takes the source's path and token.
+    let answers = "fixture\n123-wh\n\ndata.duckdb\nDB_TOKEN\n1\n\n\n\nn\n";
     let r = dre(d.path(), &["init"], answers);
-    r.ok().says("Enter keeps the value from `my-wh`");
+    r.ok()
+        .says("Enter keeps the value from `123-wh`")
+        .says("[_123_WH_TOKEN]");
     let profiles = std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap();
     assert_eq!(
         profiles,
-        "connections:\n  my-wh:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('MY_WH_TOKEN') }}\"\n\n\
-         destinations:\n  inbox_out:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('INBOX_OUT_TOKEN') }}\"\n"
+        "connections:\n  123-wh:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('DB_TOKEN') }}\"\n\n\
+         destinations:\n  inbox_out:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('DB_TOKEN') }}\"\n"
     );
 }
 
@@ -168,7 +170,7 @@ fn init_adds_to_the_right_section_of_an_existing_file_keeping_comments() {
         "# my connections\nsources:\n  old:  # keep me\n    targets:\n      dev: {type: duckdb}\n\n\
          \x20 new:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('NEW_TOKEN') }}\"\n\n\
          destinations:\n  box:\n    targets:\n      dev: {type: local}\n\n\
-         \x20 old:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('OLD_TOKEN') }}\"\n"
+         \x20 old:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('NEW_TOKEN') }}\"\n"
     );
 }
 
@@ -219,4 +221,57 @@ fn a_new_project_runs_end_to_end() {
         std::fs::read_to_string(common::resolve_run_path(&p, "target/run/hello/default/hello.csv")).unwrap(),
         "report,run_date,message\r\nhello,2026-01-25,Hello from DRE\r\n"
     );
+}
+
+#[test]
+fn init_stores_a_secret_only_as_an_environment_variable() {
+    let d = tempfile::tempdir().unwrap();
+    registry(d.path());
+    // A typed password is refused; a bare name becomes `env_var('NAME')`.
+    let answers = "fixture\nwarehouse\n\ndata.duckdb\nhunter2!\n{{ 'embedded-secret' }}\nMY_TOKEN\n\nn\n";
+    dre(d.path(), &["init"], answers)
+        .ok()
+        .says("environment variable")
+        .lacks("hunter2!")
+        .lacks("embedded-secret");
+    let profiles = std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap();
+    assert!(
+        profiles.contains("token: \"{{ env_var('MY_TOKEN') }}\""),
+        "{profiles}"
+    );
+    assert!(!profiles.contains("hunter2"), "{profiles}");
+}
+
+#[test]
+fn init_refuses_to_corrupt_a_hand_edited_file() {
+    for existing in [
+        "connections:   # prod + dev\n  old:\n    targets:\n      dev: {type: duckdb}\n",
+        "connections:\n    old:\n        targets:\n            dev: {type: duckdb}\n",
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        registry(d.path());
+        std::fs::create_dir_all(d.path().join("dot-dre")).unwrap();
+        std::fs::write(d.path().join("dot-dre/profiles.yml"), existing).unwrap();
+        dre(d.path(), &["init"], "fixture\nnew\n\ndata.duckdb\n\n\nn\n")
+            .failed()
+            .says("add this block by hand");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap(),
+            existing
+        );
+    }
+}
+
+#[test]
+fn init_preserves_an_existing_profiles_file_it_cannot_read_as_text() {
+    let d = tempfile::tempdir().unwrap();
+    registry(d.path());
+    let path = d.path().join("dot-dre/profiles.yml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = b"# keep this file\n\xff\n";
+    std::fs::write(&path, original).unwrap();
+    dre(d.path(), &["init"], "fixture\nnew\n\ndata.duckdb\n\n\nn\n")
+        .failed()
+        .says("can't read");
+    assert_eq!(std::fs::read(&path).unwrap(), original);
 }

@@ -17,9 +17,9 @@ Each code has a kind, which decides `dre`'s exit code and whether trying again c
 
 ### ambiguous-selector
 
-A selector matches a report and a folder.
+A bare selector picks different reports as a report, tag or folder.
 
-A bare name can mean a report or a folder. Use `folder:<path>` or the report's full dotted path.
+A bare name is read as a report name, a tag and a folder name; when those pick different reports DRE refuses rather than guess. Write the one you mean: `report:<name>`, `tag:<tag>` or `folder:<dotted path>`.
 
 ### invalid-selector
 
@@ -50,6 +50,12 @@ The selector (`-s`, a schedule's `select:` or `report:`) names no report, folder
 A selector names a source that doesn't exist.
 
 `source:<name>` selects reports using that source; the name must be declared under `sources:`.
+
+### unused-var
+
+A `--var` name appears nowhere in the project.
+
+No project file mentions the name, so nothing can read it with `var()`: usually a typo (`--var regoin=EU`), and the run uses the template's default instead. A warning; check the spelling.
 
 ## Config: the project's files
 
@@ -577,9 +583,9 @@ A schedule names a timing that doesn't exist.
 
 ### unmanaged-report
 
-A .sql file runs as an unmanaged report.
+A .sql file no YAML lists would run as an unmanaged report.
 
-A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report: it runs with the folder's settings into a csv. That's for quick tests; add a YAML to make it a managed report.
+A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report. It's an error unless `allow_unmanaged: true` in dre_project.yml opts in; then it runs with the folder's settings, for quick tests, with a warning. List it in a report YAML, or delete it.
 
 ### unrecognized-yaml
 

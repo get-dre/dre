@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum OnEmpty {
     /// Write the output (an empty section) and deliver it, with a warning.
-    #[default]
     Continue,
-    /// Drop the query's tab or file; for an output: write and deliver nothing.
+    /// Drop the query's tab or file; for an output (the default): write and deliver nothing.
+    #[default]
     Skip,
     /// Fail the run.
     Fail,
@@ -160,8 +160,12 @@ mod tests {
         let d = decide(Some(Fail), &[q("a", 1, None)], true);
         assert_eq!(d, Decision::default());
 
-        // Default continue, all empty: written, with a warning.
+        // Default skip, all empty: nothing written or delivered.
         let d = decide(None, &[q("a", 0, None)], true);
+        assert_eq!(d.skip.as_deref(), Some("no data: `a` returned no rows"));
+
+        // Continue, all empty: written, with a warning.
+        let d = decide(Some(Continue), &[q("a", 0, None)], true);
         assert!(d.skip.is_none() && d.fail.is_none());
         assert!(d.warnings[0].contains("`a` returned no rows; the output is written empty"));
 

@@ -338,6 +338,9 @@ codes! {
     UnresolvedVar = "unresolved-var", Config,
         "`var()` has no value.",
         "No level sets the variable: `--var`, the schedule, the Set, the report, the folders, or the project. Set it at one of them, or give `var()` a default.";
+    UnusedVar = "unused-var", Usage,
+        "A `--var` name appears nowhere in the project.",
+        "No project file mentions the name, so nothing can read it with `var()`: usually a typo (`--var regoin=EU`), and the run uses the template's default instead. A warning; check the spelling.";
     UnsetEnvVar = "unset-env-var", Config,
         "`env_var()` names an unset variable.",
         "The environment variable isn't set and `env_var()` has no default. Set it, or give a default: `env_var('NAME', 'fallback')`.";
@@ -348,8 +351,8 @@ codes! {
         "A template uses a name that was removed.",
         "The function or variable was renamed in an earlier release; the message says what to use.";
     UnmanagedReport = "unmanaged-report", Config,
-        "A .sql file runs as an unmanaged report.",
-        "A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report: it runs with the folder's settings into a csv. That's for quick tests; add a YAML to make it a managed report.";
+        "A .sql file no YAML lists would run as an unmanaged report.",
+        "A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report. It's an error unless `allow_unmanaged: true` in dre_project.yml opts in; then it runs with the folder's settings, for quick tests, with a warning. List it in a report YAML, or delete it.";
     UnmanagedSideEffect = "unmanaged-side-effect", Refused,
         "An unmanaged report runs a statement it may not.",
         "Unmanaged reports may only run `SELECT`/`WITH` and create temp tables or views, so a stray `.sql` file can't change data. Rewrite the statement, or give the report a YAML.";
@@ -423,8 +426,8 @@ codes! {
         "`source:<name>` selects reports using that source; the name must be declared under `sources:`.";
     // -- selectors and schedules ------------------------------------------------------------
     AmbiguousSelector = "ambiguous-selector", Usage,
-        "A selector matches a report and a folder.",
-        "A bare name can mean a report or a folder. Use `folder:<path>` or the report's full dotted path.";
+        "A bare selector picks different reports as a report, tag or folder.",
+        "A bare name is read as a report name, a tag and a folder name; when those pick different reports DRE refuses rather than guess. Write the one you mean: `report:<name>`, `tag:<tag>` or `folder:<dotted path>`.";
     InvalidSelector = "invalid-selector", Usage,
         "A selector can't be resolved.",
         "The selector (`-s`, `--set`, `--schedule`) doesn't resolve to Bindings to run. The message says why; `dre ls` lists what exists.";

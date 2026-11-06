@@ -1,20 +1,24 @@
 //! Selector resolution, shared by `dre validate` (schedules.yml) and `dre run`.
 //!
-//! A bare token is tried as (1) an exact report name, (2) a tag, (3) a folder leaf name anywhere
-//! under `reports/`. `tag:x` is an explicit tag; a dotted token is a folder path from `reports/`.
+//! A bare token is read as an exact report name, a tag and a folder leaf name anywhere under
+//! `reports/` (a dotted token: a folder path from `reports/`). Readings that pick different
+//! reports are an error, so adding a report, tag or folder never silently changes what an
+//! existing selector runs; `report:x`, `tag:x` and `folder:a.b` pick one reading. Every term must
+//! match some report.
 //! `source:sales` picks every report a query of which reads a table of source `sales`, and
 //! `source:sales.orders` those reading that table (as the parse pass found them).
 
 use crate::codes::Code;
 use std::fmt;
 
-use crate::project::{Project, REPORTS_DIR, Report, dotted};
+use crate::project::{Project, Report, dotted};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SelectorError {
+    /// A bare token's readings (`report:x`, `tag:x`, `folder:a.x`) pick different reports.
     Ambiguous {
         token: String,
-        candidates: Vec<Vec<String>>,
+        candidates: Vec<String>,
     },
     NoMatch {
         token: String,
@@ -40,19 +44,11 @@ impl fmt::Display for SelectorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SelectorError::Ambiguous { token, candidates } => {
-                writeln!(
+                write!(
                     f,
-                    "\"{token}\" matches more than one location — use the dotted form to disambiguate:"
-                )?;
-                let width = candidates.iter().map(|c| dotted(c).len()).max().unwrap_or(0);
-                for (i, c) in candidates.iter().enumerate() {
-                    let d = dotted(c);
-                    write!(f, "  {d:<width$}   ({REPORTS_DIR}/{}/)", c.join("/"))?;
-                    if i + 1 < candidates.len() {
-                        writeln!(f)?;
-                    }
-                }
-                Ok(())
+                    "\"{token}\" picks different reports as {}; write the one you mean",
+                    candidates.join(", ")
+                )
             }
             SelectorError::NoMatch { token } => {
                 write!(f, "selector `{token}` matches no report name, tag or folder")
@@ -64,8 +60,6 @@ impl fmt::Display for SelectorError {
 
 impl std::error::Error for SelectorError {}
 
-/// Resolve one selector token to reports, in project order. An explicit `tag:` or dotted path
-/// that matches nothing returns an empty list; an unknown bare token is `NoMatch`.
 /// Resolve a selection: one or more selectors separated by spaces, commas or semicolons
 /// (`daily tag:regulatory`, `daily,monthly`, `daily;monthly`), matching any of them. Reports come
 /// back in project order, each once.
@@ -94,44 +88,61 @@ fn resolve_one<'p>(project: &'p Project, token: &str) -> Result<Vec<&'p Report>,
             .filter(|r| r.folder.starts_with(folder))
             .collect()
     };
-    if let Some(sel) = token.strip_prefix("source:") {
-        return by_source(project, token, sel);
-    }
-    if let Some(tag) = token.strip_prefix("tag:") {
-        return Ok(project
+    let tagged = |tag: &str| -> Vec<&'p Report> {
+        project
             .reports()
             .iter()
             .filter(|r| r.tags.iter().any(|t| t == tag))
-            .collect());
+            .collect()
+    };
+    let path = |p: &str| -> Vec<String> { p.split('.').map(str::to_string).collect() };
+    let no_match = || SelectorError::NoMatch {
+        token: token.to_string(),
+    };
+    let found = |reports: Vec<&'p Report>| {
+        if reports.is_empty() {
+            Err(no_match())
+        } else {
+            Ok(reports)
+        }
+    };
+    if let Some(sel) = token.strip_prefix("source:") {
+        return by_source(project, token, sel);
     }
+    if let Some(name) = token.strip_prefix("report:") {
+        return project.report(name).map(|r| vec![r]).ok_or_else(no_match);
+    }
+    if let Some(tag) = token.strip_prefix("tag:") {
+        return found(tagged(tag));
+    }
+    if let Some(folder) = token.strip_prefix("folder:") {
+        return found(under(&path(folder)));
+    }
+    // Every reading of a bare token, as the explicit selector that picks it.
+    let mut readings: Vec<(String, Vec<&'p Report>)> = Vec::new();
     if let Some(r) = project.report(token) {
-        return Ok(vec![r]);
+        readings.push((format!("report:{token}"), vec![r]));
     }
     if token.contains('.') {
-        let path: Vec<String> = token.split('.').map(str::to_string).collect();
-        return Ok(under(&path));
+        readings.push((format!("folder:{token}"), under(&path(token))));
+    } else {
+        readings.push((format!("tag:{token}"), tagged(token)));
+        for f in project
+            .folders()
+            .iter()
+            .filter(|f| f.last().is_some_and(|l| l == token))
+        {
+            readings.push((format!("folder:{}", dotted(f)), under(f)));
+        }
     }
-    let tagged: Vec<&Report> = project
-        .reports()
-        .iter()
-        .filter(|r| r.tags.iter().any(|t| t == token))
-        .collect();
-    if !tagged.is_empty() {
-        return Ok(tagged);
-    }
-    let folders: Vec<&Vec<String>> = project
-        .folders()
-        .iter()
-        .filter(|f| f.last().is_some_and(|l| l == token))
-        .collect();
-    match folders.as_slice() {
-        [] => Err(SelectorError::NoMatch {
-            token: token.to_string(),
-        }),
-        [folder] => Ok(under(folder)),
+    readings.retain(|(_, reports)| !reports.is_empty());
+    let names = |reports: &[&Report]| reports.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+    match readings.as_slice() {
+        [] => Err(no_match()),
+        [(_, first), rest @ ..] if rest.iter().all(|(_, r)| names(r) == names(first)) => Ok(first.clone()),
         _ => Err(SelectorError::Ambiguous {
             token: token.to_string(),
-            candidates: folders.into_iter().cloned().collect(),
+            candidates: readings.into_iter().map(|(s, _)| format!("`{s}`")).collect(),
         }),
     }
 }

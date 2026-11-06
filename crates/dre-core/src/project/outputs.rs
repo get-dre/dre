@@ -1186,6 +1186,9 @@ impl Loader {
         let Loose::Ok(t) = t else {
             unreachable!("checked above")
         };
+        for k in &t.unknown.0 {
+            err(self, format!("`output.template` has unknown key `{}`", k.name));
+        }
         let mut bindings = Vec::new();
         let items = match t.bindings {
             None => Vec::new(),

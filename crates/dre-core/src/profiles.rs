@@ -486,6 +486,17 @@ fn parse_profile(
         );
         return None;
     };
+    for k in &m.unknown.0 {
+        diags.error(
+            Code::InvalidProfile,
+            file.clone(),
+            Some(k.line),
+            format!(
+                "{what}: unknown key `{}`; a profile has `target` and `targets`",
+                k.name
+            ),
+        );
+    }
     let target_line = m.target.as_ref().and_then(Located::line);
     let own_target = match m.target {
         None => None,
@@ -630,6 +641,9 @@ pub struct ConnectionProfile {
     /// DRE 0.1's name for `targets`, read only to say so.
     #[schemars(skip)]
     outputs: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    unknown: UnknownKeys,
 }
 
 /// A named destination with one entry per target (environment).
@@ -643,6 +657,9 @@ pub struct DestinationProfile {
     target: Option<Located<Loose<String>>>,
     #[schemars(skip)]
     outputs: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "$unknown", default)]
+    #[schemars(skip)]
+    unknown: UnknownKeys,
 }
 
 /// Either kind of profile, as the loader checks it.
@@ -650,6 +667,7 @@ pub struct RawProfile {
     target: Option<Located<Loose<String>>>,
     targets: Option<Located<Loose<Map<Located<serde_json::Value>>>>>,
     outputs: Option<serde::de::IgnoredAny>,
+    unknown: UnknownKeys,
 }
 
 fn entries<E: Into<serde_json::Value>>(
@@ -673,6 +691,7 @@ impl From<ConnectionProfile> for RawProfile {
             target: p.target,
             targets: entries(p.targets),
             outputs: p.outputs,
+            unknown: p.unknown,
         }
     }
 }
@@ -683,6 +702,7 @@ impl From<DestinationProfile> for RawProfile {
             target: p.target,
             targets: entries(p.targets),
             outputs: p.outputs,
+            unknown: p.unknown,
         }
     }
 }

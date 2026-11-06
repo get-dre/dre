@@ -21,7 +21,7 @@ position: 14
 | `DRE_THREADS` | How many Bindings may run at once in a `dre run`, over each connection entry's `threads:` (see [Running Bindings at once](connections.md#running-bindings-at-once)). `--threads` overrides it. New in 0.4. |
 | `DRE_ROW_CONCURRENCY` | How many rows of a [per-row output](per-row-outputs.md) render and deliver at once, over `for_each.concurrency` (default 4). `--row-concurrency` overrides it. New in 0.6. |
 | `DRE_GITHUB_API_URL` | The GitHub API for `github:` plugin sources and `dre system update` (GitHub Enterprise, a mirror). |
-| `DRE_RUN_DATE` | The run date (`YYYY-MM-DD`) behind `run.date`, instead of today. It wins over `DRE_RUN_AT`'s date. |
+| `DRE_RUN_DATE` | The run date (`YYYY-MM-DD`) behind `run.date`, instead of today. It wins over `DRE_RUN_AT`'s date. Any other value refuses to start (exit 2). |
 | `DRE_RUN_AT` | The instant a run was scheduled for (RFC 3339, e.g. `2026-09-01T06:00:00Z`). It becomes `run.now` and `run.scheduled_at`, gives `run.date` (that instant's date in the run's timezone) when `DRE_RUN_DATE` isn't set, and is recorded as `scheduled_at` in `run_results.json`. `dre schedule ls` puts it in every occurrence's command. |
 | `DRE_TIMEZONE` | The run's timezone (IANA name), above every `timezone:` setting. `--timezone` overrides it. |
 | `DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS` | How long to wait for a plugin to start (default 30,000). |

@@ -237,8 +237,7 @@ fn selectors_pick_reports_by_name_path_tag_or_everything() {
 #[test]
 fn an_ambiguous_selector_gives_the_same_error_as_validate() {
     let p = many_reports();
-    let expected = "\"monthly\" matches more than one location — use the dotted form to disambiguate:\n  \
-                    finance.monthly   (reports/finance/monthly/)\n  ops.monthly       (reports/ops/monthly/)";
+    let expected = "\"monthly\" picks different reports as `folder:finance.monthly`, `folder:ops.monthly`; write the one you mean";
     // Same message from the same resolver; only the surrounding indentation differs.
     let flat = |s: &str| s.lines().map(str::trim).collect::<Vec<_>>().join("\n");
     let run = p.dre("run", &["monthly"]);

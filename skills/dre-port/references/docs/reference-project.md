@@ -37,6 +37,7 @@ For copyable examples and common errors, see [Project configuration](project-con
 | `dispatch` | list of map (see below) |  | Which macro packages `dispatch()` searches, and in what order. |
 | `mask_secrets` | boolean | `true` | Whether `DRE_SECRET_*` values are masked as `*****` in the console, logs, JSON events, `run_results.json` and `target/compiled/`. |
 | `mask_row_values` | boolean | `true` | Whether a per-row output's destination values rendered from `each.*` (addresses, paths) are masked in the console, logs, `run_results.json` and `rows.jsonl`. A `for_each` block's own `mask_row_values` wins. |
+| `allow_unmanaged` | boolean | `false` | Whether a `.sql` file under `reports/` that no YAML lists in `queries:` (and no `ref()` uses) runs as an unmanaged report, for quick tests. Off by default: such a file is an error, so a leftover query is never run or delivered by accident. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
 | `locale` | string |  | The locale the number filters (`number`, `percent`, `currency`, `compact`, `signed`) format for, such as `de-DE` or `fr`: decimal and group separators, and where the currency symbol and percent sign go. Default: `en`. |
 | `week_start` | `monday` or `sunday` | `monday` | The first day of the week for `run.date` week arithmetic. |

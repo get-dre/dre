@@ -1,6 +1,6 @@
 //! `dre init` (interactive onboarding) and `dre new` (scaffold a project).
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -190,6 +190,68 @@ struct Prompter<R: BufRead> {
     input: R,
 }
 
+/// Restore terminal echo even when reading fails or setup unwinds.
+struct QuietInput {
+    #[cfg(unix)]
+    mode: libc::termios,
+    #[cfg(windows)]
+    mode: u32,
+}
+
+impl QuietInput {
+    fn new() -> Result<Option<Self>, String> {
+        if !std::io::stdin().is_terminal() {
+            return Ok(None);
+        }
+        #[cfg(unix)]
+        // SAFETY: stdin is a terminal; tcgetattr initializes mode before it is read.
+        unsafe {
+            let mut mode = std::mem::MaybeUninit::uninit();
+            if libc::tcgetattr(libc::STDIN_FILENO, mode.as_mut_ptr()) != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            let mode = mode.assume_init();
+            let mut quiet = mode;
+            quiet.c_lflag &= !libc::ECHO;
+            if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &quiet) != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(Some(Self { mode }))
+        }
+        #[cfg(windows)]
+        // SAFETY: the console APIs validate the standard input handle and mode pointer.
+        unsafe {
+            use windows_sys::Win32::System::Console::{
+                ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+            };
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            let mut mode = 0;
+            if GetConsoleMode(handle, &mut mode) == 0
+                || SetConsoleMode(handle, mode & !ENABLE_ECHO_INPUT) == 0
+            {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            Ok(Some(Self { mode }))
+        }
+    }
+}
+
+impl Drop for QuietInput {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: mode came from tcgetattr on this terminal.
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.mode);
+        }
+        #[cfg(windows)]
+        // SAFETY: mode came from GetConsoleMode on this standard input handle.
+        unsafe {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode};
+            SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), self.mode);
+        }
+    }
+}
+
 impl<R: BufRead> Prompter<R> {
     fn ask(&mut self, q: &str, default: Option<&str>) -> Result<String, String> {
         match default {
@@ -292,7 +354,7 @@ fn choices(index: &Index, kind: PluginKind) -> Vec<Choice<'_>> {
 
 /// The environment variable a secret defaults to: `dre-demo` + `token` → `DRE_DEMO_TOKEN`.
 fn env_name(profile: &str, field: &str) -> String {
-    format!("{profile}_{field}")
+    let mut name: String = format!("{profile}_{field}")
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
@@ -301,7 +363,11 @@ fn env_name(profile: &str, field: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    if name.starts_with(|c: char| c.is_ascii_digit()) {
+        name.insert(0, '_');
+    }
+    name
 }
 
 /// The connection profile just set up, whose values a destination on the same platform can reuse.
@@ -329,12 +395,19 @@ fn connection<R: BufRead>(
                 s.fields
                     .get(f.name.as_str())
                     .and_then(Value::as_str)
+                    .and_then(|v| {
+                        if f.secret {
+                            v.strip_prefix("{{ env_var('")?.strip_suffix("') }}")
+                        } else {
+                            Some(v)
+                        }
+                    })
                     .map(|v| (s.profile, v))
             });
         let default = if let Some((_, v)) = inherited {
             Some(v.to_string())
         } else if f.secret {
-            Some(format!("{{{{ env_var('{}') }}}}", env_name(profile, &f.name)))
+            Some(env_name(profile, &f.name))
         } else {
             f.default.as_ref().map(|d| match d {
                 serde_json::Value::String(s) => s.clone(),
@@ -351,14 +424,41 @@ fn connection<R: BufRead>(
         if !f.choices.is_empty() {
             eprintln!("    One of: {}", f.choices.join(", "));
         }
+        if f.secret {
+            eprintln!(
+                "    A secret: enter the name of the environment variable that holds it (never the value)."
+            );
+        }
         loop {
-            let v = p.input(default.as_deref())?;
+            let quiet = if f.secret { QuietInput::new()? } else { None };
+            let input = p.input(default.as_deref());
+            if quiet.is_some() {
+                eprintln!();
+            }
+            drop(quiet);
+            let mut v = input?;
             if v.is_empty() && f.required {
                 eprintln!("    `{}` is required.", f.name);
                 continue;
             }
             if v.is_empty() {
                 break;
+            }
+            // A secret is stored only as `env_var('NAME')`, never as typed.
+            if f.secret {
+                let is_name = v
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !is_name {
+                    eprintln!(
+                        "    That isn't an environment variable name; secrets aren't stored in profiles.yml. Enter the variable's name, e.g. {}.",
+                        env_name(profile, &f.name)
+                    );
+                    continue;
+                }
+                v = format!("{{{{ env_var('{v}') }}}}");
             }
             // Checked as the plugin will check it: a choice, or a whole number.
             if !f.choices.is_empty() && !f.choices.contains(&v) && !v.contains("{{") {
@@ -433,7 +533,11 @@ fn add_profile(
     kind: &str,
     fields: Mapping,
 ) -> Result<(), String> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("can't read {}: {e}", path.display())),
+    };
     let parsed = dre_core::config::node::parse(&existing).ok().map(|n| n.to_json());
     // A DRE 0.1 file keeps its connections under `sources:`; add to that rather than start a
     // second section.
@@ -507,10 +611,22 @@ fn add_profile(
     }
     let mut text = lines.join("\n");
     text.push('\n');
+    // The splice can't follow every hand-written layout (a comment after the section key, other
+    // indentation): write only a file that still parses and holds the new profile.
+    let added = dre_core::config::node::parse(&text)
+        .ok()
+        .is_some_and(|n| n.to_json().get(section).and_then(|s| s.get(name)).is_some());
+    if !added {
+        return Err(format!(
+            "can't add the profile to {} without changing its layout; add this block by hand under `{section}:`:\n{block}",
+            path.display()
+        ));
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, text).map_err(|e| format!("can't write {}: {e}", path.display()))
+    dre_core::fs::write_atomic(path, text.as_bytes())
+        .map_err(|e| format!("can't write {}: {e}", path.display()))
 }
 
 /// `dre init`.
@@ -547,7 +663,7 @@ fn init_inner(
     let profile = p.ask("Name for this connection profile", Some("warehouse"))?;
     let target = p.ask("Target (environment) name", Some("dev"))?;
     eprintln!("\nConnection details for `{}`.", source.name());
-    eprintln!("Secrets default to an env_var() reference; type a value to store it instead.\n");
+    eprintln!("For secrets, enter only an environment variable name; DRE stores an env_var() reference.\n");
     let conn = connection(&mut p, &profile, &fields, None)?;
     add_profile(
         &profiles_path,

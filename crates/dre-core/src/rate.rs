@@ -27,7 +27,8 @@ fn one() -> u64 {
 }
 
 impl Rate {
-    /// Parse `N/unit`: the unit is `second`, `minute` or `hour` (or `s`, `m`, `h`, plurals).
+    /// Parse `N/unit`: the unit is `second`, `minute` or `hour`, or one of their short forms
+    /// (`s`, `sec`, `m`, `min`, `h`, `hr`) or plurals. Anything else (`ms`) is refused.
     pub fn parse(s: &str) -> Result<Rate, String> {
         let bad = || {
             format!(
@@ -39,10 +40,10 @@ impl Rate {
         if count == 0 {
             return Err(format!("`{s}`: the count must be 1 or more"));
         }
-        let per_seconds = match unit.trim().to_ascii_lowercase().trim_end_matches('s') {
-            "second" | "sec" | "" => 1,
-            "minute" | "min" | "m" => 60,
-            "hour" | "hr" | "h" => 3600,
+        let per_seconds = match unit.trim().to_ascii_lowercase().as_str() {
+            "s" | "sec" | "secs" | "second" | "seconds" => 1,
+            "m" | "min" | "mins" | "minute" | "minutes" => 60,
+            "h" | "hr" | "hrs" | "hour" | "hours" => 3600,
             _ => return Err(bad()),
         };
         Ok(Rate {
@@ -120,7 +121,7 @@ mod tests {
         );
         assert_eq!(Rate::parse("60 / Minutes").unwrap().shown(), "60/minute");
         assert_eq!(Rate::parse("20_000/h").unwrap().count, 20_000);
-        for bad in ["100", "0/minute", "x/minute", "10/day"] {
+        for bad in ["100", "0/minute", "x/minute", "10/day", "10/ms", "5/secss", "5/"] {
             assert!(Rate::parse(bad).is_err(), "{bad}");
         }
     }
