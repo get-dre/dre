@@ -477,7 +477,7 @@ context (DRE 0.6): `{"file": "<absolute path>" or null, "project_root", "run": {
 "target", "schedule", "date", "now", "scheduled_at", "timezone", "week_start",
 "week_numbering"}, "vars": {...}, "cli_vars": {...}, "locale"}`. `vars` holds every resolved var
 (the Binding's, with the schedule's on top) and `cli_vars` the `--var` values as typed, which
-`var()` reads first. The plugin renders the template itself; `dre_core::document` builds the same
+`var()` reads first. The plugin renders the template itself; `dre-template`'s `document` module builds the same
 `var()`, `run.*`, date and number filters core's templates have.
 
 ### Destination
@@ -586,7 +586,8 @@ and replace `dre_protocol::host` and `dre_protocol::conformance` imports with
 `dre_plugin_host::host` and `dre_plugin_host::conformance`. Plugin implementations continue
 to depend on `dre-protocol`; existing plugin binaries need no rebuild for this split.
 
-`dre-core` and `dre-plugin-host` are implementation libraries for the matching CLI release;
+`dre-core`, `dre-plugin-host` and `dre-template` (the template context and filters core and the
+`document` plugin share) are implementation libraries for the matching CLI release;
 their Rust APIs carry no stability guarantee. Integrations should use the CLI and published
 JSON contracts, and plugins should use the protocol. Core's template and run internals are
 not an embedding API.

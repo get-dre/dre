@@ -78,9 +78,9 @@ mod templates;
 pub const PROJECT_FILE: &str = "dre_project.yml";
 pub const REPORTS_DIR: &str = "reports";
 pub const MACROS_DIR: &str = "macros";
-pub const TARGET_DIR: &str = "target";
-pub const LOGS_DIR: &str = "logs";
 pub use crate::plugins::DEPS_DIR;
+pub use dre_template::LOGS_DIR;
+pub use dre_template::TARGET_DIR;
 pub const DEFAULT_RUN_QUERY_MAX_ROWS: u64 = 10_000;
 
 pub const REPORT_KEYS: &[&str] = &[

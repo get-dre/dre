@@ -9,9 +9,10 @@ publish.workspace = true
 
 [dependencies]
 dre-protocol.workspace = true
-# The template context, `var()`, `run.*`, the date functions and the number filters: core's own
-# implementation, so a document template reads exactly what a message template reads.
-dre-core.workspace = true
+# The template context, `var()`, `run.*`, the date functions and the number filters: the same
+# crate core builds its own templates from, so a document template reads exactly what a message
+# template reads. The plugin never links dre-core.
+dre-template.workspace = true
 arrow.workspace = true
 serde_json.workspace = true
 minijinja.workspace = true
@@ -27,6 +28,8 @@ lopdf = { version = "0.46", default-features = false }
 getrandom = "0.4"
 
 [dev-dependencies]
+# Tests only: they drive the plugin through core's host, as `dre` does.
+dre-core.workspace = true
 dre-plugin-host.workspace = true
 tempfile.workspace = true
 flate2 = "1.1"

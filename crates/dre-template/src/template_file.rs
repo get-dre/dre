@@ -11,8 +11,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::plugins::DEPS_DIR;
-use crate::project::{LOGS_DIR, TARGET_DIR};
+use crate::DEPS_DIR;
+use crate::{LOGS_DIR, TARGET_DIR};
 
 /// Resolve `name`, looked up from `from` (a folder inside `root`). The error is a sentence for
 /// the person: the name, and where it was looked for or the files it matched.

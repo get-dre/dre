@@ -121,7 +121,7 @@ class ReleaseWorkflow(unittest.TestCase):
         mock = r'''
         cargo() {
           if [[ "$1" == metadata ]]; then
-            printf '%s\n' '{"packages":[{"name":"dre-protocol","version":"1.0.0"},{"name":"dre-plugin-host","version":"1.0.0"},{"name":"dre-core","version":"1.0.0"},{"name":"dre-cli","version":"1.0.0"}]}'
+            printf '%s\n' '{"packages":[{"name":"dre-protocol","version":"1.0.0"},{"name":"dre-plugin-host","version":"1.0.0"},{"name":"dre-template","version":"1.0.0"},{"name":"dre-core","version":"1.0.0"},{"name":"dre-cli","version":"1.0.0"}]}'
           else
             echo "cargo $*"
             [[ "$FAIL_VERIFY" != true ]]
@@ -137,18 +137,18 @@ class ReleaseWorkflow(unittest.TestCase):
     def test_verifies_unpublished_dependencies_together_and_propagates_failure(self):
         result = self.run_publish_script("crates-verify")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cargo publish --dry-run --locked -p dre-protocol -p dre-plugin-host -p dre-core -p dre-cli", result.stdout)
+        self.assertIn("cargo publish --dry-run --locked -p dre-protocol -p dre-plugin-host -p dre-template -p dre-core -p dre-cli", result.stdout)
         self.assertNotEqual(self.run_publish_script("crates-verify", fail=True).returncode, 0)
         result = self.run_publish_script("crates-verify", existing="dre-protocol")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cargo publish --dry-run --locked -p dre-plugin-host -p dre-core -p dre-cli", result.stdout)
+        self.assertIn("cargo publish --dry-run --locked -p dre-plugin-host -p dre-template -p dre-core -p dre-cli", result.stdout)
 
     def test_upload_does_not_rebuild_and_preserves_dependency_order(self):
         result = self.run_publish_script("crates")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
             f"cargo publish -p {crate} --locked --no-verify"
-            for crate in ("dre-protocol", "dre-plugin-host", "dre-core", "dre-cli")])
+            for crate in ("dre-protocol", "dre-plugin-host", "dre-template", "dre-core", "dre-cli")])
         result = self.run_publish_script("crates", existing="dre-protocol")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("cargo publish -p dre-protocol", result.stdout)

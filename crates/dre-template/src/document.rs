@@ -15,10 +15,10 @@ use minijinja::{Environment, Value};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as Json};
 
+use crate::common::RunContext;
 use crate::dates::{Calendar, WeekNumbering, WeekStart};
-use crate::message::QueryResult;
 use crate::numbers::Locale;
-use crate::render::RunContext;
+use crate::result::QueryResult;
 
 /// A format `write` request's `template` for the html and pdf formats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,7 +156,7 @@ impl Context {
 pub fn environment(ctx: &Context, secrets: &crate::secrets::Secrets) -> Result<Environment<'static>, String> {
     let mut env = Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    crate::render::add_common(
+    crate::common::add_common(
         &mut env,
         ctx.run_context()?,
         ctx.vars.clone(),

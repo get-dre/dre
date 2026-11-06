@@ -398,7 +398,7 @@ fn signed(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::Env;
+    use crate::Env;
 
     #[test]
     fn locale_number_rounding_and_grouping() {

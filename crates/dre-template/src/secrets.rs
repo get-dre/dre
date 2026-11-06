@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 
-use crate::context::Env;
+use crate::Env;
 
 pub const PREFIX: &str = "DRE_SECRET_";
 pub const MASK: &str = "*****";
@@ -315,7 +315,7 @@ impl Secrets {
 
     /// Mask a rendered message without changing the report payload. Markdown interpolation has
     /// already escaped punctuation, so both literal and escaped secret values must be matched.
-    pub(crate) fn mask_markdown<'a>(&self, s: &'a str) -> Cow<'a, str> {
+    pub fn mask_markdown<'a>(&self, s: &'a str) -> Cow<'a, str> {
         if !self.enabled() {
             return Cow::Borrowed(s);
         }
@@ -324,7 +324,7 @@ impl Secrets {
 
     /// Message titles collapse whitespace before delivery. Match that representation as well as
     /// the literal secret when protecting a title in logs and run metadata.
-    pub(crate) fn mask_message_title<'a>(&self, s: &'a str) -> Cow<'a, str> {
+    pub fn mask_message_title<'a>(&self, s: &'a str) -> Cow<'a, str> {
         if !self.enabled() {
             return Cow::Borrowed(s);
         }
