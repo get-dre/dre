@@ -42,7 +42,7 @@ use dre_protocol::plugin::{
     About, Destination, ErrorKind, Format, Plugin, PluginError, ResultSets, ResultSink, Source, WriteRequest,
     serve_format, serve_package, serve_source,
 };
-use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
+use dre_protocol::{CAP_CATALOG, CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
 use serde_json::{Map, Value};
 
 struct Fixture {
@@ -53,6 +53,23 @@ impl Source for Fixture {
     fn sql_dialect(&self) -> Option<dre_protocol::sql::SqlDialect> {
         Some(fixture_dialect())
     }
+    fn catalog(&mut self, _tables: &[String], _schemas: &[String]) -> dre_protocol::plugin::Result<Value> {
+        Ok(serde_json::json!({
+            "schema_version": "dre/catalog/v1",
+            "identifier_quote": "\"",
+            "dialect": fixture_dialect().describe(),
+            "current_catalog": "fixture",
+            "current_schema": "main",
+            "tables": [{
+                "catalog": "fixture", "schema": "main", "name": "fixture_table",
+                "qualified_name": ["fixture", "main", "fixture_table"],
+                "description": "Native fixture table", "description_source": "database",
+                "columns": [{"name": "id", "type": "BIGINT", "description": "Native fixture column"}],
+                "requested": ["fixture_table"]
+            }]
+        }))
+    }
+
     fn identifier_quote(&self) -> Option<&'static str> {
         Some("\"")
     }
@@ -248,6 +265,7 @@ fn main() {
         serve_source(about, Fixture { opened: false })
     }
     let about = About::new("fixture", env!("CARGO_PKG_VERSION")).capabilities(&[
+        CAP_CATALOG,
         CAP_SESSIONS,
         CAP_READ_ONLY,
         CAP_CHECK,

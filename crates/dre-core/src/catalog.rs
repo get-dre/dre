@@ -27,12 +27,6 @@ pub fn build(
     let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` is unavailable"));
     };
-    if !project.plugins().iter().any(|p| p.name == target.kind) {
-        return Err(format!(
-            "live catalogue comments are not yet supported for `{}`; declare a source plugin advertising `catalog`",
-            target.kind
-        ));
-    }
     plugin_catalog(ctx, project, profile, target, request).map_err(|(found, error)| {
         if found {
             error
