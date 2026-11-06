@@ -104,14 +104,16 @@ fn init_installs_the_source_writes_profiles_and_scaffolds_a_project() {
 fn init_offers_the_source_values_to_a_destination_on_the_same_platform() {
     let d = tempfile::tempdir().unwrap();
     registry(d.path());
-    // Profile `my-wh`; the destination's `path` is left blank, so it takes the source's.
-    let answers = "fixture\nmy-wh\n\ndata.duckdb\nDB_TOKEN\n1\n\n\n\nn\n";
+    // Profile `123-wh` gets a valid secret variable name; the destination takes the source's path and token.
+    let answers = "fixture\n123-wh\n\ndata.duckdb\nDB_TOKEN\n1\n\n\n\nn\n";
     let r = dre(d.path(), &["init"], answers);
-    r.ok().says("Enter keeps the value from `my-wh`");
+    r.ok()
+        .says("Enter keeps the value from `123-wh`")
+        .says("[_123_WH_TOKEN]");
     let profiles = std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap();
     assert_eq!(
         profiles,
-        "connections:\n  my-wh:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('DB_TOKEN') }}\"\n\n\
+        "connections:\n  123-wh:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('DB_TOKEN') }}\"\n\n\
          destinations:\n  inbox_out:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('DB_TOKEN') }}\"\n"
     );
 }
@@ -258,4 +260,18 @@ fn init_refuses_to_corrupt_a_hand_edited_file() {
             existing
         );
     }
+}
+
+#[test]
+fn init_preserves_an_existing_profiles_file_it_cannot_read_as_text() {
+    let d = tempfile::tempdir().unwrap();
+    registry(d.path());
+    let path = d.path().join("dot-dre/profiles.yml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = b"# keep this file\n\xff\n";
+    std::fs::write(&path, original).unwrap();
+    dre(d.path(), &["init"], "fixture\nnew\n\ndata.duckdb\n\n\nn\n")
+        .failed()
+        .says("can't read");
+    assert_eq!(std::fs::read(&path).unwrap(), original);
 }
