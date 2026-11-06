@@ -18,10 +18,12 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use serde_json::{Map, Value};
 
-use crate::frame::{self, Frame, FrameError};
-use crate::msg::{ConnectionField, DeliveryFile, Envelope, LogLevel, Request, Response, ResultSetMeta};
-use crate::options::OptionField;
-use crate::{
+use dre_protocol::frame::{self, Frame, FrameError};
+use dre_protocol::msg::{
+    ConnectionField, DeliveryFile, Envelope, LogLevel, Request, Response, ResultSetMeta,
+};
+use dre_protocol::options::OptionField;
+use dre_protocol::{
     CORE_MIN_VERSION, Kind, MAX_VERSION, PluginId, parse_executable_name, parse_package_executable_name,
 };
 
@@ -176,7 +178,7 @@ pub struct Description {
     /// A message destination's length limit, in characters.
     pub message_limit: Option<u64>,
     /// A source's field naming a file only one process may write at a time.
-    pub single_writer: Option<crate::msg::SingleWriter>,
+    pub single_writer: Option<dre_protocol::msg::SingleWriter>,
 }
 
 #[derive(Debug)]
@@ -1265,8 +1267,8 @@ impl PluginProcess {
     pub fn write_finish_with_fonts(
         &mut self,
         resolve: &mut dyn FnMut(
-            &crate::msg::FontRequest,
-        ) -> std::result::Result<Vec<String>, crate::msg::FontError>,
+            &dre_protocol::msg::FontRequest,
+        ) -> std::result::Result<Vec<String>, dre_protocol::msg::FontError>,
     ) -> Result<(Vec<String>, Vec<String>)> {
         self.send(&Request::Finish {})?;
         loop {
@@ -1330,7 +1332,7 @@ impl PluginProcess {
                 message: None,
             },
             many => {
-                if !self.has(crate::CAP_MULTI_FILE) {
+                if !self.has(dre_protocol::CAP_MULTI_FILE) {
                     return Err(HostError::plugin(
                         &self.label,
                         format!(
@@ -1362,12 +1364,12 @@ impl PluginProcess {
     /// Deliver a message, with `attach` files, to a plugin advertising `message`.
     pub fn deliver_message(
         &mut self,
-        message: &crate::msg::Message,
+        message: &dre_protocol::msg::Message,
         attach: &[DeliveryFile],
         connection: Map<String, Value>,
         options: Map<String, Value>,
     ) -> Result<String> {
-        if !self.has(crate::CAP_MESSAGE) {
+        if !self.has(dre_protocol::CAP_MESSAGE) {
             return Err(HostError::plugin(
                 &self.label,
                 "a message, but the plugin doesn't advertise `message`",

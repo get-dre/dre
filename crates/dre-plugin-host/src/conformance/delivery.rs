@@ -1,4 +1,4 @@
-//! The delivery cases (`conformance/delivery.json`), run against [`crate::delivery`] with an
+//! The delivery cases (`conformance/delivery.json`), run against [`dre_protocol::delivery`] with an
 //! in-memory store. The Go SDK runs the same cases against its own delivery code, so both apply
 //! `if_exists`, temporary names, `temp_dir`, retries and numbered names the same way.
 
@@ -10,11 +10,11 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::Check;
-use crate::delivery::{Caps, Rules, Store, StoreError, deliver_with};
-use crate::plugin::PluginError;
+use dre_protocol::delivery::{Caps, Rules, Store, StoreError, deliver_with};
+use dre_protocol::plugin::PluginError;
 
 /// The delivery cases, as published.
-pub const DELIVERY_CASES: &str = include_str!("../../conformance/delivery.json");
+pub const DELIVERY_CASES: &str = dre_protocol::schema::DELIVERY_CASES;
 
 #[derive(Debug, Deserialize)]
 struct Cases {

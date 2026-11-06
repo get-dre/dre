@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
 use serde_json::{Value, json};
 

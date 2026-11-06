@@ -21,6 +21,7 @@ aws-credential-types = "1"
 async-trait = "0.1"
 
 [dev-dependencies]
+dre-plugin-host.workspace = true
 tempfile.workspace = true
 hmac = "0.13"
 sha2 = "0.11"

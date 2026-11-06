@@ -5,8 +5,8 @@ use arrow::array::{
     ArrayRef, BooleanArray, Date32Array, DictionaryArray, Float64Array, Int64Array, RecordBatch, StringArray,
 };
 use arrow::datatypes::Int32Type;
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
 use dre_protocol::{Kind, PluginId};
 use serde_json::{Value, json};

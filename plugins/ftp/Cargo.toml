@@ -17,4 +17,5 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 
 [dev-dependencies]
+dre-plugin-host.workspace = true
 tempfile.workspace = true

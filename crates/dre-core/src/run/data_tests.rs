@@ -1,7 +1,8 @@
 //! Local checks of immutable Arrow spools, using a disposable core-owned DuckDB database.
 
 use super::session::{Session, masked_source_error, protected_sql};
-use dre_protocol::{CAP_SESSIONS, host::Execution};
+use dre_plugin_host::host::Execution;
+use dre_protocol::CAP_SESSIONS;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

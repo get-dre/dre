@@ -5,8 +5,8 @@ use arrow::array::{
     ArrayRef, BinaryArray, BooleanArray, Date32Array, Decimal128Array, Float64Array, Int64Array, RecordBatch,
     StringArray, TimestampMicrosecondArray,
 };
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::basic::Compression;

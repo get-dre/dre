@@ -27,6 +27,7 @@ lopdf = { version = "0.46", default-features = false }
 getrandom = "0.4"
 
 [dev-dependencies]
+dre-plugin-host.workspace = true
 tempfile.workspace = true
 flate2 = "1.1"
 lopdf = { version = "0.46", default-features = false }

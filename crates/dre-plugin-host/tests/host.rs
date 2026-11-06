@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arrow::array::{Array, Int64Array};
-use dre_protocol::host::{Execution, HostError, LogSink, PluginProcess};
-use dre_protocol::{CAP_SESSIONS, Kind, MAX_VERSION, MIN_VERSION, conformance};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{Execution, HostError, LogSink, PluginProcess};
+use dre_protocol::{CAP_SESSIONS, Kind, MAX_VERSION, MIN_VERSION};
 use serde_json::{Map, json};
 
 fn fixture() -> &'static Path {
@@ -419,7 +420,7 @@ const BATCHES: usize = 200;
 /// thread, which ends when the write does. Returns the plugin's canceller, the thread, and how
 /// many batches it got through before the plugin pushed back.
 fn stalled_write() -> (
-    dre_protocol::host::Canceller,
+    dre_plugin_host::host::Canceller,
     std::thread::JoinHandle<Result<(), HostError>>,
     usize,
 ) {

@@ -17,6 +17,7 @@ name = "dre"
 path = "src/main.rs"
 
 [dependencies]
+dre-plugin-host.workspace = true
 serde-saphyr.workspace = true
 dre-core.workspace = true
 dre-protocol.workspace = true

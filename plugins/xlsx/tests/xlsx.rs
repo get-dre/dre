@@ -6,8 +6,8 @@ use arrow::array::{
     TimestampMicrosecondArray,
 };
 use calamine::{Data, Reader, Xlsx, open_workbook};
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
 use serde_json::{Value, json};
 

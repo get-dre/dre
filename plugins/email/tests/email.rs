@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::DeliveryFile;
 use dre_protocol::msg::Message;
-use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE, conformance};
+use dre_protocol::{CAP_MESSAGE, CAP_MULTI_FILE};
 use mail_parser::{MessageParser, MimeHeaders};
 use serde_json::{Map, Value, json};
 

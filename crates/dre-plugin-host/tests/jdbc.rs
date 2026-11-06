@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use arrow::array::{Array, BinaryArray, Decimal128Array, StringArray, TimestampMillisecondArray};
 use arrow::datatypes::{DataType, TimeUnit};
-use dre_protocol::conformance::{self, Options, Session};
-use dre_protocol::host::{Execution, LogSink, PluginProcess};
+use dre_plugin_host::conformance::{self, Options, Session};
+use dre_plugin_host::host::{Execution, LogSink, PluginProcess};
 use dre_protocol::{CAP_CHECK, CAP_LOAD, CAP_READ_ONLY, CAP_SESSIONS};
 use serde_json::{Value, json};
 

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use dre_protocol::host::LogSink;
+use dre_plugin_host::host::LogSink;
 use serde_json::{Map, Value};
 
 use crate::Diagnostics;

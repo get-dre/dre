@@ -1,4 +1,11 @@
 //! DRE core: turns a project directory into a resolved, validated project, and runs it.
+//!
+//! An implementation library for the matching `dre-cli` release, not a stable embedding API.
+//! Engine internals are private:
+//!
+//! ```compile_fail
+//! use dre_core::render;
+//! ```
 
 // A public function that can panic says when in a `# Panics` section (CI denies warnings).
 #![warn(clippy::missing_panics_doc)]
@@ -6,21 +13,21 @@
 pub mod catalog;
 pub mod checksum;
 pub mod codes;
-pub mod coltypes;
+pub(crate) mod coltypes;
 pub mod config;
 pub mod constraints;
 pub mod context;
 pub mod data_tests;
 pub mod dates;
-pub mod delivery;
+pub(crate) mod delivery;
 pub mod diag;
 pub mod dialect;
 pub mod document;
 pub mod engine;
 pub mod error;
 pub mod fonts;
-pub mod for_each;
-pub mod formats;
+pub(crate) mod for_each;
+pub(crate) mod formats;
 pub mod fs;
 pub mod lock;
 pub mod lookups;
@@ -28,40 +35,40 @@ pub mod manager;
 pub mod manifest;
 pub mod message;
 mod mutable;
-pub mod no_data;
+pub(crate) mod no_data;
 pub mod numbers;
 pub mod occurrences;
 pub mod options;
 pub mod packages;
-pub mod parse;
+pub(crate) mod parse;
 pub mod plugin_host;
 pub mod plugins;
-pub mod preflight;
+pub(crate) mod preflight;
 pub mod profiles;
 pub mod project;
 pub mod query;
 pub mod rate;
 pub mod release;
-pub mod render;
-pub mod rows;
+pub(crate) mod render;
+pub(crate) mod rows;
 pub mod run;
-pub mod run_results;
+pub(crate) mod run_results;
 pub mod runs;
-pub mod saved;
+pub(crate) mod saved;
 pub mod schedule;
 mod schema;
-pub mod secret_columns;
+pub(crate) mod secret_columns;
 pub mod secrets;
-pub mod selector;
+pub(crate) mod selector;
 pub mod settings;
 pub mod sqlsplit;
 pub mod start;
 pub mod target;
 pub mod template_file;
-pub mod values;
-pub mod variables;
+pub(crate) mod values;
+pub(crate) mod variables;
 pub mod yaml;
-pub mod zip_pack;
+pub(crate) mod zip_pack;
 
 pub use context::{Context, Env};
 pub use diag::{Diagnostic, Diagnostics, Severity};

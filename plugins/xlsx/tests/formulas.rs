@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Date32Array, Float64Array, Int64Array, RecordBatch, StringArray};
 use calamine::{Data, Reader, Xlsx, open_workbook};
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::{ColumnOptions, ResultSetMeta};
 use serde_json::{Value, json};
 use umya_spreadsheet::Workbook;

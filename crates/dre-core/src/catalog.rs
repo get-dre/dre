@@ -168,7 +168,7 @@ fn plugin_catalog(
         crate::plugin_host::find_plugin(ctx, project, crate::project::PluginKind::Source, &target.kind)
             .map_err(|e| (true, e.to_string()))?;
     let secrets = ctx.secrets().clone();
-    let log: dre_protocol::host::LogSink = std::sync::Arc::new(move |name, message| {
+    let log: dre_plugin_host::host::LogSink = std::sync::Arc::new(move |name, message| {
         eprintln!("{name}: {}", secrets.mask_source_error(message, false));
     });
     let mut process = ctx
@@ -180,7 +180,7 @@ fn plugin_catalog(
         return Err((false, String::new()));
     }
     let connection = crate::profiles::render_connection(target, ctx.env()).map_err(|e| (true, e))?;
-    let masked = |e: dre_protocol::host::HostError| {
+    let masked = |e: dre_plugin_host::host::HostError| {
         ctx.secrets()
             .mask_source_error(&e.to_string(), false)
             .into_owned()

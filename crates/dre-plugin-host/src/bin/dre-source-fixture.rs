@@ -154,7 +154,7 @@ impl Source for Fixture {
             }
             "sleep" => {
                 let secs: u64 = arg.parse()?;
-                dre_protocol::plugin::on_cancel(|| log::warn!("fixture: cancel hook"));
+                dre_protocol::plugin::on_cancel(|| dre_protocol::log::warn!("fixture: cancel hook"));
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
                 while std::time::Instant::now() < deadline {
                     if dre_protocol::plugin::cancelled() {

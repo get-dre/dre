@@ -11,8 +11,8 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::PluginId;
-use dre_protocol::host::{LogSink, PluginProcess};
 use serde_json::{Map, Value, json};
 
 fn root() -> PathBuf {

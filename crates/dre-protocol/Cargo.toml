@@ -1,6 +1,6 @@
 [package]
 name = "dre-protocol"
-description = "The DRE plugin protocol: frames, messages, host side, plugin SDK and conformance suite"
+description = "The DRE plugin protocol: frames, messages and plugin SDK"
 # Versioned on its own, not with DRE: plugins depend on it. The wire protocol has its own
 # integer version too (MIN_VERSION/MAX_VERSION), which changes only when the messages do.
 version = "0.12.0"
@@ -23,7 +23,7 @@ schemars.workspace = true
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Pipes"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [dev-dependencies]
 tempfile.workspace = true

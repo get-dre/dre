@@ -1,8 +1,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use dre_protocol::host::{Execution, LogSink, PluginProcess};
-use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, conformance};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{Execution, LogSink, PluginProcess};
+use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS};
 use serde_json::{Map, json};
 
 fn bin() -> &'static Path {
@@ -142,7 +143,9 @@ fn a_cancel_interrupts_the_running_query() {
         started.elapsed()
     );
     match err {
-        dre_protocol::host::HostError::Plugin { kind, .. } => assert_eq!(kind.as_deref(), Some("cancelled")),
+        dre_plugin_host::host::HostError::Plugin { kind, .. } => {
+            assert_eq!(kind.as_deref(), Some("cancelled"))
+        }
         e => panic!("{e:?}"),
     }
 }
