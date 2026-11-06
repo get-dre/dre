@@ -18,7 +18,7 @@ From 1.0, a supported project continues to validate and run within the same core
 using compatible, pinned plugins. The compatibility promise covers:
 
 - Documented project YAML keys, types, defaults, layering and template functions and filters.
-- Documented CLI commands, flags, selector semantics and [exit codes](exit-codes.md).
+- Documented CLI commands, flags, selector semantics, registered diagnostic codes and [exit codes](exit-codes.md).
 - Versioned machine-readable outputs: [manifest and run results](manifest.md), validation JSON,
   [JSON log events](manifest.md#json-validation-and-log-events), and scheduled occurrence
   documents. Consumers must check the document's schema identifier and tolerate additional optional fields.
