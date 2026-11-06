@@ -770,15 +770,7 @@ pub fn render_connection(
     use serde_json::Value as Json;
     let mut env = minijinja::Environment::new();
     env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    let process = process.clone();
-    env.add_function("env_var", move |name: String, default: Option<String>| -> Result<String, minijinja::Error> {
-        process.var(&name).map(str::to_string).or(default).ok_or_else(|| {
-            minijinja::Error::new(
-                minijinja::ErrorKind::UndefinedError,
-                format!("`env_var('{name}')`: environment variable `{name}` is not set and no default is given"),
-            )
-        })
-    });
+    crate::render::add_env_var(&mut env, process.clone());
     fn walk(env: &minijinja::Environment<'_>, v: &Json) -> Result<Json, String> {
         Ok(match v {
             Json::String(s) if crate::preflight::is_templated(s) => Json::String(

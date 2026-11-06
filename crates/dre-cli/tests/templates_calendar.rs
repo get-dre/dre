@@ -182,7 +182,7 @@ fn timezone_precedence_cli_env_schedule_report_folder_project() {
         "select 'Asia/Kolkata'\n"
     );
     // A schedule's zone sits above the report's, below the environment.
-    p.dre("run", &["--schedule", "sched", "--dry-run"]).ok();
+    p.dre("run", &["--schedule", "sched"]).ok();
     assert_eq!(
         p.read("target/compiled/monthly/default/q.sql"),
         "select 'Asia/Tokyo'\n"

@@ -61,7 +61,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "good"
         ],
@@ -90,7 +90,7 @@ exit: 0
       "invocation": {
         "argv": [
           "dre",
-          "run",
+          "build",
           "--schedule",
           "good"
         ],

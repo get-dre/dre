@@ -340,7 +340,7 @@ fn connection_secrets_are_masked_without_hiding_open_errors() {
 }
 
 #[test]
-fn dry_run_compiles_and_executes_nothing() {
+fn compile_executes_nothing() {
     let p = project(&[
         ("reports/fin/d/d.yml", "queries: [dq]\n"),
         (
@@ -348,7 +348,7 @@ fn dry_run_compiles_and_executes_nothing() {
             "delete from accounts where id = {{ 1 + 1 }};\nselect count(*) as n from accounts",
         ),
     ]);
-    p.dre("run", &["d", "--dry-run"])
+    p.dre("compile", &["d"])
         .ok()
         .says("Compiled  target/compiled/d/default/dq.sql");
     assert_eq!(
@@ -451,7 +451,7 @@ fn unmanaged_side_effects_are_refused_before_anything_runs() {
         .says("reports/scratch/sneaky.sql:2")
         .says("found `delete from accounts`")
         .says("nothing was run");
-    p.dre("run", &["sneaky", "--dry-run"])
+    p.dre("compile", &["sneaky"])
         .failed()
         .says("found `delete from accounts`");
     // Nothing ran: the table still has every row.

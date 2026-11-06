@@ -267,18 +267,15 @@ struct RunArgs {
     /// Override the full output (delivery) path for this run (the first output, with several).
     #[arg(long)]
     output_path: Option<String>,
-    /// Render SQL into target/compiled/ and stop; no report query is executed.
-    #[arg(long)]
-    dry_run: bool,
     /// Keep normal outputs locally without delivering them to any destination.
     #[arg(long)]
     no_deliver: bool,
     /// Write typed JSON rows per query and isolate this run's outputs/history in DIR.
-    #[arg(long, value_name = "DIR", conflicts_with = "dry_run")]
+    #[arg(long, value_name = "DIR")]
     output_json: Option<PathBuf>,
     /// Re-render the outputs from results saved with `--output-json DIR`, without running any
     /// query or opening a connection; implies --no-deliver. For designing a template.
-    #[arg(long, value_name = "DIR", conflicts_with_all = ["dry_run", "output_json", "preview"])]
+    #[arg(long, value_name = "DIR", conflicts_with_all = ["output_json", "preview"])]
     from_results: Option<PathBuf>,
     /// Execute with a row limit (default 100); output stays in target/ and is never delivered.
     #[arg(long, value_name = "ROWS", num_args = 0..=1, default_missing_value = "100")]
@@ -306,11 +303,11 @@ struct RunArgs {
     #[arg(long, value_name = "N")]
     row_concurrency: Option<String>,
     /// Hold every delivery: render and record them, and deliver them later with `dre release`.
-    #[arg(long, conflicts_with_all = ["dry_run", "preview", "no_deliver"])]
+    #[arg(long, conflicts_with_all = ["preview", "no_deliver"])]
     hold: bool,
     /// Redo a run's failed and never-started rows of its per-row outputs, from the query results
     /// it saved, with no query; other outputs are skipped. The new run doesn't become current.
-    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["dry_run", "from_results", "output_json"])]
+    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["from_results", "output_json"])]
     retry_failed: Option<String>,
     /// Make only these rows of each per-row output (keys, comma-separated); recorded as partial.
     #[arg(long, value_name = "KEYS", value_delimiter = ',')]
@@ -1211,14 +1208,7 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, results: dre_cor
                     ..Default::default()
                 }
             } else {
-                run_mode(
-                    a.dry_run,
-                    a.from_results,
-                    a.retry_failed,
-                    a.hold,
-                    a.no_deliver,
-                    a.preview,
-                )
+                run_mode(a.from_results, a.retry_failed, a.hold, a.no_deliver, a.preview)
             },
             output_json: a.output_json,
             rows: dre_core::run::RowOptions {
@@ -1278,7 +1268,6 @@ fn run(ctx: &Context, a: RunArgs, mut printer: output::Printer, results: dre_cor
 
 /// `dre run`'s mode from its flags (clap keeps the conflicting ones apart).
 fn run_mode(
-    dry_run: bool,
     from_results: Option<PathBuf>,
     retry_failed: Option<String>,
     hold: bool,
@@ -1286,10 +1275,9 @@ fn run_mode(
     preview: Option<u64>,
 ) -> dre_core::run::Mode {
     use dre_core::run::{DeliveryMode, Mode, Results};
-    let results = match (dry_run, from_results, retry_failed) {
-        (true, _, _) => Results::Compile,
-        (_, Some(dir), _) => Results::Replay(dir),
-        (_, _, Some(id)) => Results::Retry(id),
+    let results = match (from_results, retry_failed) {
+        (Some(dir), _) => Results::Replay(dir),
+        (_, Some(id)) => Results::Retry(id),
         _ => Results::Query,
     };
     // `--from-results` delivers nothing: it replays results to look at them.
@@ -1505,23 +1493,19 @@ mod tests {
 
     #[test]
     fn run_flags_pick_the_mode() {
-        let m = run_mode(false, None, None, false, false, None);
+        let m = run_mode(None, None, false, false, None);
         assert_eq!((m.results, m.delivery), (Results::Query, DeliveryMode::Send));
-        assert_eq!(
-            run_mode(true, None, None, false, false, None).results,
-            Results::Compile
-        );
         // A replay delivers nothing.
-        let m = run_mode(false, Some("saved".into()), None, false, false, None);
+        let m = run_mode(Some("saved".into()), None, false, false, None);
         assert_eq!(
             (m.results, m.delivery),
             (Results::Replay("saved".into()), DeliveryMode::Keep)
         );
-        let m = run_mode(false, None, Some("r1".into()), true, false, Some(5));
+        let m = run_mode(None, Some("r1".into()), true, false, Some(5));
         assert_eq!(m.results, Results::Retry("r1".into()));
         assert_eq!((m.delivery, m.preview), (DeliveryMode::Hold, Some(5)));
         assert_eq!(
-            run_mode(false, None, None, false, true, None).delivery,
+            run_mode(None, None, false, true, None).delivery,
             DeliveryMode::Keep
         );
     }

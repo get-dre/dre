@@ -77,9 +77,9 @@ fn source_selectors_still_resolve_before_scoping_the_run() {
     );
     p.write(
         "reports/good/good.sql",
-        "select * from {{ source('sales', 'orders') }}",
+        "{% set relation = source('sales', 'orders') %}rows 2",
     );
-    p.dre("run", &["source:sales.orders", "--dry-run"]).ok();
+    p.dre("run", &["source:sales.orders"]).ok();
     assert!(p.path("target/compiled/good/default/good.sql").exists());
     assert!(!p.path("target/compiled/bad/default/bad.sql").exists());
 }

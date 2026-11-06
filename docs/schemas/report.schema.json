@@ -471,12 +471,13 @@
         "when": {
           "type": [
             "string",
-            "boolean"
+            "boolean",
+            "null"
           ],
-          "description": "A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`."
+          "description": "A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. `null` clears an inherited condition."
         },
         "destination": {
-          "description": "Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path.",
+          "description": "Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. `null` clears inherited destinations.",
           "oneOf": [
             {
               "$ref": "#/$defs/destination"
@@ -487,11 +488,22 @@
               "items": {
                 "$ref": "#/$defs/destination"
               }
+            },
+            {
+              "type": "null"
             }
           ]
         },
         "template": {
-          "$ref": "#/$defs/template"
+          "description": "A template for xlsx, html or pdf. `null` clears an inherited template.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/template"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "for_each": {
           "description": "One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md.",

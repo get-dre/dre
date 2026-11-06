@@ -112,7 +112,7 @@ when a template calls it, so `dre compile` connects for reports that use it. Pac
 `dre_utils.star()` is one.
 
 `dre run` renders each query just before running it, so a template sees what the queries before
-it made. `dre compile`, `--dry-run` and `dre validate` run nothing, so there a temp table made by
+it made. `dre compile` and `dre validate` run nothing, so there a temp table made by
 an earlier query doesn't exist yet: `columns()` or `run_query()` on it fails there, and works in
 `dre run`. `dre validate` reports such a report as a warning (it can only be checked by
 `dre run`) and still checks everything else.

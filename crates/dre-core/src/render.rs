@@ -809,6 +809,11 @@ fn add_vars(
             })
         },
     );
+    add_env_var(env, process);
+}
+
+/// Register the shared environment lookup, preserving the Jinja type of a default.
+pub(crate) fn add_env_var(env: &mut Environment<'static>, process: Env) {
     env.add_function("env_var", move |name: String, default: Option<Value>| -> Result<Value, Error> {
         match process.var(&name) {
             Some(v) => Ok(Value::from(v)),

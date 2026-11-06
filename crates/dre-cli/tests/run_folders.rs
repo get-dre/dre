@@ -110,7 +110,7 @@ fn a_second_run_of_the_same_binding_is_refused_and_changes_nothing() {
     }
     assert!(lock.exists(), "the first run never took the lock");
     let second = p.dre("run", &["slow"]);
-    assert_eq!(second.code, 2, "{second:?}");
+    assert_eq!(second.code, 75, "{second:?}");
     let text = second.stdout.clone() + &second.stderr;
     assert!(
         text.contains("run-in-progress") || text.contains("is already running"),
@@ -136,7 +136,7 @@ fn unlock_removes_a_lock_left_on_another_host() {
     )
     .unwrap();
     let refused = p.dre("run", &["daily"]);
-    assert_eq!(refused.code, 2, "{refused:?}");
+    assert_eq!(refused.code, 75, "{refused:?}");
     assert!(
         (refused.stdout.clone() + &refused.stderr).contains("on elsewhere"),
         "{refused:?}"

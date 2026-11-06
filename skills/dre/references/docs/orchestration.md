@@ -203,8 +203,8 @@ whose templates query the database.
 `DRE_SCHEDULER_DB` and DRE's own credentials come from the environment cron runs with (e.g.
 `/etc/environment` or a wrapper that reads your secret store). Without a database, a crontab line
 per schedule also works, as long as each line passes the instant it was meant for:
-`CRON_TZ=Australia/Sydney` plus `DRE_RUN_AT=$(date -u +%Y-%m-%dT%H:%M:00Z) dre run --schedule
-close_monthly`. cron's own DST rules then decide, not DRE's.
+`CRON_TZ=Australia/Sydney` plus `DRE_RUN_AT=$(date -u +%Y-%m-%dT%H:%M:00Z) dre build --schedule
+close_monthly`. DRE checks the firing against its timing, timezone, pauses and exception dates.
 
 ### Airflow
 

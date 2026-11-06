@@ -276,7 +276,7 @@ fn validate_writes_the_whole_manifest_and_run_leaves_it_unchanged() {
     p.dre("validate", &["-s", "daily"]).ok();
     assert_eq!(manifest(&p)["reports"].as_object().unwrap().len(), 3);
     let bytes = p.read("target/manifest.json");
-    p.dre("run", &["-s", "daily", "--dry-run"]).ok();
+    p.dre("compile", &["-s", "daily"]).ok();
     assert_eq!(p.read("target/manifest.json"), bytes);
     p.dre("run", &["--schedule", "daily_all"]).ok();
     assert_eq!(p.read("target/manifest.json"), bytes);

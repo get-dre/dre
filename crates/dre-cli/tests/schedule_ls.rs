@@ -200,7 +200,7 @@ fn running_an_occurrences_invocation_renders_that_firing() {
     assert_eq!(o["run_date"], "2026-10-01");
     assert_eq!(
         o["invocation"]["argv"],
-        serde_json::json!(["dre", "run", "--schedule", "close_monthly"])
+        serde_json::json!(["dre", "build", "--schedule", "close_monthly"])
     );
     execute(&p, &o);
     let expected = "client,period,d,now\r\na,month,2026-10-01,2026-10-01T06:00:00+10:00\r\n";
@@ -322,7 +322,7 @@ fn a_split_occurrence_renders_what_its_binding_renders_in_the_full_run() {
         occurrences[1]["invocation"]["argv"],
         serde_json::json!([
             "dre",
-            "run",
+            "build",
             "--schedule",
             "close_monthly",
             "-s",

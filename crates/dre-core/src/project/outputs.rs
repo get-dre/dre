@@ -579,7 +579,7 @@ impl Loader {
                 }
             }
         }
-        let destinations = match o.destination {
+        let destinations = match o.destination.into_option() {
             None => Vec::new(),
             Some(Loose::Ok(de::OneOf::A(d))) => self
                 .typed_destination(d, ctx, file.as_deref(), used)
@@ -591,7 +591,7 @@ impl Loader {
                     file.clone(),
                     None,
                     format!(
-                        "{ctx}: `output.destination` is an empty list; name at least one destination, or remove it to keep the output in target/"
+                        "{ctx}: `output.destination` is an empty list; name at least one destination, or set it to null to keep the output in target/"
                     ),
                 );
                 Vec::new()
@@ -621,7 +621,7 @@ impl Loader {
                 Vec::new()
             }
         };
-        let template = match o.template {
+        let template = match o.template.into_option() {
             None => None,
             Some(t) => {
                 if !Format::new(&format).takes_template() {
@@ -686,7 +686,7 @@ impl Loader {
                 None
             }
         };
-        let when = match o.when {
+        let when = match o.when.into_option() {
             None => None,
             Some(Loose::Ok(de::OneOf::A(w))) => Some(w),
             Some(Loose::Ok(de::OneOf::B(b))) => Some(b.to_string()),
@@ -1469,8 +1469,12 @@ pub fn merge_output(base: &mut OutputConfig, over: &OutputConfig) -> Option<Stri
     replace(&mut base.name, name);
     replace(&mut base.format, format);
     replace(&mut base.queries, queries);
-    replace(&mut base.when, when);
-    replace(&mut base.template, template);
+    if let de::Maybe::Given(_) = when {
+        base.when.clone_from(when);
+    }
+    if let de::Maybe::Given(_) = template {
+        base.template.clone_from(template);
+    }
     replace(&mut base.for_each, for_each);
     replace(&mut base.file_name, file_name);
     replace(&mut base.on_empty, on_empty);
@@ -1478,32 +1482,36 @@ pub fn merge_output(base: &mut OutputConfig, over: &OutputConfig) -> Option<Stri
         base.extension = de::Maybe::Given(e.clone());
     }
     merge_options(&mut base.options, options);
-    match destination {
-        Some(Loose::Ok(de::OneOf::A(o))) => {
-            let fits =
-                |b: &DestinationConfig| o.profile.is_none() || same(b.profile.as_ref(), o.profile.as_ref());
-            match &mut base.destination {
-                Some(Loose::Ok(de::OneOf::B(list))) if o.profile.is_none() && list.len() > 1 => {
-                    problem = Some(format!(
-                        "this overrides `destination` with no `profile:`, but it inherits {} destinations, so it's unclear which one to change; override the full list instead",
-                        list.len()
-                    ));
+    if let de::Maybe::Given(destination) = destination {
+        match destination {
+            Some(Loose::Ok(de::OneOf::A(o))) => {
+                let fits = |b: &DestinationConfig| {
+                    o.profile.is_none() || same(b.profile.as_ref(), o.profile.as_ref())
+                };
+                match &mut base.destination {
+                    de::Maybe::Given(Some(Loose::Ok(de::OneOf::B(list))))
+                        if o.profile.is_none() && list.len() > 1 =>
+                    {
+                        problem = Some(format!(
+                            "this overrides `destination` with no `profile:`, but it inherits {} destinations, so it's unclear which one to change; override the full list instead",
+                            list.len()
+                        ));
+                    }
+                    de::Maybe::Given(Some(Loose::Ok(de::OneOf::B(list))))
+                        if list.len() == 1 && matches!(&list[0], Loose::Ok(b) if fits(b)) =>
+                    {
+                        let Some(Loose::Ok(mut b)) = list.pop() else {
+                            unreachable!("the guard checked the one entry is a map");
+                        };
+                        merge_destination(&mut b, o);
+                        base.destination = de::Maybe::Given(Some(Loose::Ok(de::OneOf::A(b))));
+                    }
+                    de::Maybe::Given(Some(Loose::Ok(de::OneOf::A(b)))) if fits(b) => merge_destination(b, o),
+                    _ => base.destination = de::Maybe::Given(destination.clone()),
                 }
-                Some(Loose::Ok(de::OneOf::B(list)))
-                    if list.len() == 1 && matches!(&list[0], Loose::Ok(b) if fits(b)) =>
-                {
-                    let Some(Loose::Ok(mut b)) = list.pop() else {
-                        unreachable!("the guard checked the one entry is a map");
-                    };
-                    merge_destination(&mut b, o);
-                    base.destination = Some(Loose::Ok(de::OneOf::A(b)));
-                }
-                Some(Loose::Ok(de::OneOf::A(b))) if fits(b) => merge_destination(b, o),
-                _ => base.destination = destination.clone(),
             }
+            _ => base.destination = de::Maybe::Given(destination.clone()),
         }
-        Some(d) => base.destination = Some(d.clone()),
-        None => {}
     }
     problem
 }
@@ -1633,9 +1641,9 @@ mod tests {
             }
             out.trim().to_string()
         };
-        match &o.destination {
+        match o.destination.clone().into_option() {
             None => Vec::new(),
-            Some(Loose::Ok(de::OneOf::A(d))) => vec![one(d)],
+            Some(Loose::Ok(de::OneOf::A(d))) => vec![one(&d)],
             Some(Loose::Ok(de::OneOf::B(list))) => list.iter().filter_map(Loose::ok).map(one).collect(),
             Some(Loose::Bad(_)) => vec!["bad".into()],
         }
@@ -1733,8 +1741,8 @@ mod tests {
     fn a_map_layer_changes_the_output_its_name_names() {
         let mut outs = vec![output("name: a\nformat: csv"), output("name: b\nformat: xlsx")];
         assert!(layer_outputs(&mut outs, &layer("{name: b, when: 'false'}")).is_empty());
-        assert!(outs[0].when.is_none());
-        assert!(outs[1].when.is_some());
+        assert!(outs[0].when.clone().into_option().is_none());
+        assert!(outs[1].when.clone().into_option().is_some());
         let problems = layer_outputs(&mut outs, &layer("{when: 'true'}"));
         assert!(problems[0].contains("inherits 2 outputs"), "{problems:?}");
         let problems = layer_outputs(&mut outs, &layer("{name: c}"));

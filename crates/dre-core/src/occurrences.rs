@@ -323,7 +323,7 @@ fn chosen<'a>(project: &'a Project, req: &Request) -> Result<Vec<&'a ScheduleEnt
         .collect())
 }
 
-/// The command that runs one firing: `dre run --schedule <name>`, narrowed to one Binding under
+/// The command that runs one firing: `dre build --schedule <name>`, narrowed to one Binding under
 /// `--split`. Never a target, profile or credentials: the deployment decides those.
 fn invocation(
     name: &str,
@@ -333,7 +333,7 @@ fn invocation(
 ) -> Json {
     let mut argv = vec![
         "dre".to_string(),
-        "run".into(),
+        "build".into(),
         "--schedule".into(),
         name.to_string(),
     ];

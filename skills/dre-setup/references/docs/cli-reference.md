@@ -84,7 +84,6 @@ dre run [OPTIONS] [SELECTOR]...
 | `--profile <PROFILE>` |  | Use this connection instead of the inherited one (report, Set, folder `+profile`, `default_profile`), e.g. for an ad hoc Set. A query's own `profile:` or a source's wins. |
 | `--output-name <OUTPUT_NAME>` |  | Override the output file name for this run (the first output, with several). |
 | `--output-path <OUTPUT_PATH>` |  | Override the full output (delivery) path for this run (the first output, with several). |
-| `--dry-run` |  | Render SQL into target/compiled/ and stop; no report query is executed. |
 | `--no-deliver` |  | Keep normal outputs locally without delivering them to any destination. |
 | `--output-json <DIR>` |  | Write typed JSON rows per query and isolate this run's outputs/history in DIR. |
 | `--from-results <DIR>` |  | Re-render the outputs from results saved with `--output-json DIR`, without running any query or opening a connection; implies --no-deliver. For designing a template. |
