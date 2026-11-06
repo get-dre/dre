@@ -455,3 +455,35 @@ fn a_timed_out_run_keeps_its_finished_rows() {
             || done.is_empty()
     );
 }
+
+#[test]
+fn a_null_in_a_row_value_fails_its_path_or_file_name_never_writes_none() {
+    let members = (
+        "reports/members/statements/members.sql",
+        "select * from (values (101, 'Ann'), (102, null), (103, 'Cat')) t(member_id, name) order by member_id",
+    );
+    let p = project(
+        "queries: [members, holdings]\noutput:\n  name: statement\n  format: csv\n  for_each: {query: members, key: member_id}\n\
+\x20 destination: {profile: outbox, path: \"out/{{ each.name }}.csv\"}\n",
+        &[members],
+    );
+    // Paths are rendered for every row before any is delivered, so the output fails.
+    p.dre("run", &["statements"])
+        .failed()
+        .says("output path")
+        .says("NULL");
+    for bad in ["out/None.csv", "out/none.csv", "out/.csv"] {
+        assert!(!p.path(bad).exists(), "{bad} was written");
+    }
+
+    // A file name is checked before any row renders: the output fails.
+    let p = project(
+        "queries: [members, holdings]\noutput:\n  name: statement\n  format: csv\n  for_each: {query: members, key: member_id}\n  file_name: \"{{ each.name }}.csv\"\n",
+        &[members],
+    );
+    p.dre("run", &["statements"]).failed().says("NULL");
+    let dir = p.path("target/run/statements/default/statement");
+    for bad in ["None.csv", "none.csv", ".csv"] {
+        assert!(!dir.join(bad).exists(), "{bad} was written");
+    }
+}

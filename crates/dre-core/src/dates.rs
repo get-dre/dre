@@ -109,9 +109,9 @@ impl Calendar {
         }
     }
 
-    /// The last microsecond of `d` here.
-    fn end_of(&self, d: NaiveDate) -> ChronoDateTime<Tz> {
-        self.start_of(d + Days::new(1)) - Duration::microseconds(1)
+    /// The last microsecond of `d` here; `None` on the calendar's last day.
+    fn end_of(&self, d: NaiveDate) -> Option<ChronoDateTime<Tz>> {
+        Some(self.start_of(d.succ_opt()?) - Duration::microseconds(1))
     }
 
     fn week_start_of(&self, d: NaiveDate) -> NaiveDate {
@@ -143,7 +143,10 @@ impl Calendar {
             }
             WeekNumbering::Us => {
                 let jan1 = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(bad)?;
-                let start = self.week_start_of(jan1) + Days::new(7 * (w.max(1) as u64 - 1));
+                let start = self
+                    .week_start_of(jan1)
+                    .checked_add_days(Days::new(7 * (u64::from(w.max(1)) - 1)))
+                    .ok_or_else(bad)?;
                 if w == 0 || start.year() > year {
                     return Err(bad());
                 }
@@ -171,11 +174,18 @@ fn year_start(d: NaiveDate) -> NaiveDate {
 }
 
 fn add_months(d: NaiveDate, n: i64) -> Option<NaiveDate> {
+    let months = Months::new(u32::try_from(n.unsigned_abs()).ok()?);
     if n >= 0 {
-        d.checked_add_months(Months::new(n as u32))
+        d.checked_add_months(months)
     } else {
-        d.checked_sub_months(Months::new(n.unsigned_abs() as u32))
+        d.checked_sub_months(months)
     }
+}
+
+/// `d` moved by whole years, months, weeks and days; `None` past the calendar's ends.
+fn move_date(d: NaiveDate, years: i64, months: i64, weeks: i64, days: i64) -> Option<NaiveDate> {
+    let d = add_months(d, years.checked_mul(12)?.checked_add(months)?)?;
+    add_days(d, weeks.checked_mul(7)?.checked_add(days)?)
 }
 
 fn add_days(d: NaiveDate, n: i64) -> Option<NaiveDate> {
@@ -292,15 +302,11 @@ impl Object for Date {
             "week_year" => Value::from(cal.week_number(d).0),
             "weekday" => Value::from(d.weekday().number_from_monday()),
             "day_of_year" => Value::from(d.ordinal()),
-            "days_in_month" => Value::from(
-                (add_months(month_start(d), 1).expect("the date is far from the end of the calendar")
-                    - month_start(d))
-                .num_days(),
-            ),
+            "days_in_month" => Value::from((add_months(month_start(d), 1)? - month_start(d)).num_days()),
             "prev_day" => self.at(d.pred_opt()?),
             "next_day" => self.at(d.succ_opt()?),
             "week_start" => self.at(cal.week_start_of(d)),
-            "week_end" => self.at(cal.week_start_of(d) + Days::new(6)),
+            "week_end" => self.at(cal.week_start_of(d).checked_add_days(Days::new(6))?),
             "month_start" => self.at(month_start(d)),
             "month_end" => self.at(add_months(month_start(d), 1)?.pred_opt()?),
             "quarter_start" => self.at(quarter_start(d)),
@@ -308,8 +314,8 @@ impl Object for Date {
             "year_start" => self.at(year_start(d)),
             "year_end" => self.at(NaiveDate::from_ymd_opt(d.year(), 12, 31)?),
             "this_week" => self.period(Kind::Week, cal.week_start_of(d)),
-            "prev_week" => self.period(Kind::Week, cal.week_start_of(d) - Days::new(7)),
-            "next_week" => self.period(Kind::Week, cal.week_start_of(d) + Days::new(7)),
+            "prev_week" => self.period(Kind::Week, cal.week_start_of(d).checked_sub_days(Days::new(7))?),
+            "next_week" => self.period(Kind::Week, cal.week_start_of(d).checked_add_days(Days::new(7))?),
             "this_month" => self.period(Kind::Month, month_start(d)),
             "prev_month" => self.period(Kind::Month, add_months(month_start(d), -1)?),
             "next_month" => self.period(Kind::Month, add_months(month_start(d), 1)?),
@@ -320,7 +326,7 @@ impl Object for Date {
             "prev_year" => self.period(Kind::Year, add_months(year_start(d), -12)?),
             "next_year" => self.period(Kind::Year, add_months(year_start(d), 12)?),
             "start" => DateTime::value(cal.start_of(d), cal),
-            "end" => DateTime::value(cal.end_of(d), cal),
+            "end" => DateTime::value(cal.end_of(d)?, cal),
             "date" => self.at(d),
             "unix" => Value::from(cal.start_of(d).timestamp()),
             "unix_ms" => Value::from(cal.start_of(d).timestamp_millis()),
@@ -352,9 +358,8 @@ impl Object for Date {
                 let (years, months, weeks, days) =
                     (get("years")?, get("months")?, get("weeks")?, get("days")?);
                 kw.assert_all_used()?;
-                let d = add_months(self.d, years * 12 + months)
-                    .and_then(|d| add_days(d, weeks * 7 + days))
-                    .ok_or_else(|| err("date out of range"))?;
+                let d =
+                    move_date(self.d, years, months, weeks, days).ok_or_else(|| err("date out of range"))?;
                 Ok(self.at(d))
             }
             // `d.day` is the day of the month; the one-day period is `d.as_period()`.
@@ -465,8 +470,7 @@ impl Object for DateTime {
                     self.t
                 } else {
                     let local = self.t.naive_local();
-                    let day = add_months(local.date(), years * 12 + months)
-                        .and_then(|d| add_days(d, weeks * 7 + days))
+                    let day = move_date(local.date(), years, months, weeks, days)
                         .ok_or_else(|| err("date out of range"))?;
                     let wall = day.and_time(local.time());
                     let tz = self.t.timezone();
@@ -486,8 +490,12 @@ impl Object for DateTime {
                         LocalResult::None => tz.from_utc_datetime(&(wall - offset)),
                     }
                 };
-                let t =
-                    moved + Duration::hours(hours) + Duration::minutes(minutes) + Duration::seconds(seconds);
+                let t = Duration::try_hours(hours)
+                    .zip(Duration::try_minutes(minutes))
+                    .zip(Duration::try_seconds(seconds))
+                    .and_then(|((h, m), s)| h.checked_add(&m)?.checked_add(&s))
+                    .and_then(|delta| moved.checked_add_signed(delta))
+                    .ok_or_else(|| err("date and time out of range"))?;
                 Ok(DateTime::value(t, self.cal))
             }
             _ => Err(Error::from(ErrorKind::UnknownMethod)),
@@ -528,20 +536,17 @@ impl Period {
     }
 
     fn of(kind: Kind, first: NaiveDate, cal: Calendar) -> Period {
+        let after = |months| add_months(first, months).and_then(|d| d.pred_opt());
+        // A period running past the calendar's last day ends on it.
         let last = match kind {
-            Kind::Day => first,
-            Kind::Week => first + Days::new(6),
-            Kind::Month => {
-                add_months(first, 1).expect("the date is far from the end of the calendar") - Days::new(1)
-            }
-            Kind::Quarter => {
-                add_months(first, 3).expect("the date is far from the end of the calendar") - Days::new(1)
-            }
-            Kind::Year => {
-                add_months(first, 12).expect("the date is far from the end of the calendar") - Days::new(1)
-            }
-            Kind::Days(n) => first + Days::new(n - 1),
-        };
+            Kind::Day => Some(first),
+            Kind::Week => first.checked_add_days(Days::new(6)),
+            Kind::Month => after(1),
+            Kind::Quarter => after(3),
+            Kind::Year => after(12),
+            Kind::Days(n) => first.checked_add_days(Days::new(n.saturating_sub(1))),
+        }
+        .unwrap_or(NaiveDate::MAX);
         Period {
             kind,
             first,
@@ -572,7 +577,7 @@ impl Object for Period {
         let cal = self.cal;
         Some(match key.as_str()? {
             "start" => DateTime::value(cal.start_of(self.first), cal),
-            "end" => DateTime::value(cal.end_of(self.last), cal),
+            "end" => DateTime::value(cal.end_of(self.last)?, cal),
             "first_day" => Date::value(self.first, cal),
             "last_day" => Date::value(self.last, cal),
             "next" => Period::value(self.shift(true)?),
@@ -602,10 +607,6 @@ fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .or_else(|_| NaiveDate::parse_from_str(s, "%Y%m%d"))
         .ok()
-        .or_else(|| {
-            s.get(..10)
-                .and_then(|p| NaiveDate::parse_from_str(p, "%Y-%m-%d").ok())
-        })
 }
 
 fn parse_datetime(s: &str, cal: Calendar) -> Option<ChronoDateTime<Tz>> {
@@ -645,9 +646,9 @@ fn to_date(v: &Value, cal: Calendar) -> Result<NaiveDate, Error> {
     if let Some(t) = v.downcast_object_ref::<DateTime>() {
         return Ok(t.t.date_naive());
     }
-    let _ = cal;
+    // Text with a time is read as a date and time, so an offset moves it into the calendar's day.
     v.as_str()
-        .and_then(parse_date)
+        .and_then(|s| parse_date(s).or_else(|| parse_datetime(s, cal).map(|t| t.date_naive())))
         .ok_or_else(|| err(format!("`{v}` isn't a date; use `YYYY-MM-DD`")))
 }
 
@@ -707,7 +708,11 @@ fn preset(name: &str, as_of: NaiveDate, n: Option<i64>, cal: Calendar) -> Result
         "today" => Period::of(Kind::Day, d, cal),
         "yesterday" => Period::of(Kind::Day, d.pred_opt().ok_or_else(bad)?, cal),
         "this_week" => Period::of(Kind::Week, week, cal),
-        "last_week" => Period::of(Kind::Week, week - Days::new(7), cal),
+        "last_week" => Period::of(
+            Kind::Week,
+            week.checked_sub_days(Days::new(7)).ok_or_else(bad)?,
+            cal,
+        ),
         "this_month" => Period::of(Kind::Month, month_start(d), cal),
         "last_month" => Period::of(Kind::Month, add_months(month_start(d), -1).ok_or_else(bad)?, cal),
         "mtd" => range(month_start(d), d),

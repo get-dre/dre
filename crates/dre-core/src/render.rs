@@ -61,6 +61,9 @@ pub struct RunContext {
 
 /// Appended to a message template's name: it turns on Markdown escaping.
 const MARKDOWN_SUFFIX: &str = "\u{0}md";
+/// Appended to the template name of a value that names a place (a path, file name, address or
+/// password): printing a NULL there is an error, not an empty string.
+const NO_NULL_SUFFIX: &str = "\u{0}value";
 
 /// Rows returned to templates by `run_query()`.
 #[derive(Debug, Clone, Default)]
@@ -292,7 +295,18 @@ impl Renderer {
                 minijinja::AutoEscape::None
             }
         });
-        env.set_formatter(|out, state, value| {
+        env.set_formatter(move |out, state, value| {
+            // NULL (SQL NULL, an unset `run.set`) prints as nothing; in a path or address it's an
+            // error, so a row's NULL can't send a file to `None/` (the parse pass has no data).
+            if value.is_none() {
+                if !parse && state.name().ends_with(NO_NULL_SUFFIX) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidOperation,
+                        "a value here is NULL; give it a fallback, e.g. `{{ x | default('unknown') }}`",
+                    ));
+                }
+                return Ok(());
+            }
             if *state.auto_escape() == minijinja::AutoEscape::Custom("markdown".into()) {
                 let text = value.to_string();
                 let text = if value.is_safe() {
@@ -645,13 +659,24 @@ impl Renderer {
         ctx: Value,
         markdown: bool,
     ) -> Result<String, RenderError> {
+        self.render_named(file, src, ctx, if markdown { MARKDOWN_SUFFIX } else { "" })
+    }
+
+    /// Render a value that names a place: a path, file name, destination setting or password.
+    /// Printing a NULL in it is an error.
+    ///
+    /// # Panics
+    ///
+    /// As [`Renderer::render_with`].
+    pub fn render_value(&self, file: &Path, src: &str, ctx: Value) -> Result<String, RenderError> {
+        self.render_named(file, src, ctx, NO_NULL_SUFFIX)
+    }
+
+    fn render_named(&self, file: &Path, src: &str, ctx: Value, suffix: &str) -> Result<String, RenderError> {
         self.columns_cache.lock().unwrap().clear();
         *self.raised.lock().unwrap() = None;
         let full = format!("{}{src}", self.import);
-        let mut name = file.to_string_lossy().to_string();
-        if markdown {
-            name.push_str(MARKDOWN_SUFFIX);
-        }
+        let name = format!("{}{suffix}", file.to_string_lossy());
         let tmpl = self
             .env
             .template_from_named_str(&name, &full)
@@ -808,6 +833,13 @@ pub fn add_common(
     cli_vars: BTreeMap<String, String>,
     secrets: &Secrets,
 ) {
+    // NULL prints as nothing, as in core's own templates.
+    env.set_formatter(|out, state, value| {
+        if value.is_none() {
+            return Ok(());
+        }
+        minijinja::escape_formatter(out, state, value)
+    });
     crate::mutable::register(env);
     add_vars(env, vars, cli_vars, Env::default());
     env.add_function(

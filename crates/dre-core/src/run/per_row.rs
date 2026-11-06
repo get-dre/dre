@@ -382,12 +382,7 @@ impl BindingRun<'_> {
             let name = if let Some(source) = &output.file_name {
                 let (_, each) = each_of(pop, i, self.calendar)?;
                 let name = renderer
-                    .render_with(
-                        &self.report.file,
-                        source,
-                        minijinja::context! { each => each },
-                        false,
-                    )
+                    .render_value(&self.report.file, source, minijinja::context! { each => each })
                     .map_err(|e| failed(format!("`file_name`: {}", e.message)))?
                     .trim()
                     .to_string();
@@ -1183,7 +1178,7 @@ impl BindingRun<'_> {
         let mask = &job.mask;
         let file = &self.report.file;
         let profile = renderer
-            .render_with(file, &d.profile, ctx.clone(), false)
+            .render_value(file, &d.profile, ctx.clone())
             .map_err(|e| {
                 Fail::new(
                     Code::RenderFailed,
@@ -1203,7 +1198,7 @@ impl BindingRun<'_> {
             let path = match &d.path {
                 Some(p) => Some(
                     renderer
-                        .render_with(file, p, ctx.clone(), false)
+                        .render_value(file, p, ctx.clone())
                         .map_err(|e| format!("output path: {}", mask.apply(&e.message)))?,
                 ),
                 None => None,
@@ -1221,7 +1216,7 @@ impl BindingRun<'_> {
                     password: match &z.password {
                         Some(pw) => Some(
                             renderer
-                                .render_with(file, pw, ctx.clone(), false)
+                                .render_value(file, pw, ctx.clone())
                                 .map_err(|e| format!("`zip.password`: {}", mask.apply(&e.message)))?,
                         ),
                         None => None,
@@ -1404,7 +1399,7 @@ fn render_json_with(
 ) -> Result<Json, RenderError> {
     Ok(match v {
         Json::String(s) if crate::preflight::is_templated(s) => {
-            Json::String(renderer.render_with(file, s, ctx.clone(), false)?)
+            Json::String(renderer.render_value(file, s, ctx.clone())?)
         }
         Json::Array(a) => Json::Array(
             a.iter()

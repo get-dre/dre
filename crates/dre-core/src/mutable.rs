@@ -134,6 +134,45 @@ impl Object for MutableList {
             lock(&self.0).extend(more);
             return Ok(Value::from(()));
         }
+        // Comparing can read this list again (`a.count(a)`), so compare a copy, never under the lock.
+        let snapshot = || lock(&self.0).clone();
+        match method {
+            "remove" => {
+                let (v,): (Value,) = from_args(args).map_err(|_| bad("`remove()` takes one value"))?;
+                let at = snapshot()
+                    .iter()
+                    .position(|x| *x == v)
+                    .ok_or_else(|| bad("`remove()`: the value is not in the list"))?;
+                lock(&self.0).remove(at);
+                return Ok(Value::from(()));
+            }
+            "sort" => {
+                let (kwargs,): (Kwargs,) =
+                    from_args(args).map_err(|_| bad("`sort()` takes only `reverse=`"))?;
+                let reverse: Option<bool> = kwargs.get("reverse")?;
+                kwargs.assert_all_used()?;
+                let mut sorted = snapshot();
+                sorted.sort();
+                if reverse == Some(true) {
+                    sorted.reverse();
+                }
+                *lock(&self.0) = sorted;
+                return Ok(Value::from(()));
+            }
+            "index" => {
+                let (v,): (Value,) = from_args(args).map_err(|_| bad("`index()` takes one value"))?;
+                return snapshot()
+                    .iter()
+                    .position(|x| *x == v)
+                    .map(|i| Value::from(i as i64))
+                    .ok_or_else(|| bad("`index()`: the value is not in the list"));
+            }
+            "count" => {
+                let (v,): (Value,) = from_args(args).map_err(|_| bad("`count()` takes one value"))?;
+                return Ok(Value::from(snapshot().iter().filter(|x| **x == v).count() as i64));
+            }
+            _ => {}
+        }
         let mut items = lock(&self.0);
         match method {
             "append" => {
@@ -163,15 +202,6 @@ impl Object for MutableList {
                 at.map(|at| items.remove(at))
                     .ok_or_else(|| bad("`pop()` from an empty list or an index out of range"))
             }
-            "remove" => {
-                let (v,): (Value,) = from_args(args).map_err(|_| bad("`remove()` takes one value"))?;
-                let at = items
-                    .iter()
-                    .position(|x| *x == v)
-                    .ok_or_else(|| bad("`remove()`: the value is not in the list"))?;
-                items.remove(at);
-                Ok(Value::from(()))
-            }
             "clear" => {
                 from_args::<()>(args).map_err(|_| bad("`clear()` takes no arguments"))?;
                 items.clear();
@@ -181,29 +211,6 @@ impl Object for MutableList {
                 from_args::<()>(args).map_err(|_| bad("`reverse()` takes no arguments"))?;
                 items.reverse();
                 Ok(Value::from(()))
-            }
-            "sort" => {
-                let (kwargs,): (Kwargs,) =
-                    from_args(args).map_err(|_| bad("`sort()` takes only `reverse=`"))?;
-                let reverse: Option<bool> = kwargs.get("reverse")?;
-                kwargs.assert_all_used()?;
-                items.sort();
-                if reverse == Some(true) {
-                    items.reverse();
-                }
-                Ok(Value::from(()))
-            }
-            "index" => {
-                let (v,): (Value,) = from_args(args).map_err(|_| bad("`index()` takes one value"))?;
-                items
-                    .iter()
-                    .position(|x| *x == v)
-                    .map(|i| Value::from(i as i64))
-                    .ok_or_else(|| bad("`index()`: the value is not in the list"))
-            }
-            "count" => {
-                let (v,): (Value,) = from_args(args).map_err(|_| bad("`count()` takes one value"))?;
-                Ok(Value::from(items.iter().filter(|x| **x == v).count() as i64))
             }
             "copy" => {
                 from_args::<()>(args).map_err(|_| bad("`copy()` takes no arguments"))?;
@@ -250,10 +257,9 @@ impl Object for MutableDict {
     }
 
     fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
-        lock(&self.0)
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.clone())
+        // Compare a copy: comparing can read this dict again (`d[d]`).
+        let pairs = lock(&self.0).clone();
+        pairs.into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
@@ -285,42 +291,49 @@ impl Object for MutableDict {
                 merge(&mut incoming, &src)?;
             }
             merge_kwargs(&mut incoming, &kwargs)?;
-            let mut pairs = lock(&self.0);
+            // Compare keys on a copy, never under the lock: comparing can read this dict again.
+            let mut pairs = lock(&self.0).clone();
             for (k, v) in incoming {
                 put(&mut pairs, k, v);
             }
+            *lock(&self.0) = pairs;
             return Ok(Value::from(()));
         }
-        let mut pairs = lock(&self.0);
+        let position = |k: &Value| {
+            let pairs = lock(&self.0).clone();
+            pairs.iter().position(|(x, _)| x == k)
+        };
         match method {
             "get" => {
                 let (k, default): (Value, Option<Value>) =
                     from_args(args).map_err(|_| bad("`get()` takes a key and an optional default"))?;
-                Ok(pairs
-                    .iter()
-                    .find(|(x, _)| *x == k)
-                    .map(|(_, v)| v.clone())
-                    .or(default)
-                    .unwrap_or_else(|| Value::from(())))
+                return Ok(match position(&k) {
+                    Some(at) => lock(&self.0)[at].1.clone(),
+                    None => default.unwrap_or_else(|| Value::from(())),
+                });
             }
             "setdefault" => {
                 let (k, default): (Value, Option<Value>) =
                     from_args(args).map_err(|_| bad("`setdefault()` takes a key and an optional default"))?;
-                if let Some((_, v)) = pairs.iter().find(|(x, _)| *x == k) {
-                    return Ok(v.clone());
+                if let Some(at) = position(&k) {
+                    return Ok(lock(&self.0)[at].1.clone());
                 }
                 let v = default.unwrap_or_else(|| Value::from(()));
-                pairs.push((k, v.clone()));
-                Ok(v)
+                lock(&self.0).push((k, v.clone()));
+                return Ok(v);
             }
             "pop" => {
                 let (k, default): (Value, Option<Value>) =
                     from_args(args).map_err(|_| bad("`pop()` takes a key and an optional default"))?;
-                match pairs.iter().position(|(x, _)| *x == k) {
-                    Some(at) => Ok(pairs.remove(at).1),
+                return match position(&k) {
+                    Some(at) => Ok(lock(&self.0).remove(at).1),
                     None => default.ok_or_else(|| bad("`pop()`: no key with that value")),
-                }
+                };
             }
+            _ => {}
+        }
+        let mut pairs = lock(&self.0);
+        match method {
             "clear" => {
                 from_args::<()>(args).map_err(|_| bad("`clear()` takes no arguments"))?;
                 pairs.clear();

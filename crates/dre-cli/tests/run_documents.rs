@@ -194,3 +194,23 @@ fn validate_rejects_a_bad_missing_fonts_value() {
         .says("`missing_fonts` must be `warn` or `error`")
         .lacks("undeclared-plugin");
 }
+
+#[test]
+fn a_null_renders_as_nothing_in_a_document() {
+    let p = project(
+        "queries: [nulls]\noutput: {format: html, template: {file: nulls.html}}\n",
+        &[
+            (
+                "reports/clients/statement/nulls.sql",
+                "select null as region, 'x' as other",
+            ),
+            (
+                "reports/clients/statement/nulls.html",
+                "<p>[{{ results.nulls.rows[0].region }}][{{ run.set }}]</p>",
+            ),
+        ],
+    );
+    p.dre("run", &["statement"]).ok();
+    let html = p.read("target/run/statement/default/statement.html");
+    assert!(html.contains("<p>[][]</p>"), "{html}");
+}
