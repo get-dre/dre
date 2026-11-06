@@ -652,9 +652,16 @@ public final class Main {
       request.statement = statement;
       checkCancelled(request);
       statement.setFetchSize(8192);
-      if (!statement.execute(message.path("sql").asText())) {
+      boolean hasResult = statement.execute(message.path("sql").asText());
+      // SQL Server and Sybase (without SET NOCOUNT ON) answer "N rows affected" before the rows.
+      long affected = 0;
+      for (long count; !hasResult && (count = statement.getLargeUpdateCount()) != -1; ) {
+        affected += Math.max(0, count);
+        hasResult = statement.getMoreResults();
+      }
+      if (!hasResult) {
         checkCancelled(request);
-        execution = ExecutionResult.noResult(Math.max(0, statement.getLargeUpdateCount()));
+        execution = ExecutionResult.noResult(affected);
       } else try (ResultSet result = statement.getResultSet(); RootAllocator allocator = new RootAllocator(512L << 20)) {
         ResultSetMetaData metadata = result.getMetaData();
         boolean oracle = connection.getMetaData().getDatabaseProductName().equalsIgnoreCase("Oracle");

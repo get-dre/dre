@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -127,4 +128,14 @@ func Unknown(conn map[string]any, fields []Field, also ...string) error {
 	}
 	sort.Strings(bad)
 	return fmt.Errorf("unknown profile field(s) %s; check the spelling", strings.Join(bad, ", "))
+}
+
+// Loopback is whether host (a name or IP, without a port) is this machine: localhost or a
+// loopback address. Plain-text credentials are only safe there.
+func Loopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

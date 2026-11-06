@@ -143,7 +143,11 @@ impl BindingRun<'_> {
             .step(Level::Debug, "Rendered", &q.path.display().to_string(), None);
         // 2. Split. One file makes at most one tab, from its last statement, so any earlier
         // SELECT would be lost: that's an error, not a guess.
-        let parts = sqlsplit::split(&sql);
+        let backslash = self
+            .pool
+            .as_ref()
+            .is_some_and(|pool| pool.backslash_escapes(connection));
+        let parts = sqlsplit::split_with(&sql, backslash);
         if self.stages.tests && !q.data_tests.is_empty() && parts.is_empty() {
             return Err(Fail::new(
                 Code::DataTestError,

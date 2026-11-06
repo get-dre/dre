@@ -133,3 +133,21 @@ func TestACopiedDbtProfileValidatesWithoutWarnings(t *testing.T) {
 		t.Fatalf("%v %v", errs, warns)
 	}
 }
+
+func TestAPasswordSentInClearToAnotherHostWarns(t *testing.T) {
+	for _, c := range []struct {
+		conn  map[string]any
+		warns bool
+	}{
+		{map[string]any{"host": "ch.prod.internal", "password": "pw"}, true},
+		{map[string]any{"host": "ch.prod.internal", "password": "pw", "secure": true}, false},
+		{map[string]any{"host": "ch.prod.internal", "password": "pw", "ssh": map[string]any{}}, false},
+		{map[string]any{"host": "127.0.0.1", "password": "pw"}, false},
+		{map[string]any{"host": "localhost", "password": "pw"}, false},
+		{map[string]any{"host": "ch.prod.internal"}, false},
+	} {
+		if got := cleartextWarning(c.conn); (got != "") != c.warns {
+			t.Errorf("%v: %q", c.conn, got)
+		}
+	}
+}

@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,10 +77,12 @@ func deliverToWorkspace(local, remote string, conn, opts map[string]any) (string
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{}
+	ctx, done := uploads.Start(context.Background())
+	defer done()
+	client := uploadClient(ctx, rules)
 	dir := api[:strings.LastIndex(api, "/")]
 	mkdirs, _ := json.Marshal(map[string]string{"path": dir})
-	_, err = plugin.Retry(rules.Retries, "creating /Workspace"+dir, func() (struct{}, error) {
+	_, err = plugin.Retry(rules, "creating /Workspace"+dir, func() (struct{}, error) {
 		return struct{}{}, workspaceRequest(client, base+"/api/2.0/workspace/mkdirs", a, func() (io.Reader, string, error) {
 			return bytes.NewReader(mkdirs), "application/json", nil
 		})

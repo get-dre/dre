@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -20,8 +21,11 @@ import (
 	"github.com/get-dre/dre/go/plugin"
 )
 
-// batchRows is how many rows go in one Arrow batch.
+// batchRows is the most rows in one Arrow batch; batchBytes ends a batch of wide rows sooner,
+// well inside the protocol's 1 GiB frame.
 const batchRows = 65536
+
+var batchBytes = 64 << 20
 
 // session is one ClickHouse session. Over HTTP every request carries the session's session_id;
 // over native the pool holds one connection. Either way temp tables and SET from one statement
@@ -46,6 +50,9 @@ func open(conn map[string]any, level readOnlyLevel) (*session, error) {
 	if err != nil {
 		return nil, &plugin.Error{Kind: "config", Message: err.Error()}
 	}
+	if w := cleartextWarning(conn); w != "" {
+		slog.Warn(w)
+	}
 	s := &session{opts: o, native: o.Protocol == clickhouse.Native}
 	if b, ok := conn["ssh"].(map[string]any); ok {
 		s.tunnel = &tunnel{settings: b, timeout: o.DialTimeout}
@@ -61,7 +68,9 @@ func open(conn map[string]any, level readOnlyLevel) (*session, error) {
 	if err != nil {
 		return nil, &plugin.Error{Kind: "config", Message: err.Error()}
 	}
-	s.conn, err = plugin.Retry(int(retries), "connecting to ClickHouse", func() (driver.Conn, error) {
+	rules := plugin.DefaultRules()
+	rules.Retries = int(retries)
+	s.conn, err = plugin.Retry(rules, "connecting to ClickHouse", func() (driver.Conn, error) {
 		c, err := clickhouse.Open(o)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), o.DialTimeout+o.ReadTimeout)
@@ -371,14 +380,16 @@ func (r *result) Next() (arrow.RecordBatch, error) {
 		builders[i] = c.builder()
 		defer builders[i].Release()
 	}
-	n := int64(0)
-	for r.HasNext() && n < batchRows {
+	n, size := int64(0), 0
+	for r.HasNext() && n < batchRows && size < batchBytes {
 		r.peeked = false
 		if err := r.rows.Scan(r.dest...); err != nil {
 			return nil, r.failed(err)
 		}
 		for i, c := range r.cols {
-			c.append(builders[i], reflect.ValueOf(r.dest[i]).Elem().Interface())
+			v := reflect.ValueOf(r.dest[i]).Elem().Interface()
+			c.append(builders[i], v)
+			size += valueSize(v)
 		}
 		n++
 	}
@@ -394,6 +405,17 @@ func (r *result) Next() (arrow.RecordBatch, error) {
 		defer cols[i].Release()
 	}
 	return array.NewRecordBatch(r.schema, cols, n), nil
+}
+
+// valueSize is roughly how many bytes a scanned value adds to a batch.
+func valueSize(v any) int {
+	switch x := deref(v).(type) {
+	case string:
+		return len(x)
+	case []byte:
+		return len(x)
+	}
+	return 8
 }
 
 // returnsRows is whether a statement answers with rows, from its first keyword (after comments

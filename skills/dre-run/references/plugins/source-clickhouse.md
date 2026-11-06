@@ -59,7 +59,7 @@ The fields dbt-clickhouse only uses to build models (`cluster`, `database_engine
 |---|---|
 | `driver` | `http` (the default) or `native`, ClickHouse's own TCP protocol. HTTP sessions survive a failed statement; see below. |
 | `host`, `port` | The port follows `driver` and `secure` unless set: 8123, 8443 with `secure`, 9000 native, 9440 native with `secure`. |
-| `user`, `password` | `default` and no password unless set. |
+| `user`, `password` | `default` and no password unless set. Without `secure` or `ssh`, a password sent to a host other than `localhost` crosses the network unencrypted, and DRE warns. |
 | `schema` | The database unqualified table names are read from (default `default`). |
 | `secure`, `verify` | TLS, and whether the server's certificate is checked (default yes). |
 | `ca_cert` | A CA certificate (PEM) to trust, for a server whose certificate isn't from a public CA. |
@@ -103,6 +103,8 @@ Capabilities: `sessions`, `check`, `load`, `read_only`.
 - **Inlined lookups** spell `'` and `\` with backslashes, as ClickHouse reads them (it has no
   `chr()`, which other sources get). This needs DRE 0.5.1 and clickhouse 1.0.1; with an older
   DRE, give a lookup holding those characters `load: temp_table` in its YAML.
+  DRE splits a file's statements reading those escapes (`'O\'Brien'` doesn't end at `\'`) from
+  DRE 0.12.
 - **Read-only.** An unmanaged report's session runs with ClickHouse's `readonly = 2`: writes and
   DDL on tables are refused, `SET` and temp tables still work, and no statement can lower it.
   `dre query` uses `readonly = 1`, which also refuses `SET`, temp tables and the table functions

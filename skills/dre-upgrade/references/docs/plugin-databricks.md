@@ -52,6 +52,10 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: databricks
 | `scopes` |  | OAuth scopes. |
 | `redirect_port` |  | The localhost port browser sign-in redirects to (default 8020) |
 | `retries` | `3` | How many times to try again after a temporary error (0: never): connecting, or a Volume or workspace upload. |
+| `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) |
+| `timeout` | `60s` | How long a read or write may make no progress before it fails. |
+| `retry_wait` |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. |
+| `max_retry_wait` | `10m` | The longest wait between tries (`10m`) |
 
 ### `databricks` destination: options
 
@@ -67,7 +71,7 @@ Set in the report's `output.destination` entry.
 
 | Field | Notes |
 |---|---|
-| `host` | Workspace host. |
+| `host` | Workspace host. An `http://` host is refused (it would send the token unencrypted), except `localhost`. |
 | `http_path` | The SQL warehouse's HTTP path. |
 | `auth_type` | `auto` (default), `pat` or `oauth`. |
 | `token` | A personal access token, or any other bearer token. Optional with `auto`. |
@@ -174,6 +178,10 @@ outside Databricks (a laptop, Airflow, CI), where it uploads, and in a Databrick
 
 Takes `if_exists` (see [A file already at the path](plugins.md#a-file-already-at-the-path)): the Files and Workspace APIs'
 `overwrite=false` refuses a taken name in the same step.
+
+Uploads take the shared `connect_timeout` and `timeout` (see
+[Every destination that talks to a server](plugins.md#destinations)), and `retries`, `retry_wait`
+and `max_retry_wait` (see [Tries again](plugins.md#tries-again)). A cancelled run stops the upload.
 
 ## Verify a warehouse, then add report SQL
 

@@ -13,20 +13,23 @@ use crate::plugin_host::{Open, Plugin};
 use crate::profiles::{Entry, Role};
 use crate::project::{PluginKind, Project};
 
-pub fn execute(
-    ctx: &crate::Context,
-    project: &Project,
-    profile: &str,
-    sql: &str,
-    max_rows: u64,
-) -> Result<Value, String> {
-    if max_rows == 0 || max_rows > 100_000 {
-        return Err("max_rows must be between 1 and 100000".into());
-    }
-    let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
-        return Err(format!("connection `{profile}` has no entry for this target"));
-    };
-    let dialect: Box<dyn sqlparser::dialect::Dialect> = match target.kind.as_str() {
+/// The formats Databricks reads a path as a table with (``parquet.`/path` ``).
+const FILE_FORMATS: &[&str] = &[
+    "parquet",
+    "csv",
+    "json",
+    "text",
+    "delta",
+    "orc",
+    "avro",
+    "binaryFile",
+    "xml",
+];
+
+/// Refuses `sql` unless it is a single read-only query on a source of type `kind`, without
+/// functions or path tables that reach files, programs or the network.
+fn guard(kind: &str, sql: &str) -> Result<(), String> {
+    let dialect: Box<dyn sqlparser::dialect::Dialect> = match kind {
         "duckdb" => Box::new(DuckDbDialect {}),
         "postgres" => Box::new(PostgreSqlDialect {}),
         "databricks" => Box::new(DatabricksDialect {}),
@@ -86,6 +89,16 @@ pub fn execute(
                     self.refused = Some(name.to_string());
                     std::ops::ControlFlow::Break(())
                 }
+                // Databricks' ``csv.`/Volumes/...` ``: a file read in place, not a table.
+                TableFactor::Table { name, .. }
+                    if matches!(name.0.as_slice(), [format, path]
+                        if path.as_ident().is_some_and(|i| i.quote_style == Some('`'))
+                            && format.as_ident().is_some_and(|i| i.quote_style.is_none()
+                                && FILE_FORMATS.iter().any(|f| f.eq_ignore_ascii_case(&i.value)))) =>
+                {
+                    self.refused = Some(name.to_string());
+                    std::ops::ControlFlow::Break(())
+                }
                 // A table function, not a table that happens to share a function's name.
                 TableFactor::Table {
                     name, args: Some(_), ..
@@ -102,7 +115,7 @@ pub fn execute(
         }
     }
     let mut guard = ReadOnly {
-        dialect: crate::dialect::of(&target.kind),
+        dialect: crate::dialect::of(kind),
         refused: None,
     };
     safe &= statements.visit(&mut guard).is_continue();
@@ -114,6 +127,23 @@ pub fn execute(
     if !safe {
         return Err("expected a single read-only query; nothing was run".into());
     }
+    Ok(())
+}
+
+pub fn execute(
+    ctx: &crate::Context,
+    project: &Project,
+    profile: &str,
+    sql: &str,
+    max_rows: u64,
+) -> Result<Value, String> {
+    if max_rows == 0 || max_rows > 100_000 {
+        return Err("max_rows must be between 1 and 100000".into());
+    }
+    let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
+        return Err(format!("connection `{profile}` has no entry for this target"));
+    };
+    guard(&target.kind, sql)?;
     let plugin = crate::plugin_host::find_plugin(ctx, project, PluginKind::Source, &target.kind)
         .map_err(|e| e.to_string())?;
     let secrets = ctx.secrets().clone();
@@ -254,6 +284,22 @@ mod tests {
         )]));
         arrow::array::RecordBatch::try_new(schema, vec![Arc::new(arrow::array::Int64Array::from(vec![1]))])
             .unwrap()
+    }
+
+    #[test]
+    fn the_databricks_guard_refuses_try_secret_and_path_tables() {
+        for sql in [
+            "select try_secret('prod', 'sf_password')",
+            "select * from text.`/Volumes/main/hr/private/salaries.csv`",
+            "select * from PARQUET.`s3://bucket/x`",
+            "select * from binaryFile.`/Volumes/a/b/c`",
+        ] {
+            let err = guard("databricks", sql).expect_err(sql);
+            assert!(err.contains("nothing was run"), "{sql}: {err}");
+        }
+        // A table in a schema that happens to be named like a format is still a table.
+        guard("databricks", "select * from text.notes").unwrap();
+        guard("databricks", "select * from main.`my table`").unwrap();
     }
 
     #[test]

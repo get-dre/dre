@@ -302,7 +302,8 @@ characters are `chr(39)` and `chr(92)` joined with `||`, which DuckDB, Postgres 
 read the same way. `backslash`: `\'` and `\\` inside the quotes, for a database without `chr()`
 (ClickHouse). A core that doesn't know the field ignores it, so a plugin can send it to any
 core; core asks the plugin to update DRE when it names a style core doesn't know. Added in DRE
-0.5.1 (clickhouse 1.0.1).
+0.5.1 (clickhouse 1.0.1). With `backslash`, core also reads a backslash inside quotes as an escape when it
+splits that source's SQL into statements (DRE 0.12).
 
 `message_limit` (destinations advertising `message`) is the most characters a message may have
 in the service after translation. `dre run --preview` shows it next to each message's length.

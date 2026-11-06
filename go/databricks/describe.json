@@ -194,6 +194,37 @@
         "same_as_source": "databricks",
         "manual": true,
         "kind": "integer"
+      },
+      {
+        "name": "connect_timeout",
+        "description": "how long to wait for a connection (`30s`, `2m`, or seconds)",
+        "required": false,
+        "secret": false,
+        "default": "30s",
+        "manual": true
+      },
+      {
+        "name": "timeout",
+        "description": "how long a read or write may make no progress before it fails",
+        "required": false,
+        "secret": false,
+        "default": "60s",
+        "manual": true
+      },
+      {
+        "name": "retry_wait",
+        "description": "the first wait before trying again (`30s`), doubling each try; a server's Retry-After wins",
+        "required": false,
+        "secret": false,
+        "manual": true
+      },
+      {
+        "name": "max_retry_wait",
+        "description": "the longest wait between tries (`10m`)",
+        "required": false,
+        "secret": false,
+        "default": "10m",
+        "manual": true
       }
     ],
     "option_fields": [

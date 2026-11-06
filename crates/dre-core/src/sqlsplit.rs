@@ -1,7 +1,8 @@
 //! Statement splitting: lexing `;`-separated SQL, not parsing it.
 //!
 //! Understands single/double/backtick quotes, `--` and nested `/* */` comments, and Postgres
-//! dollar-quoted blocks (`$$ ... $$`, `$tag$ ... $tag$`). Shared by `dre validate`'s best-effort
+//! dollar-quoted blocks (`$$ ... $$`, `$tag$ ... $tag$`); with [`split_with`], backslash escapes
+//! inside quotes (`'O\'Brien'`) for a source that asks for them. Shared by `dre validate`'s best-effort
 //! unmanaged-report check and by the run path.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,13 +14,19 @@ pub struct Statement {
 }
 
 pub fn split(sql: &str) -> Vec<Statement> {
+    split_with(sql, false)
+}
+
+/// [`split`], reading a backslash inside quotes as escaping the next character when
+/// `backslash_escapes` is set: for a source whose plugin asks for backslash string literals.
+pub fn split_with(sql: &str, backslash_escapes: bool) -> Vec<Statement> {
     let b = sql.as_bytes();
     let mut out = Vec::new();
     let mut start = 0;
     let mut i = 0;
     while let Some(&c) = b.get(i) {
         match c {
-            b'\'' | b'"' | b'`' => i = skip_quoted(b, i, c),
+            b'\'' | b'"' | b'`' => i = skip_quoted(b, i, c, backslash_escapes),
             b'-' if b.get(i + 1) == Some(&b'-') => {
                 while b.get(i).is_some_and(|&c| c != b'\n') {
                     i += 1;
@@ -56,9 +63,13 @@ fn push_statement(sql: &str, start: usize, end: usize, out: &mut Vec<Statement>)
 }
 
 /// The end of the `q`-quoted string that opens at `i`.
-fn skip_quoted(b: &[u8], i: usize, q: u8) -> usize {
+fn skip_quoted(b: &[u8], i: usize, q: u8, backslash_escapes: bool) -> usize {
     let mut j = i + 1;
     while let Some(&c) = b.get(j) {
+        if backslash_escapes && c == b'\\' {
+            j += 2;
+            continue;
+        }
         if c == q {
             // A doubled quote is an escaped quote.
             if b.get(j + 1) == Some(&q) {
