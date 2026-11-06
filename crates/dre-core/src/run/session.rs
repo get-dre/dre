@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arrow::datatypes::SchemaRef;
-use dre_protocol::host::{Execution, HostError, LogSink};
+use dre_plugin_host::host::{Execution, HostError, LogSink};
 use dre_protocol::{CAP_LOAD, CAP_READ_ONLY};
 use serde_json::{Map as JsonMap, Value as Json};
 
@@ -147,10 +147,14 @@ impl Session {
 /// from another thread, so the scope waits for the lines the plugin wrote before showing
 /// diagnostics again; if the plugin keeps writing, they stay hidden until the next statement.
 #[must_use = "dropping the scope shows diagnostics again at once"]
-pub(super) struct OpaqueLogScope(Arc<AtomicBool>, Option<dre_protocol::host::StderrSync>);
+pub(super) struct OpaqueLogScope(Arc<AtomicBool>, Option<dre_plugin_host::host::StderrSync>);
 
 impl OpaqueLogScope {
-    fn new(active: Arc<AtomicBool>, sensitive: bool, stderr: Option<dre_protocol::host::StderrSync>) -> Self {
+    fn new(
+        active: Arc<AtomicBool>,
+        sensitive: bool,
+        stderr: Option<dre_plugin_host::host::StderrSync>,
+    ) -> Self {
         active.store(sensitive, Ordering::SeqCst);
         Self(active, stderr)
     }

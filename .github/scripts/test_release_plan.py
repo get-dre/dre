@@ -6,6 +6,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -64,12 +65,15 @@ class Plan(unittest.TestCase):
         protocol_check.assert_not_called()
 
     def test_jdbc_reads_its_pom_and_reports_java(self):
+        version = ET.parse(release_plan.ROOT / "java/jdbc/pom.xml").getroot().findtext(
+            "{http://maven.apache.org/POM/4.0.0}version"
+        )
         self.assertEqual(
-            release_plan.plan("jdbc-v1.0.0"),
+            release_plan.plan(f"jdbc-v{version}"),
             {
                 "kind": "plugin",
                 "package": "jdbc",
-                "version": "1.0.0",
+                "version": version,
                 "prerelease": "false",
                 "go": "",
                 "lang": "java",

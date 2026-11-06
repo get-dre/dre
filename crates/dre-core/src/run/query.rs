@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use arrow::ipc::writer::FileWriter;
+use dre_plugin_host::host::Execution;
 use dre_protocol::CAP_SESSIONS;
-use dre_protocol::host::Execution;
 
 use super::session::{Pool, PoolRunner, Session, masked_source_error, protected_sql};
 use super::{BindingRun, Fail, Produced, Statement, thousands};

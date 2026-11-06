@@ -15,4 +15,5 @@ russh-sftp = "3"
 tokio = { version = "1", features = ["rt", "fs", "io-util", "net", "time"] }
 
 [dev-dependencies]
+dre-plugin-host.workspace = true
 tempfile.workspace = true

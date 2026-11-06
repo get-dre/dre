@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use dre_protocol::host::LogSink;
+use dre_plugin_host::host::LogSink;
 use serde_json::{Map as JsonMap, Value as Json};
 
 use crate::run::{BindingOutcome, BindingPlan, RunTargets, ShownMessage};

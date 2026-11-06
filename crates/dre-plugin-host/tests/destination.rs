@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use dre_protocol::host::{HostError, LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{HostError, LogSink, PluginProcess};
 use dre_protocol::msg::DeliveryFile;
-use dre_protocol::{CAP_MULTI_FILE, MAX_VERSION, MIN_VERSION, conformance};
+use dre_protocol::{CAP_MULTI_FILE, MAX_VERSION, MIN_VERSION};
 use serde_json::{Map, Value, json};
 
 fn fixture() -> &'static Path {

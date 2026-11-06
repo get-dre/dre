@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use dre_protocol::host::{HostError, LogSink};
+use dre_plugin_host::host::{HostError, LogSink};
 use dre_protocol::msg::DeliveryFile;
 use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY, CAP_MULTI_FILE};
 use serde_json::{Map as JsonMap, Value as Json};

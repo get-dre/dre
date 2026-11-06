@@ -1,0 +1,23 @@
+[package]
+name = "dre-plugin-host"
+description = "DRE plugin process host and protocol conformance runner"
+version = "0.12.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+dre-protocol.workspace = true
+arrow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Pipes"] }
+
+[dev-dependencies]
+tempfile.workspace = true

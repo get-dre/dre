@@ -5,7 +5,7 @@
 //! [`delivery`]. Every first-party plugin runs the suite in its tests. A package executable
 //! (`dre-plugin-<package>`) is checked once per plugin it provides.
 //!
-//! Every message a plugin sends is also checked against the message schema ([`crate::schema`]).
+//! Every message a plugin sends is also checked against the message schema ([`dre_protocol::schema`]).
 //! A case that doesn't apply to a plugin (another kind, a capability it doesn't advertise, a
 //! session the caller didn't describe) is listed as skipped, with the reason.
 
@@ -19,16 +19,16 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::frame::{self, Frame};
 use crate::host::{LogSink, PluginProcess};
-use crate::msg::{ERROR_KINDS, Envelope, Response};
-use crate::{
+use dre_protocol::frame::{self, Frame};
+use dre_protocol::msg::{ERROR_KINDS, Envelope, Response};
+use dre_protocol::{
     CAPABILITIES, Kind, MAX_VERSION, MIN_VERSION, PluginId, parse_executable_name,
     parse_package_executable_name,
 };
 
 /// The protocol cases, as published.
-pub const PROTOCOL_CASES: &str = include_str!("../conformance/protocol.json");
+pub const PROTOCOL_CASES: &str = dre_protocol::schema::PROTOCOL_CASES;
 
 /// How long a plugin may take over one reply.
 const TIMEOUT: Duration = Duration::from_secs(20);

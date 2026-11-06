@@ -9,6 +9,11 @@ use serde_json::{Value, json};
 use crate::msg::{ERROR_KINDS, Envelope, Request, Response};
 use crate::{CAPABILITIES, CORE_MIN_VERSION, MAX_VERSION, MIN_VERSION};
 
+/// The language-neutral wire conformance cases.
+pub const PROTOCOL_CASES: &str = include_str!("../conformance/protocol.json");
+/// The language-neutral delivery conformance cases.
+pub const DELIVERY_CASES: &str = include_str!("../conformance/delivery.json");
+
 /// The published schema file, as checked in.
 pub const PUBLISHED: &str = include_str!("../conformance/schema.json");
 

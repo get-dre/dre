@@ -4,8 +4,8 @@
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use dre_protocol::conformance;
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use serde_json::{Value, json};
 
 fn bin() -> &'static Path {

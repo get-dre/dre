@@ -38,9 +38,9 @@ impl Error {
 
     /// A plugin's failure: its own code when it gave one (`code` without `kind` counts as
     /// `internal`), else `run-failed` until the step gives it one. `message` is what to show.
-    pub fn from_plugin(e: &dre_protocol::host::HostError, message: impl Into<String>) -> Error {
+    pub fn from_plugin(e: &dre_plugin_host::host::HostError, message: impl Into<String>) -> Error {
         let code = match e {
-            dre_protocol::host::HostError::Plugin {
+            dre_plugin_host::host::HostError::Plugin {
                 code: Some(code),
                 kind,
                 ..
@@ -73,7 +73,7 @@ impl From<&str> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dre_protocol::host::HostError;
+    use dre_plugin_host::host::HostError;
 
     fn plugin(kind: Option<&str>, code: Option<&str>) -> HostError {
         HostError::Plugin {

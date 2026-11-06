@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::ResultSetMeta;
 use serde_json::{Value, json};
 use umya_spreadsheet::Workbook;

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use dre_protocol::host::HostError;
+use dre_plugin_host::host::HostError;
 use dre_protocol::msg::ResultSetMeta;
 use serde_json::{Map as JsonMap, Value as Json};
 

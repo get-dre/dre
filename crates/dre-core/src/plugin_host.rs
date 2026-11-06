@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
-use dre_protocol::host::{Canceller, Description, Execution, LogSink, PluginInfo, PluginProcess, StderrSync};
+use dre_plugin_host::host::{
+    Canceller, Description, Execution, LogSink, PluginInfo, PluginProcess, StderrSync,
+};
 use dre_protocol::msg::{ConnectionField, DeliveryFile, FieldKind, Message, ResultSetMeta};
 use dre_protocol::{PluginId, parse_executable_name};
 use serde_json::{Map, Value};
@@ -27,7 +29,7 @@ pub mod memory;
 
 /// What a plugin request returns: its answer, or what went wrong (the plugin's own error, a
 /// crash, a protocol break).
-pub type HostResult<T> = dre_protocol::host::Result<T>;
+pub type HostResult<T> = dre_plugin_host::host::Result<T>;
 
 /// Finds and starts plugins, and stops the ones it started.
 pub trait PluginHost: Send + Sync {
@@ -247,7 +249,7 @@ fn handshake_timeout(env: &Env) -> std::time::Duration {
     env.setting("DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS")
         .and_then(|v| v.parse().ok())
         .map(std::time::Duration::from_millis)
-        .unwrap_or(dre_protocol::host::DEFAULT_HANDSHAKE_TIMEOUT)
+        .unwrap_or(dre_plugin_host::host::DEFAULT_HANDSHAKE_TIMEOUT)
 }
 
 /// Start `path`, asking for `plugin` (`None`: a package's first), in `running` from before the

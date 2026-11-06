@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
-use dre_protocol::host::LogSink;
+use dre_plugin_host::host::LogSink;
 
 use crate::delivery::ProcessCache;
 use crate::engine::Events;

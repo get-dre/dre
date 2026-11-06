@@ -719,7 +719,7 @@ fn a_selector_that_matches_nothing_is_a_typed_error() {
 
 /// Three reports on one connection whose entry allows three Bindings at once.
 fn three_reports(single_writer: bool) -> (MemoryHost, Context, TempDir, Project) {
-    let description = dre_protocol::host::Description {
+    let description = dre_plugin_host::host::Description {
         single_writer: single_writer.then(|| dre_protocol::msg::SingleWriter {
             field: "path".into(),
             except: vec![":memory:".into()],
@@ -1521,7 +1521,7 @@ fn a_release_record_masks_the_secrets_a_destination_error_echoes() {
 /// lookup as `'O\'Brien'`, and the statements around it still split where they should.
 #[test]
 fn a_lookup_quote_in_backslash_literals_keeps_the_statements_apart() {
-    let description = dre_protocol::host::Description {
+    let description = dre_plugin_host::host::Description {
         string_literal: Some("backslash".into()),
         ..Default::default()
     };

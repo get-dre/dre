@@ -27,9 +27,24 @@ impl<T> Envelope<T> {
     }
 }
 
-/// Core → plugin.
+/// Core → plugin. Match future requests with a wildcard.
+///
+/// ```compile_fail
+/// use dre_protocol::msg::Request;
+/// fn exhaustive(request: Request) {
+///     match request {
+///         Request::Hello { .. } | Request::Describe { .. } |
+///         Request::ValidateConnection { .. } | Request::Validate { .. } |
+///         Request::Open { .. } | Request::Check { .. } | Request::Catalog { .. } |
+///         Request::Execute { .. } | Request::Write { .. } | Request::Load { .. } |
+///         Request::ResultSetEnd { .. } | Request::Finish { .. } | Request::Fonts { .. } |
+///         Request::Deliver { .. } | Request::Close { .. } | Request::Cancel { .. } => {}
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Request {
     /// Always first. The plugin picks a version in both ranges or replies `version_mismatch`.
     Hello {
@@ -146,9 +161,24 @@ pub enum Request {
     Cancel {},
 }
 
-/// Plugin → core.
+/// Plugin → core. Match future replies with a wildcard.
+///
+/// ```compile_fail
+/// use dre_protocol::msg::Response;
+/// fn exhaustive(response: Response) {
+///     match response {
+///         Response::Hello { .. } | Response::VersionMismatch { .. } |
+///         Response::Describe { .. } | Response::Validated { .. } | Response::Ok { .. } |
+///         Response::Result { .. } | Response::ResultEnd { .. } | Response::NoResult { .. } |
+///         Response::Catalog { .. } | Response::NeedFonts { .. } | Response::Written { .. } |
+///         Response::Delivered { .. } | Response::Loaded { .. } | Response::Error { .. } |
+///         Response::Log { .. } | Response::Progress { .. } => {}
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Response {
     Hello {
         protocol_version: u32,

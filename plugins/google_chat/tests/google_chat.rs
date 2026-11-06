@@ -11,9 +11,10 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use dre_protocol::host::{LogSink, PluginProcess};
+use dre_plugin_host::conformance;
+use dre_plugin_host::host::{LogSink, PluginProcess};
 use dre_protocol::msg::{DeliveryFile, Message};
-use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY, conformance};
+use dre_protocol::{CAP_MESSAGE, CAP_MESSAGE_ONLY};
 use serde_json::{Map, Value, json};
 
 /// Each request the fake received: path and JSON body.

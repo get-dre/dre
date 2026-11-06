@@ -649,7 +649,7 @@ impl Binding {
     }
 
     /// Every output's destinations, each with its key: how the parse pass's rendered profiles
-    /// ([`crate::parse::ParsedBinding::destination`]) are found again.
+    /// (`ParsedBinding::destination`) are found again.
     pub fn keyed_destinations(&self) -> impl Iterator<Item = (DestinationKey, &Destination)> {
         self.outputs.iter().enumerate().flat_map(|(output, o)| {
             o.destinations
