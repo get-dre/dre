@@ -269,6 +269,7 @@
         "name": "if_exists",
         "type": "string",
         "description": "when a file is already at the path: `overwrite` it, fail with `error`, or `number` the new one",
+        "required": false,
         "default": "overwrite",
         "choices": [
           "overwrite",
