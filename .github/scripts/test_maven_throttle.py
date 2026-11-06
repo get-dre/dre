@@ -71,7 +71,7 @@ class MavenThrottle(unittest.TestCase):
 <url>http://{host}:{server.server_port}</url></mirror></mirrors></settings>""")
                     env = dict(os.environ, MAVEN_THROTTLE_DIR=temp)
                     result = subprocess.run(
-                        [os.environ.get("MAVEN", "mvn"), "-B", "-C", "-s", str(settings),
+                        [os.environ.get("MAVEN", "mvn"), "-B", "-V", "-C", "-s", str(settings),
                          f"-Dmaven.repo.local={folder / 'repository'}", "-f", str(POM), "validate"],
                         cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, timeout=30,
