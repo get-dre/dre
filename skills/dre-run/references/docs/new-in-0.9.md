@@ -2,7 +2,7 @@
 title: "New in 0.9"
 description: "Selected runs isolate report errors, per-row populations stream to disk, and the core is prepared for large projects."
 section: upgrading
-position: 3
+position: 5
 ---
 
 # New in 0.9

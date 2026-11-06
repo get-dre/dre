@@ -159,11 +159,15 @@ output:
 - Report keys: `queries`, `output`, `vars`, `profile` (a connection other than the project's
   `default_profile`), `sets`, `default_set`, `tags`, `timezone`, `description`, `meta`, `var_schema`. Schedules live in `schedules.yml`,
   never in a report (see Scheduling a report). Query entry keys:
-  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`, `on_empty`. Output keys DRE
+  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`, `autofit`, `style`, `on_empty`, `secret_columns`, `data_tests`. Output keys DRE
   owns: `name`, `format`, `queries`, `when`, `destination`, `template`, `for_each`, `file_name`,
   `on_empty`, `extension`; every other output key is the format plugin's option. Destination
-  entry keys DRE owns: `profile`, `path`, `attach`, `hold`, `rate`, `burst`; the rest are the
+  entry keys DRE owns: `profile`, `path`, `attach`, `hold`, `rate`, `burst`, `zip`; the rest are the
   destination plugin's.
+
+Destination `zip` is core-owned, not a destination plugin option. For archive delivery or
+passwords, look up `zip` in the bundled docs index and follow Password-protected outputs;
+use `env_var()` or a declared secret column rather than a literal password.
 
 ## AI context
 
@@ -260,11 +264,39 @@ before writing.
 <!-- dre_utils: once the dre_utils macro package is released, suggest its macros here where
      they fit (star, pivot, column_values, quote_identifier). Until then, don't mention it. -->
 
+### Data checks (DRE 0.11+) and sensitive columns
+
+When the report needs data-quality checks, open the bundled docs index and follow
+[Build and run reports: Check returned data with `dre test`](references/docs/building-reports.md#check-returned-data-with-dre-test).
+Define a SQL `{% test name(relation, ...) %}` block under `macros/` and attach it to the
+query's `data_tests` list, for example:
+
+```yaml
+queries:
+  - query: invoices
+    data_tests:
+      - missing_identifier:
+          arguments: {column: invoice_id}
+          config: {execution: local, severity: error}
+```
+
+Zero failing rows pass; error-severity failures block that Binding
+in `dre build`. Choose local (default) or source execution from the documented restrictions.
+Run `dre test <report>` to check fresh data without report delivery; use `dre build` when
+checks must gate formatting and delivery. `dre run` skips attached data tests.
+
+Mark sensitive query values with `secret_columns: [column_name]`; this masks DRE diagnostics,
+not delivered files or retained Arrow results. For per-row passwords, review
+[Password-protected outputs](references/docs/password-protected-outputs.md) and
+`for_each.keep_results: false` before retaining results on disk.
+
 ### Step 5: the format
 
 Load `references/topics/formats.md` (and `documents.md` for pdf or html). Use only options from
 `references/plugins/format-<format>.md`. For xlsx:
 
+- query-level `autofit` and `style` override output defaults; `columns.<name>.width` and
+  `columns.<name>.style` override the query's settings;
 - number and date formats per column (`columns: {amount: {format: "#,##0.00"}}`, per query or
   output-wide), and `date_format` for every date column;
 - row formulas (`formula: "={qty}*{price}"`, with a placeholder column selected in SQL) and

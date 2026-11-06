@@ -24,6 +24,13 @@ refuses a target path that is the project root, contains the project, or sits in
 `macros/`, `lookups/` or `dre_deps/`. A path elsewhere inside the project is skipped when DRE
 reads the project; add it to `.gitignore` (a new project's `.gitignore` covers `target/` only).
 
+The Binding lock prefers hard-link publication and falls back to exclusive file creation
+on filesystems without hard links. Test the actual mount before scheduling runs; FUSE, SMB
+and other mounted filesystems vary. Local destination delivery requires hard links when
+`atomic: true` combines with `if_exists: error` or `number`. There is no copy fallback for that no-replace operation.
+Use a supporting filesystem, or set that local destination's `atomic: false` if you accept
+writing directly to its final path.
+
 Schema-drift detection compares each run with the snapshot the last successful run left in the
 target path, so on an ephemeral runner (a job cluster, a CI runner) point it at a folder that
 outlives the run:
@@ -80,12 +87,14 @@ So several runs can share one target path safely:
   alone); its error names the run in progress. Different reports run in parallel freely. A lock
   left by a process on this machine that has gone (a crash, a kill, a restarted container that
   reuses the host name and process id) is taken over with a warning; one from another machine (a
-  shared folder) is never guessed about: `dre unlock <report> [--binding <set>]` shows it and
+  shared folder) is never guessed about. `DRE_HOST_NAME` overrides the host identity for
+  containers; reuse it only for the same machine/process namespace, never unrelated hosts.
+  `dre unlock <report> [--binding <set>]` shows it and
   removes it. `dre clean --prune` skips a report or Set whose lock is held.
 - **Parallel runs of one project install plugins and git packages one at a time**: a later run
   waits, then uses what the first one installed.
-- **A crash leaves the previous run current**, and only an unfinished folder behind, which the
-  next run removes.
+- **A crash leaves the previous run current**, plus an unfinished run folder. Pruning removes
+  that folder once it falls outside `keep_runs`; the next run does not necessarily remove it.
 - **An older run never replaces a newer one.** A rerun for an earlier instant (`DRE_RUN_AT`) than
   the current run's finishes in its own folder but doesn't become current, and doesn't touch the
   drift snapshot.
@@ -93,9 +102,10 @@ So several runs can share one target path safely:
   `dre.lock`) is written whole: a temporary file next to it, flushed to disk, then renamed into
   place, so a run stopped mid-write leaves the previous file or the new one, never a broken one.
 
-Before 0.4 a Binding's files were straight in `target/run/<report>/<set or default>/`. The first
-0.4 run moves them into a `runs/<time>-legacy/` folder (and the drift snapshot carries on). Don't
-run 0.3 and 0.4 on one target path.
+Before 0.4 a Binding's files were straight in `target/run/<report>/<set or default>/`.
+DRE 0.12 leaves that older layout untouched; it no longer moves those files automatically.
+Archive them before switching versions, and avoid sharing a target path across incompatible layouts.
+See [Updating DRE](updating.md#legacy-configuration-removed-in-the-012-candidate).
 
 ## Cleaning
 

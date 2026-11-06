@@ -173,7 +173,8 @@ Licences and unapproved Rust sources always fail.
   Every break goes in the release notes and the migration guide, and a removed key or name is an
   error that says what to write instead, never silently ignored. Renamed keys may keep working,
   with a warning, where that costs little. The one exception so far is 0.2.1, which corrected
-  0.2.0's targets (see the migration guide).
+  0.2.0's targets (see the migration guide). The [stability contract](docs/stability.md) defines
+  the covered interfaces and the policy from 1.0.
 - **Agent skills** in `skills/`: edit the sources, never the generated copies (the
   `references/` folders and the `shared/` blocks in `SKILL.md`), then run
   `.github/scripts/skills.py sync` and `generate`. See [`skills/README.md`](skills/README.md).

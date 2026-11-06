@@ -27,6 +27,26 @@ position: 14
 | `DRE_PLUGIN_HANDSHAKE_TIMEOUT_MS` | How long to wait for a plugin to start (default 30,000). |
 | `NO_COLOR` | Turns off coloured output. |
 | `DRE_SECRET_*` | Values are masked as `*****` in the console, logs, JSON events, the manifest, `run_results.json`, schema snapshots and `target/compiled/`. If a source rejects SQL containing a secret, its opaque error detail is omitted because databases may truncate or transform the value. Variables that `profiles.yml` reads through `env_var()` into a secret field (`password`, `token`, `api_key`, or a field the plugin marks secret) are masked the same way; paths and hosts are not. A value under 4 characters is masked only where it stands alone (not inside a longer word or number). `mask_secrets: false` in `dre_project.yml` turns masking off. Query result files are not altered. |
+| `DRE_HOST_NAME` | Overrides the host identity recorded in Binding locks. A dead local process's lock can be reclaimed only when its host identity matches. Share an identity only within the same machine/process namespace; use `dre unlock` for a lock from another host. |
+| `DRE_<COMMAND>_BIN` | Runs this executable for an extension command, e.g. `DRE_MCP_BIN` for `dre mcp`. This explicit override bypasses registry download and extension signature verification. Use only a trusted executable. |
+| `DRE_INTERACTIVE` | Passed to plugins unchanged when set; otherwise DRE sets `1` for a terminal and `0` for unattended execution. Plugins use it to allow interactive sign-in or fail instead of waiting. |
+| `DRE_NO_BROWSER` | Any nonempty value stops the Databricks plugin opening a browser; it prints the sign-in URL instead. It does not make browser sign-in suitable for an unattended runner. |
+
+## Installer and development variables
+
+These are separate from normal project settings:
+
+| Variable | Effect |
+|---|---|
+| `DRE_VERSION` | Pins the Unix `install.sh` download to a release tag instead of the latest release. |
+| `DRE_INSTALL_DIR` | Overrides the Unix install script's destination (default `~/.local/bin`). |
+| `DRE_VOLUMES_ROOT`, `DRE_WORKSPACE_ROOT` | Databricks plugin test overrides for the root of mounted Volumes and Workspace paths; used only when `DATABRICKS_RUNTIME_VERSION` is set. Leave unset in production. |
+| `DRE_TEST_*` | Internal test controls, service credentials and fixtures, not supported user settings. Includes prebuilt test binaries, extension signing test keys and font staging overrides. |
+| `DRE_UPDATE_DOCS`, `DRE_UPDATE_DESCRIBE`, `DRE_UPDATE_SCHEMA`, `DRE_UPDATE_SCHEMAS` | Maintainer test switches that rewrite generated CLI, plugin, protocol and project-schema fixtures. |
+| `DRE_SCHEMA_EXTRA_PROJECTS` | Extra project directories for the schema test, separated by the platform's path-list separator. |
+
+Other `DRE_*` names in example SQL, test fixtures or build tooling are fixture data or local
+script inputs, not additional CLI settings. `env_var()` may read any user-chosen variable name.
 
 ## Give a scheduled run stable inputs
 

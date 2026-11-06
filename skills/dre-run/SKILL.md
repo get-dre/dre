@@ -168,6 +168,17 @@ in `run_results.json.project_errors` (`path`, `code`, `message`, one entry per r
 those records and the selected outputs; keep the same production and delivery confirmations.
 Use `dre validate` as the whole-project gate; a successful selected run does not clear it.
 
+### Check attached data tests (DRE 0.11 and later)
+
+Inspect the selected queries' `data_tests`. For test-only requests, run `dre test <report>`
+with the selected Sets and target: it executes fresh queries and checks, with no report
+formatting or delivery. Production reads still require the confirmation below.
+Read [Build and run reports: Check returned data with `dre test`](references/docs/building-reports.md#check-returned-data-with-dre-test)
+for verdicts and execution restrictions. Do not call a preview or `dre run` a data-test pass:
+`dre run` skips checks. Use `dre build` for production or scheduled delivery when attached
+tests must gate output. Error-severity failures block the affected Binding.
+On DRE 0.9 or 0.10, explain that data tests require 0.11 or newer; do not invoke these commands.
+
 ### Step 4: preview
 
 Run `dre run <report> --preview` (100 rows; `--preview 20` for fewer). It runs the queries with a
@@ -209,7 +220,8 @@ target, where it came from, and each profile's entry), confirm first (RUN-2):
 1. show what will happen, from step 3's `dre validate -s <report>` (target, connections, output,
    each destination with its recipients, channel or path);
 2. ask for an explicit yes;
-3. run `dre run <report>` with the same selection, Set and target.
+3. run `dre build <report>` when attached data tests must gate delivery (DRE 0.11+), otherwise
+   `dre run <report>`, with the same selection, Set and target. Show that command before confirmation.
 
 For a per-row output that sends to people, also say how many deliveries the preview counted, and
 check that the destination profile delivers nowhere on `dev` (RUN-8); recommend a first
@@ -232,7 +244,8 @@ Report what was delivered where, what delivered nowhere on purpose, and what fai
 several outputs, `output_results` has one entry per output: `skipped` (its `when:` was false, or
 its message rendered empty) is not a failure, and a message's entry holds the full text it sent.
 
-End with what ran and what's next: fixing a failure, or scheduling (`dre run --schedule <name>`
+End with what ran and what's next: fixing a failure, or scheduling (`dre build --schedule <name>`
+for reports with attached tests on DRE 0.11+, otherwise `dre run --schedule <name>`,
 from the user's orchestrator, with `DRE_RUN_AT` for the instant it was scheduled for, RUN-3; a
 lasting `--target-path` on ephemeral runners, RUN-4).
 

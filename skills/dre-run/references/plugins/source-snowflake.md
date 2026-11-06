@@ -117,6 +117,14 @@ The driver keeps the SSO and MFA token cache, as it does for dbt; DRE writes not
 for Snowflake. `connections.toml` isn't read. Set `SNOWFLAKE_LOG_LEVEL` (e.g. `DEBUG`) to see the
 driver's log.
 
+The driver also reads `SF_CLIENT_CONFIG_FILE`, or searches its default directories for
+`sf_client_config.json`. That client configuration can replace the logger after DRE disables
+it. For the DRE plugin, avoid `log_path: STDOUT`: stdout carries binary protocol frames, and a
+driver log line there makes the connection fail. Point `SF_CLIENT_CONFIG_FILE` at an
+operator-managed configuration with logging disabled, or a private log directory when needed.
+Driver logs are outside DRE's masking and retention controls and may contain SQL; restrict
+access and retention. `SNOWFLAKE_LOG_LEVEL` alone does not override that client configuration.
+
 To make reports visible inside Snowflake, deliver them to the bucket behind an external stage
 with the `s3`, `gcs` or `azure_blob` destination; there's no Snowflake stage destination.
 
