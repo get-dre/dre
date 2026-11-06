@@ -156,3 +156,106 @@ fn a_refused_connection_is_tried_again_and_refused_credentials_are_not() {
         "{err}"
     );
 }
+
+/// Deliver a file of `bytes` with `conn`, returning the result and the plugin's log lines.
+fn deliver_logged(conn: Value, bytes: &[u8]) -> (Result<String, String>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let local = dir.path().join("report.csv");
+    std::fs::write(&local, bytes).unwrap();
+    let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let l = lines.clone();
+    let log: LogSink = Arc::new(move |_, m: &str| l.lock().unwrap().push(m.to_string()));
+    let mut p = PluginProcess::start(bin(), log).unwrap();
+    let Value::Object(c) = conn else { panic!() };
+    let r = p
+        .deliver(local.to_str().unwrap(), Some("x.csv"), c)
+        .map_err(|e| e.to_string());
+    let _ = p.close();
+    let lines = lines.lock().unwrap().clone();
+    (r, lines)
+}
+
+/// A port nothing listens on.
+fn closed_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[test]
+fn a_password_over_plain_ftp_warns() {
+    let conn = |tls: &str| {
+        json!({"host": "127.0.0.1", "port": closed_port(), "username": "dre", "password": "x",
+            "tls": tls, "retries": 0})
+    };
+    let (r, log) = deliver_logged(conn("none"), b"x");
+    assert!(r.is_err());
+    assert!(
+        log.iter()
+            .any(|l| l.contains("plain text") && l.contains("tls: explicit")),
+        "{log:?}"
+    );
+    let (_, log) = deliver_logged(conn("explicit"), b"x");
+    assert!(!log.iter().any(|l| l.contains("plain text")), "{log:?}");
+}
+
+#[test]
+fn a_port_above_65535_is_refused() {
+    let conn = json!({"host": "127.0.0.1", "port": 65557, "username": "dre", "password": "x"});
+    let err = deliver("x.csv", conn, b"x").unwrap_err();
+    assert!(err.contains("`port` must be a port number"), "{err}");
+}
+
+/// A server that stops reading the data connection mid-upload (disk full, a stuck process):
+/// the upload fails after `timeout` instead of hanging.
+#[test]
+fn a_stalled_data_connection_times_out() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    let control = TcpListener::bind("127.0.0.1:0").unwrap();
+    let data = TcpListener::bind("127.0.0.1:0").unwrap();
+    let (cport, dport) = (
+        control.local_addr().unwrap().port(),
+        data.local_addr().unwrap().port(),
+    );
+    // Sockets the server holds open without reading, until the test ends.
+    let (held_tx, held_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (s, _) = control.accept().unwrap();
+        let mut w = s.try_clone().unwrap();
+        w.write_all(b"220 ready\r\n").unwrap();
+        for line in BufReader::new(s).lines() {
+            let line = line.unwrap();
+            let reply = match line.split(' ').next().unwrap() {
+                "USER" => "331 password".to_string(),
+                "PASS" => "230 in".to_string(),
+                "SIZE" => "550 no such file".to_string(),
+                "PASV" => format!("227 Passive (127,0,0,1,{},{})", dport >> 8, dport & 0xff),
+                "STOR" => {
+                    w.write_all(b"150 go\r\n").unwrap();
+                    held_tx.send(data.accept().unwrap().0).unwrap();
+                    continue;
+                }
+                _ => "200 ok".to_string(),
+            };
+            w.write_all(format!("{reply}\r\n").as_bytes()).unwrap();
+        }
+    });
+    // More than the socket buffers hold, so the upload blocks once the server stops reading.
+    let bytes = vec![b'x'; 64 << 20];
+    let (done_tx, done_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let conn = json!({"host": "127.0.0.1", "port": cport, "username": "dre", "password": "x",
+            "timeout": "1s", "retries": 0, "atomic": false});
+        done_tx.send(deliver_logged(conn, &bytes).0).unwrap();
+    });
+    let r = done_rx
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the upload hung on a stalled data connection");
+    assert!(r.unwrap_err().contains("can't upload to x.csv"));
+    drop(held_rx);
+}

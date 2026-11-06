@@ -375,7 +375,23 @@ impl HostCheck {
         }
         match russh::keys::check_known_hosts_path(&self.host, self.port, key, &self.known_hosts) {
             Ok(true) => Ok(()),
-            Ok(false) if self.accept_unknown => Ok(()),
+            Ok(false) if self.accept_unknown => {
+                // russh calls a stored key of another type unknown, not changed: any key listed
+                // for this host means the offered one contradicts known_hosts.
+                let listed =
+                    russh::keys::known_hosts::known_host_keys_path(&self.host, self.port, &self.known_hosts)
+                        .is_ok_and(|keys| !keys.is_empty());
+                if listed {
+                    Err(format!(
+                        "the host key of {}:{} ({fp}) doesn't match {}, which lists another key type for it; refusing to connect — it may have changed or be spoofed",
+                        self.host,
+                        self.port,
+                        self.known_hosts.display()
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
             Ok(false) => Err(format!(
                 "the host key of {}:{} ({fp}) isn't in {}; add it (ssh-keyscan) or pin `host_key_fingerprint: {fp}`",
                 self.host,

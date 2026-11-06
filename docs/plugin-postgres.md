@@ -49,7 +49,7 @@ Set in `profiles.yml`, under `connections:`, in a target with `type: postgres`.
 | `user`, `password` | |
 | `database` (or `dbname`) | |
 | `sslmode` | `disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`, with libpq's meanings. |
-| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`. A leading `~/` is your home directory. |
+| `sslrootcert` | CA certificate for `verify-ca` / `verify-full`; may be a bundle of several. When set, only these CAs are trusted, not the system's. `verify-ca` requires it. A leading `~/` is your home directory. |
 | `connect_timeout` | How long to wait for a connection: a duration (`30s`, `2m`) or seconds. Default `30s` (before 0.4, no limit). Queries themselves have no time limit; the run's timeout is the backstop. |
 | `retries` | How many times to try connecting again after a temporary failure (the server unreachable, starting up, or dropping the connection). Default 3; a query is never tried again (see [Tries again](plugins.md#tries-again)). |
 | `retry_wait` | The first wait before trying to connect again (`30s`), doubling each try. Default about 1s, then 4s, then 16s. |

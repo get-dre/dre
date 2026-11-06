@@ -265,14 +265,14 @@ fn a_path_for_another_store_is_rejected() {
     let _unused: Map<String, Value> = Map::new();
 }
 
-/// `deliver` with the plugin's environment replaced for the AWS variables.
-fn deliver_env(remote: &str, conn: Value, env: &[(&str, &str)]) -> Result<String, String> {
+/// `deliver` to the `kind` destination with extra environment variables for the plugin.
+fn deliver_env(kind: &str, remote: &str, conn: Value, env: &[(&str, &str)]) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
     let local = dir.path().join("report.csv");
     std::fs::write(&local, b"a\r\n1\r\n").unwrap();
     let log: LogSink = Arc::new(|_, _| {});
     let mut p = PluginProcess::spawn_env(bin(), log, env).unwrap();
-    p.ask_for(Some(plugin("s3")));
+    p.ask_for(Some(plugin(kind)));
     p.handshake(
         (dre_protocol::MIN_VERSION, dre_protocol::MAX_VERSION),
         std::time::Duration::from_secs(10),
@@ -306,7 +306,7 @@ fn s3_without_any_credentials_fails_at_once_saying_what_it_tried() {
     let env = no_aws(dir.path());
     let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     let start = std::time::Instant::now();
-    let err = deliver_env("s3://b/x.csv", json!({"region": "us-east-1"}), &env).unwrap_err();
+    let err = deliver_env("s3", "s3://b/x.csv", json!({"region": "us-east-1"}), &env).unwrap_err();
     assert!(err.contains("no AWS credentials found (tried: "), "{err}");
     assert!(
         start.elapsed() < std::time::Duration::from_secs(20),
@@ -338,7 +338,7 @@ fn s3_reads_a_named_profile_from_the_shared_files() {
     let conn = json!({"endpoint": endpoint, "region": "us-east-1", "profile": "reports"});
     // The bucket exists from the other S3 test only sometimes; either it lands or S3 says why,
     // but never a credentials error.
-    match deliver_env("s3://reports/profile/x.csv", conn, &env) {
+    match deliver_env("s3", "s3://reports/profile/x.csv", conn, &env) {
         Ok(loc) => assert_eq!(loc, "s3://reports/profile/x.csv"),
         Err(e) => assert!(!e.contains("credentials"), "{e}"),
     }
@@ -444,4 +444,61 @@ fn a_503_is_tried_again_for_each_object_store() {
             .contains("503")
     );
     assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn if_exists_error_streams_a_large_file_in_parts() {
+    // Azure: no blob by the name (HEAD 404), then blocks and the block list.
+    let (url, seen) = flaky_server(|method, _, _| match method {
+        "HEAD" => (404, vec![]),
+        _ => (201, vec![("ETag".into(), "\"e\"".into())]),
+    });
+    let conn = json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": url});
+    let r = deliver_with(
+        "azure",
+        "az://c/r.csv",
+        conn,
+        json!({"if_exists": "error"}),
+        &payload(),
+    );
+    assert_eq!(r.unwrap(), "az://c/r.csv");
+    let seen = seen.lock().unwrap();
+    assert!(
+        seen.iter().filter(|r| r.contains("comp=block&")).count() > 1
+            && seen.iter().any(|r| r.contains("comp=blocklist")),
+        "{seen:?}"
+    );
+    // An object by the name: refused without uploading.
+    let (url, seen) = flaky_server(|_, _, _| {
+        let modified = "Thu, 05 Nov 2026 10:00:00 GMT";
+        (
+            200,
+            vec![
+                ("Last-Modified".into(), modified.into()),
+                ("ETag".into(), "\"e\"".into()),
+            ],
+        )
+    });
+    let conn = json!({"account_name": AZ_ACCOUNT, "access_key": AZ_KEY, "endpoint": url});
+    let err = deliver_with(
+        "azure",
+        "az://c/r.csv",
+        conn,
+        json!({"if_exists": "error"}),
+        &payload(),
+    )
+    .unwrap_err();
+    assert!(err.contains("already"), "{err}");
+    assert!(seen.lock().unwrap().iter().all(|r| r.starts_with("HEAD")));
+}
+
+#[test]
+fn azure_managed_identity_honours_retries() {
+    // The managed identity endpoint always answers 503: `retries: 0` asks it once.
+    let (url, seen) = flaky_server(|_, _, _| (503, vec![("Retry-After".into(), "0".into())]));
+    let conn = json!({"account_name": AZ_ACCOUNT, "use_managed_identity": true, "endpoint": url,
+        "retries": 0});
+    let err = deliver_env("azure", "az://c/r.csv", conn, &[("IDENTITY_ENDPOINT", &url)]).unwrap_err();
+    assert!(err.contains("503"), "{err}");
+    assert_eq!(seen.lock().unwrap().len(), 1, "{:?}", seen.lock().unwrap());
 }

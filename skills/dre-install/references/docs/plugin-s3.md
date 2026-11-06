@@ -57,7 +57,8 @@ is honoured, and with no credentials anywhere the delivery fails at once, listin
 The region comes from `region:`, else the AWS config. `endpoint` and `allow_http` point it at
 S3-compatible stores. Paths are `s3://bucket/key`, or a bare key in `bucket`. Takes `if_exists`
 (see [A file already at the path](plugins.md#a-file-already-at-the-path)); the S3-compatible store must support conditional
-writes for `error` and `number`.
+writes for `error` and `number`. A file over 8 MB is checked for and then uploaded in
+parts, so two runs creating the same new name at once can both succeed.
 
 ## Deliver a dated finance export
 

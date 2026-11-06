@@ -32,6 +32,8 @@ const DEFAULT_API: &str = "https://slack.com/api";
 const MAX_RETRY_WAIT: u64 = 60;
 /// The longest message text posted, in characters: Slack's recommended maximum.
 const MESSAGE_LIMIT: u64 = 4_000;
+/// The longest title, in characters, before its `*` marks.
+const TITLE_LIMIT: usize = 1_000;
 const CUT_MARKER: &str = "\n… _(cut short: the full message is attached)_";
 
 struct Slack;
@@ -86,13 +88,18 @@ impl Destination for Slack {
         let target = Target::from(&d.options, &d.connection)?;
         let api = Api::new(&d.connection, &d.options)?;
         let channel_id = api.channel_of(&target)?;
-        let title = format!("*{}*", markdown::to_slack(&markdown::escape(&m.title)));
-        let (text, cut) = markdown::fit(
+        // A title from a long value is cut too, leaving the text room.
+        let (title, title_cut) = markdown::fit(&m.title, TITLE_LIMIT, "…", |t| {
+            markdown::to_slack(&markdown::escape(t))
+        });
+        let title = format!("*{title}*");
+        let (text, text_cut) = markdown::fit(
             &m.text,
-            MESSAGE_LIMIT as usize - title.chars().count() - 1,
+            (MESSAGE_LIMIT as usize).saturating_sub(title.chars().count() + 1),
             CUT_MARKER,
             markdown::to_slack,
         );
+        let cut = title_cut || text_cut;
         let text = format!("{title}\n{text}");
         let mut files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
         if cut {

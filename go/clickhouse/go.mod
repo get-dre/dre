@@ -14,13 +14,13 @@ require (
 
 require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
-	github.com/andybalholm/brotli v1.2.6 // indirect
+	github.com/andybalholm/brotli v1.2.8 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.29 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect

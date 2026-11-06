@@ -122,6 +122,28 @@ fn unknown_hosts_are_refused_until_trusted() {
 }
 
 #[test]
+fn a_known_host_offering_a_key_of_another_type_is_refused_even_when_accepting_unknown_hosts() {
+    let Some((host, port)) = server() else {
+        eprintln!("skipped: set DRE_TEST_SFTP=host:port");
+        return;
+    };
+    // known_hosts holds an ECDSA key for the server; the server (or a man in the middle) offers
+    // Ed25519 or RSA. That contradicts known_hosts, so `accept_unknown_host` doesn't apply.
+    let dir = tempfile::tempdir().unwrap();
+    let ecdsa = keygen(dir.path(), "ecdsa");
+    let public = std::fs::read_to_string(format!("{ecdsa}.pub")).unwrap();
+    let kh = dir.path().join("known_hosts");
+    std::fs::write(&kh, format!("[{host}]:{port} {public}")).unwrap();
+    let err = deliver(
+        "upload/x.csv",
+        base(json!({"known_hosts_path": kh, "accept_unknown_host": true})),
+        b"x",
+    )
+    .unwrap_err();
+    assert!(err.contains("doesn't match"), "{err}");
+}
+
+#[test]
 fn uploads_with_a_password_creating_directories() {
     let Some((host, port)) = server() else { return };
     let dir = tempfile::tempdir().unwrap();
