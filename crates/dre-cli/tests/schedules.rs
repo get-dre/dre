@@ -358,7 +358,7 @@ fn dre_secrets_needing_json_escapes_never_reach_json_output() {
         serde_json::from_str::<serde_json::Value>(line).unwrap_or_else(|e| panic!("{e}: {line}"));
     }
     let results = p.json("target/run/secret/default/run_results.json");
-    assert_eq!(results["status"], "error", "{results}");
+    assert_eq!(results["status"], "failed", "{results}");
     assert!(surfaces[3].1.contains("*****"), "{}", surfaces[3].1);
 
     // Configured off: the value is written as is.

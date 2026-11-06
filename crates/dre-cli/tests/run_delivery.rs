@@ -39,7 +39,7 @@ fn a_failed_upload_leaves_the_output_in_target_and_says_so() {
     assert_eq!(p.read("target/run/daily/default/daily.csv"), "n\r\n1\r\n");
     assert_eq!(
         p.json("target/run/daily/default/run_results.json")["status"],
-        "error"
+        "failed"
     );
 }
 

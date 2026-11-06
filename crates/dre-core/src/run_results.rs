@@ -15,13 +15,13 @@ use crate::settings::Settings;
 type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// The format's version.
-pub const SCHEMA_VERSION: &str = "dre/run-results/v1";
+pub const SCHEMA_VERSION: &str = "dre/run-results/v2";
 
 /// `<target path>/run/<report>/<set or default>/runs/<run id>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[schemars(title = "DRE run results")]
 pub struct RunResults {
-    /// The format's version: `dre/run-results/v1`.
+    /// The format's version: `dre/run-results/v2`.
     #[schemars(schema_with = "schema_version")]
     pub schema_version: &'static str,
     /// This run's id (`20261009T060000Z-k3f9`: its UTC start and four random characters), the name of its folder under `runs/`.
@@ -141,9 +141,12 @@ pub struct Released {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    #[serde(rename = "succeeded")]
     Success,
+    #[serde(rename = "failed")]
     Error,
-    /// `--dry-run`: rendered, nothing executed.
+    /// `dre compile`: rendered, nothing executed.
+    #[serde(rename = "compiled")]
     DryRun,
     /// `dre validate --live`: checked on the database, nothing executed.
     Checked,

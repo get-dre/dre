@@ -323,7 +323,6 @@ impl BindingRun<'_> {
                 destinations,
             });
         }
-        let first = outputs.first().cloned();
         let pool = self.pool.clone().expect("the pool is made before rendering");
         let queries = self
             .parsed
@@ -347,9 +346,6 @@ impl BindingRun<'_> {
             profile: self.parsed.inherited.clone(),
             queries,
             target: self.target.clone(),
-            format: first.as_ref().map(|o| o.format.clone()).unwrap_or_default(),
-            output: first.as_ref().map(|o| o.output.clone()).unwrap_or_default(),
-            destinations: first.map(|o| o.destinations).unwrap_or_default(),
             outputs,
             schedules: self.b.schedules.clone(),
         }

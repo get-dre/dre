@@ -45,7 +45,7 @@ fn a_one_query_report_writes_csv_into_target_and_records_the_run() {
     );
 
     let r = p.json("target/run/daily/default/run_results.json");
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
     assert_eq!(r["report"], "daily");
     assert_eq!(r["target"], "dev");
     assert_eq!(r["preview"], false);
@@ -104,7 +104,7 @@ fn bad_sql_fails_the_run_and_is_recorded() {
         .says("nope")
         .says("0 succeeded, 1 failed");
     let r = p.json("target/run/daily/default/run_results.json");
-    assert_eq!(r["status"], "error");
+    assert_eq!(r["status"], "failed");
     assert!(
         r["error"]
             .as_str()
@@ -153,7 +153,7 @@ fn run_results_match_the_published_schema() {
     let p = project("queries: [summary]\n", "");
     p.dre("run", &["daily"]).ok();
     let ok = p.json("target/run/daily/default/run_results.json");
-    assert_eq!(ok["schema_version"], "dre/run-results/v1");
+    assert_eq!(ok["schema_version"], "dre/run-results/v2");
     let errors: Vec<String> = validator.iter_errors(&ok).map(|e| e.to_string()).collect();
     assert!(errors.is_empty(), "{errors:?}");
     p.write("reports/ops/daily/summary.sql", "select nope from accounts\n");

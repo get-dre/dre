@@ -19,7 +19,7 @@ use crate::delivery::{Deliverer, Request};
 use crate::engine::Events;
 use crate::error::Error as Fail;
 use crate::project::Project;
-use crate::run_results::Released;
+use crate::run_results::{Released, Status};
 use crate::runs::BindingRuns;
 
 /// `held.json` in a run folder.
@@ -357,10 +357,14 @@ fn write_record(
         .unwrap_or_else(|| serde_json::json!({}));
     let failed = outcome.failed();
     if let Json::Object(m) = &mut record {
+        m.insert(
+            "schema_version".into(),
+            Json::from(crate::run_results::SCHEMA_VERSION),
+        );
         m.insert("run_id".into(), Json::from(release_id));
         m.insert(
             "status".into(),
-            Json::from(if failed { "error" } else { "success" }),
+            serde_json::json!(if failed { Status::Error } else { Status::Success }),
         );
         m.insert(
             "started_at".into(),

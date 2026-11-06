@@ -6,8 +6,8 @@
   "description": "target/manifest.json, written by `dre compile` and `dre validate`, and the document `dre ls --output json` prints (holding only the matching reports and schedules). Resolved for the run's inputs, as dbt's is: the target, vars, environment variables and run.* decide Jinja in `profile:` values and source fields, so the same project and the same inputs give the same bytes. New optional fields may appear within a version; consumers should ignore fields they don't know. See docs/manifest.md.",
   "properties": {
     "schema_version": {
-      "description": "The format's version: `dre/manifest/v3` (DRE 0.4). Version 2 (DRE 0.2) had `\"schema\": 2` instead.",
-      "const": "dre/manifest/v3"
+      "description": "The format's version: `dre/manifest/v4` (DRE 0.12). Version 3 retained legacy first-output fields.",
+      "const": "dre/manifest/v4"
     },
     "version": {
       "type": "string",
@@ -486,17 +486,6 @@
             "$ref": "#/$defs/query"
           }
         },
-        "output": {
-          "description": "The first output; every output is under `outputs`.",
-          "$ref": "#/$defs/ManifestOutput"
-        },
-        "destinations": {
-          "type": "array",
-          "description": "Every output's destinations, in delivery order.",
-          "items": {
-            "$ref": "#/$defs/destination"
-          }
-        },
         "outputs": {
           "type": "array",
           "description": "Every output, in declared order.",
@@ -517,8 +506,6 @@
         "profile",
         "vars",
         "queries",
-        "output",
-        "destinations",
         "outputs",
         "schedules"
       ]
@@ -568,11 +555,8 @@
           "description": "The template file, as declared."
         },
         "destinations": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "description": "In delivery order. (Absent on a Binding's `output`.)",
+          "type": "array",
+          "description": "In delivery order.",
           "items": {
             "$ref": "#/$defs/destination"
           }
@@ -580,7 +564,8 @@
       },
       "required": [
         "format",
-        "options"
+        "options",
+        "destinations"
       ]
     },
     "destination": {

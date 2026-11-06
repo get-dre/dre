@@ -1,5 +1,6 @@
 exit: 0
 {
+  "schema_version": "dre/validate/v1",
   "ok": true,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
@@ -94,9 +95,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/monthly/client_a/runs/<run id>/monthly.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -130,9 +128,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/monthly/client_b/runs/<run id>/monthly.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -166,9 +161,6 @@ exit: 0
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/monthly/client_c_pilot/runs/<run id>/monthly.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -207,11 +199,6 @@ exit: 0
       "monthly": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -257,11 +244,6 @@ exit: 0
             }
           },
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -299,11 +281,6 @@ exit: 0
             }
           },
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -374,7 +351,7 @@ exit: 0
       }
     },
     "schedules": {},
-    "schema_version": "dre/manifest/v3",
+    "schema_version": "dre/manifest/v4",
     "sources": {},
     "version": "$VERSION"
   }

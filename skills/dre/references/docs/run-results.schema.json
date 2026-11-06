@@ -6,8 +6,8 @@
   "description": "`<target path>/run/<report>/<set or default>/runs/<run id>/run_results.json`: what one run of one Binding did. Written by `dre run` for each Binding it runs. See docs/manifest.md.",
   "properties": {
     "schema_version": {
-      "description": "The format's version: `dre/run-results/v1`.",
-      "const": "dre/run-results/v1"
+      "description": "The format's version: `dre/run-results/v2`.",
+      "const": "dre/run-results/v2"
     },
     "run_id": {
       "type": "string",
@@ -427,14 +427,14 @@
         {
           "type": "string",
           "enum": [
-            "success",
-            "error"
+            "succeeded",
+            "failed"
           ]
         },
         {
           "type": "string",
-          "description": "`--dry-run`: rendered, nothing executed.",
-          "const": "dry_run"
+          "description": "`dre compile`: rendered, nothing executed.",
+          "const": "compiled"
         },
         {
           "type": "string",

@@ -1,5 +1,6 @@
 exit: 1
 {
+  "schema_version": "dre/validate/v1",
   "ok": false,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
@@ -109,9 +110,6 @@ exit: 1
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/quick_look/default/runs/<run id>/quick_look.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -138,9 +136,6 @@ exit: 1
         }
       ],
       "target": "dev",
-      "format": "csv",
-      "output": "target/run/temp_then_select/default/runs/<run id>/temp_then_select.csv",
-      "destinations": [],
       "outputs": [
         {
           "name": null,
@@ -179,11 +174,6 @@ exit: 1
       "quick_look": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -231,11 +221,6 @@ exit: 1
       "temp_then_select": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -283,11 +268,6 @@ exit: 1
       "templated": {
         "bindings": [
           {
-            "destinations": [],
-            "output": {
-              "format": "csv",
-              "options": {}
-            },
             "outputs": [
               {
                 "destinations": [],
@@ -334,7 +314,7 @@ exit: 1
       }
     },
     "schedules": {},
-    "schema_version": "dre/manifest/v3",
+    "schema_version": "dre/manifest/v4",
     "sources": {},
     "version": "$VERSION"
   }

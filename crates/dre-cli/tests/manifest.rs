@@ -83,7 +83,7 @@ fn compile_writes_the_whole_project() {
     let p = project();
     p.dre("compile", &["-s", "daily"]).ok();
     let m = manifest(&p);
-    assert_eq!(m["schema_version"], "dre/manifest/v3");
+    assert_eq!(m["schema_version"], "dre/manifest/v4");
     assert!(m.get("schema").is_none());
     // It validates against the published schema.
     let schema: Value = serde_json::from_str(
@@ -125,9 +125,9 @@ fn compile_writes_the_whole_project() {
     let b = &daily["bindings"][0];
     assert_eq!(b["set"], Value::Null);
     assert_eq!(b["profile"], "warehouse");
-    assert_eq!(b["output"]["format"], "csv");
+    assert_eq!(b["outputs"][0]["format"], "csv");
     assert_eq!(
-        b["destinations"],
+        b["outputs"][0]["destinations"],
         json!([
             {"profile": "inbox", "path": "out/daily-{{ run.date.yyyymmdd }}.csv"},
             {"profile": "archive", "path": "archive/daily.csv"}
@@ -297,7 +297,7 @@ fn scoped_runs_do_not_claim_the_checksum_of_an_earlier_manifest() {
     p.write("reports/ops/daily/summary.sql", "select * from no_such_table\n");
     p.dre("run", &["-s", "daily"]).failed();
     let results = p.json("target/run/daily/default/run_results.json");
-    assert_eq!(results["status"], "error");
+    assert_eq!(results["status"], "failed");
     assert!(results["manifest_checksum"].is_null());
     assert_eq!(p.read("target/manifest.json"), bytes);
 }

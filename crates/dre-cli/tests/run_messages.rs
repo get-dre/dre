@@ -171,7 +171,7 @@ fn when_false_skips_the_output_and_the_binding_succeeds() {
         .says("Skipped  output `always`: the message is empty");
     assert!(deliveries(&rec).is_empty());
     let r = results(&p);
-    assert_eq!(r["status"], "success");
+    assert_eq!(r["status"], "succeeded");
     let outs = r["output_results"].as_array().unwrap();
     assert_eq!(outs[0]["status"], "skipped");
     assert_eq!(outs[0]["when"], false);

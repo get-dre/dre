@@ -112,7 +112,7 @@ fn json_log_format_is_one_object_per_line() {
         .iter()
         .find(|e| e["event"] == "binding_end" && e["report"] == "daily")
         .unwrap();
-    assert_eq!(end["status"], "success");
+    assert_eq!(end["status"], "succeeded");
     assert!(events.iter().all(|e| e["ts"].is_string()));
 }
 

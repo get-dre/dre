@@ -138,7 +138,7 @@ fn scoped_results_validate_against_the_published_schema_even_when_the_query_fail
     p.write("reports/good/good.sql", "fail");
     p.dre("run", &["good"]).failed();
     let results = p.json("target/run/good/default/run_results.json");
-    assert_eq!(results["status"], "error");
+    assert_eq!(results["status"], "failed");
     assert_eq!(results["project_errors"][0]["code"], "unknown-key");
     let schema: serde_json::Value =
         serde_json::from_str(include_str!("../../../docs/run-results.schema.json")).unwrap();

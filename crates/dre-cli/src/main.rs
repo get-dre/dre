@@ -262,7 +262,7 @@ struct RunArgs {
     /// `default_profile`), e.g. for an ad hoc Set. A query's own `profile:` or a source's wins.
     #[arg(long)]
     profile: Option<String>,
-    /// Override the output file name for this run (the first output, with several).
+    /// Override the first output's file name in each Binding. Not for outputs with for_each.
     #[arg(long)]
     output_name: Option<String>,
     /// Override the full output (delivery) path for this run: one Binding whose first output
@@ -746,6 +746,7 @@ impl Validation<'_> {
     fn json(&self) -> serde_json::Value {
         let (project, diags, targets) = (self.project, self.diags, self.targets);
         serde_json::json!({
+            "schema_version": "dre/validate/v1",
             "ok": self.ok,
             "profiles": project.map(|p| serde_json::json!({
                 "path": p.profiles().path,

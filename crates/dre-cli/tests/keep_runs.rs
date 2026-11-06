@@ -59,7 +59,7 @@ fn flags_keep_runs_keeps_that_many_and_the_newest_is_current() {
     assert_eq!(current.trim(), kept[2]);
     let history = p.dre("history", &["daily"]);
     assert_eq!(
-        history.stdout.lines().filter(|l| l.contains("success")).count(),
+        history.stdout.lines().filter(|l| l.contains("succeeded")).count(),
         3,
         "{}",
         history.stdout
