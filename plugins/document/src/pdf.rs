@@ -7,7 +7,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::LazyLock;
 
-use dre_core::document::Context;
+use dre_template::document::Context;
 use fulgur::{AssetBundle, Engine, Margin, PageSize};
 use regex::Regex;
 

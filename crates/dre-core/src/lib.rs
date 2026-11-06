@@ -18,11 +18,9 @@ pub mod config;
 pub mod constraints;
 pub mod context;
 pub mod data_tests;
-pub mod dates;
 pub(crate) mod delivery;
 pub mod diag;
 pub mod dialect;
-pub mod document;
 pub mod engine;
 pub mod error;
 pub mod fonts;
@@ -34,9 +32,7 @@ pub mod lookups;
 pub mod manager;
 pub mod manifest;
 pub mod message;
-mod mutable;
 pub(crate) mod no_data;
-pub mod numbers;
 pub mod occurrences;
 pub mod options;
 pub mod packages;
@@ -58,20 +54,19 @@ pub(crate) mod saved;
 pub mod schedule;
 mod schema;
 pub(crate) mod secret_columns;
-pub mod secrets;
 pub(crate) mod selector;
 pub mod settings;
 pub mod sqlsplit;
 pub mod start;
 pub mod target;
-pub mod template_file;
-pub(crate) mod values;
 pub(crate) mod variables;
 pub mod yaml;
 pub(crate) mod zip_pack;
 
 pub use context::{Context, Env};
 pub use diag::{Diagnostic, Diagnostics, Severity};
+pub(crate) use dre_template::values;
+pub use dre_template::{dates, document, numbers, secrets, template_file};
 
 /// The version string `dre --version` prints. DRE has no released version yet.
 pub fn version() -> &'static str {
@@ -81,17 +76,7 @@ pub fn version() -> &'static str {
     }
 }
 
-/// A path with `/` separators on every platform, so messages and goldens read the same everywhere.
-pub fn slash(p: &std::path::Path) -> std::path::PathBuf {
-    std::path::PathBuf::from(p.to_string_lossy().replace('\\', "/"))
-}
-
-/// A path relative to `root` when it is inside it, with `/` separators on every platform.
-/// Paths outside `root` keep their original prefix. Relativity follows the native path rules;
-/// separator normalization happens afterwards, as in [`slash`].
-pub fn slash_relative(root: &std::path::Path, path: &std::path::Path) -> std::path::PathBuf {
-    slash(path.strip_prefix(root).unwrap_or(path))
-}
+pub use dre_template::{slash, slash_relative};
 
 #[cfg(test)]
 mod path_tests {

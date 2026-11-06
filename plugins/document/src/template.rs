@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use dre_core::document::{Check, Context};
-use dre_core::message::QueryResult;
-use dre_core::numbers::Locale;
+use dre_template::document::{Check, Context};
+use dre_template::numbers::Locale;
+use dre_template::result::QueryResult;
 use minijinja::value::{Enumerator, Object, ObjectRepr, Value};
 use minijinja::{Environment, Error, ErrorKind};
 use regex::Regex;
@@ -273,9 +273,9 @@ pub fn render(ctx: &Context, data: &Data) -> Result<Rendered, String> {
 /// HTML escaping, the `date` filter, `table()`, and includes looked up inside the project.
 fn environment(ctx: &Context, root: &Path, locale: Locale) -> Result<Environment<'static>, String> {
     // The plugin's own process: number filter errors mask its `DRE_SECRET_*` values.
-    static SECRETS: std::sync::LazyLock<dre_core::secrets::Secrets> =
-        std::sync::LazyLock::new(|| dre_core::secrets::Secrets::new(&dre_core::Env::from_process()));
-    let mut env = dre_core::document::environment(ctx, &SECRETS)?;
+    static SECRETS: std::sync::LazyLock<dre_template::secrets::Secrets> =
+        std::sync::LazyLock::new(|| dre_template::secrets::Secrets::new(&dre_template::Env::from_process()));
+    let mut env = dre_template::document::environment(ctx, &SECRETS)?;
     env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
     let r = root.to_path_buf();
     env.set_path_join_callback(move |name, parent| {
@@ -287,7 +287,7 @@ fn environment(ctx: &Context, root: &Path, locale: Locale) -> Result<Environment
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| r.clone())
         };
-        match dre_core::template_file::resolve(&r, &from, name) {
+        match dre_template::template_file::resolve(&r, &from, name) {
             Ok(p) => p.to_string_lossy().into_owned().into(),
             Err(e) => format!("{UNRESOLVED}{e}").into(),
         }
@@ -701,7 +701,7 @@ pub fn check(c: &Check) -> (Vec<String>, Vec<String>) {
     let ctx = Context {
         file: Some(file.clone()),
         project_root: c.project_root.clone(),
-        run: dre_core::document::RunInfo {
+        run: dre_template::document::RunInfo {
             report: String::new(),
             set: None,
             target: String::new(),
@@ -749,7 +749,7 @@ pub fn check(c: &Check) -> (Vec<String>, Vec<String>) {
         let dir = Path::new(&name).parent().unwrap_or(&root).to_path_buf();
         for cap in include.captures_iter(&src) {
             match cap.get(2).or_else(|| cap.get(3)) {
-                Some(lit) => match dre_core::template_file::resolve(&root, &dir, lit.as_str()) {
+                Some(lit) => match dre_template::template_file::resolve(&root, &dir, lit.as_str()) {
                     Ok(p) => todo.push(p.to_string_lossy().into_owned()),
                     Err(e) => errors.push(format!("template `{shown_name}`: an include: {e}")),
                 },

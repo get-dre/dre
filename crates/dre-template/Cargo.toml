@@ -1,0 +1,25 @@
+[package]
+name = "dre-template"
+description = "DRE template pieces shared by the engine and the document plugin"
+version = "0.12.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+arrow.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+chrono-tz.workspace = true
+minijinja.workspace = true
+minijinja-contrib.workspace = true
+dre-protocol.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+serde-saphyr.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

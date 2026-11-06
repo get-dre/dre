@@ -2,7 +2,7 @@
 //! template filled with the output's query results and the run's context.
 //!
 //! Core streams every result set and sends the template context in `write`'s `template`
-//! (`dre_core::document::Context`). The plugin buffers the result sets, renders the template once
+//! (`dre_template::document::Context`). The plugin buffers the result sets, renders the template once
 //! at `finish` (`template`), resolves its images, stylesheets and fonts inside the project
 //! (`assets`), and writes the HTML, or lays it out into a PDF ([`pdf`]), in-process: no browser,
 //! no network.
@@ -21,11 +21,11 @@ mod template;
 
 use std::sync::Arc;
 
-use dre_core::document::{Check, Context};
 use dre_protocol::options::{OptionField, OptionType};
 use dre_protocol::plugin::{
     About, ErrorKind, Format, Plugin, PluginError, Result, ResultSets, WriteRequest, serve_package,
 };
+use dre_template::document::{Check, Context};
 use serde_json::{Map, Value};
 
 pub use template::Data;
@@ -224,7 +224,7 @@ impl Format for Document {
                 .iter()
                 .filter_map(|(c, opts)| Some((c.clone(), opts.format.clone()?)))
                 .collect();
-            let result = dre_core::document::query_result(columns, &batches, cal);
+            let result = dre_template::document::query_result(columns, &batches, cal);
             data.push(rs.meta.query.clone(), Arc::new(result), formats, types);
         }
         let rendered = template::render(&ctx, &data)?;

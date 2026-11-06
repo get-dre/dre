@@ -45,7 +45,7 @@ impl InstalledPackage {
 }
 
 /// Everything a project installs: plugins and macro packages.
-pub const DEPS_DIR: &str = "dre_deps";
+pub use dre_template::DEPS_DIR;
 
 /// `DRE_PLUGINS_DIR`, when set: plugins live and install there, for every project.
 pub fn override_dir(env: &Env) -> Option<PathBuf> {
