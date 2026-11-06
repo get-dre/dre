@@ -375,13 +375,8 @@ impl BindingRun<'_> {
             p.autofit = q.autofit;
             p.style = q.style.clone();
         }
-        for o in self
-            .b
-            .outputs
-            .iter()
-            .filter(|o| Format::new(&o.format).is_workbook())
-        {
-            let sheets = self.produced.iter().filter(|p| o.feeds(&p.query));
+        for o in self.b.outputs.iter().filter(|o| Format::of(o).is_workbook()) {
+            let sheets = self.produced.iter().filter(|p| o.sections(&p.query));
             formats::check_sheets(sheets.map(|p| (p.name.as_str(), p.query.as_str())))?;
         }
         Ok(())

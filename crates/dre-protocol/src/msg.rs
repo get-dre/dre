@@ -160,6 +160,28 @@ pub enum Request {
     Cancel {},
 }
 
+/// How core groups result sets and supplies templates for a format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FormatLayout {
+    /// One result set per file; several queries split into sibling files.
+    SingleTable,
+    /// Several result sets in one file, without a core template context.
+    MultipleTables,
+    /// Sheets and cell bindings in a workbook template.
+    Workbook,
+    /// One document whose template receives the run context.
+    Document,
+}
+
+/// A format's file and template contract, supplied by its plugin rather than its name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FormatProperties {
+    /// File extension without the dot; an empty string means no extension.
+    pub extension: String,
+    pub layout: FormatLayout,
+}
+
 /// Plugin → core. Match future replies with a wildcard.
 ///
 /// ```compile_fail
@@ -195,6 +217,9 @@ pub enum Response {
         max_version: u32,
     },
     Describe {
+        /// Format-owned file and template behavior. Required for file-output planning.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format_properties: Option<FormatProperties>,
         connection_fields: Vec<ConnectionField>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         option_fields: Vec<OptionField>,

@@ -1003,7 +1003,7 @@ impl BindingRun<'_> {
         job.files = row_files(plan, row.name, &kept)?;
         if let Some(Json::Object(base)) = &plan.template_base {
             let mut t = base.clone();
-            if Format::new(&o.format).is_document() {
+            if Format::of(o).is_document() {
                 t.insert("each".into(), Json::Object(row.each.0.clone()));
             }
             job.template = Some(Json::Object(t));

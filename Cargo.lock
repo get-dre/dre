@@ -2279,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-csv"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "arrow 59.3.0",
  "dre-plugin-host",
@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-document"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2337,7 +2337,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-fixed_width"
-version = "1.0.3"
+version = "1.1.0"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2408,7 +2408,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-parquet"
-version = "1.0.3"
+version = "1.1.0"
 dependencies = [
  "arrow 59.3.0",
  "dre-plugin-host",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-xlsx"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "arrow 59.3.0",
  "calamine",

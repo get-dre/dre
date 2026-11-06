@@ -17,7 +17,7 @@ pub fn bin_dir() -> PathBuf {
 /// The workspace package that builds `bin`.
 fn package_of(bin: &str) -> &str {
     match bin {
-        "dre-source-fixture" | "dre-destination-fixture" => "dre-plugin-host",
+        "dre-source-fixture" | "dre-destination-fixture" | "dre-format-folio" => "dre-plugin-host",
         b => b,
     }
 }

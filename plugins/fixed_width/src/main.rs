@@ -545,6 +545,13 @@ fn round(int: &str, frac: &str, places: usize) -> (String, String) {
 struct FixedWidth;
 
 impl Format for FixedWidth {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: "txt".into(),
+            layout: dre_protocol::msg::FormatLayout::SingleTable,
+        })
+    }
+
     fn options(&self) -> Vec<OptionField> {
         use OptionType::*;
         vec![

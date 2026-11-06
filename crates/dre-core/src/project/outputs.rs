@@ -74,7 +74,10 @@ impl Loader {
         }
         // Two unnamed outputs of one format would write the same default file.
         let mut exts = BTreeSet::new();
-        for o in outputs.iter().filter(|o| o.name.is_none()) {
+        for o in outputs
+            .iter()
+            .filter(|o| o.name.is_none() && Format::of(o).known())
+        {
             if !exts.insert(o.files().extension()) {
                 self.diags.error(
                     Code::DuplicateOutput,
@@ -91,15 +94,18 @@ impl Loader {
             let formats: Vec<Format<'_>> = outputs
                 .iter()
                 .filter(|o| o.feeds(&q.query))
-                .map(|o| Format::new(&o.format))
+                .map(Format::of)
                 .collect();
-            if !formats.is_empty() && !formats.iter().any(|f| f.is_workbook()) {
+            if !formats.is_empty()
+                && formats.iter().all(|f| f.known())
+                && !formats.iter().any(|f| f.is_workbook())
+            {
                 self.diags.error(
                     Code::InvalidField,
                     at.clone(),
                     None,
                     format!(
-                        "{ctx}: `columns` on query `{}` only applies to the xlsx format",
+                        "{ctx}: `columns` on query `{}` only applies to workbook formats",
                         q.query
                     ),
                 );
@@ -195,7 +201,7 @@ impl Loader {
             .unwrap_or_default();
         // The names `run` gives the output's files, from the same catalog.
         let files_of = |o: &Output| -> Option<Vec<String>> {
-            if o.for_each.is_some() || o.is_message() {
+            if o.for_each.is_some() || o.is_message() || !Format::of(o).known() {
                 return None;
             }
             let path = o
@@ -566,6 +572,8 @@ impl Loader {
             .and_then(Loose::ok)
             .cloned()
             .unwrap_or_else(|| crate::formats::DEFAULT.to_string());
+        let format_properties = self.format_properties.get(&format).cloned();
+        let semantics = Format::with_properties(&format, format_properties.as_ref());
         // `message` is built in; every other format is a plugin.
         if !Format::new(&format).is_message() {
             used.format(&format, ctx, &file_path);
@@ -624,22 +632,25 @@ impl Loader {
         let template = match o.template.into_option() {
             None => None,
             Some(t) => {
-                if !Format::new(&format).takes_template() {
+                if semantics.known() && !semantics.takes_template() {
                     self.diags.error(
                         Code::InvalidOutputOption,
                         file.clone(),
                         None,
-                        format!("{ctx}: `output.template` only applies to the xlsx, html and pdf formats"),
+                        format!("{ctx}: `output.template` only applies to workbook and document formats"),
                     );
                 }
                 let t = self.typed_template(t, ctx, file.as_deref(), queries);
-                if !Format::new(&format).is_workbook() && t.as_ref().is_some_and(|t| !t.bindings.is_empty()) {
+                if semantics.known()
+                    && !semantics.is_workbook()
+                    && t.as_ref().is_some_and(|t| !t.bindings.is_empty())
+                {
                     self.diags.error(
                         Code::InvalidTemplate,
                         file.clone(),
                         None,
                         format!(
-                            "{ctx}: `output.template.bindings` is for xlsx templates; an {format} template reads `results.<query>` itself"
+                            "{ctx}: `output.template.bindings` is for workbook templates; an {format} template reads `results.<query>` itself"
                         ),
                     );
                 }
@@ -705,12 +716,12 @@ impl Loader {
             Some(Loose::Ok(_)) => Some(queries.iter().map(|q| q.query.clone()).collect()),
             _ => None,
         };
-        if extension.is_some() && Format::new(&format).is_workbook() {
+        if extension.is_some() && semantics.is_workbook() {
             self.diags.error(
                 Code::InvalidOutputOption,
                 file.clone(),
                 None,
-                format!("{ctx}: `extension` doesn't apply to xlsx (Excel only opens .xlsx workbooks)"),
+                format!("{ctx}: `extension` doesn't apply to workbook formats"),
             );
         }
         let on_empty = match o.on_empty {
@@ -730,7 +741,7 @@ impl Loader {
             }
         };
         // A document or message template decides its sections: a query can't drop one.
-        if Format::new(&format).template_decides_sections() {
+        if semantics.template_decides_sections() {
             for q in entries.iter().filter(|q| {
                 q.on_empty == Some(crate::no_data::OnEmpty::Skip)
                     && output_feeds(o.queries.as_ref(), &q.query)
@@ -786,6 +797,7 @@ impl Loader {
         Output {
             name,
             format,
+            format_properties,
             queries,
             when,
             options: opts,
@@ -1308,7 +1320,7 @@ impl Loader {
             for (format, t) in r.bindings.iter().flat_map(|b| {
                 b.outputs
                     .iter()
-                    .filter_map(|o| Some((o.format.as_str(), o.template.as_ref()?)))
+                    .filter_map(|o| Some((Format::of(o), o.template.as_ref()?)))
             }) {
                 if !seen.insert((r.name.clone(), t.file.clone(), format!("{:?}", t.bindings))) {
                     continue;
@@ -1325,7 +1337,7 @@ impl Loader {
                         continue;
                     }
                 };
-                if !Format::new(format).is_workbook() {
+                if !format.is_workbook() {
                     continue;
                 }
                 match template_sheets(&path) {

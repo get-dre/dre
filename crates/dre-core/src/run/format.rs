@@ -27,6 +27,22 @@ use crate::project::PluginKind;
 type FileGroup = (String, Vec<usize>);
 
 impl BindingRun<'_> {
+    /// File outputs require a resolved plugin contract before any SQL can execute.
+    pub(super) fn check_format_properties(&self) -> Result<(), Fail> {
+        for output in &self.b.outputs {
+            if !Format::of(output).known() {
+                return Err(Fail::new(
+                    Code::FormatFailed,
+                    format!(
+                        "format `{}` has no resolved format_properties; update or install its plugin",
+                        output.format
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Make every file output whose `on_empty` and `when:` let it, into the run folder; a
     /// per-row output waits for the deliver stage. Returns the file and message outputs, in
     /// the order they deliver.
@@ -153,7 +169,7 @@ impl BindingRun<'_> {
                     .and_then(|q| q.on_empty),
             })
             .collect();
-        let droppable = !(Format::new(&o.format).template_decides_sections() || o.for_each.is_some());
+        let droppable = !(Format::of(o).template_decides_sections() || o.for_each.is_some());
         let d = crate::no_data::decide(o.on_empty, &queries, droppable);
         self.outs[oi].no_data = d.empty.clone();
         for w in &d.warnings {
@@ -411,9 +427,7 @@ impl BindingRun<'_> {
             processes.formats.insert(out.format.clone(), process);
         }
         let template = match &out.template {
-            _ if Format::new(&out.format).is_document() => {
-                Some(self.document_payload(out.template.as_ref())?)
-            }
+            _ if Format::of(out).is_document() => Some(self.document_payload(out.template.as_ref())?),
             Some(t) => Some(self.template_payload(t)?),
             None => None,
         };

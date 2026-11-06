@@ -676,6 +676,9 @@ pub struct Output {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub format: String,
+    /// File and template contract supplied by the selected format plugin.
+    #[serde(skip)]
+    pub format_properties: Option<dre_protocol::msg::FormatProperties>,
     /// `queries:`: which of the Binding's queries this output formats; `None`: all of them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queries: Option<Vec<String>>,
@@ -1118,6 +1121,40 @@ pub fn load(root: &Path, opts: &LoadOptions) -> (Option<Project>, Diagnostics) {
 /// Parse and validate the project at `root` in `ctx` (its environment and secrets). Returns the
 /// resolved project when it could be built at all, plus every diagnostic found along the way.
 pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Option<Project>, Diagnostics) {
+    let (parsed, diagnostics) = parse_with(root, opts, ctx);
+    let Some(project) = parsed else {
+        return (None, diagnostics);
+    };
+    resolve_formats(&project, opts, ctx)
+}
+
+/// Resolve installed format plugins after parsing declarations and installing their packages.
+/// Recheck output semantics before returning a project for manifests, compilation or execution.
+pub fn resolve_formats(
+    project: &Project,
+    opts: &LoadOptions,
+    ctx: &crate::Context,
+) -> (Option<Project>, Diagnostics) {
+    let mut metadata_diags = Diagnostics::default();
+    let properties = format_properties(ctx, project, &mut metadata_diags);
+    let (project, mut diagnostics) = load_formats(project.root(), opts, ctx, properties);
+    for diagnostic in metadata_diags.sorted() {
+        diagnostics.push(diagnostic.clone());
+    }
+    (project, diagnostics)
+}
+
+/// Parse project declarations without asking format plugins for their properties.
+pub fn parse_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Option<Project>, Diagnostics) {
+    load_formats(root, opts, ctx, BTreeMap::new())
+}
+
+fn load_formats(
+    root: &Path,
+    opts: &LoadOptions,
+    ctx: &crate::Context,
+    properties: BTreeMap<String, dre_protocol::msg::FormatProperties>,
+) -> (Option<Project>, Diagnostics) {
     let mut l = Loader {
         ctx: ctx.clone(),
         root: root.to_path_buf(),
@@ -1126,6 +1163,7 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
         opts: opts.clone(),
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
+        format_properties: properties,
         allow_unmanaged: false,
         default_output: None,
         scope: None,
@@ -1137,6 +1175,52 @@ pub fn load_with(root: &Path, opts: &LoadOptions, ctx: &crate::Context) -> (Opti
     };
     let project = l.run();
     (project, l.diags)
+}
+
+fn format_properties(
+    ctx: &crate::Context,
+    project: &Project,
+    diags: &mut Diagnostics,
+) -> BTreeMap<String, dre_protocol::msg::FormatProperties> {
+    let names: BTreeSet<&str> = project
+        .reports
+        .iter()
+        .filter(|r| in_scope(&project.loaded_selection, &r.name))
+        .flat_map(|r| &r.bindings)
+        .flat_map(|b| &b.outputs)
+        .filter(|o| !o.is_message())
+        .map(|o| o.format.as_str())
+        .collect();
+    let mut properties = BTreeMap::new();
+    for name in names {
+        let result = (|| -> Result<_, String> {
+            let located = crate::plugin_host::find_plugin(ctx, project, PluginKind::Format, name)
+                .map_err(|e| e.to_string())?;
+            let mut plugin = ctx
+                .host()
+                .start(&located, std::sync::Arc::new(|_, _| {}), Some(project.root()))
+                .map_err(|e| e.to_string())?;
+            let description = plugin.describe().map_err(|e| e.to_string());
+            plugin.close();
+            let properties = description?
+                .format_properties
+                .ok_or_else(|| "describe reply has no format_properties; update the plugin".to_string())?;
+            if properties.extension.contains(['/', '\\', '.'])
+                || properties.extension.chars().any(char::is_whitespace)
+            {
+                return Err(
+                    "format_properties.extension must contain no dot, path separator or whitespace".into(),
+                );
+            }
+            Ok(properties)
+        })();
+        match result {
+            Ok(value) => { properties.insert(name.to_string(), value); }
+            Err(error) => diags.warning(Code::OptionsUnchecked, None, None,
+                format!("format `{name}` properties unavailable: {error}; file predictions and format checks omitted")),
+        }
+    }
+    properties
 }
 
 struct Loader {
@@ -1151,6 +1235,7 @@ struct Loader {
     diags: Diagnostics,
     /// `format_options:` from the project file: per format, defaults under every output of it.
     format_options: Mapping,
+    format_properties: BTreeMap<String, dre_protocol::msg::FormatProperties>,
     /// `allow_unmanaged:` from the project file: a `.sql` file no YAML lists may run.
     allow_unmanaged: bool,
     /// `default_output:` from the project file: the output every report starts from, over the
@@ -1696,6 +1781,7 @@ fn test_loader(root: &Path) -> Loader {
         opts: LoadOptions::default(),
         diags: Diagnostics::default(),
         format_options: Mapping::new(),
+        format_properties: BTreeMap::new(),
         allow_unmanaged: false,
         default_output: None,
         scope: None,

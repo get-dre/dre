@@ -399,6 +399,9 @@ impl<'a> BindingRun<'a> {
     /// The stages: render and query (or replay, compile or check), then format, deliver and
     /// record.
     fn run_stages(&mut self) -> Result<(), Fail> {
+        if self.stages.format && !matches!(self.stages.source, Source::Compile | Source::Check) {
+            self.check_format_properties()?;
+        }
         self.check_inputs()?;
         let pool = self.open_pool();
         if !self.report.managed {

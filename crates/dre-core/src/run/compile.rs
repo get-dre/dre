@@ -300,6 +300,9 @@ impl BindingRun<'_> {
             .collect();
         let mut outputs = Vec::new();
         for oi in 0..self.outs.len() {
+            if !crate::formats::Format::of(&self.b.outputs[oi]).known() {
+                continue;
+            }
             let file = self.file_names(oi);
             let o = &self.b.outputs[oi];
             let destinations = self.outs[oi]

@@ -79,7 +79,7 @@ fn host(destination: Script) -> MemoryHost {
                 .rows("select 'acme' as client, 12 as total", summary())
                 .rows("select * from members", members()),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", destination)
         .plugin(Kind::Destination, "shelf", Script::new(&[]))
 }
@@ -296,7 +296,7 @@ fn slow_run(delay: Duration) -> (MemoryHost, Context, TempDir, Project) {
                 .rows("select 'acme' as client, 12 as total", summary())
                 .delay(Call::Execute, delay),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (dir, project) = project(ONE_FILE, &ctx);
@@ -487,7 +487,7 @@ fn a_compile_whose_template_needs_the_database_says_only_a_run_can_check_it() {
             "mem",
             Script::new(&[dre_protocol::CAP_SESSIONS]).fail(Call::Execute, 1, "no such table: staging"),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (dir, project) = project(ONE_FILE, &ctx);
@@ -510,7 +510,7 @@ fn checking_runs_no_statement_and_delivers_nothing() {
             "mem",
             Script::new(&[dre_protocol::CAP_SESSIONS, dre_protocol::CAP_CHECK]),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (_dir, project) = project(ONE_FILE, &ctx);
@@ -734,7 +734,7 @@ fn three_reports(single_writer: bool) -> (MemoryHost, Context, TempDir, Project)
                 .rows("select 'acme' as client, 12 as total", summary())
                 .description(description),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (dir, _) = project(ONE_FILE, &ctx);
@@ -840,7 +840,7 @@ fn formats_and_destinations_are_reused_across_outputs_and_bindings() {
     let starts = calls_of(&host, "Start");
     assert_eq!(
         starts.iter().filter(|c| c.starts_with("format/csv")).count(),
-        1,
+        2, // One metadata process, then one reused writer.
         "{starts:?}"
     );
     assert_eq!(
@@ -854,7 +854,7 @@ fn formats_and_destinations_are_reused_across_outputs_and_bindings() {
     let closes = calls_of(&host, "Close");
     assert_eq!(
         closes.iter().filter(|c| c.starts_with("format/csv")).count(),
-        1,
+        2,
         "{closes:?}"
     );
     assert_eq!(
@@ -879,7 +879,7 @@ fn a_failed_destination_is_closed_and_replaced_while_formats_stay_warm() {
     let starts = calls_of(&host, "Start");
     assert_eq!(
         starts.iter().filter(|c| c.starts_with("format/csv")).count(),
-        1,
+        2, // One metadata process, then one reused writer.
         "{starts:?}"
     );
     // One describe process, the original delivery process, and its replacement.
@@ -924,7 +924,7 @@ fn cancelling_a_reused_destination_closes_every_retained_process() {
     let starts = calls_of(&host, "Start");
     assert_eq!(
         starts.iter().filter(|c| c.starts_with("format/csv")).count(),
-        1,
+        2, // One metadata process, then one reused writer.
         "{starts:?}"
     );
     assert_eq!(
@@ -970,7 +970,7 @@ fn per_row_chunks_reuse_processes_and_match_unsorted_detail_batches() {
                     vec![many_members(151, 150), many_members(1, 150)],
                 ),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]).record_writes())
+        .plugin(Kind::Format, "csv", csv_script().record_writes())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let report = "queries: [members, summary]\noutput: \n  - name: letter\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'out/{{ each.member_id }}.csv'}\n  - name: copy\n    format: csv\n    queries: [members, summary]\n    for_each: {query: members, key: member_id, concurrency: 1}\n    destination: {profile: outbox, path: 'copy/{{ each.member_id }}.csv'}\n";
@@ -1032,7 +1032,7 @@ fn per_row_chunks_reuse_processes_and_match_unsorted_detail_batches() {
     let starts = calls_of(&host, "Start");
     assert_eq!(
         starts.iter().filter(|c| c.starts_with("format/csv")).count(),
-        1,
+        2, // One metadata process, then one reused writer.
         "{starts:?}"
     );
     assert_eq!(
@@ -1057,7 +1057,7 @@ fn driver_duplicates_in_later_spool_batches_fail_before_delivery() {
                 vec![many_members(1, 150), many_members(150, 1)],
             ),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (_dir, project) = project(PER_ROW, &ctx);
@@ -1106,7 +1106,11 @@ fn large_per_row(format: Script, changes: &str) -> (MemoryHost, Context, TempDir
                 vec![many_members(1, 150), many_members(151, 150)],
             ),
         )
-        .plugin(Kind::Format, "csv", format)
+        .plugin(
+            Kind::Format,
+            "csv",
+            format.format_properties("csv", dre_protocol::msg::FormatLayout::SingleTable),
+        )
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let report = PER_ROW.replace(
@@ -1178,7 +1182,7 @@ fn reused_plugins_log_to_the_current_bindings_event_block() {
     let host = host(Script::new(&[]).log_on(Call::Deliver, "sent")).plugin(
         Kind::Format,
         "csv",
-        Script::new(&[]).log_on(Call::Write, "written"),
+        csv_script().log_on(Call::Write, "written"),
     );
     let ctx = context(&host);
     let report = "queries: [summary]\nsets: [{name: east}, {name: west}]\noutput: {name: detail, format: csv, destination: {profile: outbox, path: 'out/{{ run.set }}/detail.csv'}}\n";
@@ -1237,7 +1241,7 @@ fn host_in(dirs: &[&str], destination: Script) -> MemoryHost {
             "mem",
             Script::new(&[dre_protocol::CAP_SESSIONS]).rows("select * from members", members_in(dirs)),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", destination)
         .plugin(Kind::Destination, "shelf", Script::new(&[]))
 }
@@ -1533,7 +1537,7 @@ fn a_lookup_quote_in_backslash_literals_keeps_the_statements_apart() {
                 .rows("select * from x", summary())
                 .description(description),
         )
-        .plugin(Kind::Format, "csv", Script::new(&[]))
+        .plugin(Kind::Format, "csv", csv_script())
         .plugin(Kind::Destination, "drop", Script::new(&[]));
     let ctx = context(&host);
     let (dir, _) = project(ONE_FILE, &ctx);
@@ -1641,4 +1645,30 @@ fn per_row_email_refuses_recipient_values_containing_commas() {
             }
         }
     }
+}
+
+fn csv_script() -> Script {
+    Script::new(&[]).format_properties("csv", dre_protocol::msg::FormatLayout::SingleTable)
+}
+
+#[test]
+fn unresolved_format_properties_stop_direct_runs_before_sql() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, _) = project(ONE_FILE, &ctx);
+    let (parsed, diagnostics) = crate::project::parse_with(dir.path(), &Default::default(), &ctx);
+    assert!(!diagnostics.has_errors(), "{:?}", diagnostics.sorted());
+    let summary = run_once(&ctx, &parsed.unwrap(), &options());
+    assert!(summary.failed());
+    assert!(
+        summary.outcomes[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("format_properties")
+    );
+    assert!(calls_of(&host, "Execute").is_empty(), "{:?}", host.calls());
+    assert!(calls_of(&host, "Write").is_empty());
+    assert!(calls_of(&host, "Deliver").is_empty());
 }

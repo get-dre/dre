@@ -169,6 +169,7 @@ pub struct PluginInfo {
 /// A plugin's `describe` reply.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Description {
+    pub format_properties: Option<dre_protocol::msg::FormatProperties>,
     pub connection_fields: Vec<ConnectionField>,
     pub option_fields: Vec<OptionField>,
     /// A source's identifier quote character.
@@ -1032,6 +1033,7 @@ impl PluginProcess {
         self.send(&Request::Describe {})?;
         match self.recv_json("a describe reply")? {
             Response::Describe {
+                format_properties,
                 connection_fields,
                 option_fields,
                 identifier_quote,
@@ -1040,6 +1042,7 @@ impl PluginProcess {
                 message_limit,
                 single_writer,
             } => Ok(Description {
+                format_properties,
                 connection_fields,
                 option_fields,
                 identifier_quote,

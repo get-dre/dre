@@ -543,6 +543,12 @@ impl ResultSets<'_> {
 }
 
 pub trait Format {
+    /// File naming, result-set grouping and the template context this format consumes.
+    /// Older plugins may omit this; core cannot plan their output files without it.
+    fn properties(&self) -> Option<crate::msg::FormatProperties> {
+        None
+    }
+
     /// The options this format takes: every key of a report's `output:` block except `format`,
     /// `destination`, `template` and `extension`, which core owns.
     fn options(&self) -> Vec<OptionField> {
@@ -1031,7 +1037,12 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Handler::Destination(d) => d.message_limit(),
             _ => None,
         };
+        let format_properties = match h {
+            Handler::Format(f) => f.properties(),
+            _ => None,
+        };
         out.send(&Response::Describe {
+            format_properties,
             connection_fields,
             option_fields: h.option_fields(),
             identifier_quote,

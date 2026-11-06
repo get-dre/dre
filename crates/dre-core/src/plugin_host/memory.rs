@@ -64,6 +64,15 @@ impl Script {
         }
     }
 
+    /// File grouping and extension described by a scripted format plugin.
+    pub fn format_properties(mut self, extension: &str, layout: dre_protocol::msg::FormatLayout) -> Self {
+        self.description.format_properties = Some(dre_protocol::msg::FormatProperties {
+            extension: extension.into(),
+            layout,
+        });
+        self
+    }
+
     /// `sql` returns `batch`.
     pub fn rows(mut self, sql: &str, batch: RecordBatch) -> Script {
         self.rows.insert(normalize(sql), vec![batch]);

@@ -82,6 +82,13 @@ impl Options {
 }
 
 impl Format for Document {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: (if self.pdf { "pdf" } else { "html" }).into(),
+            layout: dre_protocol::msg::FormatLayout::Document,
+        })
+    }
+
     fn options(&self) -> Vec<OptionField> {
         use OptionType::*;
         let mut v = vec![

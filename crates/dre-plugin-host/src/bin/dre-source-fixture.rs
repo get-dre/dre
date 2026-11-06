@@ -287,6 +287,7 @@ fn close_probe() -> ! {
                 provides: Vec::new(),
             },
             Request::Describe {} => Response::Describe {
+                format_properties: None,
                 connection_fields: Fixture { opened: false }.connection_fields(),
                 option_fields: Vec::new(),
                 identifier_quote: Some("\"".into()),
@@ -317,6 +318,13 @@ fn close_probe() -> ! {
 struct Stall;
 
 impl Format for Stall {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: "stall".into(),
+            layout: dre_protocol::msg::FormatLayout::MultipleTables,
+        })
+    }
+
     fn write(
         &mut self,
         _req: &WriteRequest,
