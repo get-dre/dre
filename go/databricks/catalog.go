@@ -17,6 +17,7 @@ func relationParts(name string) ([]string, error) {
 		var part string
 		if text[0] == '`' || text[0] == '"' {
 			quote := text[0]
+			var quoted strings.Builder
 			text = text[1:]
 			closed := false
 			for len(text) > 0 {
@@ -24,15 +25,16 @@ func relationParts(name string) ([]string, error) {
 				text = text[1:]
 				if c == quote {
 					if len(text) > 0 && text[0] == quote {
-						part += string(c)
+						quoted.WriteByte(c)
 						text = text[1:]
 						continue
 					}
 					closed = true
 					break
 				}
-				part += string(c)
+				quoted.WriteByte(c)
 			}
+			part = quoted.String()
 			if !closed {
 				return nil, fmt.Errorf("unterminated relation identifier `%s`", name)
 			}

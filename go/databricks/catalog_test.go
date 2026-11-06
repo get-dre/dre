@@ -69,3 +69,16 @@ func TestCatalogRejectsMissingTablesAndIncompleteRows(t *testing.T) {
 		t.Fatalf("incomplete row: %v", err)
 	}
 }
+
+func TestRelationPartsPreserveQuotedUnicodeAndEscapedQuotes(t *testing.T) {
+	for _, name := range []string{"`café`.`odd``é`.`注文`", "\"café\".\"odd\"\"é\".\"注文\""} {
+		parts, err := relationParts(name)
+		quote := "`"
+		if name[0] == '"' {
+			quote = "\""
+		}
+		if err != nil || len(parts) != 3 || parts[0] != "café" || parts[1] != "odd"+quote+"é" || parts[2] != "注文" {
+			t.Fatalf("relationParts(%q) = %v, %v", name, parts, err)
+		}
+	}
+}
