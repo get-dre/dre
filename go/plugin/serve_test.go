@@ -348,12 +348,12 @@ func TestHelloServesThePluginCoreAsksFor(t *testing.T) {
 		t.Fatal("RoleFor")
 	}
 	c := plugintest.Start(t, p, p.Roles[0])
-	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t", "plugin": "destination/fake"})
+	c.Send(map[string]any{"type": "hello", "min_version": 1, "max_version": 1, "core_version": "t", "plugin": "destination/fake"})
 	if r := c.Reply(); r["kind"] != "destination" {
 		t.Fatalf("%v", r)
 	}
 	c = plugintest.Start(t, p, p.Roles[0])
-	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t", "plugin": "destination/other"})
+	c.Send(map[string]any{"type": "hello", "min_version": 1, "max_version": 1, "core_version": "t", "plugin": "destination/other"})
 	plugintest.ExpectError(t, c.Reply(), "this executable provides source/fake, destination/fake, not destination/other")
 	if code := <-c.Code; code != 1 {
 		t.Fatalf("exit code %d", code)
@@ -571,5 +571,15 @@ func TestABatchTooLargeForAFrameIsAnErrorNotAnExit(t *testing.T) {
 	c.Send(map[string]any{"type": "describe", "id": 3})
 	if r := c.Reply(); r["type"] != "describe" {
 		t.Fatalf("after the error: %v", r)
+	}
+}
+
+func TestProtocolZeroIsRefused(t *testing.T) {
+	p := pkg(&fakeDB{}, &[]string{})
+	c := plugintest.Start(t, p, p.Roles[0])
+	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "old"})
+	r := c.Reply()
+	if r["type"] != "version_mismatch" {
+		t.Fatalf("protocol zero accepted: %v", r)
 	}
 }

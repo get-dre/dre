@@ -99,7 +99,7 @@ pub const REPORT_KEYS: &[&str] = &[
     "timezone",
     "locale",
 ];
-/// Declares the project's plugin packages, in any project YAML file.
+/// Declares the project's plugin packages, only in root dependencies.yml.
 const PLUGINS_KEY: &str = "plugins";
 pub const PLUGIN_KEYS: &[&str] = &[PLUGINS_KEY];
 /// Where plugins were declared before packages; now an error pointing at `plugins:`. (`sources:`

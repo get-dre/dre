@@ -26,7 +26,6 @@ For copyable examples and common errors, see [Connections and targets](connectio
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `connections` | map |  | Database connections, referenced by `default_profile`, `profile:` (report, query, Set, folder `+profile`) and a source's `profile`. |
-| `sources` | map |  | DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`. |
 | `destinations` | map |  | Delivery targets, referenced by `output.destination.profile`. |
 
 ## `connections.<name>`

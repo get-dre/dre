@@ -25,8 +25,6 @@ struct Cases {
 struct Case {
     name: String,
     #[serde(default)]
-    base: Option<String>,
-    #[serde(default)]
     store: StoreCaps,
     #[serde(default)]
     existing: BTreeMap<String, String>,
@@ -196,12 +194,7 @@ pub fn run() -> Vec<Check> {
 }
 
 fn run_case(c: &Case) -> Result<(), String> {
-    let base = match c.base.as_deref() {
-        None | Some("default") => Rules::default(),
-        Some("legacy") => Rules::legacy(),
-        Some(other) => return Err(format!("unknown base rules `{other}`")),
-    };
-    let rules = match Rules::from_settings(base, &c.connection, &c.options, &[]) {
+    let rules = match Rules::from_settings(Rules::default(), &c.connection, &c.options, &[]) {
         Ok((r, _)) => r,
         Err(e) => {
             return match c.expect.as_ref().and_then(|x| x.settings_error.as_deref()) {

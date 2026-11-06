@@ -303,7 +303,10 @@ fn local_package_tests_use_helpers_defaults_and_the_local_duckdb_dialect() {
         "queries:\n  - query: data\n    data_tests: [{quality.positive: {}}]\noutput: {format: message}\n",
         "",
     );
-    p.write("packages.yml", "packages: [{local: ../checks}]\n");
+    p.write(
+        "dependencies.yml",
+        "plugins: [fixture]\npackages: [{local: ../checks}]\n",
+    );
     p.write("../checks/dre_package.yml", "name: quality\n");
     p.write("../checks/macros/checks.sql", "{% macro predicate(column) %}{{ dispatch('predicate', 'quality')(column) }}{% endmacro %}\n{% macro default__predicate(column) %}MUST_NOT_USE_SOURCE_DIALECT{% endmacro %}\n{% macro duckdb__predicate(column) %}{{ column }} < 0{% endmacro %}\n{% test positive(relation, column='n') %}select * from {{ relation }} where {{ predicate(column) }}{% endtest %}");
     p.dre("validate", &[]).ok();
@@ -325,8 +328,8 @@ fn project_and_package_test_blocks_can_call_qualified_package_helpers() {
             "{% macro predicate(column) %}WRONG_PROJECT_HELPER{% endmacro %}",
         );
         p.write(
-            "packages.yml",
-            "packages: [{local: ../checks}, {local: ../helpers}]\n",
+            "dependencies.yml",
+            "plugins: [fixture]\npackages: [{local: ../checks}, {local: ../helpers}]\n",
         );
         p.write("../checks/dre_package.yml", "name: quality\n");
         p.write("../helpers/dre_package.yml", "name: helpers\n");

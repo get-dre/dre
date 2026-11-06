@@ -179,7 +179,7 @@ fn a_failed_open_is_reported() {
 fn an_incompatible_version_names_both_ranges() {
     let err = start_mode("old_protocol", Duration::from_secs(10)).err().unwrap();
     let msg = err.to_string();
-    assert!(msg.contains("7..=9") && msg.contains("0..=1"), "{msg}");
+    assert!(msg.contains("7..=9") && msg.contains("1..=1"), "{msg}");
 }
 
 #[test]
@@ -201,13 +201,10 @@ fn a_protocol_zero_plugin_is_told_to_update() {
 }
 
 #[test]
-fn the_sdk_still_speaks_protocol_zero_to_an_older_core() {
+fn the_sdk_refuses_protocol_zero() {
     let mut p = PluginProcess::spawn(fixture(), quiet()).unwrap();
-    p.handshake((0, 0), Duration::from_secs(10)).unwrap();
-    assert_eq!(p.info().protocol_version, 0);
-    p.open(Map::new(), false).unwrap();
-    let (_, values) = collect(&mut p, "rows 2", None);
-    assert_eq!(values, vec![0, 1]);
+    let err = p.handshake((0, 0), Duration::from_secs(10)).err().unwrap();
+    assert!(err.to_string().contains("1..=1"), "{err}");
 }
 
 fn recording() -> (LogSink, Arc<Mutex<Vec<String>>>) {

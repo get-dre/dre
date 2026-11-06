@@ -1,7 +1,7 @@
-exit: 0
+exit: 1
 {
   "schema_version": "dre/validate/v1",
-  "ok": true,
+  "ok": false,
   "profiles": {
     "path": "$CASE/profiles/profiles.yml",
     "exists": true,
@@ -10,14 +10,7 @@ exit: 0
   "target": {
     "name": "dev",
     "from": "default",
-    "profiles": [
-      {
-        "role": "connection",
-        "profile": "local_dev",
-        "target": "dev",
-        "deliver": true
-      }
-    ]
+    "profiles": []
   },
   "settings": [
     {
@@ -61,37 +54,18 @@ exit: 0
       "source": "default"
     }
   ],
-  "errors": 0,
+  "errors": 1,
   "warnings": 0,
-  "diagnostics": [],
-  "compiled": [
+  "diagnostics": [
     {
-      "report": "daily",
-      "set": null,
-      "compiled": [
-        "target/compiled/daily/default/summary.sql"
-      ],
-      "profile": "local_dev",
-      "queries": [
-        {
-          "query": "summary",
-          "connection": "local_dev",
-          "type": "duckdb",
-          "target": "dev"
-        }
-      ],
-      "target": "dev",
-      "outputs": [
-        {
-          "name": null,
-          "format": "csv",
-          "output": "target/run/daily/default/runs/<run id>/daily.csv",
-          "destinations": []
-        }
-      ],
-      "schedules": []
+      "severity": "error",
+      "code": "removed-key",
+      "message": "`plugins:` must be declared in dependencies.yml at the project root; move this declaration there",
+      "file": "reports/ops/daily/daily.yml",
+      "line": 2
     }
   ],
+  "compiled": [],
   "project": {
     "plugins": [
       {
@@ -99,7 +73,7 @@ exit: 0
         "source": {
           "type": "registry"
         },
-        "version": "^0, >=0.1"
+        "version": "^0"
       },
       {
         "package": "duckdb",
@@ -107,13 +81,6 @@ exit: 0
           "type": "registry"
         },
         "version": ">=0.0"
-      },
-      {
-        "package": "xlsx",
-        "source": {
-          "type": "registry"
-        },
-        "version": "*"
       }
     ],
     "project": {
@@ -154,6 +121,9 @@ exit: 0
         "depends_on": {
           "sources": []
         },
+        "errors": [
+          "error[removed-key]: reports/ops/daily/daily.yml:2: `plugins:` must be declared in dependencies.yml at the project root; move this declaration there"
+        ],
         "file": "reports/ops/daily/daily.yml",
         "folder": [
           "ops",
@@ -169,7 +139,7 @@ exit: 0
           }
         ],
         "tags": [],
-        "valid": true
+        "valid": false
       }
     },
     "schedules": {},

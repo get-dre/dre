@@ -381,9 +381,6 @@ codes! {
     InvalidProfileValue = "invalid-profile-value", Config,
         "A value that chooses a connection uses something only a connection has.",
         "`profile:` and `default_profile` are rendered before any connection is open, so they can't use `connection.*`, `run_query()` or `columns()`.";
-    ProfilesSourcesRenamed = "profiles-sources-renamed", Config,
-        "profiles.yml uses the old `sources:` section.",
-        "DRE 0.2 renamed profiles.yml's `sources:` to `connections:`. Rename it.";
     ProfilesMissing = "profiles-missing", Config,
         "The project uses profiles but there's no profiles.yml.",
         "DRE looks for profiles.yml in `--profiles-dir`, `DRE_PROFILES_DIR`, the project directory, then `~/.dre`. Create one with `dre init`, or point DRE at yours.";

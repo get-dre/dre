@@ -205,7 +205,7 @@ fn cancel(id: u64) {
 pub fn log_fields(level: LogLevel, message: &str, fields: Map<String, Value>) {
     let s = shared();
     if s.version.load(Ordering::SeqCst) == 0 {
-        // Protocol 0 has no `log` message: stderr, with the prefixes core 0.3 shows.
+        // Before the handshake there is no request to attach a log message to.
         let prefix = match level {
             LogLevel::Error | LogLevel::Warn => "warning: ",
             LogLevel::Info => "info: ",

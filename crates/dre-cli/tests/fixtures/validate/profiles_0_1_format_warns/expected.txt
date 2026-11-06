@@ -1,7 +1,6 @@
-exit: 0
-warning[target-mismatch]: every profile is on `prod` but the run's target is `dev`: pass `--target prod` or set `DRE_TARGET`
-warning[profiles-sources-renamed]: $CASE/profiles/profiles.yml:1: `sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x
-Compiled 1 Binding into target/compiled/
+exit: 1
+error[invalid-profiles]: $CASE/profiles/profiles.yml:1: unknown profiles.yml section `sources`; profiles go under `connections:` or `destinations:`
+error[unknown-profile]: dre_project.yml:2: connection profile `local_dev` isn't defined under `connections:` in $CASE/profiles/profiles.yml
   Profiles  $CASE/profiles/profiles.yml (from --profiles-dir)
-    Target  dev (default); connection `local_dev`: prod
-Validation passed: 0 errors, 2 warnings
+    Target  dev (default)
+Validation failed: 2 errors, 0 warnings

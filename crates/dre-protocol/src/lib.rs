@@ -45,7 +45,7 @@ pub mod util;
 pub const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Protocol versions the plugin SDK speaks: a plugin built on it also works with an older core.
-pub const MIN_VERSION: u32 = 0;
+pub const MIN_VERSION: u32 = 1;
 pub const MAX_VERSION: u32 = 1;
 /// The oldest protocol version core accepts from a plugin.
 pub const CORE_MIN_VERSION: u32 = 1;

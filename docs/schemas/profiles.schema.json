@@ -12,14 +12,6 @@
         "$ref": "#/$defs/connection"
       }
     },
-    "sources": {
-      "type": "object",
-      "description": "DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`.",
-      "deprecated": true,
-      "additionalProperties": {
-        "$ref": "#/$defs/connection"
-      }
-    },
     "destinations": {
       "type": "object",
       "description": "Delivery targets, referenced by `output.destination.profile`.",
@@ -29,12 +21,6 @@
     }
   },
   "additionalProperties": false,
-  "not": {
-    "required": [
-      "connections",
-      "sources"
-    ]
-  },
   "$defs": {
     "connection": {
       "type": "object",

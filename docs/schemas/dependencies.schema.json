@@ -3,10 +3,10 @@
   "x-dre-schema-version": "0.12",
   "title": "DRE dependencies",
   "type": "object",
-  "description": "Plugin packages and macro packages, in `dependencies.yml` or `packages.yml` at the project root.",
+  "description": "Plugin packages and macro packages, in `dependencies.yml` at the project root.",
   "properties": {
     "plugins": {
-      "description": "The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.",
+      "description": "The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. Declare these only in `dependencies.yml` at the project root.",
       "x-doc-type": "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)",
       "oneOf": [
         {

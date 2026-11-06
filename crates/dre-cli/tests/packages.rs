@@ -1,4 +1,4 @@
-//! Macro packages: declared in dependencies.yml/packages.yml, installed into dre_deps/packages,
+//! Macro packages: declared in dependencies.yml, installed into dre_deps/packages,
 //! called through the package's name, and overridable through `dispatch()`.
 
 mod common;
@@ -29,7 +29,15 @@ fn project(files: &[(&str, &str)]) -> TestProject {
         ("dre_project.yml", "name: acme\ndefault_profile: warehouse\n"),
         ("dependencies.yml", DEPS),
     ];
-    all.extend_from_slice(files);
+    let mut dependency_text = DEPS.to_string();
+    for &(file, text) in files {
+        if file == "dependencies.yml" {
+            dependency_text.push_str(text);
+        } else {
+            all.push((file, text));
+        }
+    }
+    all[1] = ("dependencies.yml", &dependency_text);
     let p = TestProject::new(&all, DUCK_PROFILES);
     p.duckdb("data.duckdb", "select 1;");
     p
@@ -46,7 +54,7 @@ const REPORT: [(&str, &str); 2] = [
 #[test]
 fn a_local_package_is_called_through_its_name_and_dispatches_per_source() {
     let p = project(&[
-        ("packages.yml", "packages:\n  - local: ../shared/dre_utils\n"),
+        ("dependencies.yml", "packages:\n  - local: ../shared/dre_utils\n"),
         REPORT[0],
         REPORT[1],
     ]);
@@ -58,7 +66,7 @@ fn a_local_package_is_called_through_its_name_and_dispatches_per_source() {
 #[test]
 fn the_project_overrides_a_dispatched_macro_unless_dispatch_config_says_otherwise() {
     let p = project(&[
-        ("packages.yml", "packages:\n  - local: ../shared/dre_utils\n"),
+        ("dependencies.yml", "packages:\n  - local: ../shared/dre_utils\n"),
         (
             "macros/overrides.sql",
             "{% macro duckdb__label(s) %}'mine {{ s }}'{% endmacro %}\n",
@@ -233,7 +241,7 @@ fn a_git_package_with_a_symlink_is_refused() {
 fn package_problems_are_reported() {
     let p = project(&[
         (
-            "packages.yml",
+            "dependencies.yml",
             "packages:\n  - local: ../shared/run_pkg\n  - git: https://example.invalid/x.git\n",
         ),
         ("reports/r/r.yml", "queries: [q]\npackages: [nope]\n"),
@@ -245,7 +253,7 @@ fn package_problems_are_reported() {
     p.dre("validate", &["--no-auto-install"])
         .failed()
         .says("git package `https://example.invalid/x.git` needs a `revision`")
-        .says("`packages:` goes in dependencies.yml or packages.yml at the project root")
+        .says("`packages:` goes in dependencies.yml at the project root")
         .says("package `run` has the same name as a DRE function or variable");
 }
 
@@ -253,7 +261,7 @@ fn package_problems_are_reported() {
 fn a_git_package_that_isnt_installed_asks_for_dre_deps() {
     let p = project(&[
         (
-            "packages.yml",
+            "dependencies.yml",
             "packages:\n  - git: https://example.invalid/x.git\n    revision: v1\n",
         ),
         REPORT[0],

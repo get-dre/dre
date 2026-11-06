@@ -19,7 +19,7 @@ fn registry(dir: &Path) {
     let index = serde_json::json!({"schema": 2, "plugins": [
         {"name": "fixture", "description": "a test package",
          "provides": ["source/fixture", "destination/inbox"],
-         "versions": [{"version": "1.0.0", "protocol": 0, "artifacts": art}]},
+         "versions": [{"version": "1.0.0", "protocol": 1, "artifacts": art}]},
     ]});
     std::fs::write(reg.join("index.json"), index.to_string()).unwrap();
 }
@@ -154,7 +154,7 @@ fn init_adds_to_the_right_section_of_an_existing_file_keeping_comments() {
     std::fs::create_dir_all(d.path().join("dot-dre")).unwrap();
     std::fs::write(
         d.path().join("dot-dre/profiles.yml"),
-        "# my connections\nsources:\n  old:  # keep me\n    targets:\n      dev: {type: duckdb}\n\n\
+        "# my connections\nconnections:\n  old:  # keep me\n    targets:\n      dev: {type: duckdb}\n\n\
          destinations:\n  box:\n    targets:\n      dev: {type: local}\n",
     )
     .unwrap();
@@ -167,7 +167,7 @@ fn init_adds_to_the_right_section_of_an_existing_file_keeping_comments() {
     .ok();
     assert_eq!(
         std::fs::read_to_string(d.path().join("dot-dre/profiles.yml")).unwrap(),
-        "# my connections\nsources:\n  old:  # keep me\n    targets:\n      dev: {type: duckdb}\n\n\
+        "# my connections\nconnections:\n  old:  # keep me\n    targets:\n      dev: {type: duckdb}\n\n\
          \x20 new:\n    targets:\n      dev:\n        type: fixture\n        path: data.duckdb\n        token: \"{{ env_var('NEW_TOKEN') }}\"\n\n\
          destinations:\n  box:\n    targets:\n      dev: {type: local}\n\n\
          \x20 old:\n    targets:\n      dev:\n        type: inbox\n        path: data.duckdb\n        token: \"{{ env_var('NEW_TOKEN') }}\"\n"

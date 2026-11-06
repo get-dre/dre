@@ -20,8 +20,6 @@
 //! profile's own `target:`, else `dev`. A used profile without that entry is an error; a
 //! destination entry `{deliver: false}` deliberately delivers nowhere.
 //!
-//! DRE 0.1 called the connections section `sources:`; it still loads in 0.2.x, with a warning.
-//!
 //! Location: `--profiles-dir` > `DRE_PROFILES_DIR` > `~/.dre`, one file, never merged. These are
 //! read directly at startup, never through the `env_var()` Jinja function. `env_var()` calls
 //! *inside* the file are rendered at run time, just before a connection config is handed to a
@@ -49,9 +47,6 @@ pub static BUILTIN_LOCAL: std::sync::LazyLock<ProfileTarget> = std::sync::LazyLo
     kind: LOCAL_TYPE.into(),
     fields: serde_json::Map::new(),
 });
-
-/// The section DRE 0.1 kept connections under; read with a warning in 0.2.x.
-pub const OLD_CONNECTIONS_SECTION: &str = "sources";
 
 /// The run's target (environment), and a profile's entry, when nothing chooses one.
 pub const DEFAULT_TARGET: &str = "dev";
@@ -196,8 +191,6 @@ pub struct Profiles {
     declared: BTreeMap<Role, BTreeMap<String, usize>>,
     pub connections: BTreeMap<String, Profile>,
     pub destinations: BTreeMap<String, Profile>,
-    /// The section connections were read from: `connections`, or 0.1's `sources`.
-    connections_section: &'static str,
     /// The run's target, which picks each profile's entry (see [`Profiles::target_of`]).
     pub run: RunTarget,
 }
@@ -293,31 +286,8 @@ impl Profiles {
                 ),
             );
         }
-        let connections = match (raw.connections, raw.sources) {
-            (Some(c), Some(s)) => {
-                diags.error(
-                    Code::InvalidProfiles,
-                    file,
-                    s.line(),
-                    "profiles.yml has both `connections:` and `sources:`; `sources:` is the old name of `connections:`, so move its profiles under `connections:`",
-                );
-                Some(("connections", c))
-            }
-            (Some(c), None) => Some(("connections", c)),
-            (None, Some(s)) => {
-                diags.warning(
-                    Code::ProfilesSourcesRenamed,
-                    file,
-                    s.line(),
-                    "`sources:` in profiles.yml is now `connections:` (DRE 0.2); rename it. `sources:` still works in 0.2.x",
-                );
-                out.connections_section = OLD_CONNECTIONS_SECTION;
-                Some((OLD_CONNECTIONS_SECTION, s))
-            }
-            (None, None) => None,
-        };
-        if let Some((key, section)) = connections {
-            let (parsed, declared) = parse_section(Role::Connection, key, section, &path, diags);
+        if let Some(section) = raw.connections {
+            let (parsed, declared) = parse_section(Role::Connection, "connections", section, &path, diags);
             out.connections = parsed;
             out.declared.insert(Role::Connection, declared);
         }
@@ -347,14 +317,9 @@ impl Profiles {
         }
     }
 
-    /// The section key a role's profiles were read from (`sources` for an 0.1 file).
+    /// The section key for a role's profiles.
     pub fn section_key(&self, role: Role) -> &'static str {
-        match role {
-            Role::Connection if self.connections_section == OLD_CONNECTIONS_SECTION => {
-                OLD_CONNECTIONS_SECTION
-            }
-            r => r.section(),
-        }
+        role.section()
     }
 
     pub fn get(&self, role: Role, name: &str) -> Option<&Profile> {
@@ -615,13 +580,9 @@ type Section<P> = Located<Loose<Map<Located<Loose<P>>>>>;
 /// Connections and destinations, in `profiles.yml`: what reports read from and where outputs go. Kept outside the project (`~/.dre`, `--profiles-dir` or `DRE_PROFILES_DIR`). Every profile lists its targets (environments). Each profile the run uses picks one: `--target`, else `DRE_TARGET` (either sets every profile), else the profile's own `target`, else `dev`; a used profile without that entry is an error.
 #[derive(Deserialize, JsonSchema)]
 #[schemars(title = "DRE profiles", deny_unknown_fields)]
-#[schemars(extend("not" = {"required": ["connections", "sources"]}))]
 pub struct ProfilesFile {
     /// Database connections, referenced by `default_profile`, `profile:` (report, query, Set, folder `+profile`) and a source's `profile`.
     connections: Option<Section<ConnectionProfile>>,
-    /// DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`.
-    #[schemars(extend("deprecated" = true))]
-    sources: Option<Section<ConnectionProfile>>,
     /// Delivery targets, referenced by `output.destination.profile`.
     destinations: Option<Section<DestinationProfile>>,
     #[serde(rename = "$unknown", default)]

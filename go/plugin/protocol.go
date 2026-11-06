@@ -5,7 +5,7 @@ package plugin
 // against it, and the conformance suite checks every message.
 
 const (
-	ProtocolMin = 0
+	ProtocolMin = 1
 	ProtocolMax = 1
 )
 

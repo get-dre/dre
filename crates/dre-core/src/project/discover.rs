@@ -70,6 +70,15 @@ impl Loader {
         timings: &mut Vec<Rc<YamlFile>>,
     ) {
         let in_reports = yf.display.starts_with(REPORTS_DIR);
+        if yf.display == Path::new("packages.yml") {
+            self.diags.error(
+                Code::RemovedKey,
+                Some(yf.display.clone()),
+                None,
+                "packages.yml was removed; move its declarations into dependencies.yml at the project root",
+            );
+            return;
+        }
         if PLUGIN_KEYS.iter().any(|k| yf.value.get(*k).is_some()) || yf.value.get(SOURCES_KEY).is_some() {
             self.global_files.insert(yf.display.clone());
         }
@@ -101,7 +110,7 @@ impl Loader {
                         Code::MisplacedPackages,
                         Some(yf.display.clone()),
                         yf.line_of("packages", None),
-                        "`packages:` goes in dependencies.yml or packages.yml at the project root",
+                        "`packages:` goes in dependencies.yml at the project root",
                     );
                 }
                 if dependency_file {

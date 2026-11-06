@@ -90,16 +90,6 @@ impl Default for Rules {
 }
 
 impl Rules {
-    /// How destinations delivered before these rules: replace, straight to the final name, no
-    /// retries.
-    pub fn legacy() -> Rules {
-        Rules {
-            atomic: false,
-            retries: 0,
-            ..Rules::default()
-        }
-    }
-
     /// The rules from a profile target's `connection` (`connect_timeout`, `timeout`,
     /// `retries`) and a destination entry's `options` (`if_exists`, `atomic`, `temp_dir`),
     /// starting from `base`. `aliases` maps deprecated keys to these (`("upload_timeout",
@@ -837,9 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rules_write_straight_to_the_final_name() {
+    fn non_atomic_rules_write_straight_to_the_final_name() {
         let mut s = Fake::default();
-        let d = run(&mut s, &Rules::legacy()).unwrap();
+        let d = run(&mut s, &rules(IfExists::Overwrite, false)).unwrap();
         assert_eq!((d.path.as_str(), d.attempts), ("out/r.xlsx", 1));
         assert_eq!(s.log, ["write out/r.xlsx"]);
     }
@@ -1042,7 +1032,7 @@ mod tests {
         let dst = dir.path().join("out/r.csv");
         let dst = dst.to_str().unwrap();
         let mut s = LocalStore;
-        deliver(&mut s, &src, dst, &Rules::legacy()).unwrap();
+        deliver(&mut s, &src, dst, &rules(IfExists::Overwrite, false)).unwrap();
         assert_eq!(std::fs::read_to_string(dst).unwrap(), "new");
         std::fs::write(&src, "newer").unwrap();
         deliver(&mut s, &src, dst, &rules(IfExists::Overwrite, true)).unwrap();

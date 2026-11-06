@@ -258,44 +258,6 @@ impl BindingRuns {
         crate::fs::write_atomic(&self.dir.join(CURRENT), format!("{run_id}\n").as_bytes())
     }
 
-    /// Move a folder from before run folders (outputs and `run_results.json` straight in the
-    /// Binding's folder) into `runs/<started>-legacy/` and make it current, so its drift history
-    /// and results carry over. Call it holding the lock. Returns the new run id, if there was
-    /// anything to move. `before` is the new run's start: the legacy run is named for an earlier
-    /// time, so it always sorts (and is pruned) as older.
-    pub fn migrate_legacy(&self, before: DateTime<Utc>) -> std::io::Result<Option<String>> {
-        let Ok(entries) = std::fs::read_dir(&self.dir) else {
-            return Ok(None);
-        };
-        let old: Vec<std::ffi::OsString> = entries
-            .flatten()
-            .map(|e| e.file_name())
-            .filter(|n| {
-                let name = n.to_string_lossy();
-                ![CURRENT, LOCK, RUNS].contains(&name.as_ref())
-                    && !(name.starts_with('.') && name.ends_with(".tmp"))
-            })
-            .collect();
-        if old.is_empty() {
-            return Ok(None);
-        }
-        let started = std::fs::metadata(self.dir.join("run_results.json"))
-            .and_then(|m| m.modified())
-            .map(DateTime::<Utc>::from)
-            .unwrap_or(before)
-            .min(before - chrono::Duration::seconds(1));
-        let id = format!("{}-legacy", started.format("%Y%m%dT%H%M%SZ"));
-        let to = self.run_dir(&id);
-        std::fs::create_dir_all(&to)?;
-        for name in old {
-            std::fs::rename(self.dir.join(&name), to.join(&name))?;
-        }
-        if self.current().is_none() {
-            self.switch(&id)?;
-        }
-        Ok(Some(id))
-    }
-
     /// Remove all but the newest `keep` runs (of any status, finished or not), never the current
     /// run. Call it holding the lock.
     pub fn prune(&self, keep: usize) -> Vec<String> {
@@ -517,20 +479,6 @@ mod tests {
         let removed = r.prune(1);
         assert_eq!(removed, ["20261002T000000Z-bbbb"]);
         assert_eq!(r.list(), ["20261001T000000Z-aaaa", "20261003T000000Z-cccc"]);
-    }
-
-    #[test]
-    fn an_old_layout_moves_into_a_legacy_run() {
-        let (_d, r) = runs();
-        std::fs::create_dir_all(r.dir()).unwrap();
-        std::fs::write(r.dir().join("daily.csv"), "a\n").unwrap();
-        std::fs::write(r.dir().join("run_results.json"), "{}").unwrap();
-        let id = r.migrate_legacy(Utc::now()).unwrap().unwrap();
-        assert!(id.ends_with("-legacy"));
-        assert_eq!(r.current().as_deref(), Some(id.as_str()));
-        assert!(r.run_dir(&id).join("daily.csv").is_file());
-        assert!(!r.dir().join("daily.csv").exists());
-        assert_eq!(r.migrate_legacy(Utc::now()).unwrap(), None);
     }
 
     #[test]

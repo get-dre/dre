@@ -357,18 +357,6 @@ impl<'a> BindingRun<'a> {
                 self.label()
             ));
         }
-        match self.runs.migrate_legacy(self.started_at) {
-            Ok(Some(id)) => self.ui.step(
-                Level::Debug,
-                "Moved",
-                &format!("the files of the run before run folders into runs/{id}/"),
-                None,
-            ),
-            Ok(None) => {}
-            Err(e) => self
-                .ui
-                .warn(&format!("can't move the earlier run's files into runs/: {e}")),
-        }
         // A retry redoes some rows of an earlier run: it never replaces the current one.
         self.becomes_current = !self.older_than_current() && !matches!(self.stages.source, Source::Retry(_));
         // The run's own log, in its folder.

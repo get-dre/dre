@@ -11,8 +11,8 @@
       ]
     },
     {
-      "name": "legacy rules write straight to the final name",
-      "base": "legacy",
+      "name": "non-atomic rules write straight to the final name",
+      "options": {"atomic": false, "retries": 0},
       "remote": "out/r.xlsx",
       "expect": {"path": "out/r.xlsx", "attempts": 1, "ops": ["write out/r.xlsx"], "files": {"out/r.xlsx": "new"}}
     },

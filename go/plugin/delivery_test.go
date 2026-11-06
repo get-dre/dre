@@ -70,9 +70,9 @@ func run(s *fakeStore, r Rules) (Delivered, error) {
 	return deliverWith(s, "new", "out/r.xlsx", r, func(time.Duration) {})
 }
 
-func TestLegacyAndAtomicDelivery(t *testing.T) {
+func TestNonAtomicAndAtomicDelivery(t *testing.T) {
 	s := newFake(allCaps)
-	if d, err := run(s, LegacyRules()); err != nil || d.Path != "out/r.xlsx" || fmt.Sprint(s.log) != "[write out/r.xlsx false]" {
+	if d, err := run(s, rules(IfExistsOverwrite, false)); err != nil || d.Path != "out/r.xlsx" || fmt.Sprint(s.log) != "[write out/r.xlsx false]" {
 		t.Fatalf("%v %v %v", d, err, s.log)
 	}
 	s = newFake(allCaps, "out/r.xlsx")

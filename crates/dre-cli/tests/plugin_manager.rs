@@ -40,7 +40,12 @@ impl Env {
             h.set_size(bin.len() as u64);
             h.set_mode(0o755);
             h.set_cksum();
-            b.append_data(&mut h, &exe_name, bin.as_slice()).unwrap();
+            b.append_data(
+                &mut h,
+                format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX),
+                bin.as_slice(),
+            )
+            .unwrap();
             b.into_inner().unwrap().finish().unwrap()
         };
         std::fs::write(reg.join("fixture-1.2.0-rc.1.tar.gz"), &tgz).unwrap();
@@ -50,9 +55,9 @@ impl Env {
             "plugins": [{
                 "kind": "source", "name": "fixture", "description": "test plugin",
                 "versions": [
-                    {"version": "1.0.0", "protocol": 0, "artifacts": art("fixture-1.0.0", &bin)},
-                    {"version": "1.1.0", "protocol": 0, "artifacts": art("fixture-1.1.0", &bin)},
-                    {"version": "1.2.0-rc.1", "protocol": 0, "artifacts": art("fixture-1.2.0-rc.1.tar.gz", &tgz)},
+                    {"version": "1.0.0", "protocol": 1, "artifacts": art("fixture-1.0.0", &bin)},
+                    {"version": "1.1.0", "protocol": 1, "artifacts": art("fixture-1.1.0", &bin)},
+                    {"version": "1.2.0-rc.1", "protocol": 1, "artifacts": art("fixture-1.2.0-rc.1.tar.gz", &tgz)},
                 ]
             }]
         });
@@ -109,7 +114,7 @@ impl Env {
     }
 
     fn installed(&self, version: &str) -> bool {
-        let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+        let exe = format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX);
         self.p("plugins/fixture").join(version).join(exe).exists()
     }
 
@@ -292,7 +297,7 @@ fn deps_without_a_lockfile_reinstalls_an_installed_file_that_differs_from_the_re
     // The same version rebuilt locally: not the registry's artifact any more.
     let exe = e
         .p("plugins/fixture/1.1.0")
-        .join(format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX));
+        .join(format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX));
     let original = std::fs::read(&exe).unwrap();
     let mut changed = original.clone();
     changed.extend_from_slice(b"rebuilt");
@@ -333,35 +338,17 @@ fn a_lockfile_written_on_another_platform_installs_here_and_learns_this_platform
 }
 
 #[test]
-fn a_lockfile_from_before_per_platform_checksums_still_works() {
+fn legacy_scalar_lock_checksums_are_rejected_before_install() {
     let e = Env::new(DECLARED);
-    e.dre(&["deps"]).ok();
-    let sha = e
-        .lock()
-        .lines()
-        .find_map(|l| {
-            l.trim()
-                .strip_prefix(&format!("{}: ", platform()))
-                .map(str::to_string)
-        })
-        .unwrap();
-    let old = |s: &str| format!("plugins:\n  fixture:\n    version: 1.1.0\n    sha256: {s}\n");
-    // Its one checksum is one the registry publishes: installed, and rewritten per platform.
-    std::fs::write(e.p("project/dre.lock"), old(&sha)).unwrap();
-    uninstall_everything(&e);
-    e.dre(&["deps"]).ok();
-    assert!(e.installed("1.1.0"));
-    assert!(
-        e.lock().contains(&format!("{}: {sha}", platform())),
-        "{}",
-        e.lock()
-    );
-    // One the registry doesn't publish for any platform: refused.
-    std::fs::write(e.p("project/dre.lock"), old(&"0".repeat(64))).unwrap();
-    uninstall_everything(&e);
-    e.dre(&["deps"])
-        .failed()
-        .says("the registry's checksum doesn't match dre.lock");
+    std::fs::write(
+        e.p("project/dre.lock"),
+        format!(
+            "plugins:\n  fixture:\n    version: 1.1.0\n    sha256: '{}'\n",
+            sha(&std::fs::read(e.p("registry/fixture-1.1.0")).unwrap())
+        ),
+    )
+    .unwrap();
+    e.dre(&["deps"]).failed().says("dre.lock");
     assert!(!e.installed("1.1.0"));
 }
 
@@ -709,12 +696,12 @@ fn a_plugin_archive_cannot_contain_a_duplicate_file() {
 }
 
 #[test]
-fn a_legacy_bare_executable_still_installs() {
+fn legacy_bare_executable_installs_under_the_package_name() {
     let e = Env::new(DECLARED);
     e.dre(&["plugin", "install", "fixture@=1.0.0"])
         .ok()
         .says("plugin package `fixture` 1.0.0");
-    let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let exe = format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX);
     let version = e.p("plugins/fixture/1.0.0");
     assert_eq!(
         std::fs::read(version.join(&exe)).unwrap(),
@@ -726,17 +713,15 @@ fn a_legacy_bare_executable_still_installs() {
 }
 
 #[test]
-fn a_legacy_archive_with_the_executable_at_the_top_still_installs() {
+fn legacy_single_plugin_archive_names_are_rejected() {
     let e = Env::new(DECLARED);
-    e.dre(&["plugin", "install", "fixture@=1.2.0-rc.1"])
-        .ok()
-        .says("plugin package `fixture` 1.2.0-rc.1");
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
-    let version = e.p("plugins/fixture/1.2.0-rc.1");
-    assert!(version.join(&exe).is_file());
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(version.join("plugin.json")).unwrap()).unwrap();
-    assert_eq!(manifest["executable"], exe);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    publish_1_1_archive(&e, &gzip_tar([(exe, bin, 0o755)]));
+    e.dre(&["plugin", "install", "fixture@=1.1.0"])
+        .failed()
+        .says("dre-plugin-fixture");
+    assert!(!e.p("plugins/fixture/1.1.0").exists());
 }
 
 #[test]
@@ -878,6 +863,7 @@ fn a_plugin_archive_cannot_contain_two_package_executables() {
     let e = Env::new(DECLARED);
     let exe = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
     let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(&exe)).unwrap();
+    let exe = format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX);
     let tgz = gzip_tar([
         (format!("fixture/{exe}"), bin.clone(), 0o755),
         (format!("fixture/nested/{exe}"), bin, 0o755),
@@ -966,7 +952,7 @@ fn a_package_installs_once_and_provides_all_its_plugins() {
         "name": "csv",
         "description": "csv and delimited",
         "provides": ["format/csv", "format/delimited"],
-        "versions": [{"version": "1.0.0", "protocol": 0, "artifacts": {
+        "versions": [{"version": "1.0.0", "protocol": 1, "artifacts": {
             platform(): {"url": e.p("registry/csv-1.0.0.tar.gz").to_string_lossy(), "sha256": sha(&tgz)}
         }}],
     }));
@@ -1036,4 +1022,15 @@ fn yanked_versions_are_skipped_but_existing_lock_pins_still_run() {
     let update = e.dre(&["plugin", "update", "fixture"]);
     assert_eq!(update.code, 0, "{}", update.stderr);
     assert!(e.lock().contains("1.0.0"), "{}", e.lock());
+}
+
+#[test]
+fn current_release_archives_with_top_level_package_executables_install() {
+    let e = Env::new(DECLARED);
+    let fixture = format!("dre-source-fixture{}", std::env::consts::EXE_SUFFIX);
+    let bin = std::fs::read(test_plugins(&["dre-source-fixture"]).join(fixture)).unwrap();
+    let exe = format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX);
+    publish_1_1_archive(&e, &gzip_tar([(exe, bin, 0o755)]));
+    e.dre(&["plugin", "install", "fixture@=1.1.0"]).ok();
+    assert!(e.installed("1.1.0"));
 }

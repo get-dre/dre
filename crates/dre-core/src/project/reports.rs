@@ -79,7 +79,6 @@ impl Loader {
                     description,
                     meta,
                     output,
-                    plugins: _,
                     sources: _,
                     tags,
                     queries,

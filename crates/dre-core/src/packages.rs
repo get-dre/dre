@@ -1,5 +1,5 @@
 //! Macro packages: reusable macros from another project (e.g. `dre_utils`), declared under
-//! `packages:` in the project's root `dependencies.yml` or `packages.yml`:
+//! `packages:` in the project's root `dependencies.yml`:
 //!
 //! ```yaml
 //! packages:
@@ -26,8 +26,8 @@ use crate::lock::{Lock, LockedPackage};
 use crate::plugins::DEPS_DIR;
 use crate::yaml::YamlFile;
 
-/// Root files that may declare `packages:` (and plugins, like any YAML file).
-pub const DEPENDENCY_FILES: &[&str] = &["dependencies.yml", "packages.yml"];
+/// Root files that may declare plugin and macro packages.
+pub const DEPENDENCY_FILES: &[&str] = &["dependencies.yml"];
 pub const PACKAGE_FILE: &str = "dre_package.yml";
 const INSTALLED_COMMIT: &str = ".dre_commit";
 

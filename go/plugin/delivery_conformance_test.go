@@ -18,7 +18,6 @@ import (
 
 type deliveryCase struct {
 	Name  string `json:"name"`
-	Base  string `json:"base"`
 	Store struct {
 		CreateExclusive     bool `json:"create_exclusive"`
 		RenameNoReplace     bool `json:"rename_no_replace"`
@@ -146,11 +145,7 @@ func TestTheSDKFollowsEveryDeliveryCase(t *testing.T) {
 }
 
 func runDeliveryCase(c deliveryCase) error {
-	base := DefaultRules()
-	if c.Base == "legacy" {
-		base = LegacyRules()
-	}
-	rules, _, err := RulesFrom(base, c.Connection, c.Options, nil)
+	rules, _, err := RulesFrom(DefaultRules(), c.Connection, c.Options, nil)
 	x := c.Expect
 	if err != nil {
 		if x != nil && x.SettingsErr != "" && strings.Contains(err.Error(), x.SettingsErr) {

@@ -34,7 +34,7 @@ PAGES = [
      "Every key of profiles.yml: connections, destinations and their targets."),
     ("sources", "reference-sources", "Sources", "any project YAML file with a top-level `sources:` key, e.g. `sources/<name>.yml`", 9,
      "Every key of a sources declaration: sources, tables and columns, as in dbt."),
-    ("dependencies", "reference-dependencies", "dependencies.yml", "`dependencies.yml` or `packages.yml`", 10,
+    ("dependencies", "reference-dependencies", "dependencies.yml", "`dependencies.yml`", 10,
      "Every key of dependencies.yml: the plugin packages, companion extensions and macro packages a DRE project installs, and how dre.lock pins them."),
     ("lookup", "reference-lookups", "Lookup config", "`lookups/<name>.yml`, next to the lookup's data file", 11,
      "Every key of a lookup's config file: the columns, types and loading options of a mapping table kept as a file in your DRE project."),

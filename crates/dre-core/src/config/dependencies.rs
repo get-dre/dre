@@ -1,5 +1,4 @@
-//! The shapes of `dependencies.yml` (or `packages.yml`): `plugins:`, the plugin packages, which
-//! any project YAML file may also declare, and `packages:`, the macro packages.
+//! The shape of root `dependencies.yml`: plugin packages and macro packages.
 
 use schemars::JsonSchema;
 use serde::de::Deserializer;
@@ -7,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::de::{Located, Loose, Map, OneOf, UnknownKeys};
 
-/// Plugin packages and macro packages, in `dependencies.yml` or `packages.yml` at the project root.
+/// Plugin packages and macro packages, in `dependencies.yml` at the project root.
 #[derive(Deserialize, JsonSchema)]
 #[schemars(title = "DRE dependencies", deny_unknown_fields)]
 pub struct DependenciesFile {
@@ -35,7 +34,7 @@ pub struct ExtensionEntry {
     pub settings: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
-/// The `plugins:` key of any project YAML file.
+/// A `plugins:` declaration, checked for placement before it is loaded.
 #[derive(Deserialize)]
 pub struct PluginsKey {
     pub plugins: Option<PluginsSection>,
@@ -124,7 +123,7 @@ pub struct Package {
 #[allow(dead_code)]
 struct VersionMap {}
 
-/// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.
+/// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. Declare these only in `dependencies.yml` at the project root.
 #[derive(JsonSchema)]
 #[schemars(inline, extend("x-doc-type" = "list of plugin packages: a name, `name: \"<version>\"`, or a map (see below)"))]
 #[allow(dead_code)]
