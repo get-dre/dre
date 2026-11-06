@@ -31,8 +31,8 @@ using compatible, pinned plugins. The compatibility promise covers:
 
 An incompatible change to a covered interface requires a new major version of its owning
 package, with migration instructions. Additive features may arrive in a minor release.
-Deprecated configuration keeps working during the supported compatibility period, warns with
-its replacement, and is listed in upgrade guidance before removal. Security fixes may tighten
+Deprecated configuration keeps working throughout the same major version, warns with its
+replacement, and is listed in upgrade guidance before removal in a later major version. Security fixes may tighten
 previously unsafe behavior; release notes identify the effect and the required action.
 
 ## Interfaces outside the promise

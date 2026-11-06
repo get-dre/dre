@@ -286,7 +286,9 @@ Run `dre test <report>` to check fresh data without report delivery; use `dre bu
 checks must gate formatting and delivery. `dre run` skips attached data tests.
 
 Mark sensitive query values with `secret_columns: [column_name]`; this masks DRE diagnostics
-and saved result copies, including Arrow snapshots, without changing delivered files. For per-row passwords, review
+without changing delivered files. DRE 0.12 also masks saved result copies, including per-row
+Arrow snapshots. On older supported cores, do not assume per-row snapshots mask those columns.
+For per-row passwords, review
 [Password-protected outputs](references/docs/password-protected-outputs.md) and
 `for_each.keep_results: false` before retaining results on disk.
 
