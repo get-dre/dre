@@ -122,6 +122,7 @@ jobs:
 
   push:
     name: Push to the tap and bucket
+    environment: release
     needs: [render, homebrew, scoop]
     if: inputs.push
     runs-on: ubuntu-latest
