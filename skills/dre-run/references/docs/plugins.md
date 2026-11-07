@@ -36,8 +36,8 @@ secrets can use `env_var()`.
 | `ftp` | the [`ftp`](plugin-ftp.md) destination |
 | `email` | the [`email`](plugin-email.md) destination |
 | `slack` | the [`slack`](plugin-slack.md) destination |
-| `teams` | the [`teams`](plugin-teams.md) destination, messages only (release candidate: 1.0.0-rc.1) |
-| `google_chat` | the [`google_chat`](plugin-google_chat.md) destination, messages only (release candidate: 1.0.0-rc.1) |
+| `teams` | the [`teams`](plugin-teams.md) destination, messages only (release candidate) |
+| `google_chat` | the [`google_chat`](plugin-google_chat.md) destination, messages only (release candidate) |
 
 ```yaml
 # dependencies.yml
