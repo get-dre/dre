@@ -394,6 +394,7 @@ jobs:
 
   publish:
     name: Publish the release
+    environment: release
     # After crates.io (DRE releases): a publish there can't be undone, so if it fails, no GitHub
     # release points people at crates that don't exist.
     needs: [plan, build, build-jdbc, jdbc-install, attest, crates]
@@ -471,6 +472,7 @@ jobs:
 
   registry:
     name: Update the registry index
+    environment: release
     needs: [plan, publish]
     # After a plugin release, or run by hand with `-f tag=registry`.
     if: >-
@@ -515,6 +517,7 @@ jobs:
 
   site:
     name: Rebuild getdre.com
+    environment: release
     # A stable DRE release changes what the docs, plugin catalogue and changelog show.
     needs: [plan, publish, package-managers]
     if: >-
@@ -563,6 +566,7 @@ jobs:
 
   crates:
     name: Publish to crates.io
+    environment: release
     needs: [plan, build, attest, crates-verify]
     if: >-
       always() && needs.plan.outputs.kind == 'core' && needs.build.result == 'success' &&
