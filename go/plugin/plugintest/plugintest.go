@@ -94,6 +94,27 @@ func (c *Conversation) Reply() map[string]any {
 	}
 }
 
+// ReplySkippingRecords is Reply that also discards Arrow frames before the reply, such as a batch
+// already in flight when the plugin was told to cancel.
+func (c *Conversation) ReplySkippingRecords() map[string]any {
+	c.t.Helper()
+	for {
+		f, err := plugin.ReadFrame(c.out)
+		if err != nil {
+			c.t.Fatalf("reading a reply: %v", err)
+		}
+		if f.Tag != plugin.TagJSON {
+			continue
+		}
+		var m map[string]any
+		json.Unmarshal(f.Body, &m)
+		if t := m["type"]; t != "log" && t != "progress" {
+			return m
+		}
+		c.Logs = append(c.Logs, m)
+	}
+}
+
 // Message reads the next JSON message, whatever it is.
 func (c *Conversation) Message() map[string]any {
 	c.t.Helper()
