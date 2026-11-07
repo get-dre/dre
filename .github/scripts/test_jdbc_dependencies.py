@@ -10,6 +10,15 @@ spec.loader.exec_module(jdbc)
 
 
 class JdbcDependencies(unittest.TestCase):
+    def test_windows_runs_the_cmd_launcher_beside_a_unix_maven_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            mvn = Path(d) / 'mvn'
+            mvn.write_text('')
+            (Path(d) / 'mvn.cmd').write_text('')
+            self.assertEqual(jdbc.maven_command(str(mvn), windows=True), str(mvn) + '.cmd')
+            self.assertEqual(jdbc.maven_command(str(mvn), windows=False), str(mvn))
+            self.assertEqual(jdbc.maven_command('mvn', windows=True), 'mvn')
+
     def test_changed_transitive_jar_or_unapproved_license_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

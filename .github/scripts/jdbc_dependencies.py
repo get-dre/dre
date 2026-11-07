@@ -46,11 +46,18 @@ def check(actual, locked):
         raise ValueError('JDBC dependencies differ from the reviewed lock; run jdbc_dependencies.py sync and review')
 
 
+def maven_command(maven, windows=os.name == 'nt'):
+    """`MAVEN` names Maven's Unix launcher; on Windows run the `.cmd` beside it instead."""
+    if windows and not maven.lower().endswith(('.cmd', '.bat', '.exe')) and Path(maven + '.cmd').exists():
+        return maven + '.cmd'
+    return maven
+
+
 def main(mode):
     with tempfile.TemporaryDirectory(prefix='dre-jdbc-deps-') as directory:
         directory = Path(directory)
         report, classpath = directory / 'licenses.xml', directory / 'classpath.txt'
-        command = [os.environ.get('MAVEN', 'mvn'), '-B', '-C', '-f', str(ROOT / 'java/jdbc/pom.xml')]
+        command = [maven_command(os.environ.get('MAVEN', 'mvn')), '-B', '-C', '-f', str(ROOT / 'java/jdbc/pom.xml')]
         if os.environ.get('MAVEN_REPO_LOCAL'):
             command.append('-Dmaven.repo.local=' + os.environ['MAVEN_REPO_LOCAL'])
         subprocess.run(command + ['org.apache.maven.plugins:maven-dependency-plugin:3.9.0:build-classpath',
