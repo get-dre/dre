@@ -233,16 +233,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Maven 3.9.11
+      - name: Install Maven
         shell: bash
-        run: |
-          curl --fail --silent --show-error --location \
-            https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz \
-            -o "$RUNNER_TEMP/maven.tar.gz"
-          echo "4b7195b6a4f5c81af4c0212677a32ee8143643401bc6e1e8412e6b06ea82beac  $RUNNER_TEMP/maven.tar.gz" \
-            | sha256sum --check -
-          mkdir -p "$RUNNER_TEMP/maven"
-          (cd "$RUNNER_TEMP" && tar -xzf maven.tar.gz --strip-components=1 -C maven)
+        run: .github/scripts/install_maven.sh
 
       - name: Install Rust for the Windows launcher
         if: runner.os == 'Windows'
@@ -394,7 +387,8 @@ jobs:
 
   publish:
     name: Publish the release
-    environment: release
+    # A dry run from a branch checks without publishing, so it needs no release environment.
+    environment: ${{ !inputs.dry_run && 'release' || '' }}
     # After crates.io (DRE releases): a publish there can't be undone, so if it fails, no GitHub
     # release points people at crates that don't exist.
     needs: [plan, build, build-jdbc, jdbc-install, attest, crates]
@@ -566,7 +560,8 @@ jobs:
 
   crates:
     name: Publish to crates.io
-    environment: release
+    # A dry run from a branch checks without publishing, so it needs no release environment.
+    environment: ${{ !inputs.dry_run && 'release' || '' }}
     needs: [plan, build, attest, crates-verify]
     if: >-
       always() && needs.plan.outputs.kind == 'core' && needs.build.result == 'success' &&

@@ -83,6 +83,9 @@ jobs:
           java-version: '17'
           cache: maven
           cache-dependency-path: java/jdbc/pom.xml
+      # The same pinned Maven as release.yml.
+      - name: Install Maven
+        run: .github/scripts/install_maven.sh && echo "$RUNNER_TEMP/maven/bin" >> "$GITHUB_PATH"
       - name: Check bounded Maven throttling recovery
         run: python3 .github/scripts/test_maven_throttle.py
       - run: mvn -B -C -f java/jdbc/pom.xml package
