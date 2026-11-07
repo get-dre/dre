@@ -387,7 +387,8 @@ jobs:
 
   publish:
     name: Publish the release
-    environment: release
+    # A dry run from a branch checks without publishing, so it needs no release environment.
+    environment: ${{ !inputs.dry_run && 'release' || '' }}
     # After crates.io (DRE releases): a publish there can't be undone, so if it fails, no GitHub
     # release points people at crates that don't exist.
     needs: [plan, build, build-jdbc, jdbc-install, attest, crates]
@@ -559,7 +560,8 @@ jobs:
 
   crates:
     name: Publish to crates.io
-    environment: release
+    # A dry run from a branch checks without publishing, so it needs no release environment.
+    environment: ${{ !inputs.dry_run && 'release' || '' }}
     needs: [plan, build, attest, crates-verify]
     if: >-
       always() && needs.plan.outputs.kind == 'core' && needs.build.result == 'success' &&
