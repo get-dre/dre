@@ -147,7 +147,7 @@ Search this index for the question's terms, then open the linked page. These loc
 ## Upgrading
 
 - [Updating DRE](docs/updating.md): Update DRE with dre system update or your install method (Homebrew, Scoop, pip, cargo), and rehearse an update against a small report first.
-  Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `atomic`, `connections:`, `dependencies.yml`, `dre`, `dre-cli`, `extensions:`, `packages.yml`, `packages:`, `plugin.json`, `plugins:`, `provides`, `retries`, `sha256`, `sources:`.
+  Terms/options: `GITHUB_TOKEN`, `SHA256SUMS`, `atomic`, `connections:`, `dependencies.yml`, `dre`, `dre-cli`, `extensions:`, `format_properties`, `packages.yml`, `packages:`, `plugin.json`, `plugins:`, `provides`, `retries`, `sha256`, `sources:`, `sql_dialect`.
 - [Stability contract](docs/stability.md): The public contracts covered by DRE 1.0, how versions signal changes, and which implementation details remain internal.
   Terms/options: `dre-core`, `dre-plugin-host`, `dre-template`.
 - [New in 0.12](docs/new-in-0.12.md): Strict configuration, explicit data-check workflows, versioned machine outputs and migration away from legacy layouts.

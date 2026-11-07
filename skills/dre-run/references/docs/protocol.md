@@ -417,8 +417,9 @@ Authors must override those hooks for additional engine restrictions.
 both flags as true. A policy with an explicit `read_only_notice` may instead use a normal
 session after the single-query checks; Databricks uses this path. Use a read-only database
 role there: SQL validation does not replace database permissions. Sources with neither
-read-only support nor an explicit policy notice are refused. Older plugins may ignore `sandbox`, so database
-permissions remain the access boundary even when the source supports read-only sessions.
+read-only support nor an explicit policy notice are refused. Older plugins may ignore
+`sandbox`, so database permissions remain the access boundary even when the source supports
+read-only sessions.
 
 ```json
 {"type": "execute", "sql": "select …", "row_limit": 100}
