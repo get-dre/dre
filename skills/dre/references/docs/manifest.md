@@ -74,8 +74,8 @@ compares manifests should build both with the same target and vars.
 
 ```json
 {
-  "schema_version": "dre/manifest/v3",
-  "version": "0.2.0",
+  "schema_version": "dre/manifest/v4",
+  "version": "0.12.0",
   "project": {"name": "acme_reports", "target": "dev", "default_profile": "warehouse", "timezone": "UTC", "checksum": "…"},
   "reports": {
     "monthly": {
@@ -98,8 +98,6 @@ compares manifests should build both with the same target and vars.
             {"query": "m", "file": "reports/finance/monthly/m.sql", "tab": true,
              "connection": "warehouse", "depends_on": {"sources": ["sales.orders"]}}
           ],
-          "output": {"format": "csv", "options": {}},
-          "destinations": [{"profile": "inbox", "path": "out/monthly-{{ run.date.yyyymmdd }}.csv"}],
           "outputs": [{"format": "csv", "options": {},
                        "destinations": [{"profile": "inbox", "path": "out/monthly-{{ run.date.yyyymmdd }}.csv"}]}],
           "schedules": ["close_a"]
@@ -151,8 +149,8 @@ compares manifests should build both with the same target and vars.
   (rendered), fully merged vars, queries (each with the `connection` it runs on and
   `depends_on.sources`, from the parse pass), `outputs` in declared order (name, format, the
   queries it formats, `when`, options, extension, template file, and its destinations: rendered
-  profile name and the path template, unrendered), and the schedules that run it. `output` repeats
-  the first output and `destinations` lists every output's destinations, as before 0.3.
+  profile name and the path template, unrendered), and the schedules that run it. Each output
+  owns its destinations; the Binding has no first-output aliases or flattened destinations.
 - **`schedules`**, by name: the report or selector and Set it targets, its timing (`cron`,
   `every` or `rrule` with `starting`, `at`, `except` and `also`; a shared timing's fields, with its
   name in `timing`), whether it's `enabled`, its vars and timezone, and the Bindings it runs,
@@ -245,8 +243,8 @@ Each Binding that `dre run`, `dre test` or `dre build` executes writes `run/<rep
 in the target path (`dre history <report> --latest --path` prints the latest run's folder; see
 [the target path](target-path.md)). It records its `run_id`, the report, Set, the inherited `profile`, the `target`, the
 `connections` its queries used, the schedule and its vars, every
-var the run used, the run date and timezone, the command's parameters, the status (`success`,
-`error`, `cancelled` when Ctrl-C or a termination signal stopped it, `timed_out` when its timeout
+var the run used, the run date and timezone, the command's parameters, the status (`succeeded`,
+`failed`, `cancelled` when Ctrl-C or a termination signal stopped it, `timed_out` when its timeout
 expired) and any error,
 each result set (rows, columns and the `connection` it came from), each output file (`path`, relative to the project root, or to
 the target path when that's outside the project), each delivery (its profile, `type`, `target`
@@ -286,17 +284,47 @@ its driver `query`, `key`, row counts (`rows`, `succeeded`, `skipped`, `failed`,
 `text` that were sent. A report's checksum covers a message output's `file:` template, like an
 xlsx template.
 
+## JSON validation and log events
+
+`dre validate --json` writes a validation document with
+`"schema_version": "dre/validate/v1"`, whether validation succeeds or fails. Its `ok`,
+`errors`, `warnings` and `diagnostics` describe the verdict; `project` holds the manifest and
+`compiled` holds the selected Binding plans. Each plan exposes its outputs only through
+`outputs[]`, with each output's own `format`, `output` path and `destinations`.
+
+Every JSON log event emitted by `--log-format json` carries
+`"schema_version": "dre/events/v1"`, `event` and an RFC 3339 `ts`. A `binding_end` event uses
+the same lifecycle status as that Binding's run results: `succeeded`, `failed`, `compiled`,
+`checked`, `cancelled` or `timed_out`. Per-row results also use `succeeded` and `failed`.
+Delivery states (`delivered`, `kept`, `held`, `not_delivered`, `failed`) and data-test verdicts
+(`pass`, `warn`, `fail`, `error`, `skipped`) describe their own phases.
+
+A failed Binding makes a run fail; busy Bindings, cancellation and timeouts have distinct
+[exit codes](exit-codes.md). Read the exit code for the command's verdict and the per-Binding
+statuses for its individual outcomes.
+
+`--output-name` changes the first output's file name in each selected Binding.
+`--output-path` requires one selected Binding whose first output has one destination.
+Both refuse a per-row first output; set its `file_name` or destination path template instead.
+
 ## Versioning
 
 Both files are public contracts with a `schema_version`, and JSON Schemas generated from DRE's
-own types: [manifest.schema.json](manifest.schema.json) for the manifest (`dre/manifest/v3`) and
+own types: [manifest.schema.json](manifest.schema.json) for the manifest (`dre/manifest/v4`) and
 [run-results.schema.json](run-results.schema.json) for `run_results.json`
-(`dre/run-results/v1`).
+(`dre/run-results/v2`). Validation documents and JSON log events also carry their own
+`schema_version`; the same compatibility rules apply.
 
 - Adding an optional field keeps the version. Ignore fields you don't know.
 - Removing, renaming or re-typing a field, or changing what a field means, bumps it: in a minor
   DRE release before 1.0, a major one after. Check `schema_version` and refuse one you don't
   support.
+
+> **Changed in 0.12.** Manifest v4 removes Binding-level `output` and `destinations` aliases;
+> read `outputs[]` and each output's destinations instead. Validation's `compiled[]` plans
+> likewise remove their top-level `format`, `output` and `destinations` aliases.
+> Run-results v2 renames Binding statuses `success` to `succeeded`, `error` to `failed`, and
+> `dry_run` to `compiled`. JSON log events and validation documents gain their v1 version markers.
 
 > **Changed in 0.4.** The manifest's `"schema": 2` is replaced by
 > `"schema_version": "dre/manifest/v3"`, with nothing else changed. `run_results.json` gains

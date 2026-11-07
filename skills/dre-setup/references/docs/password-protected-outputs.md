@@ -10,7 +10,7 @@ position: 6
 Finance, payroll and member mail often must send files only the recipient can open: a statement
 PDF per member that needs their password, or one zip holding a client's whole monthly pack. DRE
 does both during the run, so `hold:` and `dre release` send exactly what was reviewed, and the
-passwords never show in DRE's own logs and results. *New in DRE 0.7* (PDF passwords need the
+declared secret columns and password environment variables are masked in DRE's records. *New in DRE 0.7* (PDF passwords need the
 `document` plugin 1.1.0).
 
 Three keys do it:
@@ -96,10 +96,15 @@ output:
 
 `secret_columns:` on a query entry lists columns whose values are secrets. Their values become
 `*****` everywhere DRE reports: the console, `dre.log`, `run_results.json`, `rows.jsonl`,
-`--preview`, error messages, and `--output-json` (which is what dre-mcp answers from). They're
+`--preview`, error messages, `--output-json` (which is what dre-mcp answers from), and the
+results a per-row run saves for `--retry-failed` (so a retry runs the queries again). They're
 never masked in what DRE delivers: the PDFs, zips and messages, and the held files waiting for
 `dre release`, are the data. A password read with `env_var()` in `password:` or
 `zip.password` is masked the same way.
+
+Do not write password literals into SQL. SQL can be logged before its returned secret-column
+values are known; `secret_columns` does not rewrite the SQL source. Read passwords from data
+or a secret environment variable instead.
 
 Every secret value is masked, however short. One under 4 characters (a two-digit PIN) is masked
 where it stands alone, not inside a longer word or number, so `PIN 73` becomes `PIN *****` while

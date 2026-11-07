@@ -51,7 +51,8 @@ Set in the report's `output.destination` entry.
 
 `account_name`, `container`, and one of `connection_string`, `sas_token`, `access_key`,
 `use_managed_identity` (true), or `use_azure_cli` (true: the `az login` session). `endpoint` is for emulators. Paths are `az://container/key`.
-Takes `if_exists` (see [A file already at the path](plugins.md#a-file-already-at-the-path)).
+Takes `if_exists` (see [A file already at the path](plugins.md#a-file-already-at-the-path)). A file over 8 MB is checked for and then uploaded in
+parts, so two runs creating the same new name at once can both succeed.
 
 ## Archive a workbook with an Azure identity
 

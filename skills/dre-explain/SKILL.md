@@ -3,8 +3,8 @@ name: dre-explain
 description: Explain DRE in plain words - what it can do for the user's goal, what a report's YAML will do when it runs (its queries, outputs, documents, per-row copies, no-data rules, destinations, rates, holds and schedules), and what an option does with its default, choices and a recommendation. Read-only, it changes no file. Use when the user asks "what can dre do", "what does this report do", "what happens if I run this", "what does for_each / hold / on_empty / rate mean", "which should I pick", or when another DRE skill needs an option explained before the user chooses. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.2.1"
-  dre: ">=0.9.0, <0.12.0"
+  version: "5.3.0"
+  dre: ">=0.9.0, <0.13.0"
 ---
 
 # Explain DRE
@@ -189,7 +189,7 @@ Explain in this order, one short paragraph or list each, skipping what doesn't a
    per-row output: "one `<format>` per row of `<driver>`, keyed by `<key>`; each gets only its
    own rows"; the number of rows isn't known until it runs (`dre run <report> --preview` prints
    "would make N row(s)", and sends nothing).
-3. **When there's no data:** what `on_empty` (or the default, `continue`) does for each output.
+3. **When there's no data:** what `on_empty` (or the default: `skip` since DRE 0.12, `continue` before) does for each output.
    On a per-row output it applies twice: an empty driver makes nothing at all, and each row whose
    slice is empty follows it too (`skip`: that row gets no file, recorded `skipped`, reason
    `no_data`). A per-row message that attaches a skipped or failed row's file is skipped for

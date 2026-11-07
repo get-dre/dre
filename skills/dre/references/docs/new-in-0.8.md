@@ -2,7 +2,7 @@
 title: "New in 0.8"
 description: "A YAML parser update: keys pulled in by <<: merges report the merge line, and a few previously rejected YAML forms now parse."
 section: upgrading
-position: 4
+position: 6
 ---
 
 # New in 0.8

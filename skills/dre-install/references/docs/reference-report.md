@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.11/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.12/report.schema.json
 ```
 
 For copyable examples and common errors, see [Build and run reports](building-reports.md). The [glossary](glossary.md) defines DRE's terms.
@@ -38,7 +38,6 @@ For copyable examples and common errors, see [Build and run reports](building-re
 | `var_schema` | map |  | Optional declarations for variables: type, default, allowed values, description, required, and for strings a pattern and max_length. Kept separate from `vars` so a map-valued variable remains a plain value. |
 | `timezone` | string |  | The timezone `run.date` and `run.now` use, an IANA name such as `Australia/Sydney`. Default: UTC. |
 | `locale` | string |  | The locale this report's number filters format for (`de-DE`). Default: the folder's `+locale`, then the project's `locale`, then `en`. |
-| `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
 | `sources` | map, as in [the sources reference](reference-sources.md) |  | dbt-style source declarations (see the sources schema). May be written in any project YAML file. |
 
 ## `queries[]`
@@ -109,12 +108,12 @@ How a report's result is written and where it goes. Besides the keys below, each
 | `name` | string |  | Names the output so other outputs and Set overrides can refer to it (`outputs.<name>` in a message, `attach:`). Also the default file name (`<name>.<ext>`). Unique within the report. |
 | `format` | string |  | The output format: `message` (built in: a short headline rendered from the results), or `csv`, `delimited`, `fixed_width`, `parquet` or `xlsx` (each a plugin). Default: `csv`, or the project's `default_output`. |
 | `queries` | list of string |  | Which of the report's queries this output formats. Default: all of them. Each query runs once, whatever the number of outputs. |
-| `when` | string or boolean |  | A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. |
-| `destination` | map (see below) or list of map (see below) |  | Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. |
-| `template` | map (see below) |  | The template an xlsx output fills (a branded workbook, instead of a new one), or an html or pdf output renders (a Jinja HTML + CSS file; see the document plugin). |
+| `when` | string or boolean or null |  | A Jinja expression over the results (`results.<query>.value < 0`); when it's false, the output is skipped and recorded as `skipped`. `null` clears an inherited condition. |
+| `destination` | map (see below) or list of map (see below) or null |  | Where to deliver the file: one destination, or a list to deliver to several in one run. Default: the file stays in the target path. `null` clears inherited destinations. |
+| `template` | map (see below) or null |  | A template for xlsx, html or pdf. `null` clears an inherited template. |
 | `for_each` | map (see below) or any |  | One copy of the output per row of a driver query (`{query: members, key: member_id}`), each with its own slice of the results and the driver row as `each.*`; `false` turns an inherited one off. See docs/per-row-outputs.md. |
 | `file_name` | string |  | A per-row output's file name, with Jinja (`"{{ each.member_id }}_statement.pdf"`). Default: the row's key and the format's extension, under a folder named after the output. |
-| `on_empty` | string |  | When every query of the output returns no rows: `continue` (default) writes and delivers it empty, with a warning; `skip` writes and delivers nothing; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md. |
+| `on_empty` | string |  | When every query of the output returns no rows: `skip` (default) writes and delivers nothing, recorded as `skipped` with reason `no_data`; `continue` writes and delivers it empty, with a warning; `fail` fails the run. A query's own `on_empty` wins. See "When there's no data" in docs/building-reports.md. |
 | `extension` | string or boolean or null |  | File extension for text formats (e.g. `aba`), instead of the format's own. `""` or `false` means none. Not for xlsx. |
 | _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
@@ -208,7 +207,6 @@ A query with settings.
 | `data_tests` | list of map |  | Checks of saved local results or explicit source relations. Each entry names one test block or explicit test_ macro, optionally qualified by package, with arguments, config, and optional query_results mapping macro arguments to earlier query names in the same Binding; run by dre test and dre build, never dre run. |
 | `on_empty` | `continue` or `skip` or `fail` |  | When this query returns no rows: keep its empty tab, leave it out, or fail the run. |
 | `secret_columns` | list of string |  | Columns whose values are masked in DRE's logs, results and previews, added to the query's own. |
-| _other keys_ | | | Options of the plugin that handles this block; see [Plugins](plugins.md). |
 
 ## `var_schema.<name>`
 
@@ -223,18 +221,6 @@ A query with settings.
 | `allowed` | list of any |  | Optional exact values accepted for this variable; required for the enum type. |
 | `pattern` | string |  | For `string` variables: a regular expression the whole value must match, e.g. `^[A-Z]{3}[0-9]{4}$` for a customer code. Anchors are implied. |
 | `max_length` | integer |  | For `string` variables: the most characters a value may have. |
-
-## `plugins[]`
-
-A package with its source.
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `name` (required) | string |  | The package name: lowercase letters, digits and `_`. |
-| `version` | string |  | A version constraint such as `1.2.0` or `>=1.0`. Not allowed with `local`. |
-| `github` | string |  | Install from the releases of this GitHub repository, `owner/repo`. |
-| `local` | string |  | Use the package folder at this path as it is. |
-| `registry` | string |  | Install from this registry index (a URL or a path) instead of the default one. |
 
 <!-- docs-nav: generated by .github/scripts/docs_sections.py from docs/sections.json -->
 

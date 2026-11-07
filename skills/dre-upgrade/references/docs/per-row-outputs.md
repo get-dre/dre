@@ -52,6 +52,11 @@ output:
 `for_each` works with every format and destination, and inherits like other output keys: a Set
 can turn it on, or off with `for_each: false`. Each Set's Binding fans out on its own.
 
+Rendered email `to`, `cc` and `bcc` options refuse values containing a comma. Each row must
+supply one address per value; use separate list entries for multiple recipients. This prevents
+a row value from adding a recipient to another member's statement. Literal recipient options
+keep their usual comma-separated and list forms.
+
 ## Files
 
 Each row's file is `<output>/<key>.<ext>` in the run folder (`statement/12345.pdf`; a
@@ -61,6 +66,13 @@ Key values are made safe for file names: letters and digits in any script (`Êù±‰
 have the same key, or would write the same file name, so rows never overwrite each other. A
 destination with a `path` must use `each.*` in it, or `dre validate` fails; pathless
 destinations (email, Slack) are exempt.
+
+Rendered remote paths must differ too: a row whose destination path another row already
+delivered to in the run (or another Set's row, when Bindings run at once) fails, naming that
+row. A path that a row's values give a `..`, an absolute start or a drive (`C:`), or a Windows
+device name (`CON`, `NUL`), is refused and that row fails; what the YAML itself writes there is
+kept. A rendered `file_name` must be a single file name; on Windows it also can't hold a `:` or
+be a device name.
 
 ## When a row fails
 
@@ -82,7 +94,8 @@ Rows render and deliver `for_each.concurrency` at a time (default 4; `--row-conc
 `DRE_ROW_CONCURRENCY` override it), each worker reusing its plugin processes from row to row.
 This is separate from `--threads`, and opens no extra warehouse connections.
 `rate:` on a destination entry paces its deliveries across every worker, to stay under an SMTP
-relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`, spaced
+relay's or Slack's limits: `rate: 100/minute`, `rate: 5/second` or `rate: 20000/hour`
+(units: `s`/`sec`/`second`, `m`/`min`/`minute`, `h`/`hr`/`hour`, or their plurals), spaced
 evenly (`60/minute` sends one a second). `burst: 20` lets up to 20 go back to back while keeping
 the same average. `burst` must be between 1 and 4294967295. `dre run --rate` and
 `dre release --rate` override every destination's rate for one command. If a service still says
@@ -168,9 +181,11 @@ renders and delivers **only** that run's failed and never-started rows, from tho
 with no query, so retried members get the same figures as the rest of the batch. The retry is
 its own run folder (`retry_of` in its `run_results.json`, shown by `dre history`), doesn't become
 the current run, leaves the original's `rows.jsonl` untouched, and skips the report's other
-outputs. Retrying again (of either run) never re-sends a row that succeeded. A run that was
-pruned (`keep_runs`) can't be retried; with `for_each.keep_results: false` nothing is saved, and
-a retry runs the queries again, with a warning.
+outputs. Retrying again (of either run) never re-sends a row that succeeded, and a failed row
+goes again only to the destinations it failed on (one it reached or held isn't sent twice). A
+run that was pruned (`keep_runs`) can't be retried; with `for_each.keep_results: false` nothing
+is saved, and a retry runs the queries again, with a warning. The same goes when a query has
+`secret_columns`: they're saved masked, so a retry runs the queries again.
 
 `--only-keys 101,102` and `--limit-rows 10` make only some rows (recorded as `partial`).
 

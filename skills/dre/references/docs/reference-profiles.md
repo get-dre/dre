@@ -16,7 +16,7 @@ Where: `profiles.yml`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.11/profiles.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.12/profiles.schema.json
 ```
 
 For copyable examples and common errors, see [Connections and targets](connections.md). The [glossary](glossary.md) defines DRE's terms.
@@ -26,7 +26,6 @@ For copyable examples and common errors, see [Connections and targets](connectio
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `connections` | map |  | Database connections, referenced by `default_profile`, `profile:` (report, query, Set, folder `+profile`) and a source's `profile`. |
-| `sources` | map |  | DRE 0.1's name for `connections:`. Still read in 0.2.x, with a warning: rename it to `connections:`. |
 | `destinations` | map |  | Delivery targets, referenced by `output.destination.profile`. |
 
 ## `connections.<name>`

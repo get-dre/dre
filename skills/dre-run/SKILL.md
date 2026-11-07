@@ -3,8 +3,8 @@ name: dre-run
 description: Invoke this skill before DRE scheduling/run answers or CLI use, even quick questions about when a schedule fires. Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews per-row outputs, retries failed rows, releases held deliveries after review (dre release), paces deliveries with rates, previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.2.1"
-  dre: ">=0.9.0, <0.12.0"
+  version: "5.3.0"
+  dre: ">=0.9.0, <0.13.0"
 ---
 
 # Run, check and deliver DRE reports
@@ -168,6 +168,17 @@ in `run_results.json.project_errors` (`path`, `code`, `message`, one entry per r
 those records and the selected outputs; keep the same production and delivery confirmations.
 Use `dre validate` as the whole-project gate; a successful selected run does not clear it.
 
+### Check attached data tests (DRE 0.11 and later)
+
+Inspect the selected queries' `data_tests`. For test-only requests, run `dre test <report>`
+with the selected Sets and target: it executes fresh queries and checks, with no report
+formatting or delivery. Production reads still require the confirmation below.
+Read [Build and run reports: Check returned data with `dre test`](references/docs/building-reports.md#check-returned-data-with-dre-test)
+for verdicts and execution restrictions. Do not call a preview or `dre run` a data-test pass:
+`dre run` skips checks. Use `dre build` for production or scheduled delivery when attached
+tests must gate output. Error-severity failures block the affected Binding.
+On DRE 0.9 or 0.10, explain that data tests require 0.11 or newer; do not invoke these commands.
+
 ### Step 4: preview
 
 Run `dre run <report> --preview` (100 rows; `--preview 20` for fewer). It runs the queries with a
@@ -209,7 +220,8 @@ target, where it came from, and each profile's entry), confirm first (RUN-2):
 1. show what will happen, from step 3's `dre validate -s <report>` (target, connections, output,
    each destination with its recipients, channel or path);
 2. ask for an explicit yes;
-3. run `dre run <report>` with the same selection, Set and target.
+3. run `dre build <report>` when attached data tests must gate delivery (DRE 0.11+), otherwise
+   `dre run <report>`, with the same selection, Set and target. Show that command before confirmation.
 
 For a per-row output that sends to people, also say how many deliveries the preview counted, and
 check that the destination profile delivers nowhere on `dev` (RUN-8); recommend a first
@@ -232,7 +244,8 @@ Report what was delivered where, what delivered nowhere on purpose, and what fai
 several outputs, `output_results` has one entry per output: `skipped` (its `when:` was false, or
 its message rendered empty) is not a failure, and a message's entry holds the full text it sent.
 
-End with what ran and what's next: fixing a failure, or scheduling (`dre run --schedule <name>`
+End with what ran and what's next: fixing a failure, or scheduling (`dre build --schedule <name>`
+for reports with attached tests on DRE 0.11+, otherwise `dre run --schedule <name>`,
 from the user's orchestrator, with `DRE_RUN_AT` for the instant it was scheduled for, RUN-3; a
 lasting `--target-path` on ephemeral runners, RUN-4).
 
@@ -332,7 +345,8 @@ Read the error: DRE names the report, Binding, file and line. Then:
   `on_orphan_rows: fail`.
 - **`dre release` refuses a file:** it changed since the run (its SHA-256 differs), or the run
   was pruned (`keep_runs`). Run again and review the new files.
-- **No data:** an output skipped with `no_data` did what its `on_empty: skip` says; a run that
+- **No data:** an output skipped with `no_data` did what its `on_empty: skip` (the default since
+  DRE 0.12; `on_empty: continue` sends empty files) says; a run that
   failed with `no-data` had `on_empty: fail` (`topics/no-data.md`).
 - **A plugin can't be installed or started:** `dre deps` installs the project's plugins and says
   what failed; the machine must reach GitHub.

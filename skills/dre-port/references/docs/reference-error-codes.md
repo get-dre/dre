@@ -17,9 +17,9 @@ Each code has a kind, which decides `dre`'s exit code and whether trying again c
 
 ### ambiguous-selector
 
-A selector matches a report and a folder.
+A bare selector picks different reports as a report, tag or folder.
 
-A bare name can mean a report or a folder. Use `folder:<path>` or the report's full dotted path.
+A bare name is read as a report name, a tag and a folder name; when those pick different reports DRE refuses rather than guess. Write the one you mean: `report:<name>`, `tag:<tag>` or `folder:<dotted path>`.
 
 ### invalid-selector
 
@@ -51,6 +51,12 @@ A selector names a source that doesn't exist.
 
 `source:<name>` selects reports using that source; the name must be declared under `sources:`.
 
+### unused-var
+
+A `--var` name appears nowhere in the project.
+
+No project file mentions the name, so nothing can read it with `var()`: usually a typo (`--var regoin=EU`), and the run uses the template's default instead. A warning; check the spelling.
+
 ## Config: the project's files
 
 ### compile-failed
@@ -81,7 +87,7 @@ Declare each package once, at one revision.
 
 Two declarations of a plugin allow no common version.
 
-A package declared in several files must have constraints some version satisfies. Align them.
+Repeated declarations in dependencies.yml must have constraints some version satisfies. Align them.
 
 ### conflicting-plugin-sources
 
@@ -237,7 +243,7 @@ The package's folder or manifest couldn't be read. The message has the reason.
 
 `packages:` is wrong.
 
-`packages:` (in dependencies.yml or packages.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.
+`packages:` (in dependencies.yml) is a list of macro packages, each with `git:` and `revision:`, or `local:`.
 
 ### invalid-plugin-declaration
 
@@ -333,7 +339,7 @@ A Jinja template in SQL or YAML has a syntax error: an unclosed `{{` or `{%`, an
 
 `packages:` is in the wrong file.
 
-Macro packages are declared in dependencies.yml or packages.yml at the project root.
+Macro packages are declared in dependencies.yml at the project root.
 
 ### missing-field
 
@@ -363,7 +369,7 @@ A template file doesn't exist.
 
 Plugins are declared under an old key.
 
-Plugin packages are declared under `plugins:` (usually in dependencies.yml), not `destinations:`, `formats:` or a list of names under `sources:`.
+Plugin packages are declared under `plugins:` in dependencies.yml, not `destinations:`, `formats:` or a list of names under `sources:`.
 
 ### no-connection
 
@@ -412,12 +418,6 @@ With Sets, each Set chooses its connection; give the report one or the other.
 The project uses profiles but there's no profiles.yml.
 
 DRE looks for profiles.yml in `--profiles-dir`, `DRE_PROFILES_DIR`, the project directory, then `~/.dre`. Create one with `dre init`, or point DRE at yours.
-
-### profiles-sources-renamed
-
-profiles.yml uses the old `sources:` section.
-
-DRE 0.2 renamed profiles.yml's `sources:` to `connections:`. Rename it.
 
 ### ref-cycle
 
@@ -577,9 +577,9 @@ A schedule names a timing that doesn't exist.
 
 ### unmanaged-report
 
-A .sql file runs as an unmanaged report.
+A .sql file no YAML lists would run as an unmanaged report.
 
-A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report: it runs with the folder's settings into a csv. That's for quick tests; add a YAML to make it a managed report.
+A `.sql` file no YAML lists in `queries:` (and no `ref()` uses) is an unmanaged report. It's an error unless `allow_unmanaged: true` in dre_project.yml opts in; then it runs with the folder's settings, for quick tests, with a warning. List it in a report YAML, or delete it.
 
 ### unrecognized-yaml
 
@@ -629,7 +629,7 @@ The format plugin failed to write the output (bad options, a template it can't f
 
 A plugin's options weren't checked.
 
-The plugin is too old to describe its options, or couldn't be asked. Run `dre plugin update` to get a version that checks them.
+The plugin could not supply valid option or format metadata. Update it with `dre plugin update`. Missing format properties omit file predictions and prevent file rendering.
 
 ### plugin-install-failed
 

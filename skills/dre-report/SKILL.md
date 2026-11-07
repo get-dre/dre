@@ -3,8 +3,8 @@ name: dre-report
 description: Create or change a DRE report, guided - the SQL and report YAML, tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet, PDF and HTML documents from a template), one copy per member or client (for_each), what happens with no data (on_empty), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat) with rates, retries and held deliveries, headline messages, and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, variable, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.2.1"
-  dre: ">=0.9.0, <0.12.0"
+  version: "5.3.0"
+  dre: ">=0.9.0, <0.13.0"
 ---
 
 # Write or change a DRE report
@@ -159,11 +159,15 @@ output:
 - Report keys: `queries`, `output`, `vars`, `profile` (a connection other than the project's
   `default_profile`), `sets`, `default_set`, `tags`, `timezone`, `description`, `meta`, `var_schema`. Schedules live in `schedules.yml`,
   never in a report (see Scheduling a report). Query entry keys:
-  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`, `on_empty`. Output keys DRE
+  `query`, `profile`, `tab`, `tab_name`, `anchor`, `header`, `columns`, `autofit`, `style`, `on_empty`, `secret_columns`, `data_tests`. Output keys DRE
   owns: `name`, `format`, `queries`, `when`, `destination`, `template`, `for_each`, `file_name`,
   `on_empty`, `extension`; every other output key is the format plugin's option. Destination
-  entry keys DRE owns: `profile`, `path`, `attach`, `hold`, `rate`, `burst`; the rest are the
+  entry keys DRE owns: `profile`, `path`, `attach`, `hold`, `rate`, `burst`, `zip`; the rest are the
   destination plugin's.
+
+Destination `zip` is core-owned, not a destination plugin option. For archive delivery or
+passwords, look up `zip` in the bundled docs index and follow Password-protected outputs;
+use `env_var()` or a declared secret column rather than a literal password.
 
 ## AI context
 
@@ -260,11 +264,41 @@ before writing.
 <!-- dre_utils: once the dre_utils macro package is released, suggest its macros here where
      they fit (star, pivot, column_values, quote_identifier). Until then, don't mention it. -->
 
+### Data checks (DRE 0.11+) and sensitive columns
+
+When the report needs data-quality checks, open the bundled docs index and follow
+[Build and run reports: Check returned data with `dre test`](references/docs/building-reports.md#check-returned-data-with-dre-test).
+Define a SQL `{% test name(relation, ...) %}` block under `macros/` and attach it to the
+query's `data_tests` list, for example:
+
+```yaml
+queries:
+  - query: invoices
+    data_tests:
+      - missing_identifier:
+          arguments: {column: invoice_id}
+          config: {execution: local, severity: error}
+```
+
+Zero failing rows pass; error-severity failures block that Binding
+in `dre build`. Choose local (default) or source execution from the documented restrictions.
+Run `dre test <report>` to check fresh data without report delivery; use `dre build` when
+checks must gate formatting and delivery. `dre run` skips attached data tests.
+
+Mark sensitive query values with `secret_columns: [column_name]`; this masks DRE diagnostics
+without changing delivered files. DRE 0.12 also masks saved result copies, including per-row
+Arrow snapshots. On older supported cores, do not assume per-row snapshots mask those columns.
+For per-row passwords, review
+[Password-protected outputs](references/docs/password-protected-outputs.md) and
+`for_each.keep_results: false` before retaining results on disk.
+
 ### Step 5: the format
 
 Load `references/topics/formats.md` (and `documents.md` for pdf or html). Use only options from
 `references/plugins/format-<format>.md`. For xlsx:
 
+- query-level `autofit` and `style` override output defaults; `columns.<name>.width` and
+  `columns.<name>.style` override the query's settings;
 - number and date formats per column (`columns: {amount: {format: "#,##0.00"}}`, per query or
   output-wide), and `date_format` for every date column;
 - row formulas (`formula: "={qty}*{price}"`, with a placeholder column selected in SQL) and

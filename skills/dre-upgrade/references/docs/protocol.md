@@ -54,8 +54,8 @@ The config block a plugin owns:
 
 | Kind | Block | Keys core owns (never sent) |
 |---|---|---|
-| format | a report's `output:` map, plus the project's `format_options.<format>` | `format`, `destination`, `template`, `extension` |
-| destination | one entry of `output.destination` | `profile`, `path` |
+| format | a report's `output:` map, plus the project's `format_options.<format>` | `name`, `format`, `queries`, `when`, `destination`, `template`, `extension`, `on_empty`, `for_each`, `file_name` |
+| destination | one entry of `output.destination` | `profile`, `path`, `attach`, `hold`, `rate`, `burst`, `zip` |
 | source | none; its settings are the profile's connection fields | |
 
 Rules for option messages. Each problem is one sentence that names the key in backticks
@@ -89,7 +89,11 @@ or without replacing), exists, delete, and flags for what it can do in one step.
   system, used by core's `local` destination).
 - Go: `go/plugin` (`Store`, `Rules`, `Deliver`).
 
-A temporary file is named `.<name>.dre-part`, next to the final file or in `temp_dir`. With
+A temporary file is named `.<name>.<unique>.dre-part`, next to the final file or in `temp_dir`.
+The token is fresh for every upload attempt, including retries, across processes and deliveries
+sharing a staging directory. Both SDKs use a process ID, timestamp and process-local sequence.
+Conformance operation logs replace these tokens with `<temp-1>`, `<temp-2>`, and so on, in write
+order; the runner checks their shape and refuses reuse. With
 `number`, the new file is saved as `<name>_2.<ext>`, then `_3`. Where a server can't check and
 write in one step (FTP), the rules look first, then write. A file already there with `if_exists:
 error` fails with kind `delivery` and code `<plugin>/file-exists`.
@@ -187,7 +191,7 @@ Capabilities:
 | Capability | Meaning |
 |---|---|
 | `sessions` | Source: one session (connection) is held across every request until `close`, so temp tables and session settings persist. Core refuses to run a Binding with more than one statement on a source without it. |
-| `read_only` | Source: honours `read_only: true` on `open`. |
+| `read_only` | Source: honours `read_only: true` on `open`. Used by `dre query` and catalogue discovery; see the session limits below. |
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
 | `catalog` | Source: can discover accessible relations through native database metadata. |
@@ -290,6 +294,55 @@ field, prompted or not, is one templates can't read. Format plugins return an em
 those values; `min` and `max` bound a number, inclusive. It may be omitted when the plugin
 takes no options.
 
+#### File-format metadata
+
+A file format's `describe` reply must supply `format_properties` for DRE 0.12:
+
+```json
+{"type":"describe","id":1,"connection_fields":[],"option_fields":[],
+ "format_properties":{"extension":"csv","layout":"single_table"}}
+```
+
+`extension` is a bare suffix without any dot, `/`, `\`, whitespace or control character.
+It also rejects the reserved Windows filename characters `:`, `<`, `>`, `"`, `|`, `?` and `*`.
+An empty string means no extension. These rules apply to the plugin's metadata, before file
+prediction; do not send a full filename or a leading dot. `layout` declares behavior
+independently of the plugin's name:
+
+| Layout | Core behavior |
+|---|---|
+| `single_table` | A file holds one query result; several results split into separate files. |
+| `multiple_tables` | One file receives all the output's query results. |
+| `workbook` | One workbook receives the results; workbook sheet/template-binding checks apply. |
+| `document` | The renderer receives the document context; its template controls the sections shown. |
+
+Core resolves these properties from the selected, pinned plugin before predicting files or
+checking format-specific settings. It never guesses traits from a format name. Missing or
+invalid metadata produces an `options-unchecked` warning and omits file predictions; file
+rendering fails before source queries rather than using guessed behavior. Compilation and
+data-test-only commands do not require file-format metadata. The built-in message output is
+independent of this file-format contract.
+
+#### Source SQL policy
+
+Sources enabling `dre query` supply `sql_dialect` in `describe`. The policy names a parser
+(`generic`, `duckdb`, `postgres` or `databricks`), `identifier_quote`, `identifier_case`
+(`insensitive`, `lower_unless_quoted` or `upper_unless_quoted`), `literal_style` (`doubling` or
+`hex`), and explicit `denied_functions` and `file_formats` lists. Empty lists are explicit
+policies; omitted safety fields and unknown policy keys are invalid. `identifier_quote` must
+be a double quote or a backtick. Entries in `denied_functions` and `file_formats` must be
+nonempty ASCII letters, digits or underscores. A hex policy supplies `hex_literal` with
+exactly one `{hex}` placeholder; a doubling policy leaves it out. `read_only_notice` is optional
+and, when present, must contain non-whitespace text; it documents the permission boundary
+when the source cannot provide a database-enforced read-only session. Missing or invalid
+policies refuse `dre query`; they never enable a permissive default. A separately advertised
+`identifier_quote` must agree with the policy.
+
+The SDKs transport these fields without changing protocol 1. The Rust SDK exposes
+`SqlDialect` and `SqlCatalog`; source plugins own native catalogue queries and the `catalog`
+exchange remains capability-gated. Core validates the returned `dre/catalog/v1` document and
+opens a read-only catalogue session when the source advertises `read_only`.
+
 `identifier_quote` (sources only) is the character the database quotes identifiers with: `"` for
 DuckDB and Postgres, a backtick for Databricks. Core quotes the parts of a
 [source](sources.md) that ask for it (`quoting:`) with this character, doubling it inside a name.
@@ -302,7 +355,8 @@ characters are `chr(39)` and `chr(92)` joined with `||`, which DuckDB, Postgres 
 read the same way. `backslash`: `\'` and `\\` inside the quotes, for a database without `chr()`
 (ClickHouse). A core that doesn't know the field ignores it, so a plugin can send it to any
 core; core asks the plugin to update DRE when it names a style core doesn't know. Added in DRE
-0.5.1 (clickhouse 1.0.1).
+0.5.1 (clickhouse 1.0.1). With `backslash`, core also reads a backslash inside quotes as an escape when it
+splits that source's SQL into statements (DRE 0.12).
 
 `message_limit` (destinations advertising `message`) is the most characters a message may have
 in the service after translation. `dre run --preview` shows it next to each message's length.
@@ -343,11 +397,29 @@ When stdin closes, the plugin exits.
 ### Source
 
 ```json
-{"type": "open", "connection": {…profile target fields…}, "read_only": false}
+{"type": "open", "connection": {…profile target fields…}, "read_only": false, "sandbox": false}
 ```
 
 `open` starts the session. `connection` holds every field of the selected `profiles.yml` target
 except `type`, with `env_var()` already rendered by core. The reply is `ok`.
+
+`read_only: true` requests a read-only database session. A source advertising `read_only`
+must enforce it, or fail `open` rather than silently opening a writable session.
+`sandbox` is optional in protocol 1 and defaults to false. `sandbox: true` requests a
+read-only session that also refuses access to files, programs and networks beyond the database,
+where the engine can enforce those restrictions. For example, disable file readers, extension
+loading and external execution. A source must refuse operations it cannot safely permit.
+This is an engine restriction, not an operating-system sandbox. The Rust SDK's
+`open_sandboxed` defaults to read-only `open`; the Go SDK falls back to `OpenReadOnly`.
+Authors must override those hooks for additional engine restrictions.
+
+`dre query` requires a valid `sql_dialect` policy. When `read_only` is advertised it sends
+both flags as true. A policy with an explicit `read_only_notice` may instead use a normal
+session after the single-query checks; Databricks uses this path. Use a read-only database
+role there: SQL validation does not replace database permissions. Sources with neither
+read-only support nor an explicit policy notice are refused. Older plugins may ignore
+`sandbox`, so database permissions remain the access boundary even when the source supports
+read-only sessions.
 
 ```json
 {"type": "execute", "sql": "select …", "row_limit": 100}
@@ -417,9 +489,12 @@ type in the final document. Only sent to plugins advertising `catalog`.
  "template": {…}}
 ```
 
-`result_index` is always 1: each query contributes at most one result set. `anchor`, `header`
-and `columns` (the query entry's per-column options: `format`, `formula`, `total`) are left out
-when not set.
+`result_index` is always 1: each query contributes at most one result set. Optional `anchor`,
+`header`, `autofit` and `style` come from the query entry. `columns` carries per-column
+`format`, `formula`, `total`, `width` and `style`; unset fields and an empty columns map are
+omitted. For XLSX, query `autofit` and sheet `style` override output defaults, while column
+`width` and cell `style` override those query settings. Their shapes are defined in the
+[message schema](https://github.com/get-dre/dre/blob/master/crates/dre-protocol/conformance/schema.json) and [report reference](reference-report.md).
 
 After `write`, core streams each result set in the order listed. Each one is sent as one or more
 data frames (the first carries the schema), then `{"type":"result_set_end"}`. After the last
@@ -472,7 +547,7 @@ context (DRE 0.6): `{"file": "<absolute path>" or null, "project_root", "run": {
 "target", "schedule", "date", "now", "scheduled_at", "timezone", "week_start",
 "week_numbering"}, "vars": {...}, "cli_vars": {...}, "locale"}`. `vars` holds every resolved var
 (the Binding's, with the schedule's on top) and `cli_vars` the `--var` values as typed, which
-`var()` reads first. The plugin renders the template itself; `dre_core::document` builds the same
+`var()` reads first. The plugin renders the template itself; `dre-template`'s `document` module builds the same
 `var()`, `run.*`, date and number filters core's templates have.
 
 ### Destination
@@ -490,7 +565,7 @@ try more than once (protocol 1; core records it in `run_results.json`). The loca
 removed. It stays in `target/` whatever the outcome.
 
 `options` holds the destination entry's plugin options: every key of the entry in
-`output.destination` other than `profile` and `path` (for example `to` and `subject` for email,
+`output.destination` other than the core-owned keys in the table above (for example `to` and `subject` for email,
 `channel` and `message` for Slack). Core renders their Jinja before sending, so string values
 arrive final. It is `{}` when the entry has none. Core has already had them checked with
 `validate`, and the Rust SDK checks them again before calling the plugin.
@@ -558,8 +633,34 @@ works with core 0.3: on version 0 they send no ids and log to stderr with the pr
 shows (`info: `, `warning: `).
 
 The protocol version is a single integer. Core and plugins release independently, so each side
-states the range it supports and the handshake picks the highest common version. Adding a new
-optional field to a message does not change the version; anything else does.
+states the range it supports and the handshake picks the highest common version.
+
+Within a wire version, optional fields may be added only when their absence preserves the old
+behavior and peers ignore fields they do not recognize. New requests, replies and exchanges
+must be gated by an advertised capability or an explicit request opt-in before either peer
+sends them. For example, `need_fonts` is allowed only after `write.font_requests: true`.
+A peer must continue to serve the existing exchange when the other peer does not opt in.
+
+Removing or renaming messages or fields, adding required fields, changing existing meanings,
+or changing framing or Arrow encoding requires a new wire version. A plugin built for wire
+version 1 continues to work with hosts supporting version 1 under these rules.
+
+The Rust SDK package version is separate from the wire version. `Request` and `Response` are
+`#[non_exhaustive]`: downstream matches must include a wildcard. This permits Rust enum
+additions; it does not make unknown wire messages valid or bypass capability negotiation.
+
+`dre-protocol` contains the plugin SDK, frames, messages and language-neutral conformance
+fixtures. Process management and the Rust conformance runner live in `dre-plugin-host`.
+When upgrading from SDK 0.11 to 0.12, plugin tests add `dre-plugin-host` as a dev-dependency
+and replace `dre_protocol::host` and `dre_protocol::conformance` imports with
+`dre_plugin_host::host` and `dre_plugin_host::conformance`. Plugin implementations continue
+to depend on `dre-protocol`; existing plugin binaries need no rebuild for this split.
+
+`dre-core`, `dre-plugin-host` and `dre-template` (the template context and filters core and the
+`document` plugin share) are implementation libraries for the matching CLI release;
+their Rust APIs carry no stability guarantee. Integrations should use the CLI and published
+JSON contracts, and plugins should use the protocol. Core's template and run internals are
+not an embedding API.
 
 ## Conformance
 
@@ -585,8 +686,8 @@ contract:
 
 ### Running the suite on your plugin
 
-Build your plugin, then run the `dre-conformance` command from the `dre-protocol` crate
-(`cargo install dre-protocol`) against the executable:
+Build your plugin, then run the `dre-conformance` command from the `dre-plugin-host` crate
+(`cargo install dre-plugin-host`) against the executable:
 
 ```text
 dre-conformance ./dre-plugin-mydb --session session.json
@@ -612,7 +713,7 @@ source given a session file: a connection that opens, and a statement per role.
 `rows` returns at least 3 rows; `slow` runs for at least a few seconds. Leave out a role your
 database can't express; the cases that need it are skipped.
 
-In Rust, `dre_protocol::conformance::assert_conforms(path)` (or `assert_conforms_with` with
+In Rust, `dre_plugin_host::conformance::assert_conforms(path)` (or `assert_conforms_with` with
 `conformance::Options`, for a session or environment variables) fails a test on any failed
 case. In Go, `plugintest.Conformance(t, pkg, plugintest.Options{})` (module
 `github.com/get-dre/dre/go/plugin`, which embeds a copy of the cases) runs the same cases against

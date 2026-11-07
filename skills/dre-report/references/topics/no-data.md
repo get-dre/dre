@@ -10,8 +10,8 @@ no records" map here.
 
 | `on_empty` | What happens | Exit | When to recommend |
 |---|---|---|---|
-| `continue` (default) | written and delivered empty, with a warning | 0 | readers expect a file every time (a system picking it up) |
-| `skip` | nothing written or delivered; a "skipped" line | 0 | people: don't send an empty email or post |
+| `skip` (default since DRE 0.12) | nothing written or delivered; a "skipped" line | 0 | people: don't send an empty email or post |
+| `continue` (the default before 0.12) | written and delivered empty, with a warning | 0 | readers expect a file every time (a system picking it up) |
 | `fail` | the run fails before anything is written | 1 | the data should never be empty (a regulator's daily file) |
 
 ## Write

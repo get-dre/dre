@@ -9,14 +9,14 @@ position: 10
 
 <!-- Generated from docs/schemas by .github/scripts/schema_docs.py. Edit the schema, not this page. -->
 
-Plugin packages and macro packages, in `dependencies.yml` or `packages.yml` at the project root.
+Plugin packages and macro packages, in `dependencies.yml` at the project root.
 
-Where: `dependencies.yml` or `packages.yml`.
+Where: `dependencies.yml`.
 
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.11/dependencies.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.12/dependencies.schema.json
 ```
 
 For copyable examples and common errors, see [Plugin and macro packages](registry.md). The [glossary](glossary.md) defines DRE's terms.
@@ -25,7 +25,7 @@ For copyable examples and common errors, see [Plugin and macro packages](registr
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place. |
+| `plugins` | list of plugin packages: a name, `name: "<version>"`, or a map (see below) |  | The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. Declare these only in `dependencies.yml` at the project root. |
 | `extensions` | list of map (see below) | `[]` | Optional separately licensed companion executables. `dre deps` offers to install them (or `--accept-proprietary`); ordinary report commands do not. Pin each binary version and review its own licence separately. |
 | `packages` | list of any |  | Macro packages (git or local). Their macros are called through the package name, e.g. `{{ dre_utils.star(...) }}`. Exact commits are pinned in `dre.lock`. |
 

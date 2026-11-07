@@ -15,12 +15,16 @@ Every `dre` command uses the same codes:
 | `0` | Everything succeeded. Skipped outputs (`when:` false, a `{deliver: false}` destination) count as success. | Nothing. |
 | `1` | The command ran, but something failed: a report or a delivery (details per Binding in [`run_results.json`](manifest.md)), or problems `dre validate` found. | Look at the failures. A retry may help when the cause was temporary (a connection, the warehouse). |
 | `2` | The command couldn't start: bad flags or environment, an invalid project or profile, an unknown selection, a missing plugin. Nothing ran. | Fix the cause; retrying won't help. |
+| `75` | A selected Binding is already running. Other selected Bindings may have completed. | Wait for the active run before retrying; inspect each Binding before resending. |
 | `124` | The run took longer than its timeout (`--timeout`, `DRE_RUN_TIMEOUT`, `flags: run_timeout`); the running Binding is recorded as `timed_out`. | Raise the timeout, or look at what was running. |
 | `130` | Cancelled by Ctrl-C (SIGINT); the running Binding is recorded as `cancelled`. | |
 | `143` | Cancelled by a termination signal (SIGTERM; on Windows Ctrl-Break, closing the console, logging off or shutting down), as an orchestrator sends when it cancels a job. | |
 
-There's no separate code for a run where some reports failed and others delivered: `1` means
-something failed, and each Binding's `run_results.json` says which.
+A busy Binding makes the run exit `75`, including when other Bindings completed. Otherwise,
+a run where some reports failed and others delivered exits `1`. Each Binding's
+`run_results.json` says which. Cancellation and timeout codes take precedence.
+Binding results and JSON `binding_end` events use `succeeded` or `failed`, matching per-row
+results; cancellation and timeout remain `cancelled` and `timed_out`.
 
 For `dre validate`, `dre compile`, `dre deps` and `dre ls`, `1` means the command ran and found
 problems and `2` means it couldn't run (no project, bad flags). Warnings exit `0`; `dre validate
