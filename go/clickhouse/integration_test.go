@@ -227,10 +227,11 @@ func TestCancelStopsTheQueryOnTheServer(t *testing.T) {
 			"sql": "SELECT sleepEachRow(1) FROM numbers(30) SETTINGS max_block_size = 1, function_sleep_max_microseconds_per_block = 0, log_comment = 'dre-cancel-test'"})
 		time.Sleep(1500 * time.Millisecond)
 		c.Send(map[string]any{"type": "cancel", "id": 7})
-		r := c.Reply()
+		// Native streams the header before the rows, and a batch already in flight may still
+		// arrive after the cancel: skip both until the cancellation reply.
+		r := c.ReplySkippingRecords()
 		if r["type"] == "result" {
-			// Native streams the header before the rows; the batch isn't full yet.
-			r = c.Reply()
+			r = c.ReplySkippingRecords()
 		}
 		if r["type"] != "error" || r["kind"] != "cancelled" {
 			t.Fatalf("%v", r)
