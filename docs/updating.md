@@ -37,7 +37,7 @@ After applying the update command for your install method, validate and preview 
 [tutorial project](../examples/tutorial/). For production work, preview your own report with
 the same target and variables it normally uses. Keep the old binary or dependency pin available
 until those checks pass. Read the relevant [migration notes](migrating-to-0.2.md),
-[0.10](new-in-0.10.md), [0.4](new-in-0.4.md) and [0.5](new-in-0.5.md) before crossing a
+[0.12](new-in-0.12.md), [0.10](new-in-0.10.md), [0.4](new-in-0.4.md) and [0.5](new-in-0.5.md) before crossing a
 minor version.
 
 A checksum failure means the archive cannot be verified: download it again from the release;
@@ -110,4 +110,4 @@ See the [protocol](protocol.md) for the delivery contract.
 
 ---
 
-**Previous:** [Glossary](glossary.md) · **Next:** [New in 0.10](new-in-0.10.md)
+**Previous:** [Glossary](glossary.md) · **Next:** [Stability contract](stability.md)

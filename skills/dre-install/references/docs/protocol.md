@@ -54,8 +54,8 @@ The config block a plugin owns:
 
 | Kind | Block | Keys core owns (never sent) |
 |---|---|---|
-| format | a report's `output:` map, plus the project's `format_options.<format>` | `format`, `destination`, `template`, `extension` |
-| destination | one entry of `output.destination` | `profile`, `path` |
+| format | a report's `output:` map, plus the project's `format_options.<format>` | `name`, `format`, `queries`, `when`, `destination`, `template`, `extension`, `on_empty`, `for_each`, `file_name` |
+| destination | one entry of `output.destination` | `profile`, `path`, `attach`, `hold`, `rate`, `burst`, `zip` |
 | source | none; its settings are the profile's connection fields | |
 
 Rules for option messages. Each problem is one sentence that names the key in backticks
@@ -191,7 +191,7 @@ Capabilities:
 | Capability | Meaning |
 |---|---|
 | `sessions` | Source: one session (connection) is held across every request until `close`, so temp tables and session settings persist. Core refuses to run a Binding with more than one statement on a source without it. |
-| `read_only` | Source: honours `read_only: true` on `open`. |
+| `read_only` | Source: honours `read_only: true` on `open`. Used by `dre query` and catalogue discovery; see the session limits below. |
 | `check` | Source: supports `check` (verify a statement without executing it). |
 | `load` | Source: supports `load` (rows into a temporary table on the session). |
 | `catalog` | Source: can discover accessible relations through native database metadata. |
@@ -397,11 +397,29 @@ When stdin closes, the plugin exits.
 ### Source
 
 ```json
-{"type": "open", "connection": {…profile target fields…}, "read_only": false}
+{"type": "open", "connection": {…profile target fields…}, "read_only": false, "sandbox": false}
 ```
 
 `open` starts the session. `connection` holds every field of the selected `profiles.yml` target
 except `type`, with `env_var()` already rendered by core. The reply is `ok`.
+
+`read_only: true` requests a read-only database session. A source advertising `read_only`
+must enforce it, or fail `open` rather than silently opening a writable session.
+`sandbox` is optional in protocol 1 and defaults to false. `sandbox: true` requests a
+read-only session that also refuses access to files, programs and networks beyond the database,
+where the engine can enforce those restrictions. For example, disable file readers, extension
+loading and external execution. A source must refuse operations it cannot safely permit.
+This is an engine restriction, not an operating-system sandbox. The Rust SDK's
+`open_sandboxed` defaults to read-only `open`; the Go SDK falls back to `OpenReadOnly`.
+Authors must override those hooks for additional engine restrictions.
+
+`dre query` requires a valid `sql_dialect` policy. When `read_only` is advertised it sends
+both flags as true. A policy with an explicit `read_only_notice` may instead use a normal
+session after the single-query checks; Databricks uses this path. Use a read-only database
+role there: SQL validation does not replace database permissions. Sources with neither
+read-only support nor an explicit policy notice are refused. Older plugins may ignore
+`sandbox`, so database permissions remain the access boundary even when the source supports
+read-only sessions.
 
 ```json
 {"type": "execute", "sql": "select …", "row_limit": 100}
@@ -471,9 +489,12 @@ type in the final document. Only sent to plugins advertising `catalog`.
  "template": {…}}
 ```
 
-`result_index` is always 1: each query contributes at most one result set. `anchor`, `header`
-and `columns` (the query entry's per-column options: `format`, `formula`, `total`) are left out
-when not set.
+`result_index` is always 1: each query contributes at most one result set. Optional `anchor`,
+`header`, `autofit` and `style` come from the query entry. `columns` carries per-column
+`format`, `formula`, `total`, `width` and `style`; unset fields and an empty columns map are
+omitted. For XLSX, query `autofit` and sheet `style` override output defaults, while column
+`width` and cell `style` override those query settings. Their shapes are defined in the
+[message schema](https://github.com/get-dre/dre/blob/master/crates/dre-protocol/conformance/schema.json) and [report reference](reference-report.md).
 
 After `write`, core streams each result set in the order listed. Each one is sent as one or more
 data frames (the first carries the schema), then `{"type":"result_set_end"}`. After the last
@@ -544,7 +565,7 @@ try more than once (protocol 1; core records it in `run_results.json`). The loca
 removed. It stays in `target/` whatever the outcome.
 
 `options` holds the destination entry's plugin options: every key of the entry in
-`output.destination` other than `profile` and `path` (for example `to` and `subject` for email,
+`output.destination` other than the core-owned keys in the table above (for example `to` and `subject` for email,
 `channel` and `message` for Slack). Core renders their Jinja before sending, so string values
 arrive final. It is `{}` when the entry has none. Core has already had them checked with
 `validate`, and the Rust SDK checks them again before calling the plugin.

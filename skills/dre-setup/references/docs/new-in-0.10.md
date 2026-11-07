@@ -2,7 +2,7 @@
 title: "New in 0.10"
 description: "JDBC sources use operator-managed Java, and MiniJinja updates change several template results."
 section: upgrading
-position: 2
+position: 4
 ---
 
 # New in 0.10
@@ -56,4 +56,4 @@ update.
 
 ---
 
-**Previous:** [Updating DRE](updating.md) · **Next:** [New in 0.9](new-in-0.9.md)
+**Previous:** [New in 0.12](new-in-0.12.md) · **Next:** [New in 0.9](new-in-0.9.md)
