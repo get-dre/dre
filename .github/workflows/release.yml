@@ -236,9 +236,14 @@ jobs:
       - name: Install Maven 3.9.11
         shell: bash
         run: |
-          curl --fail --silent --show-error --location \
-            https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz \
-            -o "$RUNNER_TEMP/maven.tar.gz"
+          # Maven Central first (archive.apache.org drops connections); the checksum below
+          # pins the same file from either source.
+          for url in \
+            https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.11/apache-maven-3.9.11-bin.tar.gz \
+            https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz; do
+            curl --fail --silent --show-error --location --connect-timeout 20 \
+              --retry 3 --retry-all-errors "$url" -o "$RUNNER_TEMP/maven.tar.gz" && break
+          done
           echo "4b7195b6a4f5c81af4c0212677a32ee8143643401bc6e1e8412e6b06ea82beac  $RUNNER_TEMP/maven.tar.gz" \
             | sha256sum --check -
           mkdir -p "$RUNNER_TEMP/maven"
