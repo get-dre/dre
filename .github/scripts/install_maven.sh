@@ -17,5 +17,6 @@ for url in \
 done
 echo "$sha256  $archive" | sha256sum --check -
 mkdir -p "$dest"
-tar -xzf "$archive" --strip-components=1 -C "$dest"
+# cd first: GNU tar on Windows reads `D:` in `-C D:\...` as a remote host.
+(cd "$dest" && tar -xzf "$archive" --strip-components=1)
 "$dest/bin/mvn" -v | head -1
