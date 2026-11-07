@@ -26,7 +26,8 @@ fields and tested dialect examples.
 
 ## Build and test
 
-Build with Java 17 or newer and Maven 3.9 or newer:
+Build with Java 17 or newer and Maven 3.10.0, the version CI and releases use
+(`.github/scripts/install_maven.sh <dir>` installs it):
 
 ```sh
 mvn -B -f java/jdbc/pom.xml package
@@ -53,7 +54,7 @@ the same directory.
 
 Release packaging is `.github/scripts/package_jdbc.py`; run `python3 java/jdbc/test_package.py`
 to check the deterministic archive and launcher contract without a database. The release job
-uses the runner's Java to build with Maven 3.9.11 and packages the launcher, JAR and notices.
+uses the runner's Java to build with Maven 3.10.0 and packages the launcher, JAR and notices.
 Release checks unpack and launch each final archive using installed Java. A Linux
 install/update test runs a report using a test-only H2 driver through the normal registry and
 lock workflow. Grype scans the shaded Java dependencies in final archive SBOMs before
