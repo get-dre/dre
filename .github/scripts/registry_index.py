@@ -28,6 +28,13 @@ from release_trust import verify_archive
 YANKS = json.loads(pathlib.Path(__file__).with_name("registry_yanks.json").read_text())
 
 PROTOCOL = 0
+# Plugin protocol 1 (the newest a release speaks) merged at this instant; plugin releases published
+# since then speak it. Core 0.12 installs only protocol-1 releases.
+PROTOCOL_1_SINCE = "2026-10-10T02:41:17Z"
+
+
+def plugin_protocol(release):
+    return 1 if release.get("published_at", "") >= PROTOCOL_1_SINCE else PROTOCOL
 SCHEMA = 2
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 TAG = re.compile(r"^([a-z0-9_]+)-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$")
@@ -120,11 +127,15 @@ def main(old_path, repo):
         if not found:
             print(f"skipping {release['tag_name']}: no complete set of archives and checksums", file=sys.stderr)
             continue
-        p["versions"].append({"version": version, "protocol": PROTOCOL, "artifacts": found})
+        p["versions"].append({"version": version, "protocol": plugin_protocol(release), "artifacts": found})
         print(f"added {package} {version} ({', '.join(found)})", file=sys.stderr)
 
+    by_tag = {r["tag_name"]: r for r in published if not r.get("draft")}
     for name, p in by_name.items():
         for version in p['versions']:
+            release = by_tag.get(f"{name}-v{version['version']}")
+            if release:
+                version['protocol'] = plugin_protocol(release)
             reason = YANKS.get(name, {}).get(version['version'])
             if reason:
                 version.update(yanked=True, yank_reason=reason)

@@ -103,6 +103,25 @@ class RegistryExtensions(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'unattested'):
                 registry.artifacts(release, 'jdbc', '1.0.0', repo='get-dre/dre')
 
+    def test_protocol_comes_from_when_the_release_was_published(self):
+        # Releases after protocol 1 shipped speak it; existing entries are corrected too, and a
+        # version not released under a plugin tag keeps what it had.
+        original = {'plugins': [{'name': 'csv', 'versions': [
+            {'version': '0.0.1-alpha-7', 'protocol': 0, 'artifacts': {}},
+            {'version': '1.0.2', 'protocol': 0, 'artifacts': {}},
+            {'version': '1.2.0', 'protocol': 0, 'artifacts': {}}]}]}
+        published = [{'tag_name': 'csv-v1.0.2', 'published_at': '2026-10-09T00:00:00Z', 'assets': []},
+                     {'tag_name': 'csv-v1.2.0', 'published_at': '2026-11-07T03:00:00Z', 'assets': []}]
+        with tempfile.TemporaryDirectory() as temporary:
+            old = Path(temporary) / 'packages.json'
+            old.write_text(json.dumps(original))
+            output = io.StringIO()
+            with patch.object(registry, 'releases', return_value=published), \
+                 contextlib.redirect_stdout(output):
+                registry.main(old, 'get-dre/dre')
+        versions = {v['version']: v['protocol'] for v in json.loads(output.getvalue())['plugins'][0]['versions']}
+        self.assertEqual(versions, {'0.0.1-alpha-7': 0, '1.0.2': 0, '1.2.0': 1})
+
     def test_yank_survives_rebuilding_the_index(self):
         original = {'plugins': [{'name': 'jdbc', 'versions': [
             {'version': '1.0.0', 'protocol': 0, 'artifacts': {}}]}]}
