@@ -74,6 +74,10 @@ pub struct Holder {
     pub pid: u32,
     /// RFC 3339.
     pub started_at: String,
+    /// When the process started, as the OS counts it (see [`process_start`]): a live process
+    /// with the same PID but another start time is a different process that reused the PID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_start: Option<u64>,
 }
 
 impl Holder {
@@ -83,6 +87,7 @@ impl Holder {
             host: host.to_string(),
             pid: std::process::id(),
             started_at: started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            process_start: process_start(std::process::id()),
         }
     }
 
@@ -227,7 +232,7 @@ impl BindingRuns {
                     };
                     let mine = holder.pid == std::process::id();
                     if holder.host != me.host
-                        || (process_alive(holder.pid) && (!mine || held().contains(&holder.run_id)))
+                        || (same_process_alive(&holder) && (!mine || held().contains(&holder.run_id)))
                     {
                         return Err(LockError::Held(holder));
                     }
@@ -333,6 +338,32 @@ pub fn process_alive(pid: u32) -> bool {
     }
 }
 
+/// Whether the holder's process is still running: its PID is alive and, where the OS tells start
+/// times, started when the lock says (a restarted container can give its PID to another process).
+fn same_process_alive(holder: &Holder) -> bool {
+    process_alive(holder.pid)
+        && match (holder.process_start, process_start(holder.pid)) {
+            (Some(was), Some(now)) => was == now,
+            _ => true,
+        }
+}
+
+/// When process `pid` started, in clock ticks since boot (Linux `/proc/<pid>/stat` field 22);
+/// `None` elsewhere or when unknown.
+pub fn process_start(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // Field 2, the command name, may hold spaces: count from its closing parenthesis.
+        stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +408,7 @@ mod tests {
             host: host_name(&crate::Env::default()),
             pid: 999_999,
             started_at: "2026-10-09T06:00:00Z".into(),
+            process_start: None,
         };
         std::fs::write(r.dir().join(LOCK), serde_json::to_string(&dead).unwrap()).unwrap();
         let g = r
@@ -410,6 +442,7 @@ mod tests {
             host: host_name(&crate::Env::default()),
             pid: std::process::id(),
             started_at: "2026-10-09T06:00:00Z".into(),
+            process_start: None,
         };
         std::fs::write(
             r.dir().join(LOCK),
@@ -422,6 +455,32 @@ mod tests {
         assert_eq!(g.took_over, Some(before_restart));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_live_process_that_reused_the_holders_pid_doesnt_keep_the_lock() {
+        let (_d, r) = runs();
+        std::fs::create_dir_all(r.dir()).unwrap();
+        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let start = process_start(other.id()).expect("a Linux process has a start time");
+        let mut holder = Holder {
+            run_id: "other".into(),
+            host: host_name(&crate::Env::default()),
+            pid: other.id(),
+            started_at: "2026-10-09T06:00:00Z".into(),
+            process_start: Some(start),
+        };
+        std::fs::write(r.dir().join(LOCK), serde_json::to_string(&holder).unwrap()).unwrap();
+        let alive = r.lock("new", Utc::now(), &host_name(&crate::Env::default()));
+        assert!(matches!(alive, Err(LockError::Held(_))), "{alive:?}");
+        // Same PID, another start time: the run that wrote the lock is gone.
+        holder.process_start = Some(start + 1);
+        std::fs::write(r.dir().join(LOCK), serde_json::to_string(&holder).unwrap()).unwrap();
+        let g = r.lock("new", Utc::now(), &host_name(&crate::Env::default()));
+        let _ = other.kill();
+        let _ = other.wait();
+        assert_eq!(g.unwrap().took_over, Some(holder));
+    }
+
     #[test]
     fn runs_racing_for_a_lock_get_exactly_one_holder() {
         let dead = Holder {
@@ -429,6 +488,7 @@ mod tests {
             host: host_name(&crate::Env::default()),
             pid: 999_999,
             started_at: "2026-10-09T06:00:00Z".into(),
+            process_start: None,
         };
         for stale in [None, Some(dead)] {
             let (_d, r) = runs();
