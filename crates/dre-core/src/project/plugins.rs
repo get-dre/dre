@@ -136,7 +136,7 @@ impl Loader {
         Some((name, m.version.clone(), source))
     }
 
-    /// The `plugins:` declarations, merged across files; and every plugin the project uses, for
+    /// The root `dependencies.yml` plugin declarations; and every plugin the project uses, for
     /// [`crate::plugins::check_uses`] to check against what the declared packages provide.
     pub(super) fn check_plugins(
         &mut self,
@@ -159,6 +159,15 @@ impl Loader {
                 };
                 let line = v.line();
                 let file = Some(yf.display.clone());
+                if yf.display != Path::new("dependencies.yml") {
+                    self.diags.error(
+                        Code::RemovedKey,
+                        file,
+                        line,
+                        "`plugins:` must be declared in dependencies.yml at the project root; move this declaration there",
+                    );
+                    continue;
+                }
                 let entries: Vec<(String, Option<Value>, PluginSource, Option<usize>)> = match v.value {
                     Loose::Ok(de::OneOf::A(items)) => items
                         .into_iter()

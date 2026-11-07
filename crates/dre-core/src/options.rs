@@ -134,7 +134,7 @@ fn collect_formats(
     at: &dyn Fn(Option<&str>) -> Use,
 ) {
     for o in b.outputs.iter().filter(|o| !o.is_message()) {
-        let template = crate::formats::Format::new(&o.format)
+        let template = crate::formats::Format::of(o)
             .is_document()
             .then(|| document_check(project, r, b, o));
         if template.as_ref().is_some_and(|t| t["file"].is_null()) && o.template.is_some() {

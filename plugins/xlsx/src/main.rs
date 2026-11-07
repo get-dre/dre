@@ -36,6 +36,13 @@ const DEFAULT_TOTALS_LABEL: &str = "Total";
 struct Xlsx;
 
 impl Format for Xlsx {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: "xlsx".into(),
+            layout: dre_protocol::msg::FormatLayout::Workbook,
+        })
+    }
+
     fn options(&self) -> Vec<OptionField> {
         vec![
             OptionField::new(

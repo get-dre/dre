@@ -84,7 +84,21 @@ fn load_command(
     console: &dyn Console,
     manifest: bool,
 ) -> Option<(Project, Option<String>)> {
-    let (project, diags) = crate::project::load_with(&req.dir, &req.load, ctx);
+    let (parsed, parse_diags) = crate::project::parse_with(&req.dir, &req.load, ctx);
+    let mut parsed = parsed;
+    if let Some(project) = parsed.as_mut().filter(|_| !parse_diags.has_errors()) {
+        if let Err(error) = project.retain_needed_plugins(ctx, req.install) {
+            console.error(&error);
+            return None;
+        }
+        if req.install && !sync_plugins(ctx, project, true, false, console) {
+            return None;
+        }
+    }
+    let (project, diags) = match parsed {
+        Some(project) => crate::project::resolve_formats(&project, &req.load, ctx),
+        None => (None, parse_diags),
+    };
     if let Some(p) = &project {
         ctx.secrets().set_enabled(p.mask_secrets());
     }
@@ -302,6 +316,8 @@ pub fn run(ctx: &Context, mut req: RunRequest, console: &mut dyn Console) -> Sta
     if req.project.install && !install_packages(&req.project.dir, console) {
         return Started::NotStarted;
     }
+    // Plugin metadata is resolved while loading, so capture installation notes from the start.
+    console.start_logs();
     let Some((mut project, manifest_checksum)) = load_command(ctx, &req.project, console, false) else {
         return Started::NotStarted;
     };
@@ -330,8 +346,6 @@ pub fn run(ctx: &Context, mut req: RunRequest, console: &mut dyn Console) -> Sta
             return Started::NotStarted;
         }
     }
-    // Run logs start before the plugins are installed, so the log files record installing them.
-    console.start_logs();
     for s in project.settings().lines() {
         console.note("Setting", &s);
     }

@@ -33,8 +33,8 @@ var version = "unreleased"
 
 var (
 	sourceRole = plugin.Role{
-		Kind: "source", Name: "databricks", Capabilities: []string{"sessions", "check", "load", "validate"},
-		Fields: connectionFields(), IdentifierQuote: "`",
+		Kind: "source", Name: "databricks", Capabilities: []string{"sessions", "check", "load", "catalog", "validate"},
+		Fields: connectionFields(), IdentifierQuote: "`", SQLDialect: sourceDialect(),
 		Open: func(conn map[string]any) (plugin.Session, error) { return newDatabricks(conn) },
 	}
 	destinationRole = plugin.Role{

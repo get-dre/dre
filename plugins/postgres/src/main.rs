@@ -18,6 +18,8 @@
 //! becomes a decimal; unconstrained `numeric` is returned as exact text, so cast it
 //! (`amount::numeric(18,2)`) for a typed column. Other types need a cast, e.g. `::text`.
 
+mod metadata;
+
 use std::error::Error as StdError;
 use std::pin::pin;
 use std::sync::Arc;
@@ -642,6 +644,17 @@ impl Postgres {
 }
 
 impl Source for Postgres {
+    fn sql_dialect(&self) -> Option<dre_protocol::sql::SqlDialect> {
+        Some(metadata::dialect())
+    }
+    fn catalog(&mut self, tables: &[String], schemas: &[String]) -> Result<Value> {
+        metadata::CATALOG
+            .build(&metadata::dialect(), tables, schemas, &mut |sql| {
+                self.catalog_rows(sql).map_err(|e| e.to_string())
+            })
+            .map_err(Into::into)
+    }
+
     fn identifier_quote(&self) -> Option<&'static str> {
         Some("\"")
     }
@@ -926,10 +939,27 @@ fn describe(e: &tokio_postgres::Error) -> String {
 
 fn main() {
     let about = About::new("postgres", env!("CARGO_PKG_VERSION")).capabilities(&[
+        dre_protocol::CAP_CATALOG,
         CAP_SESSIONS,
         CAP_READ_ONLY,
         CAP_CHECK,
         CAP_LOAD,
     ]);
     serve_source(about, Postgres::new())
+}
+
+impl Postgres {
+    fn catalog_rows(&mut self, sql: &str) -> Result<Vec<Value>> {
+        let (rt, client) = self.client()?;
+        let rows = rt.block_on(client.query(sql, &[])).map_err(|e| describe(&e))?;
+        rows.iter()
+            .take(100_000)
+            .map(|row| {
+                let values = (0..row.len())
+                    .map(|i| row.try_get::<_, Option<String>>(i).map(Value::from))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(Value::Array(values))
+            })
+            .collect()
+    }
 }

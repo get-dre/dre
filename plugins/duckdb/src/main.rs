@@ -6,6 +6,8 @@
 
 mod bridge;
 
+mod metadata;
+
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -217,6 +219,17 @@ impl DuckDb {
 }
 
 impl Source for DuckDb {
+    fn sql_dialect(&self) -> Option<dre_protocol::sql::SqlDialect> {
+        Some(metadata::dialect())
+    }
+    fn catalog(&mut self, tables: &[String], schemas: &[String]) -> Result<Value> {
+        metadata::CATALOG
+            .build(&metadata::dialect(), tables, schemas, &mut |sql| {
+                self.catalog_rows(sql).map_err(|e| e.to_string())
+            })
+            .map_err(Into::into)
+    }
+
     fn identifier_quote(&self) -> Option<&'static str> {
         Some("\"")
     }
@@ -357,12 +370,34 @@ fn next_batch(stream: &mut duckdb::ArrowStream<'_>) -> Result<Option<duckdb::arr
 
 fn main() {
     let about = About::new("duckdb", env!("CARGO_PKG_VERSION")).capabilities(&[
+        dre_protocol::CAP_CATALOG,
         CAP_SESSIONS,
         CAP_READ_ONLY,
         CAP_CHECK,
         CAP_LOAD,
     ]);
     serve_source(about, DuckDb::default())
+}
+
+impl DuckDb {
+    fn catalog_rows(&mut self, sql: &str) -> Result<Vec<Value>> {
+        let Session { conn, interrupter } = self.session()?;
+        interrupter.run(|| {
+            let mut stmt = conn.prepare(sql)?;
+            let mut rows = stmt.query([])?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next()? {
+                let values = (0..row.as_ref().column_count())
+                    .map(|i| row.get::<_, Option<String>>(i).map(Value::from))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                out.push(Value::Array(values));
+                if out.len() >= 100_000 {
+                    break;
+                }
+            }
+            Ok(out)
+        })
+    }
 }
 
 #[cfg(test)]

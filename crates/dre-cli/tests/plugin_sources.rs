@@ -187,7 +187,10 @@ impl Env {
     }
 
     fn installed(&self, version: &str) -> bool {
-        self.p("plugins/fixture").join(version).join(exe()).exists()
+        self.p("plugins/fixture")
+            .join(version)
+            .join(format!("dre-plugin-fixture{}", std::env::consts::EXE_SUFFIX))
+            .exists()
     }
 }
 
@@ -304,7 +307,7 @@ fn a_per_plugin_registry_is_used_for_that_plugin_only() {
     let bin = fixture_bin();
     std::fs::write(reg.join("fixture-2.0.0"), &bin).unwrap();
     let index = serde_json::json!({"schema": 1, "plugins": [{"kind": "source", "name": "fixture", "versions": [
-        {"version": "2.0.0", "protocol": 0, "artifacts": {platform(): {"url": reg.join("fixture-2.0.0").to_string_lossy(), "sha256": sha(&bin)}}}
+        {"version": "2.0.0", "protocol": 1, "artifacts": {platform(): {"url": reg.join("fixture-2.0.0").to_string_lossy(), "sha256": sha(&bin)}}}
     ]}]});
     std::fs::write(reg.join("index.json"), index.to_string()).unwrap();
     e.write(
@@ -387,8 +390,8 @@ fn bad_entries_are_validate_errors() {
     }
     let e = Env::new("plugins:\n  - {name: fixture, github: a/b}\n");
     e.write(
-        "project/packages.yml",
-        "plugins:\n  - {name: fixture, local: bin/x}\n",
+        "project/dependencies.yml",
+        "plugins:\n  - {name: fixture, github: a/b}\n  - {name: fixture, local: bin/x}\n",
     );
     e.dre(&["validate", "--no-auto-install"])
         .failed()
@@ -405,7 +408,7 @@ fn a_run_notices_a_changed_source_without_dre_deps() {
     let bin = fixture_bin();
     std::fs::write(reg.join("fixture-1.1.0"), &bin).unwrap();
     let index = serde_json::json!({"schema": 1, "plugins": [{"kind": "source", "name": "fixture", "versions": [
-        {"version": "1.1.0", "protocol": 0, "artifacts": {platform(): {"url": reg.join("fixture-1.1.0").to_string_lossy(), "sha256": sha(&bin)}}}
+        {"version": "1.1.0", "protocol": 1, "artifacts": {platform(): {"url": reg.join("fixture-1.1.0").to_string_lossy(), "sha256": sha(&bin)}}}
     ]}]});
     std::fs::write(reg.join("index.json"), index.to_string()).unwrap();
     let mut c = assert_cmd::Command::cargo_bin("dre").unwrap();

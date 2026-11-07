@@ -1,11 +1,4 @@
-//! The format catalog: what each output format is, and the files an output makes.
-//!
-//! Every rule that depends on a format's name lives here: its file extension, whether it holds
-//! one table per file (so an output of several queries is split), whether it's an Excel workbook
-//! (sheet names, `columns`, template bindings), a document (html, pdf) or the built-in message.
-//! `validate` and `run` both ask it, so the names `validate` predicts are the ones `run` writes.
-//! A new format means a line here and its plugin. Format plugins don't describe these
-//! properties yet; when the protocol's `describe` carries them, this is where they plug in.
+//! Plugin-owned format properties and the files an output makes.
 
 use std::collections::BTreeMap;
 
@@ -15,65 +8,64 @@ pub const DEFAULT: &str = "csv";
 /// The built-in format that renders query results into a short headline.
 pub const MESSAGE: &str = "message";
 
-/// Formats whose file holds one table: an output of several queries writes a file per query.
-const ONE_TABLE: &[&str] = &["csv", "delimited", "fixed_width", "parquet"];
-
-/// Formats that render a document from a template and the run's context.
-const DOCUMENTS: &[&str] = &["html", "pdf"];
-
-/// The Excel workbook format.
-const WORKBOOK: &str = "xlsx";
-
-/// An output format, by its name.
+/// An output format and the properties its plugin supplied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Format<'a>(&'a str);
+pub struct Format<'a> {
+    name: &'a str,
+    properties: Option<&'a dre_protocol::msg::FormatProperties>,
+}
 
 impl<'a> Format<'a> {
-    pub fn new(name: &'a str) -> Format<'a> {
-        Format(name)
-    }
-
-    pub fn name(self) -> &'a str {
-        self.0
-    }
-
-    /// The built-in message, which no plugin writes.
-    pub fn is_message(self) -> bool {
-        self.0 == MESSAGE
-    }
-
-    /// The extension of its files, without the dot.
-    pub fn extension(self) -> &'a str {
-        match self.0 {
-            "delimited" | "fixed_width" => "txt",
-            MESSAGE => "md",
-            f => f,
+    /// A name without resolved plugin metadata. Only `message` is built into core.
+    pub fn new(name: &'a str) -> Self {
+        Self {
+            name,
+            properties: None,
         }
     }
 
-    /// Whether a file of it holds one table.
+    pub fn with_properties(
+        name: &'a str,
+        properties: Option<&'a dre_protocol::msg::FormatProperties>,
+    ) -> Self {
+        Self { name, properties }
+    }
+
+    pub fn of(output: &'a crate::project::Output) -> Self {
+        Self::with_properties(&output.format, output.format_properties.as_ref())
+    }
+
+    pub fn name(self) -> &'a str {
+        self.name
+    }
+    pub fn is_message(self) -> bool {
+        self.name == MESSAGE
+    }
+    pub fn known(self) -> bool {
+        self.is_message() || self.properties.is_some()
+    }
+    pub fn extension(self) -> &'a str {
+        if self.is_message() {
+            "md"
+        } else {
+            self.properties.map_or("", |p| p.extension.as_str())
+        }
+    }
     pub fn one_table(self) -> bool {
-        ONE_TABLE.contains(&self.0)
+        self.properties
+            .is_some_and(|p| p.layout == dre_protocol::msg::FormatLayout::SingleTable)
     }
-
-    /// An Excel workbook: one sheet per query, Excel's sheet-name rules, `columns`, template
-    /// `bindings`, and no `extension` of its own.
     pub fn is_workbook(self) -> bool {
-        self.0 == WORKBOOK
+        self.properties
+            .is_some_and(|p| p.layout == dre_protocol::msg::FormatLayout::Workbook)
     }
-
-    /// A document (html, pdf): its template gets the run's context.
     pub fn is_document(self) -> bool {
-        DOCUMENTS.contains(&self.0)
+        self.properties
+            .is_some_and(|p| p.layout == dre_protocol::msg::FormatLayout::Document)
     }
-
-    /// Whether it takes `output.template`.
     pub fn takes_template(self) -> bool {
         self.is_workbook() || self.is_document()
     }
-
-    /// Whether its template decides what to show, so an empty query can't drop a section
-    /// (`on_empty: skip` has no effect).
     pub fn template_decides_sections(self) -> bool {
         self.is_message() || self.is_document()
     }
@@ -93,7 +85,7 @@ impl<'a> Files<'a> {
     /// The file plan of `output`.
     pub fn of(output: &'a crate::project::Output) -> Files<'a> {
         Files {
-            format: Format::new(&output.format),
+            format: Format::of(output),
             extension: output.extension.as_deref(),
             template: output.template.is_some(),
         }

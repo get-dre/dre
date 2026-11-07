@@ -683,24 +683,11 @@ pub fn install(
         None
     };
     let refuse = || format!("{what}: the registry's checksum doesn't match dre.lock; refusing to install");
-    // What the lock expects on this platform. A lock that doesn't name platforms (from an older
-    // DRE) was written on one of them: its checksum must be one the registry publishes for
-    // this version, whichever platform that is.
-    let mut want = pin.and_then(|c| c.get(&plat));
+    let want = pin.and_then(|c| c.get(&plat));
     if let (Some(want), Some(published)) = (want, &published)
         && !want.eq_ignore_ascii_case(published)
     {
         return Err(refuse());
-    }
-    if want.is_none()
-        && let Some(legacy) = pin.and_then(Checksums::legacy)
-    {
-        let all = published_checksums(v);
-        if all.is_empty() {
-            want = Some(legacy);
-        } else if !all.contains(legacy) {
-            return Err(refuse());
-        }
     }
     let bytes = fetch(ctx, &art.url)?;
     let got = crate::checksum::sha256_hex(&bytes);
@@ -725,8 +712,7 @@ pub fn install(
     let (exe_name, dst, version_root) = if art.url.ends_with(".tar.gz") || art.url.ends_with(".tgz") {
         extract_tar_gz(&bytes, &package.name, staging.path())?
     } else {
-        let name = crate::plugins::legacy_executable(&package.provides)
-            .unwrap_or_else(|| package_executable_name(&package.name));
+        let name = package_executable_name(&package.name);
         let dst = staging.path().join(&name);
         let mut tmp = tempfile::NamedTempFile::new_in(staging.path()).map_err(|e| e.to_string())?;
         std::io::Write::write_all(&mut tmp, &bytes).map_err(|e| e.to_string())?;
@@ -778,8 +764,28 @@ fn published_checksums(v: &IndexVersion) -> Checksums {
     c
 }
 
+fn archive_path(raw: &Path) -> Result<PathBuf, String> {
+    if raw.to_str().is_none() {
+        return Err("the archive contains a path that is not UTF-8".into());
+    }
+    let mut path = PathBuf::new();
+    for part in raw.components() {
+        match part {
+            std::path::Component::Normal(part) => path.push(part),
+            std::path::Component::CurDir => {}
+            _ => {
+                return Err(format!(
+                    "the archive contains unsafe path {}",
+                    crate::slash(raw).display()
+                ));
+            }
+        }
+    }
+    Ok(path)
+}
+
 /// Extract a package archive into `staging`. A single leading folder is its version directory;
-/// a legacy archive writes the executable at the top. Returns the manifest's executable and path.
+/// archives may also put their package executable at the top. Returns the executable and path.
 fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String, PathBuf, PathBuf), String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut roots = std::collections::BTreeSet::new();
@@ -793,23 +799,7 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
             return Err(format!("the archive contains an unsafe {kind:?} entry"));
         }
         let raw = entry.path().map_err(|e| e.to_string())?.to_path_buf();
-        if raw.to_str().is_none() {
-            return Err("the archive contains a path that is not UTF-8".into());
-        }
-        let mut path = PathBuf::new();
-        for part in raw.components() {
-            match part {
-                std::path::Component::Normal(part) => path.push(part),
-                std::path::Component::CurDir => {}
-                _ => {
-                    return Err(format!(
-                        "the archive contains unsafe path {}",
-                        crate::slash(&raw).display()
-                    ));
-                }
-            }
-        }
-        let _kind = kind;
+        let path = archive_path(&raw)?;
         let Some(first) = path.components().next() else {
             continue;
         };
@@ -840,23 +830,7 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
         let mut entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.header().entry_type();
         let raw = entry.path().map_err(|e| e.to_string())?.to_path_buf();
-        if raw.to_str().is_none() {
-            return Err("the archive contains a path that is not UTF-8".into());
-        }
-        let mut path = PathBuf::new();
-        for part in raw.components() {
-            match part {
-                std::path::Component::Normal(part) => path.push(part),
-                std::path::Component::CurDir => {}
-                _ => {
-                    return Err(format!(
-                        "the archive contains unsafe path {}",
-                        crate::slash(&raw).display()
-                    ));
-                }
-            }
-        }
-        let _kind = kind;
+        let path = archive_path(&raw)?;
         if path.components().next().is_none() {
             continue;
         }
@@ -926,9 +900,7 @@ fn extract_tar_gz(bytes: &[u8], package: &str, staging: &Path) -> Result<(String
         .into_iter()
         .filter(|path| {
             let file = path.file_name().unwrap_or_default().to_string_lossy();
-            file == exe_name
-                || parse_package_executable_name(&file).is_some_and(|name| name == package)
-                || parse_executable_name(&file).is_some_and(|(_, name)| name == package)
+            file == exe_name || parse_package_executable_name(&file).is_some_and(|name| name == package)
         })
         .filter(|path| root.as_ref().is_none_or(|root| path.starts_with(root)))
         .collect();

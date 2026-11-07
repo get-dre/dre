@@ -158,7 +158,7 @@ fn columns_on_a_csv_report_is_an_error() {
     );
     p.dre("validate", &[])
         .failed()
-        .says("`columns` on query `sales` only applies to the xlsx format");
+        .says("`columns` on query `sales` only applies to workbook formats");
 }
 
 #[test]

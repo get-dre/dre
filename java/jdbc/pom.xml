@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.getdre</groupId>
   <artifactId>dre-plugin-jdbc</artifactId>
-  <version>1.0.1</version>
+  <version>1.1.0</version>
   <licenses><license><name>GPL-3.0-only</name><url>https://www.gnu.org/licenses/gpl-3.0.html</url></license></licenses>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>

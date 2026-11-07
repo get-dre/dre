@@ -1,6 +1,7 @@
 {
   "source/postgres": {
     "capabilities": [
+      "catalog",
       "check",
       "load",
       "read_only",
@@ -129,6 +130,48 @@
       }
     ],
     "option_fields": [],
-    "identifier_quote": "\""
+    "identifier_quote": "\"",
+    "sql_dialect": {
+      "parser": "postgres",
+      "identifier_quote": "\"",
+      "identifier_case": "lower_unless_quoted",
+      "literal_style": "hex",
+      "hex_literal": "convert_from(decode('{hex}', 'hex'), 'UTF8')",
+      "denied_functions": [
+        "pg_read_file",
+        "pg_read_binary_file",
+        "pg_ls_dir",
+        "pg_ls_logdir",
+        "pg_ls_waldir",
+        "pg_ls_tmpdir",
+        "pg_ls_archive_statusdir",
+        "pg_stat_file",
+        "lo_import",
+        "lo_export",
+        "lo_get",
+        "lo_open",
+        "loread",
+        "dblink",
+        "dblink_exec",
+        "dblink_connect",
+        "dblink_send_query",
+        "pg_execute_server_program",
+        "query_to_xml",
+        "query_to_xml_and_xmlschema",
+        "query_to_xmlschema",
+        "cursor_to_xml",
+        "cursor_to_xmlschema",
+        "table_to_xml",
+        "table_to_xml_and_xmlschema",
+        "database_to_xml",
+        "schema_to_xml",
+        "current_setting",
+        "pg_reload_conf",
+        "pg_terminate_backend",
+        "pg_cancel_backend"
+      ],
+      "file_formats": [],
+      "read_only_notice": null
+    }
   }
 }

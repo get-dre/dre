@@ -5,37 +5,18 @@ use serde_json::{Value, json};
 use sqlparser::ast::{
     Expr, ObjectName, Query, SetExpr, Statement, TableFactor, Visit, Visitor, visit_statements,
 };
-use sqlparser::dialect::{DatabricksDialect, DuckDbDialect, GenericDialect, PostgreSqlDialect};
-use sqlparser::parser::Parser;
 use std::sync::Arc;
 
 use crate::plugin_host::{Open, Plugin};
 use crate::profiles::{Entry, Role};
 use crate::project::{PluginKind, Project};
 
-/// The formats Databricks reads a path as a table with (``parquet.`/path` ``).
-const FILE_FORMATS: &[&str] = &[
-    "parquet",
-    "csv",
-    "json",
-    "text",
-    "delta",
-    "orc",
-    "avro",
-    "binaryFile",
-    "xml",
-];
-
-/// Refuses `sql` unless it is a single read-only query on a source of type `kind`, without
-/// functions or path tables that reach files, programs or the network.
-fn guard(kind: &str, sql: &str) -> Result<(), String> {
-    let dialect: Box<dyn sqlparser::dialect::Dialect> = match kind {
-        "duckdb" => Box::new(DuckDbDialect {}),
-        "postgres" => Box::new(PostgreSqlDialect {}),
-        "databricks" => Box::new(DatabricksDialect {}),
-        _ => Box::new(GenericDialect {}),
-    };
-    let statements = Parser::parse_sql(dialect.as_ref(), sql)
+/// Refuse writes and external reads using the source's declared grammar and safety policy.
+fn guard(policy: &dre_protocol::sql::SqlDialect, sql: &str) -> Result<(), String> {
+    policy.validate()?;
+    let statements = policy
+        .parser
+        .parse(sql)
         .map_err(|e| format!("expected a single read-only query: {e}"))?;
     let mut safe = statements.len() == 1;
     let _ = visit_statements(&statements, |statement| {
@@ -45,21 +26,21 @@ fn guard(kind: &str, sql: &str) -> Result<(), String> {
         std::ops::ControlFlow::<()>::Continue(())
     });
     /// Refuses anything but reads, and functions that reach files, programs or the network.
-    struct ReadOnly {
-        dialect: Option<&'static crate::dialect::Dialect>,
+    struct ReadOnly<'a> {
+        dialect: &'a dre_protocol::sql::SqlDialect,
         refused: Option<String>,
     }
-    impl ReadOnly {
+    impl ReadOnly<'_> {
         fn function(&mut self, name: &ObjectName) -> std::ops::ControlFlow<()> {
             let name = name.to_string();
-            if self.dialect.is_some_and(|d| d.denies(&name)) {
+            if self.dialect.denies(&name) {
                 self.refused = Some(name);
                 return std::ops::ControlFlow::Break(());
             }
             std::ops::ControlFlow::Continue(())
         }
     }
-    impl Visitor for ReadOnly {
+    impl Visitor for ReadOnly<'_> {
         type Break = ();
         fn pre_visit_query(&mut self, query: &Query) -> std::ops::ControlFlow<()> {
             fn reads(body: &SetExpr) -> bool {
@@ -94,7 +75,7 @@ fn guard(kind: &str, sql: &str) -> Result<(), String> {
                     if matches!(name.0.as_slice(), [format, path]
                         if path.as_ident().is_some_and(|i| i.quote_style == Some('`'))
                             && format.as_ident().is_some_and(|i| i.quote_style.is_none()
-                                && FILE_FORMATS.iter().any(|f| f.eq_ignore_ascii_case(&i.value)))) =>
+                                && self.dialect.file_formats.iter().any(|f| f.eq_ignore_ascii_case(&i.value)))) =>
                 {
                     self.refused = Some(name.to_string());
                     std::ops::ControlFlow::Break(())
@@ -115,7 +96,7 @@ fn guard(kind: &str, sql: &str) -> Result<(), String> {
         }
     }
     let mut guard = ReadOnly {
-        dialect: crate::dialect::of(kind),
+        dialect: policy,
         refused: None,
     };
     safe &= statements.visit(&mut guard).is_continue();
@@ -143,7 +124,6 @@ pub fn execute(
     let Entry::Use(target) = project.profiles().entry(Role::Connection, profile) else {
         return Err(format!("connection `{profile}` has no entry for this target"));
     };
-    guard(&target.kind, sql)?;
     let plugin = crate::plugin_host::find_plugin(ctx, project, PluginKind::Source, &target.kind)
         .map_err(|e| e.to_string())?;
     let secrets = ctx.secrets().clone();
@@ -194,10 +174,23 @@ fn session_result(
     profile: &str,
     target_name: &str,
 ) -> Result<Value, String> {
+    let description = process.describe().map_err(|e| e.to_string())?;
+    let policy = description.sql_dialect.ok_or_else(|| {
+        format!(
+            "the {} plugin has no sql_dialect metadata; update it to enable read-only queries",
+            target.kind
+        )
+    })?;
+    if description
+        .identifier_quote
+        .as_ref()
+        .is_some_and(|quote| quote != &policy.identifier_quote)
+    {
+        return Err("source supplied inconsistent identifier_quote and sql_dialect metadata".into());
+    }
+    guard(&policy, sql)?;
     let session_read_only = process.has(dre_protocol::CAP_READ_ONLY);
-    // Databricks has no read-only session capability. Its single-SELECT guard is
-    // enforced here; database permissions remain the user's enforcement boundary.
-    if !session_read_only && target.kind != "databricks" {
+    if !session_read_only && policy.read_only_notice.is_none() {
         return Err(format!(
             "the {} plugin cannot guarantee a read-only connection",
             target.kind
@@ -244,7 +237,7 @@ fn session_result(
     rows.truncate(max_rows as usize);
     Ok(
         json!({"schema_version": "dre/rows/v1", "columns": columns, "row_count": rows.len(), "rows": rows,
-        "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {"SQL validation; use a read-only Databricks database role"}, "connection": profile, "target": target_name}),
+        "truncated": truncated, "read_only_enforcement": if session_read_only {"session"} else {policy.read_only_notice.as_deref().expect("checked above")}, "connection": profile, "target": target_name}),
     )
 }
 
@@ -254,6 +247,19 @@ mod tests {
     use crate::plugin_host::PluginHost;
     use crate::plugin_host::memory::{Call, MemoryHost, Script};
     use dre_protocol::Kind;
+
+    fn policy() -> dre_protocol::sql::SqlDialect {
+        dre_protocol::sql::SqlDialect {
+            parser: dre_protocol::sql::SqlParser::Databricks,
+            identifier_quote: "`".into(),
+            identifier_case: dre_protocol::sql::IdentifierCase::Insensitive,
+            literal_style: "hex".into(),
+            hex_literal: Some("decode(unhex('{hex}'), 'UTF-8')".into()),
+            denied_functions: vec!["try_secret".into()],
+            file_formats: vec!["text".into(), "parquet".into(), "binaryFile".into()],
+            read_only_notice: None,
+        }
+    }
 
     /// `run_session` on a scripted `fixture` source, against a target with no connection fields:
     /// its result, and whether the plugin was closed.
@@ -273,7 +279,10 @@ mod tests {
     }
 
     fn read_only() -> Script {
-        Script::new(&[dre_protocol::CAP_READ_ONLY])
+        Script::new(&[dre_protocol::CAP_READ_ONLY]).description(dre_plugin_host::host::Description {
+            sql_dialect: Some(policy()),
+            ..Default::default()
+        })
     }
 
     fn one_row() -> arrow::array::RecordBatch {
@@ -294,12 +303,44 @@ mod tests {
             "select * from PARQUET.`s3://bucket/x`",
             "select * from binaryFile.`/Volumes/a/b/c`",
         ] {
-            let err = guard("databricks", sql).expect_err(sql);
+            let err = guard(&policy(), sql).expect_err(sql);
             assert!(err.contains("nothing was run"), "{sql}: {err}");
         }
         // A table in a schema that happens to be named like a format is still a table.
-        guard("databricks", "select * from text.notes").unwrap();
-        guard("databricks", "select * from main.`my table`").unwrap();
+        guard(&policy(), "select * from text.notes").unwrap();
+        guard(&policy(), "select * from main.`my table`").unwrap();
+    }
+
+    #[test]
+    fn missing_or_invalid_policy_is_rejected_and_the_process_is_closed() {
+        let (out, closed) = run(Script::new(&[dre_protocol::CAP_READ_ONLY]));
+        assert!(out.unwrap_err().contains("no sql_dialect metadata"));
+        assert!(closed);
+        let mut invalid = policy();
+        invalid.identifier_quote.clear();
+        let (out, closed) = run(Script::new(&[dre_protocol::CAP_READ_ONLY]).description(
+            dre_plugin_host::host::Description {
+                sql_dialect: Some(invalid),
+                ..Default::default()
+            },
+        ));
+        assert!(out.unwrap_err().contains("invalid sql_dialect"));
+        assert!(closed);
+    }
+
+    #[test]
+    fn explicit_empty_denied_functions_still_reject_writes_and_string_paths() {
+        let mut explicit = policy();
+        explicit.denied_functions.clear();
+        guard(&explicit, "select lower('ok')").unwrap();
+        for sql in [
+            "delete from orders",
+            "select 1; select 2",
+            "select * from 'private.csv'",
+            "select * from text.`private.csv`",
+        ] {
+            assert!(guard(&explicit, sql).is_err(), "{sql}");
+        }
     }
 
     #[test]
@@ -319,7 +360,10 @@ mod tests {
 
     #[test]
     fn a_plugin_without_read_only_is_rejected_and_still_closed() {
-        let (out, closed) = run(Script::new(&[]));
+        let (out, closed) = run(Script::new(&[]).description(dre_plugin_host::host::Description {
+            sql_dialect: Some(policy()),
+            ..Default::default()
+        }));
         assert_eq!(
             out.unwrap_err(),
             "the fixture plugin cannot guarantee a read-only connection"

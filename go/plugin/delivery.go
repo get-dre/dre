@@ -59,14 +59,6 @@ func DefaultRules() Rules {
 	return Rules{IfExists: IfExistsOverwrite, Atomic: true, Retries: 3, MaxRetryWait: 10 * time.Minute, ConnectTimeout: 30 * time.Second, Timeout: 60 * time.Second}
 }
 
-// LegacyRules are how destinations delivered before these rules: replace, straight to the final
-// name, no retries.
-func LegacyRules() Rules {
-	r := DefaultRules()
-	r.Atomic, r.Retries = false, 0
-	return r
-}
-
 // RulesFrom reads the rules from a profile target's conn (connect_timeout, timeout, retries)
 // and a destination entry's opts (if_exists, atomic, temp_dir), starting from base. aliases
 // maps deprecated keys to these ({"upload_timeout": "timeout"}): an alias still works, with a

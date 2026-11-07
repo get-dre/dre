@@ -36,10 +36,9 @@
       ]
     },
     {
-      "name": "protocol 0 is still spoken, for an older core, without request ids",
+      "name": "protocol 0 is refused",
       "steps": [
-        {"hello": {"min_version": 0, "max_version": 0}, "expect": {"type": "hello", "protocol_version": 0}},
-        {"send": {"type": "describe"}, "expect": {"type": "describe", "id": {"$absent": true}}}
+        {"hello": {"min_version": 0, "max_version": 0}, "expect": {"type": "version_mismatch", "min_version": 1}}
       ]
     },
     {

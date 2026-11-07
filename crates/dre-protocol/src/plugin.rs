@@ -205,7 +205,7 @@ fn cancel(id: u64) {
 pub fn log_fields(level: LogLevel, message: &str, fields: Map<String, Value>) {
     let s = shared();
     if s.version.load(Ordering::SeqCst) == 0 {
-        // Protocol 0 has no `log` message: stderr, with the prefixes core 0.3 shows.
+        // Before the handshake there is no request to attach a log message to.
         let prefix = match level {
             LogLevel::Error | LogLevel::Warn => "warning: ",
             LogLevel::Info => "info: ",
@@ -347,6 +347,10 @@ pub trait ResultSink {
 }
 
 pub trait Source {
+    /// SQL rules used by `dre query`; absent metadata disables that command.
+    fn sql_dialect(&self) -> Option<crate::sql::SqlDialect> {
+        None
+    }
     fn connection_fields(&self) -> Vec<ConnectionField> {
         Vec::new()
     }
@@ -539,6 +543,12 @@ impl ResultSets<'_> {
 }
 
 pub trait Format {
+    /// File naming, result-set grouping and the template context this format consumes.
+    /// Older plugins may omit this; core cannot plan their output files without it.
+    fn properties(&self) -> Option<crate::msg::FormatProperties> {
+        None
+    }
+
     /// The options this format takes: every key of a report's `output:` block except `format`,
     /// `destination`, `template` and `extension`, which core owns.
     fn options(&self) -> Vec<OptionField> {
@@ -1027,11 +1037,20 @@ fn handle(h: &mut Handler<'_>, name: &str, req: Request, input: &mut Input, out:
             Handler::Destination(d) => d.message_limit(),
             _ => None,
         };
+        let format_properties = match h {
+            Handler::Format(f) => f.properties(),
+            _ => None,
+        };
         out.send(&Response::Describe {
+            format_properties,
             connection_fields,
             option_fields: h.option_fields(),
             identifier_quote,
             string_literal,
+            sql_dialect: match h {
+                Handler::Source(s) => s.sql_dialect().map(Box::new),
+                _ => None,
+            },
             message_limit,
             single_writer,
         });

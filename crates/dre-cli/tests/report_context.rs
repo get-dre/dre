@@ -508,7 +508,7 @@ fn declared_extensions_keep_their_own_settings_and_still_need_consent() {
 }
 
 #[test]
-fn catalogue_refuses_a_source_type_with_unknown_quoting_rules() {
+fn catalogue_refuses_a_source_without_a_declared_provider() {
     let p = TestProject::new(
         &[
             ("dre_project.yml", "name: catalogue\ndefault_profile: warehouse\n"),
@@ -530,6 +530,6 @@ fn catalogue_refuses_a_source_type_with_unknown_quoting_rules() {
         ],
     )
     .failed()
-    .says("not yet supported for `mystery_db`");
+    .says("no plugin package the project declares provides the source plugin `mystery_db`");
     assert!(!p.path("c.json").exists());
 }

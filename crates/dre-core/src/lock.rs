@@ -24,25 +24,14 @@ pub struct Locked {
     pub provides: Vec<PluginId>,
 }
 
-/// A locked plugin's artifact checksums by platform (`macos-aarch64`, `linux-x86_64`, ...), so
-/// one committed `dre.lock` installs the same builds on every machine. Written as a map; a lock
-/// from before this holds one checksum for a platform it didn't name (see [`Checksums::legacy`]).
-#[derive(Debug, Clone, PartialEq, Default)]
+/// A locked plugin's artifact checksums by platform (`macos-aarch64`, `linux-x86_64`, ...).
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(transparent)]
 pub struct Checksums(BTreeMap<String, String>);
-
-/// The key of a checksum whose platform isn't known.
-const LEGACY: &str = "";
 
 impl Checksums {
     pub fn new() -> Checksums {
         Checksums::default()
-    }
-
-    /// One checksum of unknown platform, as in a lock from before per-platform checksums.
-    pub fn legacy_only(sha: &str) -> Checksums {
-        let mut c = Checksums::new();
-        c.0.insert(LEGACY.into(), sha.to_lowercase());
-        c
     }
 
     pub fn get(&self, platform: &str) -> Option<&str> {
@@ -53,71 +42,30 @@ impl Checksums {
         self.0.is_empty()
     }
 
-    /// Whether `sha` is one of the known platforms' checksums.
-    pub fn contains(&self, sha: &str) -> bool {
-        self.0
-            .iter()
-            .any(|(p, s)| p != LEGACY && s.eq_ignore_ascii_case(sha))
-    }
-
-    pub fn legacy(&self) -> Option<&str> {
-        self.get(LEGACY)
-    }
-
     pub fn insert(&mut self, platform: &str, sha: &str) {
-        self.0.remove(LEGACY);
         self.0.insert(platform.into(), sha.to_lowercase());
     }
 
     /// Add the platforms `other` knows and this one doesn't.
     pub fn merge(&mut self, other: &Checksums) {
         for (p, s) in &other.0 {
-            if p != LEGACY {
-                self.0.entry(p.clone()).or_insert_with(|| s.clone());
-            }
-        }
-    }
-}
-
-impl Serialize for Checksums {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self.legacy() {
-            Some(sha) if self.0.len() == 1 => s.serialize_str(sha),
-            _ => self.0.serialize(s),
+            self.0.entry(p.clone()).or_insert_with(|| s.clone());
         }
     }
 }
 
 impl<'de> Deserialize<'de> for Checksums {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct V;
-        impl<'de> serde::de::Visitor<'de> for V {
-            type Value = Checksums;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("checksums by platform, or one checksum")
-            }
-            fn visit_str<E>(self, sha: &str) -> Result<Checksums, E> {
-                Ok(Checksums::legacy_only(sha))
-            }
-            // An unquoted checksum of digits reads as a number; it matches nothing either way.
-            fn visit_u64<E>(self, n: u64) -> Result<Checksums, E> {
-                Ok(Checksums::legacy_only(&n.to_string()))
-            }
-            fn visit_i64<E>(self, n: i64) -> Result<Checksums, E> {
-                Ok(Checksums::legacy_only(&n.to_string()))
-            }
-            fn visit_f64<E>(self, n: f64) -> Result<Checksums, E> {
-                Ok(Checksums::legacy_only(&n.to_string()))
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut m: A) -> Result<Checksums, A::Error> {
-                let mut out = BTreeMap::new();
-                while let Some((k, v)) = m.next_entry::<String, String>()? {
-                    out.insert(k, v.to_lowercase());
-                }
-                Ok(Checksums(out))
-            }
+        let checksums = BTreeMap::<String, String>::deserialize(d)?;
+        if checksums.keys().any(String::is_empty) {
+            return Err(serde::de::Error::custom("every checksum must name its platform"));
         }
-        d.deserialize_any(V)
+        Ok(Checksums(
+            checksums
+                .into_iter()
+                .map(|(p, sha)| (p, sha.to_lowercase()))
+                .collect(),
+        ))
     }
 }
 

@@ -539,18 +539,13 @@ fn add_profile(
         Err(e) => return Err(format!("can't read {}: {e}", path.display())),
     };
     let parsed = dre_core::config::node::parse(&existing).ok().map(|n| n.to_json());
-    // A DRE 0.1 file keeps its connections under `sources:`; add to that rather than start a
-    // second section.
-    let section = match &parsed {
-        Some(v)
-            if role == Role::Connection
-                && v.get(role.section()).is_none()
-                && v.get(dre_core::profiles::OLD_CONNECTIONS_SECTION).is_some() =>
-        {
-            dre_core::profiles::OLD_CONNECTIONS_SECTION
-        }
-        _ => role.section(),
-    };
+    if parsed.as_ref().is_some_and(|v| v.get("sources").is_some()) {
+        return Err(format!(
+            "{}: `sources:` was removed; rename it to `connections:` before adding profiles",
+            path.display()
+        ));
+    }
+    let section = role.section();
     if let Some(v) = &parsed
         && v.get(section).and_then(|s| s.get(name)).is_some()
     {

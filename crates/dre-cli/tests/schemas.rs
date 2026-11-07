@@ -167,18 +167,11 @@ fn the_schemas_have_the_keys_the_parser_has() {
     let project = raw("project");
     let report = raw("report");
     // `schedule:` is still a key the parser recognises, but only to say it moved to schedules.yml.
-    same(
-        "dre_project.yml",
-        props(&project),
-        plus(minus(PROJECT_KEYS, &[]), PLUGIN_KEYS),
-    );
+    same("dre_project.yml", props(&project), minus(PROJECT_KEYS, &[]));
     same(
         "report",
         props(&report),
-        plus(
-            plus(minus(REPORT_KEYS, &["schedule"]), PLUGIN_KEYS),
-            &[SOURCES_KEY],
-        ),
+        plus(minus(REPORT_KEYS, &["schedule"]), &[SOURCES_KEY]),
     );
     let sources = raw("sources");
     same(
@@ -252,7 +245,7 @@ fn the_schemas_have_the_keys_the_parser_has() {
     same(
         "profiles.yml",
         props(&raw("profiles")),
-        set(&["connections", "sources", "destinations"]),
+        set(&["connections", "destinations"]),
     );
     for role in ["connection", "destination"] {
         same(
@@ -276,7 +269,8 @@ fn the_schemas_have_the_keys_the_parser_has() {
         props(&raw("lookup")),
         minus(dre_core::lookups::CONFIG_KEYS, &[]),
     );
-    let plugin_map = &report["properties"]["plugins"]["oneOf"][0]["items"]["oneOf"][2];
+    let dependencies = raw("dependencies");
+    let plugin_map = &dependencies["properties"]["plugins"]["oneOf"][0]["items"]["oneOf"][2];
     same("plugin entry", props(plugin_map), minus(PLUGIN_ENTRY_KEYS, &[]));
 }
 

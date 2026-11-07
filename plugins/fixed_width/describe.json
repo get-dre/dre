@@ -47,6 +47,10 @@
           "replace"
         ]
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "txt",
+      "layout": "single_table"
+    }
   }
 }

@@ -9,8 +9,7 @@ use crate::{Kind, PluginId};
 
 /// A message with the id of the request it belongs to. Core numbers its requests; every reply,
 /// and every message streamed as part of a request (`result_set_end`, `finish`, `result`,
-/// `result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither
-/// does anything a protocol 0 peer sends.
+/// `result_end`, `log`, `progress`), carries that request's id. `hello` has none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // In the schema, `Request` and `Response` are each message with its envelope.
 #[schemars(rename = "{T}")]
@@ -161,6 +160,28 @@ pub enum Request {
     Cancel {},
 }
 
+/// How core groups result sets and supplies templates for a format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FormatLayout {
+    /// One result set per file; several queries split into sibling files.
+    SingleTable,
+    /// Several result sets in one file, without a core template context.
+    MultipleTables,
+    /// Sheets and cell bindings in a workbook template.
+    Workbook,
+    /// One document whose template receives the run context.
+    Document,
+}
+
+/// A format's file and template contract, supplied by its plugin rather than its name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FormatProperties {
+    /// File extension without the dot; an empty string means no extension.
+    pub extension: String,
+    pub layout: FormatLayout,
+}
+
 /// Plugin → core. Match future replies with a wildcard.
 ///
 /// ```compile_fail
@@ -196,6 +217,9 @@ pub enum Response {
         max_version: u32,
     },
     Describe {
+        /// Format-owned file and template behavior. Required for file-output planning.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format_properties: Option<FormatProperties>,
         connection_fields: Vec<ConnectionField>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         option_fields: Vec<OptionField>,
@@ -209,6 +233,9 @@ pub enum Response {
         /// inside the quotes (a database without `chr()`, such as ClickHouse).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         string_literal: Option<String>,
+        /// Source-owned SQL grammar, literal rules and read-only policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sql_dialect: Option<Box<crate::sql::SqlDialect>>,
         /// Destination advertising `message`: the most characters a message may have in the
         /// service, after translation. Core shows it next to a message's length in a preview.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -267,8 +294,8 @@ pub enum Response {
         warning: Option<String>,
     },
     /// The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,
-    /// namespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has
-    /// neither): without a `code`, core reports the failure under its own code for the step;
+    /// namespaced by the plugin (`sftp/host-key-mismatch`). Both are optional:
+    /// without a `code`, core reports the failure under its own code for the step;
     /// a `code` without a `kind` counts as `internal`.
     Error {
         message: String,

@@ -5,7 +5,7 @@ package plugin
 // against it, and the conformance suite checks every message.
 
 const (
-	ProtocolMin = 0
+	ProtocolMin = 1
 	ProtocolMax = 1
 )
 
@@ -57,12 +57,31 @@ type versionMismatchReply struct {
 	MaxVersion int `json:"max_version"`
 }
 
+// SQLDialect is the source-owned parsing and read-only policy advertised by describe.
+// Missing fields fail closed in core; denied functions and file formats must be explicit.
+type SQLDialect struct {
+	Parser          string   `json:"parser"`
+	IdentifierQuote string   `json:"identifier_quote"`
+	IdentifierCase  string   `json:"identifier_case"`
+	LiteralStyle    string   `json:"literal_style"`
+	HexLiteral      *string  `json:"hex_literal"`
+	DeniedFunctions []string `json:"denied_functions"`
+	FileFormats     []string `json:"file_formats"`
+	ReadOnlyNotice  *string  `json:"read_only_notice"`
+}
+
+type catalogReply struct {
+	envelope
+	Catalog any `json:"catalog"`
+}
+
 type describeReply struct {
 	envelope
 	ConnectionFields []Field       `json:"connection_fields"`
 	OptionFields     []OptionField `json:"option_fields,omitempty"`
 	IdentifierQuote  string        `json:"identifier_quote,omitempty"`
 	StringLiteral    string        `json:"string_literal,omitempty"`
+	SQLDialect       *SQLDialect   `json:"sql_dialect,omitempty"`
 }
 
 type validatedReply struct {

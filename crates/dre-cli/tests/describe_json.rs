@@ -33,11 +33,17 @@ fn descriptor(exe: &Path, id: &PluginId) -> Value {
         "connection_fields": d.connection_fields,
         "option_fields": d.option_fields,
     });
+    if let Some(properties) = d.format_properties {
+        v["format_properties"] = json!(properties);
+    }
     if let Some(q) = d.identifier_quote {
         v["identifier_quote"] = json!(q);
     }
     if let Some(s) = d.string_literal {
         v["string_literal"] = json!(s);
+    }
+    if let Some(policy) = d.sql_dialect {
+        v["sql_dialect"] = json!(policy);
     }
     if let Some(l) = d.message_limit {
         v["message_limit"] = json!(l);

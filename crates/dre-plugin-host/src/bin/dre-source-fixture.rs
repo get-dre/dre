@@ -42,7 +42,7 @@ use dre_protocol::plugin::{
     About, Destination, ErrorKind, Format, Plugin, PluginError, ResultSets, ResultSink, Source, WriteRequest,
     serve_format, serve_package, serve_source,
 };
-use dre_protocol::{CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
+use dre_protocol::{CAP_CATALOG, CAP_CHECK, CAP_READ_ONLY, CAP_SESSIONS, CAP_VALIDATE};
 use serde_json::{Map, Value};
 
 struct Fixture {
@@ -50,6 +50,26 @@ struct Fixture {
 }
 
 impl Source for Fixture {
+    fn sql_dialect(&self) -> Option<dre_protocol::sql::SqlDialect> {
+        Some(fixture_dialect())
+    }
+    fn catalog(&mut self, _tables: &[String], _schemas: &[String]) -> dre_protocol::plugin::Result<Value> {
+        Ok(serde_json::json!({
+            "schema_version": "dre/catalog/v1",
+            "identifier_quote": "\"",
+            "dialect": fixture_dialect().describe(),
+            "current_catalog": "fixture",
+            "current_schema": "main",
+            "tables": [{
+                "catalog": "fixture", "schema": "main", "name": "fixture_table",
+                "qualified_name": ["fixture", "main", "fixture_table"],
+                "description": "Native fixture table", "description_source": "database",
+                "columns": [{"name": "id", "type": "BIGINT", "description": "Native fixture column"}],
+                "requested": ["fixture_table"]
+            }]
+        }))
+    }
+
     fn identifier_quote(&self) -> Option<&'static str> {
         Some("\"")
     }
@@ -245,6 +265,7 @@ fn main() {
         serve_source(about, Fixture { opened: false })
     }
     let about = About::new("fixture", env!("CARGO_PKG_VERSION")).capabilities(&[
+        CAP_CATALOG,
         CAP_SESSIONS,
         CAP_READ_ONLY,
         CAP_CHECK,
@@ -284,10 +305,12 @@ fn close_probe() -> ! {
                 provides: Vec::new(),
             },
             Request::Describe {} => Response::Describe {
+                format_properties: None,
                 connection_fields: Fixture { opened: false }.connection_fields(),
                 option_fields: Vec::new(),
                 identifier_quote: Some("\"".into()),
                 string_literal: None,
+                sql_dialect: Some(Box::new(fixture_dialect())),
                 message_limit: None,
                 single_writer: None,
             },
@@ -313,6 +336,13 @@ fn close_probe() -> ! {
 struct Stall;
 
 impl Format for Stall {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: "stall".into(),
+            layout: dre_protocol::msg::FormatLayout::MultipleTables,
+        })
+    }
+
     fn write(
         &mut self,
         _req: &WriteRequest,
@@ -342,5 +372,18 @@ impl Destination for Inbox {
         _connection: &Map<String, Value>,
     ) -> dre_protocol::plugin::Result<String> {
         Ok(format!("inbox:{}", local.display()))
+    }
+}
+
+fn fixture_dialect() -> dre_protocol::sql::SqlDialect {
+    dre_protocol::sql::SqlDialect {
+        parser: dre_protocol::sql::SqlParser::Duckdb,
+        identifier_quote: "\"".into(),
+        identifier_case: dre_protocol::sql::IdentifierCase::Insensitive,
+        literal_style: "doubling".into(),
+        hex_literal: None,
+        denied_functions: vec!["read_text".into(), "fixture_external".into()],
+        file_formats: Vec::new(),
+        read_only_notice: None,
     }
 }

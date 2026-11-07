@@ -117,7 +117,7 @@ exit: 0
       }
     ],
     "project": {
-      "checksum": "527820ad3e7bd91eac355ddfbdeb2681bc9965132a734f6cd119d65a2012d876",
+      "checksum": "7fe4cdfc9be1e78b06ec78e0b182f84cf84391b27b37d1bda21dc8dd7465e8ce",
       "default_profile": "local_dev",
       "name": "acme_reports",
       "target": "dev"
@@ -150,7 +150,7 @@ exit: 0
             "vars": {}
           }
         ],
-        "checksum": "32c9aeb70056c0b839c162f7f6ae49904bbbf509b95be367453731ee4441fa14",
+        "checksum": "ac06113b61585413234694ec2ba62feaa155ac846931c17f22bce11705e16206",
         "depends_on": {
           "sources": []
         },

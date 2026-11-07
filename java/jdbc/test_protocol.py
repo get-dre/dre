@@ -60,6 +60,32 @@ class Plugin:
         return text
 
 
+class HandshakeTests(unittest.TestCase):
+    def test_only_protocol_one_is_negotiated(self):
+        for minimum, maximum, accepted in [(0, 0, False), (2, 3, False),
+                                           (2, 1, False), (0, 1, True), (1, 1, True)]:
+            with self.subTest(minimum=minimum, maximum=maximum):
+                body = b'J' + json.dumps({'type': 'hello', 'min_version': minimum,
+                                         'max_version': maximum,
+                                         'plugin': 'source/jdbc'}).encode()
+                result = subprocess.run([str(ROOT / 'dre-plugin-jdbc')],
+                                        input=struct.pack('>I', len(body)) + body,
+                                        capture_output=True, timeout=10)
+                self.assertGreaterEqual(len(result.stdout), 5)
+                length, = struct.unpack('>I', result.stdout[:4])
+                self.assertEqual(len(result.stdout), length + 4)
+                self.assertEqual(result.stdout[4:5], b'J')
+                reply = json.loads(result.stdout[5:])
+                if accepted:
+                    self.assertEqual(reply['type'], 'hello')
+                    self.assertEqual(reply['protocol_version'], 1)
+                    self.assertEqual(result.returncode, 0)
+                else:
+                    self.assertEqual(reply, {'type': 'version_mismatch',
+                                             'min_version': 1, 'max_version': 1})
+                    self.assertNotEqual(result.returncode, 0)
+
+
 class ProtocolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

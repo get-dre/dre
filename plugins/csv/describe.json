@@ -78,7 +78,11 @@
         "required": false,
         "default": false
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "csv",
+      "layout": "single_table"
+    }
   },
   "format/delimited": {
     "capabilities": [
@@ -159,6 +163,10 @@
         "required": false,
         "default": false
       }
-    ]
+    ],
+    "format_properties": {
+      "extension": "txt",
+      "layout": "single_table"
+    }
   }
 }

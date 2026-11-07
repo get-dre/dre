@@ -169,12 +169,14 @@ pub struct PluginInfo {
 /// A plugin's `describe` reply.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Description {
+    pub format_properties: Option<dre_protocol::msg::FormatProperties>,
     pub connection_fields: Vec<ConnectionField>,
     pub option_fields: Vec<OptionField>,
     /// A source's identifier quote character.
     pub identifier_quote: Option<String>,
     /// How a source wants string literals spelled (`chr` when absent; `backslash`).
     pub string_literal: Option<String>,
+    pub sql_dialect: Option<dre_protocol::sql::SqlDialect>,
     /// A message destination's length limit, in characters.
     pub message_limit: Option<u64>,
     /// A source's field naming a file only one process may write at a time.
@@ -1031,17 +1033,21 @@ impl PluginProcess {
         self.send(&Request::Describe {})?;
         match self.recv_json("a describe reply")? {
             Response::Describe {
+                format_properties,
                 connection_fields,
                 option_fields,
                 identifier_quote,
                 string_literal,
+                sql_dialect,
                 message_limit,
                 single_writer,
             } => Ok(Description {
+                format_properties,
                 connection_fields,
                 option_fields,
                 identifier_quote,
                 string_literal,
+                sql_dialect: sql_dialect.map(|policy| *policy),
                 message_limit,
                 single_writer,
             }),

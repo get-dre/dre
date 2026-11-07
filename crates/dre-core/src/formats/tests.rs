@@ -1,8 +1,36 @@
 use super::*;
 
+fn described(name: &str) -> Format<'_> {
+    use dre_protocol::msg::{FormatLayout, FormatProperties};
+    static PROPERTIES: std::sync::LazyLock<BTreeMap<&str, FormatProperties>> =
+        std::sync::LazyLock::new(|| {
+            [
+                ("csv", "csv", FormatLayout::SingleTable),
+                ("delimited", "txt", FormatLayout::SingleTable),
+                ("fixed_width", "txt", FormatLayout::SingleTable),
+                ("parquet", "parquet", FormatLayout::SingleTable),
+                ("xlsx", "xlsx", FormatLayout::Workbook),
+                ("html", "html", FormatLayout::Document),
+                ("pdf", "pdf", FormatLayout::Document),
+            ]
+            .into_iter()
+            .map(|(name, extension, layout)| {
+                (
+                    name,
+                    FormatProperties {
+                        extension: extension.into(),
+                        layout,
+                    },
+                )
+            })
+            .collect()
+        });
+    Format::with_properties(name, PROPERTIES.get(name))
+}
+
 fn files<'a>(format: &'a str, extension: Option<&'a str>, template: bool) -> Files<'a> {
     Files {
-        format: Format::new(format),
+        format: described(format),
         extension,
         template,
     }
@@ -144,7 +172,7 @@ fn what_each_format_is() {
         ("message", false, false, false, false, true),
     ];
     for (name, one, workbook, document, template, sections) in cases {
-        let f = Format::new(name);
+        let f = described(name);
         assert_eq!(
             (
                 f.one_table(),
@@ -156,5 +184,16 @@ fn what_each_format_is() {
             (one, workbook, document, template, sections),
             "{name}"
         );
+    }
+}
+
+#[test]
+fn names_do_not_invent_metadata() {
+    for name in ["csv", "xlsx", "html", "pdf", "folio"] {
+        let format = Format::new(name);
+        assert!(!format.known());
+        assert_eq!(format.extension(), "");
+        assert!(!format.one_table());
+        assert!(!format.takes_template());
     }
 }

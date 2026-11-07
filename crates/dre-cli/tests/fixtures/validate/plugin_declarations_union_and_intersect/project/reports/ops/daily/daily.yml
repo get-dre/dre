@@ -1,4 +1,1 @@
 queries: [summary]
-plugins:
-  - csv: ">=0.1"
-  - xlsx

@@ -122,7 +122,7 @@ func TestOnDatabricksComputeTheFileIsCopiedToTheMountedWorkspace(t *testing.T) {
 
 func TestTheDestinationDeliversWorkspacePaths(t *testing.T) {
 	c := plugintest.Start(t, pkg, sourceRole)
-	c.Send(map[string]any{"type": "hello", "min_version": 0, "max_version": 0, "core_version": "t", "plugin": "destination/databricks"})
+	c.Send(map[string]any{"type": "hello", "min_version": 1, "max_version": 1, "core_version": "t", "plugin": "destination/databricks"})
 	if r := c.Reply(); r["kind"] != "destination" || r["name"] != "databricks" {
 		t.Fatalf("%v", r)
 	}

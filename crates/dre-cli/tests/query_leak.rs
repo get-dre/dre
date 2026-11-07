@@ -95,3 +95,11 @@ fn a_failing_step_reaps_the_plugin_process() {
         "the plugin process is still running after the query failed"
     );
 }
+
+#[test]
+fn an_unfamiliar_source_uses_its_declared_query_safety_policy() {
+    let p = project("select fixture_external('private')");
+    let r = run_query(&p, &[]);
+    r.failed()
+        .says("reads files, runs programs or reaches the network");
+}

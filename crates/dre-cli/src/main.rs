@@ -635,7 +635,20 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         dre_core::start::install_packages(&req.dir, printer);
     }
     let selector = selection(&a.select, &a.selector);
-    let (project, mut diags) = project::load_with(&req.dir, &req.load, ctx);
+    let (parsed, parse_diags) = project::parse_with(&req.dir, &req.load, ctx);
+    let mut install_diags = dre_core::Diagnostics::default();
+    if !parse_diags.has_errors()
+        && let Some(p) = &parsed
+    {
+        plugins::check_for_validate(ctx, p, req.install, &mut install_diags, printer);
+    }
+    let (project, mut diags) = match parsed {
+        Some(project) => project::resolve_formats(&project, &req.load, ctx),
+        None => (None, parse_diags),
+    };
+    for diagnostic in install_diags.sorted() {
+        diags.push(diagnostic.clone());
+    }
     // validate checks every report, so templates that don't render are its errors too.
     for d in project.iter().flat_map(|p| p.all_parse_errors()) {
         diags.push(d.clone());
@@ -658,7 +671,6 @@ fn validate(ctx: &Context, a: ValidateArgs, printer: &output::Printer) -> ExitCo
         // Plugins aren't installed when the project already has errors, so a missing one is then
         // only a warning; the option checks run either way, so every problem shows in one pass.
         let offline = a.project.no_auto_install || diags.has_errors();
-        plugins::check_for_validate(ctx, p, req.install, &mut diags, printer);
         dre_core::start::check_plugin_uses(ctx, p, req.install, &mut diags);
         dre_core::options::check(ctx, p, offline, &mut diags);
     }

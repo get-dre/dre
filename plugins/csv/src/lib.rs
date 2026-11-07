@@ -99,9 +99,18 @@ fn encoding(label: &str) -> Option<&'static encoding_rs::Encoding> {
     encoding_rs::Encoding::for_label(label.as_bytes()).filter(|e| e.output_encoding() == *e)
 }
 
-struct Delimited;
+struct Delimited {
+    extension: &'static str,
+}
 
 impl Format for Delimited {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: self.extension.into(),
+            layout: dre_protocol::msg::FormatLayout::SingleTable,
+        })
+    }
+
     fn options(&self) -> Vec<OptionField> {
         use OptionType::*;
         vec![
@@ -271,7 +280,14 @@ pub fn serve() -> ! {
     serve_package(
         ["csv", "delimited"]
             .into_iter()
-            .map(|name| Plugin::Format(About::new(name, env!("CARGO_PKG_VERSION")), Box::new(Delimited)))
+            .map(|name| {
+                Plugin::Format(
+                    About::new(name, env!("CARGO_PKG_VERSION")),
+                    Box::new(Delimited {
+                        extension: if name == "csv" { "csv" } else { "txt" },
+                    }),
+                )
+            })
             .collect(),
     )
 }

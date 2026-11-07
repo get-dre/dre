@@ -10,6 +10,13 @@ use parquet::file::properties::WriterProperties;
 struct Parquet;
 
 impl Format for Parquet {
+    fn properties(&self) -> Option<dre_protocol::msg::FormatProperties> {
+        Some(dre_protocol::msg::FormatProperties {
+            extension: "parquet".into(),
+            layout: dre_protocol::msg::FormatLayout::SingleTable,
+        })
+    }
+
     fn write(&mut self, req: &WriteRequest, sets: &mut ResultSets<'_>) -> Result<Vec<String>> {
         if req.result_sets.len() != 1 {
             return Err(format!(

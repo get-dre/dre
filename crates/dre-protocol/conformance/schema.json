@@ -12,7 +12,7 @@
   ],
   "x-dre": {
     "protocol": {
-      "min_version": 0,
+      "min_version": 1,
       "max_version": 1,
       "core_min_version": 1
     },
@@ -433,7 +433,7 @@
           "description": "Protocol 1: stop the request whose id the envelope carries. It has no reply of its own:\nthe request replies `error` with kind `cancelled`, or its usual reply if it finished\nfirst. A cancel for a request that isn't running is ignored."
         }
       ],
-      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none."
     },
     "PluginId": {
       "description": "One plugin, written `<kind>/<name>` (`destination/s3`).",
@@ -915,6 +915,17 @@
               "type": "string",
               "const": "describe"
             },
+            "format_properties": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FormatProperties"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Format-owned file and template behavior. Required for file-output planning."
+            },
             "connection_fields": {
               "type": "array",
               "items": {
@@ -940,6 +951,17 @@
                 "null"
               ],
               "description": "Source: how core spells a string holding `'` or `\\` when it writes one into SQL (an\ninlined lookup): absent or `chr` for `chr(39)`/`chr(92)`, `backslash` for `\\'`/`\\\\`\ninside the quotes (a database without `chr()`, such as ClickHouse)."
+            },
+            "sql_dialect": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SqlDialect"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source-owned SQL grammar, literal rules and read-only policy."
             },
             "message_limit": {
               "type": [
@@ -1203,7 +1225,7 @@
             "type",
             "message"
           ],
-          "description": "The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,\nnamespaced by the plugin (`sftp/host-key-mismatch`). Both are optional (protocol 0 has\nneither): without a `code`, core reports the failure under its own code for the step;\na `code` without a `kind` counts as `internal`."
+          "description": "The request failed. `kind` is one of [`ERROR_KINDS`]; `code` names the problem,\nnamespaced by the plugin (`sftp/host-key-mismatch`). Both are optional:\nwithout a `code`, core reports the failure under its own code for the step;\na `code` without a `kind` counts as `internal`."
         },
         {
           "type": "object",
@@ -1267,7 +1289,7 @@
           "description": "Protocol 1, optional: how far a long request has got. Core shows it when present."
         }
       ],
-      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none, and neither\ndoes anything a protocol 0 peer sends."
+      "description": "A message with the id of the request it belongs to. Core numbers its requests; every reply,\nand every message streamed as part of a request (`result_set_end`, `finish`, `result`,\n`result_end`, `log`, `progress`), carries that request's id. `hello` has none."
     },
     "Kind": {
       "type": "string",
@@ -1276,6 +1298,48 @@
         "format",
         "destination"
       ]
+    },
+    "FormatProperties": {
+      "type": "object",
+      "properties": {
+        "extension": {
+          "type": "string",
+          "description": "File extension without the dot; an empty string means no extension."
+        },
+        "layout": {
+          "$ref": "#/$defs/FormatLayout"
+        }
+      },
+      "required": [
+        "extension",
+        "layout"
+      ],
+      "description": "A format's file and template contract, supplied by its plugin rather than its name."
+    },
+    "FormatLayout": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "single_table",
+          "description": "One result set per file; several queries split into sibling files."
+        },
+        {
+          "type": "string",
+          "const": "multiple_tables",
+          "description": "Several result sets in one file, without a core template context."
+        },
+        {
+          "type": "string",
+          "const": "workbook",
+          "description": "Sheets and cell bindings in a workbook template."
+        },
+        {
+          "type": "string",
+          "const": "document",
+          "description": "One document whose template receives the run context."
+        }
+      ],
+      "description": "How core groups result sets and supplies templates for a format."
     },
     "ConnectionField": {
       "type": "object",
@@ -1444,6 +1508,79 @@
         }
       ],
       "description": "What a value must be."
+    },
+    "SqlDialect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parser": {
+          "$ref": "#/$defs/SqlParser"
+        },
+        "identifier_quote": {
+          "type": "string"
+        },
+        "identifier_case": {
+          "$ref": "#/$defs/IdentifierCase"
+        },
+        "literal_style": {
+          "type": "string",
+          "description": "`doubling` or `hex`; hex requires exactly one `{hex}` in `hex_literal`."
+        },
+        "hex_literal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "denied_functions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Formats which accept backtick-quoted file paths in place of a relation."
+        },
+        "read_only_notice": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "When no read-only session exists, the database permission boundary to show the user."
+        }
+      },
+      "required": [
+        "parser",
+        "identifier_quote",
+        "identifier_case",
+        "literal_style",
+        "denied_functions",
+        "file_formats"
+      ],
+      "description": "Source-owned rules for `dre query` and catalogue consumers.\nAll safety fields are required: a missing or unknown policy fails closed."
+    },
+    "SqlParser": {
+      "type": "string",
+      "enum": [
+        "generic",
+        "duckdb",
+        "postgres",
+        "databricks"
+      ],
+      "description": "The parser grammar used to validate a query before execution."
+    },
+    "IdentifierCase": {
+      "type": "string",
+      "enum": [
+        "insensitive",
+        "lower_unless_quoted",
+        "upper_unless_quoted"
+      ],
+      "description": "How unquoted identifiers match stored names."
     },
     "SingleWriter": {
       "type": "object",

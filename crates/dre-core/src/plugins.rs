@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use dre_protocol::{PluginId, executable_name, parse_executable_name, parse_package_executable_name};
+use dre_protocol::{PluginId, parse_executable_name, parse_package_executable_name};
 use semver::{Version, VersionReq};
 
 use crate::codes::Code;
@@ -286,15 +286,6 @@ pub fn find(
 /// Where a versioned install of a package lives.
 pub fn version_dir(dir: &Path, package: &str, version: &Version) -> PathBuf {
     dir.join(package).join(version.to_string())
-}
-
-/// The executable file name a package installs under when its archive holds a single plugin's
-/// `dre-<kind>-<name>` (a plugin built before packages).
-pub fn legacy_executable(provides: &[PluginId]) -> Option<String> {
-    match provides {
-        [one] => Some(executable_name(one.kind, &one.name)),
-        _ => None,
-    }
 }
 
 /// The executable to start for one plugin, and the plugin to ask it for.

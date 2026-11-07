@@ -173,7 +173,7 @@ fn history_lists_runs_and_finds_the_latest_files() {
 }
 
 #[test]
-fn files_from_before_run_folders_move_into_a_legacy_run() {
+fn files_from_before_run_folders_remain_untouched() {
     let p = project();
     let b = binding(&p, "daily");
     std::fs::create_dir_all(&b).unwrap();
@@ -184,8 +184,8 @@ fn files_from_before_run_folders_move_into_a_legacy_run() {
     )
     .unwrap();
     p.dre("run", &["daily"]).ok();
-    assert!(!b.join("daily.csv").exists());
-    // The legacy run was current before this one; the new run replaced it (keep one).
+    assert_eq!(std::fs::read_to_string(b.join("daily.csv")).unwrap(), "old\n");
+    // The old flat files are not migrated or included in the run-folder retention count.
     let all = runs(&p, "daily");
     assert_eq!(all.len(), 1, "{all:?}");
     assert!(!all[0].ends_with("-legacy"));

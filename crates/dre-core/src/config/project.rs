@@ -76,10 +76,6 @@ pub struct ProjectFile {
     pub flags: Option<Located<Loose<Flags>>>,
     /// Where DRE writes its generated files (compiled SQL, run outputs, the manifest). Default: `target/` in the project. `--target-path` and `DRE_TARGET_PATH` override it.
     pub target_path: Option<Located<Loose<String>>>,
-    /// The plugin packages this project uses. DRE installs them on demand into `dre_deps/` and pins them in `dre.lock`. May be written in any project YAML file; `dependencies.yml` is the usual place.
-    #[schemars(schema_with = "super::dependencies::plugins")]
-    #[serde(default)]
-    pub plugins: Option<IgnoredAny>,
     /// dbt-style source declarations (see the sources schema). May be written in any project YAML file.
     #[schemars(schema_with = "sources_ref")]
     #[serde(default)]
