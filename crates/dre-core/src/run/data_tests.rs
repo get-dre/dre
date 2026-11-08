@@ -49,6 +49,7 @@ impl BindingRun<'_> {
                         crate::for_each::safe_name(&test.name)
                     )),
                 &test,
+                self.ctx.secrets().clone(),
             );
             self.not_cancelled()?;
             let started = Instant::now();
@@ -374,10 +375,11 @@ struct Evidence {
     limit: u64,
     rows: u64,
     writer: Option<arrow::csv::Writer<File>>,
+    secrets: crate::secrets::Secrets,
 }
 
 impl Evidence {
-    fn new(path: PathBuf, test: &DataTest) -> Self {
+    fn new(path: PathBuf, test: &DataTest, secrets: crate::secrets::Secrets) -> Self {
         Self {
             path,
             limit: if test.config.store_failures {
@@ -387,6 +389,7 @@ impl Evidence {
             },
             rows: 0,
             writer: None,
+            secrets,
         }
     }
 
@@ -404,11 +407,48 @@ impl Evidence {
         }
         let writer = self.writer.as_mut().expect("writer was opened above");
         writer
-            .write(&batch.slice(0, take))
+            .write(&masked(&batch.slice(0, take), &self.secrets)?)
             .map_err(|e| format!("cannot write {}: {e}", self.path.display()))?;
         self.rows += take as u64;
         Ok(())
     }
+}
+
+/// `batch` with every cell holding a declared secret value masked, whatever its column is named:
+/// a test can select a secret column under an alias. Columns without one keep their type.
+fn masked(
+    batch: &arrow::array::RecordBatch,
+    secrets: &crate::secrets::Secrets,
+) -> Result<arrow::array::RecordBatch, String> {
+    use arrow::array::{Array, ArrayRef, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    if !secrets.enabled() {
+        return Ok(batch.clone());
+    }
+    let mut fields = Vec::with_capacity(batch.num_columns());
+    let mut columns: Vec<ArrayRef> = Vec::with_capacity(batch.num_columns());
+    for (field, column) in batch.schema().fields().iter().zip(batch.columns()) {
+        let name = secrets.mask(field.name()).into_owned();
+        let text = arrow::compute::cast(column, &DataType::Utf8).ok();
+        let text = text
+            .as_ref()
+            .and_then(|t| t.as_any().downcast_ref::<StringArray>());
+        match text.filter(|t| t.iter().flatten().any(|v| secrets.contains_secret(v))) {
+            Some(text) => {
+                let cells: StringArray = text
+                    .iter()
+                    .map(|v| v.map(|v| secrets.mask(v).into_owned()))
+                    .collect();
+                fields.push(Arc::new(Field::new(name, DataType::Utf8, true)));
+                columns.push(Arc::new(cells));
+            }
+            None => {
+                fields.push(Arc::new(field.as_ref().clone().with_name(name)));
+                columns.push(column.clone());
+            }
+        }
+    }
+    arrow::array::RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).map_err(|e| e.to_string())
 }
 
 // Configure DuckDB memory and spill independently. This is not a process RSS limit:
