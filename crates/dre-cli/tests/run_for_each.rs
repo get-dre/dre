@@ -386,6 +386,37 @@ fn retry_failed_redoes_only_the_failed_rows_from_the_saved_results() {
 }
 
 #[test]
+fn a_retry_killed_before_its_results_still_counts_for_the_next_retry() {
+    let p = project(REPORT, &[("out/102-bob.csv/keep", "")]);
+    p.dre("run", &["statements"]).failed();
+    let first = results(&p)["run_id"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(p.path("out/102-bob.csv")).unwrap();
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .ok();
+    // The retry is killed after journaling 102 but before its results and done list.
+    let runs = p.path("target/run/statements/default/runs");
+    let retry = std::fs::read_dir(&runs)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .find(|id| *id != first)
+        .unwrap();
+    std::fs::remove_file(runs.join(&retry).join("run_results.json")).unwrap();
+    std::fs::remove_file(runs.join(&retry).join("statement.done.json")).unwrap();
+    std::fs::remove_file(p.path("out/102-bob.csv")).unwrap();
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .ok()
+    .says("no row left to make");
+    assert!(!p.path("out/102-bob.csv").exists());
+}
+
+#[test]
 fn retry_failed_refuses_destinations_that_changed() {
     // 102's first destination fails, its second (the archive) succeeds.
     let two = |first: &str, second: &str| {
