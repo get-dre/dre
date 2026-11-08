@@ -27,6 +27,10 @@ const batchRows = 65536
 
 var batchBytes = 64 << 20
 
+// cellBytes is the largest single value a batch takes; a bigger one is an error, not a frame
+// the protocol would refuse.
+var cellBytes = 256 << 20
+
 // session is one ClickHouse session. Over HTTP every request carries the session's session_id;
 // over native the pool holds one connection. Either way temp tables and SET from one statement
 // are there for the next.
@@ -388,8 +392,11 @@ func (r *result) Next() (arrow.RecordBatch, error) {
 		}
 		for i, c := range r.cols {
 			v := reflect.ValueOf(r.dest[i]).Elem().Interface()
-			c.append(builders[i], v)
-			size += valueSize(v)
+			added := c.append(builders[i], v)
+			if added > cellBytes {
+				return nil, fmt.Errorf("column %s: a value of %d bytes is over the %d-byte limit for one value", c.name, added, cellBytes)
+			}
+			size += added
 		}
 		n++
 	}
@@ -405,17 +412,6 @@ func (r *result) Next() (arrow.RecordBatch, error) {
 		defer cols[i].Release()
 	}
 	return array.NewRecordBatch(r.schema, cols, n), nil
-}
-
-// valueSize is roughly how many bytes a scanned value adds to a batch.
-func valueSize(v any) int {
-	switch x := deref(v).(type) {
-	case string:
-		return len(x)
-	case []byte:
-		return len(x)
-	}
-	return 8
 }
 
 // returnsRows is whether a statement answers with rows, from its first keyword (after comments
