@@ -244,8 +244,18 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
                             );
                             ok = false;
                         }
-                        // Not a type name at all: read as text.
-                        Loose::Bad(_) => {}
+                        Loose::Bad(f) => {
+                            diags.error(
+                                Code::InvalidLookup,
+                                file.clone(),
+                                c.line(),
+                                format!(
+                                    "column `{}` has {} for its type; use string, integer, number, boolean or date",
+                                    c.value, f.kind
+                                ),
+                            );
+                            ok = false;
+                        }
                     }
                 }
             }
@@ -259,6 +269,20 @@ fn parse_config(yf: &YamlFile, is_data: bool, l: &mut Lookup, diags: &mut Diagno
                 ok = false;
             }
         }
+    }
+    if let Some(sheet) = &cfg.sheet
+        && let Loose::Bad(f) = &sheet.value
+    {
+        diags.error(
+            Code::InvalidLookup,
+            file.clone(),
+            Some(f.line),
+            format!(
+                "`sheet` must be a sheet name, not {} (quote a name like '2026')",
+                f.kind
+            ),
+        );
+        ok = false;
     }
     l.sheet = cfg.sheet.as_ref().and_then(|s| s.value.ok()).cloned();
     if let Some(v) = &cfg.load {
@@ -860,6 +884,34 @@ mod tests {
             read_objects(&[Json::Null]).unwrap_err(),
             "entry 1: each row must be an object"
         );
+    }
+
+    #[test]
+    fn a_sheet_or_column_type_of_the_wrong_shape_is_an_error() {
+        let invalid = |d: &Diagnostics| d.iter().any(|d| d.code == Code::InvalidLookup);
+        for cfg in [
+            "sheet: 2026\n",
+            "sheet: [a]\n",
+            "columns: {pop: {type: integer}}\n",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join("lookups")).unwrap();
+            std::fs::write(dir.path().join("lookups/w.xlsx"), "").unwrap();
+            std::fs::write(dir.path().join("lookups/w.yml"), cfg).unwrap();
+            let files = [PathBuf::from("lookups/w.xlsx"), PathBuf::from("lookups/w.yml")];
+            let mut d = Diagnostics::default();
+            assert!(discover(dir.path(), &files, &mut d).is_empty(), "{cfg}");
+            assert!(invalid(&d), "{cfg}");
+        }
+        for (cfg, sheet) in [
+            ("columns: {pop: integer}\n", None),
+            ("sheet: '2026'\n", Some("2026")),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (l, d) = lookup(dir.path(), "w.xlsx", "", Some(cfg));
+            assert!(!invalid(&d), "{cfg}");
+            assert_eq!(l.sheet.as_deref(), sheet);
+        }
     }
 
     #[test]

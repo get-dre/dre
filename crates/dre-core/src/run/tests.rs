@@ -620,6 +620,56 @@ fn a_replay_uses_the_saved_results_and_runs_no_query() {
 }
 
 #[test]
+fn two_tabs_writing_one_file_fail_validation() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let dir = tempfile::tempdir().unwrap();
+    let files = [
+        ("dre_project.yml", "name: packs\ndefault_profile: warehouse\n"),
+        ("profiles.yml", PROFILES),
+        (
+            "reports/pack/pack.yml",
+            "queries: [summary, {query: members, tab_name: SUMMARY}]\noutput: {name: detail, format: csv}\n",
+        ),
+        ("reports/pack/summary.sql", "select 1"),
+        ("reports/pack/members.sql", "select 1"),
+    ];
+    for (path, text) in files {
+        let p = dir.path().join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    let (_, diags) = crate::project::load_with(dir.path(), &Default::default(), &ctx);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("would both write `detail_summary.csv`")),
+        "{:?}",
+        diags.sorted()
+    );
+}
+
+#[test]
+fn two_results_saved_under_one_name_fail_before_any_file_is_written() {
+    let host = host(Script::new(&[]));
+    let ctx = context(&host);
+    let (dir, project) = project(
+        "queries: [summary, {query: members, tab_name: SUMMARY}]\noutput:\n  name: detail\n  format: csv\n\
+         \x20 queries: [summary]\n  destination: {profile: outbox, path: out/detail.csv}\n",
+        &ctx,
+    );
+    let save = RunOptions {
+        output_json: Some("saved".into()),
+        ..options()
+    };
+    let summary = run_once(&ctx, &project, &save);
+    let error = summary.outcomes[0].error.clone().expect("the run fails");
+    assert!(error.contains("`SUMMARY`"), "{error}");
+    assert!(calls_of(&host, "Write").is_empty());
+    assert!(!dir.path().join("saved/pack").exists());
+}
+
+#[test]
 fn hold_holds_every_destination_of_the_run() {
     let host = host(Script::new(&[]));
     let ctx = context(&host);

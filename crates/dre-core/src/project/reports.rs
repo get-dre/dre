@@ -440,8 +440,12 @@ impl Loader {
             }) => schema.clone(),
             Some(value) => {
                 let (file, _) = located("var_schema").expect("the key is present: its value was read");
+                let problem = match &value.value {
+                    Loose::Bad(found) => format!(" ({})", found.problem),
+                    Loose::Ok(_) => String::new(),
+                };
                 self.diags.error(Code::InvalidField, Some(file), value.line(),
-                    "`var_schema` must map variable names to declarations with a supported type, default, allowed values, description, required flag, pattern and max_length");
+                    format!("`var_schema` must map variable names to declarations with a supported type, default, allowed values, description, required flag, pattern and max_length{problem}"));
                 BTreeMap::new()
             }
         };

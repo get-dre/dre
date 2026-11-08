@@ -390,7 +390,10 @@ fn settings(c: &Map<String, Value>) -> Result<Settings> {
     let mut cfg = Config::new();
     let host = conn_str(c, "host").unwrap_or("localhost").to_string();
     let port = match c.get("port") {
-        Some(Value::Number(n)) => n.as_u64().ok_or("`port` must be a number")? as u16,
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .ok_or_else(|| format!("invalid `port` `{n}`"))?,
         Some(Value::String(s)) => s.parse().map_err(|_| format!("invalid `port` `{s}`"))?,
         _ => 5432,
     };

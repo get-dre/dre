@@ -2110,6 +2110,67 @@ mod tests {
     }
 
     #[test]
+    fn a_misspelt_variable_declaration_key_is_an_error() {
+        for typo in ["allowd: [EU]", "patern: '^E'", "max_lenght: 2"] {
+            let mut files = FILES.to_vec();
+            let yml =
+                format!("queries: [monthly]\nvar_schema:\n  region: {{type: string, default: EU, {typo}}}\n");
+            files[2].1 = &yml;
+            let dir = project(&files);
+            let (_, diags) = load(dir.path(), &LoadOptions::default());
+            let key = typo.split(':').next().expect("a key");
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.code == Code::InvalidField && d.message.contains(key)),
+                "{typo}: {:?}",
+                codes(&diags)
+            );
+        }
+        let mut files = FILES.to_vec();
+        files[2].1 = "queries: [monthly]\nvar_schema:\n  region: {type: string, default: EU, allowed: [EU], pattern: 'E[A-Z]', max_length: 2}\n";
+        let dir = project(&files);
+        let (_, diags) = load(dir.path(), &LoadOptions::default());
+        assert!(
+            !diags.iter().any(|d| d.code == Code::InvalidField),
+            "{:?}",
+            codes(&diags)
+        );
+    }
+
+    #[test]
+    fn a_set_that_is_not_a_map_is_an_error() {
+        for set in ["eu: [{vars: {region: EU}}]", "eu: EU"] {
+            let mut files = FILES.to_vec();
+            let sets = format!("{set}\nb: {{vars: {{region: NZ}}}}\n");
+            files[1].1 = &sets;
+            files[2].1 = "queries: [monthly]\nsets: [eu, b]\n";
+            let dir = project(&files);
+            let (_, diags) = load(dir.path(), &LoadOptions::default());
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.code == Code::InvalidField && d.message.contains("Set `eu` must be a map")),
+                "{set}: {:?}",
+                codes(&diags)
+            );
+        }
+        for set in ["eu:", "eu: {}"] {
+            let mut files = FILES.to_vec();
+            let sets = format!("{set}\nb: {{vars: {{region: NZ}}}}\n");
+            files[1].1 = &sets;
+            files[2].1 = "queries: [monthly]\nsets: [eu, b]\nvars: {region: ALL}\n";
+            let dir = project(&files);
+            let (_, diags) = load(dir.path(), &LoadOptions::default());
+            assert!(
+                !diags.iter().any(|d| d.code == Code::InvalidField),
+                "{set}: {:?}",
+                codes(&diags)
+            );
+        }
+    }
+
+    #[test]
     fn no_project_file_is_an_error() {
         let dir = project(&[("reports/x.sql", "select 1")]);
         let (p, diags) = load(dir.path(), &LoadOptions::default());

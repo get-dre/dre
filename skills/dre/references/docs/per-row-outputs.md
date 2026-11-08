@@ -69,9 +69,9 @@ destinations (email, Slack) are exempt.
 
 Rendered remote paths must differ too: a row whose destination path another row already
 delivered to in the run (or another Set's row, when Bindings run at once) fails, naming that
-row. A path that a row's values give a `..`, an absolute start or a drive (`C:`), or a Windows
-device name (`CON`, `NUL`), is refused and that row fails; what the YAML itself writes there is
-kept. A rendered `file_name` must be a single file name; on Windows it also can't hold a `:` or
+row. A path that a row's values give a `..`, an absolute start or a drive (`C:`), a URI scheme
+(`s3://other-bucket/...`, which would name another bucket), or a Windows device name (`CON`,
+`NUL`), is refused and that row fails; what the YAML itself writes there is kept. A rendered `file_name` must be a single file name; on Windows it also can't hold a `:` or
 be a device name.
 
 ## When a row fails
