@@ -83,7 +83,7 @@ type tunnel struct {
 
 // bastion is the SSH connection, connecting (again) when there's none: a failure isn't kept
 // for the rest of the run.
-func (t *tunnel) bastion() (*ssh.Client, error) {
+func (t *tunnel) bastion(ctx context.Context) (*ssh.Client, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.client == nil {
@@ -91,7 +91,7 @@ func (t *tunnel) bastion() (*ssh.Client, error) {
 			t.agent.Close()
 			t.agent = nil
 		}
-		t.client, t.err = t.connect()
+		t.client, t.err = t.connect(ctx)
 	}
 	return t.client, t.err
 }
@@ -111,7 +111,7 @@ func (t *tunnel) drop(c *ssh.Client) {
 // native protocol; over HTTP, net/http does).
 func (t *tunnel) dialer(tlsConf *tls.Config) func(ctx context.Context, addr string) (net.Conn, error) {
 	return func(ctx context.Context, addr string) (net.Conn, error) {
-		client, err := t.bastion()
+		client, err := t.bastion(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +150,7 @@ func (t *tunnel) closeIfSet() {
 	}
 }
 
-func (t *tunnel) connect() (*ssh.Client, error) {
+func (t *tunnel) connect(ctx context.Context) (*ssh.Client, error) {
 	s := t.settings
 	if errs := checkSSH(s); len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
@@ -172,8 +172,11 @@ func (t *tunnel) connect() (*ssh.Client, error) {
 	var presented ssh.PublicKey
 	check := func(h string, a net.Addr, k ssh.PublicKey) error { presented = k; return hostKey(h, a, k) }
 	conf := &ssh.ClientConfig{User: plugin.Optional(s, "username"), Auth: auth, HostKeyCallback: check, Timeout: t.timeout}
-	c, err := ssh.Dial("tcp", addr, conf)
+	c, err := handshake(ctx, addr, conf)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("can't connect to the SSH bastion %s: %w", addr, ctx.Err())
+		}
 		var ke *knownhosts.KeyError
 		switch {
 		case errors.As(err, &ke) && len(ke.Want) == 0:
@@ -186,6 +189,33 @@ func (t *tunnel) connect() (*ssh.Client, error) {
 		return nil, fmt.Errorf("can't connect to the SSH bastion %s: %v", addr, err)
 	}
 	return c, nil
+}
+
+// handshake is ssh.Dial bounded by ctx as well as conf.Timeout: ssh.Dial's timeout covers only
+// the TCP dial, so a bastion that accepts but never answers would hang it.
+func handshake(ctx context.Context, addr string, conf *ssh.ClientConfig) (*ssh.Client, error) {
+	if conf.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, conf.Timeout)
+		defer cancel()
+	}
+	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { raw.Close() })
+	conn, chans, reqs, err := ssh.NewClientConn(raw, addr, conf)
+	if !stop() {
+		if err == nil {
+			conn.Close()
+		}
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		raw.Close()
+		return nil, err
+	}
+	return ssh.NewClient(conn, chans, reqs), nil
 }
 
 func (t *tunnel) sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {

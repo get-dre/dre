@@ -123,3 +123,77 @@ func TestTheTunnelReconnectsAfterAFailure(t *testing.T) {
 		t.Fatalf("the bastion was reached %d times, want 2", len(accepted))
 	}
 }
+
+// silentBastion accepts TCP but never sends the SSH identification; closing it releases the
+// connections it holds.
+func silentBastion(t *testing.T) (port string, accepted <-chan struct{}) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan struct{}, 4)
+	conns := make(chan net.Conn, 4)
+	t.Cleanup(func() {
+		ln.Close()
+		for len(conns) > 0 {
+			(<-conns).Close()
+		}
+	})
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conns <- c
+			ch <- struct{}{}
+		}
+	}()
+	_, port, _ = net.SplitHostPort(ln.Addr().String())
+	return port, ch
+}
+
+func silentTunnel(port string, timeout time.Duration) *tunnel {
+	return &tunnel{settings: map[string]any{"host": "127.0.0.1", "port": port, "username": "u", "password": "p",
+		"host_key_fingerprint": "SHA256:x"}, timeout: timeout}
+}
+
+// A bastion that accepts TCP but stays silent is given up on after `connect_timeout`.
+func TestASilentBastionHandshakeTimesOut(t *testing.T) {
+	port, _ := silentBastion(t)
+	done := make(chan error, 1)
+	go func() {
+		_, err := silentTunnel(port, 50*time.Millisecond).dialer(nil)(context.Background(), "clickhouse:8123")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("dialed through a silent bastion")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the SSH handshake ignored connect_timeout")
+	}
+}
+
+// Cancelling the dial's context interrupts a handshake the bastion never answers.
+func TestCancellingInterruptsASilentBastionHandshake(t *testing.T) {
+	port, accepted := silentBastion(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := silentTunnel(port, time.Hour).dialer(nil)(ctx, "clickhouse:8123")
+		done <- err
+	}()
+	<-accepted // the handshake has started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want context.Canceled", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelling didn't interrupt the SSH handshake")
+	}
+}
