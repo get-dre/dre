@@ -199,7 +199,8 @@ fn loaded_project_errors_reach_stderr_and_fail_every_listing() {
                         "{doc}"
                     );
                 } else {
-                    assert_eq!(doc.as_object().unwrap().len(), 1);
+                    assert_eq!(doc.as_object().unwrap().len(), 2, "{doc}");
+                    assert_eq!(doc["schema_version"], "dre/sources/v1");
                     assert!(doc["sources"]["sales"]["tables"]["orders"].is_object());
                 }
             }

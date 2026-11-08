@@ -61,6 +61,9 @@ pub struct UnlockArgs {
     target_path: Option<String>,
 }
 
+/// Each `dre history --output json` entry's version.
+const HISTORY_SCHEMA_VERSION: &str = "dre/history/v1";
+
 /// `<target path>/run/<report>`.
 fn report_dir(
     env: &dre_core::Env,
@@ -122,6 +125,9 @@ pub fn history(ctx: &dre_core::Context, a: HistoryArgs) -> ExitCode {
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or(Value::Null);
             rows.push(json!({
+                "schema_version": HISTORY_SCHEMA_VERSION,
+                // The stored run_results.json's own version; null when the run never finished.
+                "results_schema_version": results.get("schema_version").cloned().unwrap_or(Value::Null),
                 "report": a.report,
                 "binding": b,
                 "run_id": id,

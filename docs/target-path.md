@@ -117,6 +117,12 @@ dre history monthly --binding domestic --latest --path
 dre clean --prune --keep-runs 3
 ```
 
+`--output json` prints an array with one entry per run. Each entry has
+`"schema_version": "dre/history/v1"` and `results_schema_version`, the stored
+`run_results.json`'s own `schema_version` (null before 0.4, or when the run never finished, whose `status` is
+`unfinished`). Older runs keep their own status vocabulary, so check `results_schema_version`
+before reading `status`.
+
 `--binding` names a Set, or `default` for a report without Sets. `--latest` selects the current
 finished run and `--path` prints only its directory. The `current` run may have failed: inspect
 its `run_results.json` before treating its files as delivered.

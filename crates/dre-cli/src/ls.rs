@@ -229,7 +229,7 @@ fn sources(ctx: &dre_core::Context, project: &Project, a: &LsArgs) -> ExitCode {
     all.retain(|_, src| src["tables"].as_object().is_some_and(|t| !t.is_empty()));
     match a.output {
         LsOutput::Json => {
-            let doc = serde_json::json!({"sources": all});
+            let doc = serde_json::json!({"schema_version": SOURCES_SCHEMA_VERSION, "sources": all});
             print!("{}", dre_core::manifest::render(&doc, ctx.secrets()));
         }
         LsOutput::Text => {
@@ -271,6 +271,9 @@ fn sources(ctx: &dre_core::Context, project: &Project, a: &LsArgs) -> ExitCode {
     }
     crate::exit::ok()
 }
+
+/// `dre ls --resource-type source --output json`: the manifest's `sources`, not a manifest.
+const SOURCES_SCHEMA_VERSION: &str = "dre/sources/v1";
 
 /// Rows of cells, left-aligned in columns.
 pub(crate) fn columns<const N: usize>(rows: Vec<[String; N]>) -> String {

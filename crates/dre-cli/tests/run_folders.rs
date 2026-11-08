@@ -169,7 +169,39 @@ fn history_lists_runs_and_finds_the_latest_files() {
     let v: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
     assert_eq!(v[0]["run_id"], id.as_str());
     assert_eq!(v[0]["current"], true);
+    assert_eq!(v[0]["schema_version"], "dre/history/v1");
+    assert_eq!(v[0]["results_schema_version"], "dre/run-results/v2");
     assert_eq!(p.dre("history", &["nothing_here"]).code, 1);
+}
+
+#[test]
+fn history_json_names_each_stored_results_version() {
+    let p = project();
+    let old = binding(&p, "daily").join("runs/00000000T000000Z-old");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(
+        old.join("run_results.json"),
+        r#"{"schema_version": "dre/run-results/v1", "status": "success"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(binding(&p, "daily").join("runs/00000000T000001Z-crashed")).unwrap();
+    let json = p.dre("history", &["daily", "--output", "json"]);
+    let v: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
+    let by_id = |id: &str| {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["run_id"].as_str().is_some_and(|r| r.ends_with(id)))
+            .cloned()
+            .unwrap()
+    };
+    let old = by_id("-old");
+    assert_eq!(old["schema_version"], "dre/history/v1");
+    assert_eq!(old["results_schema_version"], "dre/run-results/v1");
+    assert_eq!(old["status"], "success");
+    let crashed = by_id("-crashed");
+    assert_eq!(crashed["status"], "unfinished");
+    assert_eq!(crashed["results_schema_version"], serde_json::Value::Null);
 }
 
 #[test]

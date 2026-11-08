@@ -313,7 +313,8 @@ Both files are public contracts with a `schema_version`, and JSON Schemas genera
 own types: [manifest.schema.json](manifest.schema.json) for the manifest (`dre/manifest/v4`) and
 [run-results.schema.json](run-results.schema.json) for `run_results.json`
 (`dre/run-results/v2`). Validation documents and JSON log events also carry their own
-`schema_version`; the same compatibility rules apply.
+`schema_version`, as do `dre ls --resource-type source --output json` (`dre/sources/v1`) and
+each `dre history --output json` entry (`dre/history/v1`); the same compatibility rules apply.
 
 - Adding an optional field keeps the version. Ignore fields you don't know.
 - Removing, renaming or re-typing a field, or changing what a field means, bumps it: in a minor
