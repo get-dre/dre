@@ -25,7 +25,8 @@ use crate::runs::BindingRuns;
 /// `held.json` in a run folder.
 pub const HELD: &str = "held.json";
 pub const SCHEMA_VERSION: &str = "dre/held/v1";
-/// In a release's run folder: every entry released so far, this release's included.
+/// In a release's run folder, and the held run's: every entry released so far, this release's
+/// included.
 pub const RELEASED: &str = "released.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,8 +193,10 @@ pub fn release(
         };
         if r.status == "delivered" {
             done.insert(e.id.clone());
-            // Recorded at once: a release stopped part-way never sends this one again.
+            // Recorded at once: a release stopped part-way never sends this one again. Also in
+            // the held run's folder, which pruning keeps as long as the run itself.
             write_released(&release_dir, &opts.run_id, &done)?;
+            write_released(&run_dir, &opts.run_id, &done)?;
         }
         progress.entry_done(e, matches!(r.status.as_str(), "failed" | "refused"), events);
         outcome.released.push(r);

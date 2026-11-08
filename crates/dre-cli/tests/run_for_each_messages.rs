@@ -665,3 +665,28 @@ fn a_terminated_release_is_cancelled_and_exits_143() {
         .says("1 already released");
     assert_eq!(deliveries(&rec).len(), 2);
 }
+
+#[test]
+fn pruning_a_release_folder_keeps_the_held_runs_released_entries() {
+    let (p, rec) = project(
+        &format!(
+            "queries: [members, holdings]\noutput:\n{STATEMENT}    destination: {{profile: mail, to: \"{{{{ each.email }}}}\", hold: true}}\n"
+        ),
+        &[],
+    );
+    p.dre("run", &["statements", "--row-concurrency", "1"]).ok();
+    let id = run_id(&p);
+    p.dre("release", &["statements", "--run", &id]).ok();
+    assert_eq!(deliveries(&rec).len(), 2);
+    // Retention removes every other run folder (a later scheduled run kept, the release pruned).
+    let runs = p.path("target/run/statements/default/runs");
+    for e in std::fs::read_dir(&runs).unwrap().flatten() {
+        if e.file_name() != id.as_str() {
+            std::fs::remove_dir_all(e.path()).unwrap();
+        }
+    }
+    p.dre("release", &["statements", "--run", &id])
+        .ok()
+        .says("2 already released");
+    assert_eq!(deliveries(&rec).len(), 2, "nothing sent twice");
+}
