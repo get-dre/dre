@@ -280,6 +280,10 @@ pub struct FailedKey {
 /// One line of `<output>.rows.jsonl`: one row of a per-row output.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, JsonSchema)]
 pub struct RowRecord {
+    /// What a retry matches the row by, when it isn't `key`: a composite key's values, each
+    /// prefixed by its length (`key` joins them with `_`, so two rows can show the same one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub key: String,
     /// `succeeded`, `skipped`, `failed` or `held`.
     pub status: String,

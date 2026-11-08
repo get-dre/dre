@@ -386,6 +386,47 @@ fn retry_failed_redoes_only_the_failed_rows_from_the_saved_results() {
 }
 
 #[test]
+fn retry_failed_refuses_destinations_that_changed() {
+    // 102's first destination fails, its second (the archive) succeeds.
+    let two = |first: &str, second: &str| {
+        format!(
+            "queries: [members, holdings]\noutput:\n  name: statement\n  format: csv\n  on_empty: continue\n  for_each: {{query: members, key: member_id}}\n\
+             \x20 destination:\n    - {{profile: outbox, path: \"{first}/{{{{ each.member_id }}}}.csv\"}}\n    - {{profile: outbox, path: \"{second}/{{{{ each.member_id }}}}.csv\"}}\n"
+        )
+    };
+    let p = project(&two("out", "archive"), &[("out/102.csv/keep", "")]);
+    p.dre("run", &["statements"]).failed();
+    let first = results(&p)["run_id"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(p.path("out/102.csv")).unwrap();
+    std::fs::remove_file(p.path("archive/102.csv")).unwrap();
+    // Reordered: the archive would inherit the failed entry's place. Refused before any send.
+    p.write(
+        "reports/members/statements/statements.yml",
+        &two("archive", "out"),
+    );
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .failed()
+    .says("destinations changed since run");
+    assert!(!p.path("out/102.csv").exists());
+    assert!(!p.path("archive/102.csv").exists());
+    // Unchanged: only the failed destination is sent again.
+    p.write(
+        "reports/members/statements/statements.yml",
+        &two("out", "archive"),
+    );
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .ok();
+    assert!(p.path("out/102.csv").is_file());
+    assert!(!p.path("archive/102.csv").exists());
+}
+
+#[test]
 fn retry_of_a_missing_run_is_a_clear_error() {
     let p = project(REPORT, &[]);
     p.dre("run", &["statements", "--retry-failed", "20990101T000000Z-zzzz"])

@@ -12,6 +12,9 @@ pub const FAILED: u8 = 1;
 /// plugin. Fix the cause; retrying won't help.
 pub const NOT_STARTED: u8 = 2;
 
+/// A Binding is busy: another run or release holds its lock. Retry later.
+pub const BUSY: u8 = 75;
+
 /// [`FAILED`].
 pub fn failed() -> ExitCode {
     ExitCode::from(FAILED)
@@ -25,4 +28,9 @@ pub fn not_started() -> ExitCode {
 /// [`OK`].
 pub fn ok() -> ExitCode {
     ExitCode::from(OK)
+}
+
+/// [`BUSY`].
+pub fn busy() -> ExitCode {
+    ExitCode::from(BUSY)
 }

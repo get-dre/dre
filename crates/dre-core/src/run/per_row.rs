@@ -35,16 +35,16 @@ use crate::project::{ForEach, OrphanRows, Output, PluginKind, Project, RowErrors
 use crate::render::{RenderError, Renderer};
 use crate::run_results::{FailedKey, ForEachResult, RowDelivery, RowFile, RowRecord};
 
-/// `--retry-failed`: the run being redone and, per per-row output (by its stem), the keys
-/// already done there or in an earlier retry (succeeded, skipped or held).
+/// `--retry-failed`: the run being redone and, per per-row output (by its stem), the rows (by
+/// identity) already done there or in an earlier retry (succeeded, skipped or held).
 pub(super) struct Retry {
     pub original: String,
     pub done: HashMap<String, std::collections::HashSet<String>>,
     pub sent: Sent,
 }
 
-/// Per output stem and unfinished row, what each destination (by index) already got: never
-/// sent again.
+/// Per output stem and unfinished row (by identity), what each destination (by index) already
+/// got: never sent again.
 pub(super) type Sent = HashMap<String, HashMap<String, Vec<Option<RowDelivery>>>>;
 
 /// A delivery a retry doesn't redo: it went, was held for `dre release`, or delivers nowhere.
@@ -86,10 +86,14 @@ struct RowDest {
     sent: Option<RowDelivery>,
 }
 
+/// `<output>.destinations.json` in a run folder: its destination plan, for `--retry-failed`.
+const DESTINATIONS: &str = "destinations.json";
+
 /// A run folder's saved query results, for `--retry-failed`.
 pub(super) const SNAPSHOT_DIR: &str = "results";
 
-/// An output a message attaches: its name, a per-row output's files by key, or its shared files.
+/// An output a message attaches: its name, a per-row output's files by row identity, or its
+/// shared files.
 type Attached = (String, Option<HashMap<String, Vec<PathBuf>>>, Vec<PathBuf>);
 
 /// What a worker does with a row.
@@ -107,6 +111,9 @@ enum Phase {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RowJob {
     i: usize,
+    /// What the row's records, attachments and held deliveries are matched by: see
+    /// [`identity`](super::population::identity). `key` is for display.
+    id: String,
     key: String,
     mask: RowMask,
     /// Each file to make: its path and the data queries (indexes) in it.
@@ -172,22 +179,23 @@ struct Shared<'a> {
     /// Bindings running at once never deliver to the same file.
     store: &'a crate::engine::RunStore,
     label: String,
-    /// The rows' remote paths so far, by destination profile and path: the row that has each.
-    claims: Mutex<HashMap<String, String>>,
+    /// The rows' remote paths so far, by destination profile and path: the row that has each
+    /// (its identity and key).
+    claims: Mutex<HashMap<String, (String, String)>>,
 }
 
 impl Shared<'_> {
-    /// Claim `profile`'s `remote` path for row `key`; who already has it, if another row or
+    /// Claim `profile`'s `remote` path for `job`'s row; who already has it, if another row or
     /// Binding.
-    fn claim(&self, profile: &str, remote: &str, key: &str) -> Option<String> {
+    fn claim(&self, profile: &str, remote: &str, job: &RowJob) -> Option<String> {
         if let Some(other) = self.store.claim(profile, remote, &self.label) {
             return Some(format!("`{other}`"));
         }
         let mut claims = self.claims.lock().unwrap();
-        let owner = claims
+        let (id, key) = claims
             .entry(format!("{profile}\u{0}{remote}"))
-            .or_insert_with(|| key.to_string());
-        (owner != key).then(|| format!("row `{owner}`"))
+            .or_insert_with(|| (job.id.clone(), job.key.clone()));
+        (*id != job.id).then(|| format!("row `{key}`"))
     }
 }
 
@@ -240,6 +248,12 @@ impl BindingRun<'_> {
         let (rows, population) = self.pick_rows(oi, &o, &pop, &fe, &label)?;
         let stem = self.output_stem(oi);
         let sidecar = self.run_dir.join(format!("{stem}.rows.jsonl"));
+        std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
+        crate::fs::write_atomic(
+            &self.run_dir.join(format!("{stem}.{DESTINATIONS}")),
+            self.destination_plan(oi).as_bytes(),
+        )
+        .map_err(|e| e.to_string())?;
         self.outs[oi].for_each = Some(ForEachResult {
             query: fe.query.clone(),
             key: fe.key.clone(),
@@ -372,7 +386,11 @@ impl BindingRun<'_> {
         for i in 0..pop.len() {
             self.not_cancelled()?;
             let key = pop.key(i)?;
-            if done.is_some_and(|d| d.contains(&key)) || only_keys.is_some_and(|keys| !keys.contains(&key)) {
+            let finished = match done {
+                Some(d) => d.contains(&pop.id(i)?),
+                None => false,
+            };
+            if finished || only_keys.is_some_and(|keys| !keys.contains(&key)) {
                 continue;
             }
             population += 1;
@@ -654,10 +672,9 @@ impl BindingRun<'_> {
                 }
             }
             if attached && matches!(r.status.as_str(), "succeeded" | "held") {
-                self.outs[oi].row_files.insert(
-                    job.key.clone(),
-                    job.files.iter().map(|(f, _)| f.clone()).collect(),
-                );
+                self.outs[oi]
+                    .row_files
+                    .insert(job.id.clone(), job.files.iter().map(|(f, _)| f.clone()).collect());
             }
         }
         s.not_started = s.rows - s.succeeded - s.held - s.skipped - s.failed;
@@ -675,7 +692,7 @@ impl BindingRun<'_> {
                     continue;
                 }
                 self.held.push(crate::release::HeldEntry {
-                    id: format!("{}/{}/{}", self.output_stem(oi), job.key, d.idx),
+                    id: format!("{}/{}/{}", self.output_stem(oi), job.id, d.idx),
                     output: self.b.outputs[oi].name.clone(),
                     key: Some(job.key.clone()),
                     profile: d.profile.clone(),
@@ -714,7 +731,7 @@ impl BindingRun<'_> {
             records
                 .iter()
                 .filter(|(_, r)| finished(r))
-                .map(|(j, _)| j.key.clone()),
+                .map(|(j, _)| j.id.clone()),
         );
         r.done.insert(stem.to_string(), all.clone());
         let path = self.run_dir.join(format!("{stem}.done.json"));
@@ -845,6 +862,7 @@ impl BindingRun<'_> {
                 ),
             ));
         }
+        self.same_destinations(id, &original)?;
         let (done, sent) = self.rows_done(&original);
         self.retry = Some(Retry {
             original: original.clone(),
@@ -923,11 +941,12 @@ impl BindingRun<'_> {
                         .lines()
                         .filter_map(|l| serde_json::from_str::<RowRecord>(l).ok())
                     {
+                        let id = r.id.clone().unwrap_or(r.key.clone());
                         if finished(&r) {
-                            set.insert(r.key);
+                            set.insert(id);
                             continue;
                         }
-                        let got = rows.entry(r.key).or_default();
+                        let got = rows.entry(id).or_default();
                         for (i, d) in r.deliveries.into_iter().enumerate() {
                             if got.len() <= i {
                                 got.resize(i + 1, None);
@@ -948,12 +967,61 @@ impl BindingRun<'_> {
         (done, sent)
     }
 
-    /// The name a per-row output's folder and sidecar take: its `name:`, else the report's.
+    /// The name a per-row output's folder, sidecar and held deliveries take: its `name:`, else
+    /// the report's, with its file extension when another unnamed per-row output shares it.
     fn output_stem(&self, oi: usize) -> String {
-        self.b.outputs[oi]
-            .name
-            .clone()
-            .unwrap_or_else(|| self.report.name.clone())
+        let o = &self.b.outputs[oi];
+        if let Some(name) = &o.name {
+            return name.clone();
+        }
+        let unnamed = self
+            .b
+            .outputs
+            .iter()
+            .filter(|x| x.for_each.is_some() && x.name.is_none())
+            .count();
+        if unnamed > 1 {
+            format!("{}-{}", self.report.name, o.files().extension())
+        } else {
+            self.report.name.clone()
+        }
+    }
+
+    /// What a retry matches output `oi`'s recorded deliveries by: each destination entry's
+    /// profile and path, in order.
+    fn destination_plan(&self, oi: usize) -> String {
+        let plan: Vec<(&str, Option<&str>)> = self.b.outputs[oi]
+            .destinations
+            .iter()
+            .map(|d| (d.profile.as_str(), d.path.as_deref()))
+            .collect();
+        serde_json::to_string(&plan).unwrap_or_default()
+    }
+
+    /// `--retry-failed`: refused when a per-row output's destinations changed since run
+    /// `original`, before anything is sent. A retry sends each destination what it didn't get by
+    /// its place, so a reordered, added or removed entry would inherit another's.
+    fn same_destinations(&self, id: &str, original: &str) -> Result<(), Fail> {
+        for (oi, o) in self.b.outputs.iter().enumerate() {
+            if o.for_each.is_none() {
+                continue;
+            }
+            let stem = self.output_stem(oi);
+            let path = self.runs.run_dir(original).join(format!("{stem}.{DESTINATIONS}"));
+            let Ok(then) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if then != self.destination_plan(oi) {
+                return Err(Fail::new(
+                    Code::RetryFailed,
+                    format!(
+                        "--retry-failed {id}: {}'s destinations changed since run `{original}` (added, removed, reordered, or another profile or path); a retry matches each one by its place, so run the report again instead",
+                        o.label(oi)
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Prepare one row's job: its files, its slices' `on_empty`, its destinations and message
@@ -961,6 +1029,7 @@ impl BindingRun<'_> {
     fn prepare_row(&mut self, plan: &RowPlan<'_>, row: &Row<'_>, phase: Phase) -> Result<RowJob, Fail> {
         let o = &self.b.outputs[plan.oi];
         let key = plan.pop.key(row.i)?;
+        let id = plan.pop.id(row.i)?;
         let mask = if o
             .for_each
             .as_ref()
@@ -973,6 +1042,7 @@ impl BindingRun<'_> {
         };
         let mut job = RowJob {
             i: row.i,
+            id,
             key,
             mask,
             files: Vec::new(),
@@ -1013,7 +1083,7 @@ impl BindingRun<'_> {
         let sent = self
             .retry
             .as_ref()
-            .and_then(|r| r.sent.get(&self.output_stem(plan.oi))?.get(&job.key))
+            .and_then(|r| r.sent.get(&self.output_stem(plan.oi))?.get(&job.id))
             .cloned();
         for idx in 0..o.destinations.len() {
             let mut d = self.row_destination(plan, idx, &ctx, &job)?;
@@ -1226,7 +1296,7 @@ impl BindingRun<'_> {
                 }
                 options.insert(k.clone(), v);
             }
-            let (attach, attach_missing) = row_attachments(&plan.attached, &d.attach, &job.key);
+            let (attach, attach_missing) = row_attachments(&plan.attached, &d.attach, &job.id);
             let zip = match &d.zip {
                 Some(z) => Some(crate::zip_pack::ZipSpec {
                     password: match &z.password {
@@ -1272,6 +1342,7 @@ impl BindingRun<'_> {
 /// A row decided before any work: skipped or failed, with why.
 fn pre_record(key: &str, status: &str, reason: &str, error: Option<(Code, String)>) -> RowRecord {
     RowRecord {
+        id: None,
         key: key.to_string(),
         status: status.into(),
         reason: Some(reason.into()),
@@ -1298,15 +1369,15 @@ fn row_files(plan: &RowPlan<'_>, name: &str, kept: &[usize]) -> Result<Vec<(Path
         .collect())
 }
 
-/// The files a row's message attaches: the same row's of a per-row output (missing when that
-/// row didn't make them), or another output's shared files.
-fn row_attachments(attached: &[Attached], names: &[String], key: &str) -> (Vec<PathBuf>, bool) {
+/// The files a row's message attaches: the same row's (by identity) of a per-row output
+/// (missing when that row didn't make them), or another output's shared files.
+fn row_attachments(attached: &[Attached], names: &[String], id: &str) -> (Vec<PathBuf>, bool) {
     let mut attach = Vec::new();
     let mut missing = false;
     for name in names {
         if let Some((_, per_row, shared)) = attached.iter().find(|(n, _, _)| n == name) {
             match per_row {
-                Some(rows) => match rows.get(key) {
+                Some(rows) => match rows.get(id) {
                     Some(files) => attach.extend(files.iter().cloned()),
                     None => missing = true,
                 },
@@ -1480,6 +1551,10 @@ fn run_jobs<E>(
                         )
                     }
                 };
+            let record = RowRecord {
+                id: (job.id != job.key).then(|| job.id.clone()),
+                ..record
+            };
             report_row(shared, &job, &record);
             Some((job, record))
         },
@@ -1515,6 +1590,7 @@ fn row_failed(
     deliveries: Vec<RowDelivery>,
 ) -> RowRecord {
     RowRecord {
+        id: None,
         key: job.key.clone(),
         status: "failed".into(),
         reason: None,
@@ -1568,6 +1644,7 @@ fn run_job(shared: &Shared<'_>, job: &RowJob, w: &mut Worker) -> Option<RowRecor
         .collect();
     if job.phase == Phase::Render {
         return Some(RowRecord {
+            id: None,
             key: job.key.clone(),
             status: "rendered".into(),
             reason: None,
@@ -1630,7 +1707,7 @@ fn deliver_row(
             return None;
         }
         let local = crate::zip_pack::sent_files(d.zip_file.as_ref(), job.files.iter().map(|(f, _)| f));
-        let claim = |remote: &str| match shared.claim(&d.profile, remote, &job.key) {
+        let claim = |remote: &str| match shared.claim(&d.profile, remote, job) {
             Some(other) => Err(Fail::new(
                 Code::DeliveryFailed,
                 job.mask.apply(&taken(&other, remote, &d.profile)),
@@ -1657,6 +1734,7 @@ fn deliver_row(
     Some(match first_error {
         Some(e) => row_failed(job, &e.code.to_string(), e.message, files, deliveries),
         None => RowRecord {
+            id: None,
             key: job.key.clone(),
             status: if held { "held" } else { "succeeded" }.into(),
             reason: None,
