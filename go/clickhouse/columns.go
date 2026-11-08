@@ -200,53 +200,53 @@ func tupleElement(el string) (name, typ string) {
 
 func (c column) builder() array.Builder { return array.NewBuilder(mem, c.arrow) }
 
-// append adds one scanned value (a pointer's target, or a pointer for Nullable) to b.
-func (c column) append(b array.Builder, v any) {
+// append adds one scanned value (a pointer's target, or a pointer for Nullable) to b and returns
+// roughly how many bytes it added: a text value's length, 8 for a fixed-width one.
+func (c column) append(b array.Builder, v any) int {
 	v = deref(v)
 	if v == nil {
 		b.AppendNull()
-		return
+		return 0
 	}
 	switch c.kind {
 	case kInt:
 		if n, ok := toInt64(v); ok {
 			b.(*array.Int64Builder).Append(n)
-			return
+			return 8
 		}
 	case kUInt64:
 		if n, ok := v.(uint64); ok {
 			b.(*array.Decimal128Builder).Append(decimal128.FromU64(n))
-			return
+			return 8
 		}
 	case kDecimal:
 		if d, ok := v.(decimal.Decimal); ok {
 			b.(*array.Decimal128Builder).Append(decimal128.FromBigInt(d.Shift(c.scale).BigInt()))
-			return
+			return 8
 		}
 	case kWideDecimal:
 		if d, ok := v.(decimal.Decimal); ok {
-			b.(*array.StringBuilder).Append(d.StringFixed(c.scale))
-			return
+			return appendText(b, d.StringFixed(c.scale))
 		}
 	case kFloat32:
 		if f, ok := v.(float32); ok {
 			b.(*array.Float32Builder).Append(f)
-			return
+			return 8
 		}
 	case kFloat64:
 		if f, ok := v.(float64); ok {
 			b.(*array.Float64Builder).Append(f)
-			return
+			return 8
 		}
 	case kBool:
 		if x, ok := v.(bool); ok {
 			b.(*array.BooleanBuilder).Append(x)
-			return
+			return 8
 		}
 	case kDate:
 		if t, ok := v.(time.Time); ok {
 			b.(*array.Date32Builder).Append(arrow.Date32(daysSinceEpoch(t)))
-			return
+			return 8
 		}
 	case kDateTime:
 		if t, ok := v.(time.Time); ok {
@@ -255,15 +255,19 @@ func (c column) append(b array.Builder, v any) {
 			} else {
 				b.(*array.TimestampBuilder).Append(arrow.Timestamp(t.UnixMicro()))
 			}
-			return
+			return 8
 		}
 	case kJSON:
 		var buf bytes.Buffer
 		appendJSON(&buf, v, c.typ)
-		b.(*array.StringBuilder).Append(buf.String())
-		return
+		return appendText(b, buf.String())
 	}
-	b.(*array.StringBuilder).Append(textValue(v, c.typ))
+	return appendText(b, textValue(v, c.typ))
+}
+
+func appendText(b array.Builder, s string) int {
+	b.(*array.StringBuilder).Append(s)
+	return len(s)
 }
 
 func daysSinceEpoch(t time.Time) int64 {

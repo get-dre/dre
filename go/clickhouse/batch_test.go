@@ -44,3 +44,63 @@ func TestWideRowsEndABatchAtItsByteBudget(t *testing.T) {
 		t.Fatal(sizes)
 	}
 }
+
+// arrayRows is n rows of one Array(String) column, each array holding elems values of size bytes.
+type arrayRows struct {
+	driver.Rows
+	n, elems, size int
+}
+
+func (a *arrayRows) Next() bool { a.n--; return a.n >= 0 }
+func (a *arrayRows) Err() error { return nil }
+func (a *arrayRows) Scan(dest ...any) error {
+	v := make([]string, a.elems)
+	for i := range v {
+		v[i] = strings.Repeat("x", a.size)
+	}
+	*dest[0].(*[]string) = v
+	return nil
+}
+
+func batchSizes(t *testing.T, r *result) ([]int64, error) {
+	t.Helper()
+	var sizes []int64
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			return sizes, nil
+		}
+		if err != nil {
+			return sizes, err
+		}
+		sizes = append(sizes, rec.NumRows())
+		rec.Release()
+	}
+}
+
+func TestNestedValuesAreChargedTheirJSONText(t *testing.T) {
+	defer func(old int) { batchBytes = old }(batchBytes)
+	batchBytes = 2500
+	col := newColumn("tags", "Array(String)")
+	r := &result{rows: &arrayRows{n: 10, elems: 10, size: 100}, cols: []column{col}, dest: []any{new([]string)},
+		schema: arrow.NewSchema([]arrow.Field{{Name: "tags", Type: col.arrow, Nullable: true}}, nil)}
+	sizes, err := batchSizes(t, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each row is about 1,000 bytes of JSON text: three rows fill a 2,500-byte budget.
+	if len(sizes) != 4 || sizes[0] != 3 {
+		t.Fatal(sizes)
+	}
+}
+
+func TestAnOversizedCellIsAnError(t *testing.T) {
+	defer func(old int) { cellBytes = old }(cellBytes)
+	cellBytes = 500
+	col := newColumn("body", "String")
+	r := &result{rows: &wideRows{n: 2, size: 1000}, cols: []column{col}, dest: []any{new(string)},
+		schema: arrow.NewSchema([]arrow.Field{{Name: "body", Type: col.arrow, Nullable: true}}, nil)}
+	if _, err := batchSizes(t, r); err == nil || !strings.Contains(err.Error(), "body") {
+		t.Fatal(err)
+	}
+}
