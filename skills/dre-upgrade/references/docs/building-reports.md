@@ -203,8 +203,9 @@ failures. Both engines write under the configured Target path, isolated by run,
 Binding, query and declaration order. Diagnostics and `run_results.json` record
 `failure_path`, `stored_failures` and `failures_truncated` when a CSV exists. Passing
 tests create no CSV. Evidence survives failed or cancelled runs and disposable
-workspace cleanup. `dre clean` removes it with other Target artifacts. Evidence
-never joins report outputs, attachments or deliveries. Local CSV storage requires
+workspace cleanup. `dre clean` removes it with other Target artifacts. Declared
+secret values (`secret_columns`, secret `env_var()`s) are masked as `*****` in every
+cell and header, even under an alias, unless `mask_secrets: false`. Evidence never joins report outputs, attachments or deliveries. Local CSV storage requires
 no source write permissions.
 
 The [evidence sink](https://github.com/get-dre/dre/blob/master/crates/dre-core/src/run/data_tests.rs) uses Arrow's existing

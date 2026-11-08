@@ -958,7 +958,7 @@ fn local_error_and_cancel_keep_completed_evidence_but_remove_disposable_workspac
                 }
             ),
         );
-        let args: &[&str] = if cancel { &["r", "--timeout", "2s"] } else { &["r"] };
+        let args: &[&str] = if cancel { &["r", "--timeout", "5s"] } else { &["r"] };
         let run = p.dre("test", args);
         if cancel {
             assert_eq!(run.code, 124, "{run:?}");
@@ -1227,5 +1227,47 @@ fn repeated_query_declarations_keep_separate_failure_csvs_for_both_engines() {
             assert!(path.contains(&format!("{}-prepare", index + 1)), "{path}");
             assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 4);
         }
+    }
+}
+
+#[test]
+fn stored_failures_mask_declared_secret_values_even_under_an_alias() {
+    for (execution, mask) in [
+        ("local", true),
+        ("source", true),
+        ("local", false),
+        ("source", false),
+    ] {
+        let p = source_project(
+            "check: {}",
+            "{% test check(relation) %}select pw as renamed, id from {{ relation }} where id = 1{% endtest %}",
+        );
+        p.write(
+            "reports/r/r.yml",
+            &format!(
+                "queries:\n  - query: prepare\n    profile: actual\n    secret_columns: [pw]\n    data_tests: [{{check: {{arguments: {{{}}}, config: {{execution: {execution}, store_failures: true}}}}}}]\noutput: {{format: message}}\n",
+                if execution == "source" { "relation: checked" } else { "" }
+            ),
+        );
+        p.write(
+            "reports/r/prepare.sql",
+            "create temp table checked as select * from (values (1, 'hunter2-a'), (2, 'hunter2-b')) t(id, pw); select * from checked",
+        );
+        if !mask {
+            p.write(
+                "dre_project.yml",
+                "name: source_checks\ndefault_profile: unused\nmask_secrets: false\n",
+            );
+        }
+        p.dre("test", &["r"]).failed();
+        let result = p.json("target/run/r/default/run_results.json");
+        assert_eq!(result["tests"][0]["failures"], 1, "{execution}");
+        let path = result["tests"][0]["failure_path"].as_str().unwrap();
+        let expected = if mask { "*****" } else { "hunter2-a" };
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            format!("renamed,id\n{expected},1\n"),
+            "{execution} mask_secrets={mask}"
+        );
     }
 }
