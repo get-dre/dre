@@ -10,8 +10,9 @@
 //! - [`OneOf<A, B>`]: an `A`, else a `B` (a query given by name or as a map), keeping both
 //!   readings' locations, which serde's untagged enums lose.
 //! - [`UnknownKeys`]: in a struct field named [`UNKNOWN`], the keys the struct doesn't define,
-//!   with their lines. A struct without that field ignores unknown keys. The field can also be a
-//!   [`Map`], to read the other keys' values (folder config: folder names next to `+` keys).
+//!   with their lines. A struct without that field leaves them to serde: ignored, or an error
+//!   under `deny_unknown_fields`. The field can also be a [`Map`], to read the other keys'
+//!   values (folder config: folder names next to `+` keys).
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -663,7 +664,10 @@ impl<'a> MapAccess<'a> for Entries<'a> {
     fn next_key_seed<K: DeserializeSeed<'a>>(&mut self, seed: K) -> Result<Option<K::Value>, Error> {
         for entry in self.entries.by_ref() {
             let (k, v) = entry;
+            // A struct without an [`UNKNOWN`] field gets its unknown keys too, so serde's
+            // `deny_unknown_fields` sees them.
             if let Some(fields) = self.fields
+                && fields.contains(&UNKNOWN)
                 && (!fields.contains(&k.name.as_str()) || k.name == UNKNOWN)
             {
                 self.unknown.push(entry);

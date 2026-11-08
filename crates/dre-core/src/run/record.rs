@@ -44,6 +44,17 @@ impl BindingRun<'_> {
     /// for `--from-results`.
     fn save_output_json(&mut self) -> Result<(), Fail> {
         if let Some(dir) = &self.opts.output_json {
+            // Each result is saved as `<name>.json`: two names alike (case aside) would overwrite.
+            let mut seen = std::collections::BTreeMap::new();
+            for r in &self.produced {
+                if let Some(prev) = seen.insert(r.name.to_lowercase(), &r.query) {
+                    return Err(format!(
+                        "--output-json: queries `{prev}` and `{}` would both be saved as `{}`; give them different `tab_name`s",
+                        r.query, r.name
+                    )
+                    .into());
+                }
+            }
             let dir = self
                 .project
                 .root()

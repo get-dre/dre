@@ -23,10 +23,21 @@ impl Loader {
                     continue;
                 }
                 seen.insert(name.clone(), yf.display.clone());
-                // Anything but a map is a Set with the report's defaults.
+                // A blank Set (or `{}`) has the report's defaults; any other non-map is an error.
                 let v = match v {
-                    Loose::Ok(Some(v)) => Some(v),
-                    _ => None,
+                    Loose::Ok(v) => v,
+                    Loose::Bad(found) => {
+                        self.diags.error(
+                            Code::InvalidField,
+                            Some(yf.display.clone()),
+                            Some(found.line),
+                            format!(
+                                "Set `{name}` must be a map (with `profile`, `vars` or `locale`), not {}",
+                                found.kind
+                            ),
+                        );
+                        continue;
+                    }
                 };
                 for k in v.iter().flat_map(|v| &v.unknown.0) {
                     self.diags.error(

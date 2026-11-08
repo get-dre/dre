@@ -322,6 +322,25 @@ fn a_connection_error_names_the_server() {
     assert!(e.contains("can't connect to Postgres at 127.0.0.1:1/shop"), "{e}");
 }
 
+#[test]
+fn a_port_out_of_range_is_refused_before_connecting() {
+    for port in [json!(65536), json!(70968), json!("70968")] {
+        let c = json!({"host": "127.0.0.1", "port": port, "user": "dre", "database": "shop", "sslmode": "disable"});
+        let e = try_open(c.as_object().unwrap().clone()).err().expect("refused");
+        assert!(
+            e.contains("invalid `port`") && !e.contains("can't connect"),
+            "{port}: {e}"
+        );
+    }
+    // The highest port is a port: the error is about connecting to it.
+    let c =
+        json!({"host": "127.0.0.1", "port": 65535, "user": "dre", "database": "shop", "sslmode": "disable"});
+    let e = try_open(c.as_object().unwrap().clone())
+        .err()
+        .expect("nothing listens there");
+    assert!(e.contains("127.0.0.1:65535/shop"), "{e}");
+}
+
 /// `host:port` from an environment variable.
 fn addr(var: &str) -> Option<(String, u16)> {
     let v = std::env::var(var).ok()?;

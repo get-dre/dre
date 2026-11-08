@@ -113,6 +113,7 @@ impl Loader {
         }
         self.check_password_lists(&outputs, ctx, file, queries);
         self.check_zip_names(&outputs, ctx, file, queries);
+        self.check_file_names(&outputs, ctx, file, queries);
         for (i, o) in outputs.iter().enumerate() {
             let octx = if several {
                 format!("{ctx}, {}", o.label(i))
@@ -190,6 +191,36 @@ impl Loader {
             }
         }
         outputs
+    }
+
+    /// An output split into a file per tab can't give two tabs one file name.
+    fn check_file_names(&mut self, outputs: &[Output], ctx: &str, file: &Path, queries: &[QueryEntry]) {
+        for (i, o) in outputs.iter().enumerate() {
+            if o.for_each.is_some() || o.is_message() || !Format::of(o).known() {
+                continue;
+            }
+            let tabs: Vec<&str> = queries
+                .iter()
+                .filter(|q| q.tab && o.feeds(&q.query))
+                .map(|q| q.tab_name.as_deref().unwrap_or(&q.query))
+                .collect();
+            let report = file.file_stem().map(|s| s.to_string_lossy());
+            let stem = o.name.as_deref().or(report.as_deref()).unwrap_or_default();
+            let path = o
+                .destinations
+                .iter()
+                .filter(|d| d.zip.is_none())
+                .find_map(|d| d.path.as_deref());
+            let base = o.files().base_name(stem, None, path);
+            if let Err(e) = o.files().plan(&base, &tabs) {
+                self.diags.error(
+                    Code::InvalidOutputOption,
+                    Some(file.to_path_buf()),
+                    None,
+                    format!("{ctx}, {}: {e}", o.label(i)),
+                );
+            }
+        }
     }
 
     /// A zipping entry's zip is flat: two of its files with one name are an error. The names

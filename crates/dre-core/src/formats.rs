@@ -148,11 +148,18 @@ impl<'a> Files<'a> {
         if !self.splits(tabs.len()) {
             return Ok(vec![(base.to_string(), (0..tabs.len()).collect())]);
         }
-        Ok(Files::split_names(base, tabs)?
-            .into_iter()
-            .enumerate()
-            .map(|(i, n)| (n, vec![i]))
-            .collect())
+        let names = Files::split_names(base, tabs)?;
+        // Some filesystems ignore case: `a_Summary.csv` and `a_summary.csv` are one file there.
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+        for (i, n) in names.iter().enumerate() {
+            if let Some(prev) = seen.insert(n.to_lowercase(), i) {
+                return Err(format!(
+                    "tabs `{}` and `{}` would both write `{}` (file names ignore case on some systems); give the queries different `tab_name`s",
+                    tabs[prev], tabs[i], names[prev]
+                ));
+            }
+        }
+        Ok(names.into_iter().enumerate().map(|(i, n)| (n, vec![i])).collect())
     }
 }
 

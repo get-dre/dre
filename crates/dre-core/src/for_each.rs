@@ -53,9 +53,23 @@ pub fn plain_file_name(name: &str) -> bool {
 }
 
 /// What a per-row destination path rendered from `source` got from the row's values that
-/// would take it out of the destination's folder: a `..` or an absolute path or drive the
-/// YAML didn't have, or a Windows device name. `None` when it's safe.
+/// would take it out of the destination's folder: a `..`, an absolute path or drive, or a URI
+/// scheme (`s3://other-bucket/...`, which names another bucket) the YAML didn't have, or a
+/// Windows device name. `None` when it's safe.
 pub fn path_escape(source: &str, rendered: &str) -> Option<&'static str> {
+    // `<scheme>://` at the start: a URI the path's own scheme and authority come from.
+    let uri = |p: &str| {
+        let p = p.trim_start();
+        p.split_once("://").is_some_and(|(scheme, _)| {
+            scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+        })
+    };
+    if uri(rendered) && !uri(source) {
+        return Some("a URI scheme or authority");
+    }
     let rooted = |p: &str| {
         let b = p.trim_start().as_bytes();
         b.first().is_some_and(|c| matches!(c, b'/' | b'\\'))
@@ -148,6 +162,35 @@ mod tests {
         let long = safe_name(&"東".repeat(50));
         assert_eq!(long, "東".repeat(33));
         assert_eq!(safe_name(&"a".repeat(150)).len(), 100);
+    }
+
+    #[test]
+    fn a_row_value_cannot_add_a_uri_scheme_or_bucket() {
+        let bare = "{{ each.id }}/statement.pdf";
+        for rendered in [
+            "s3://outside/stolen/statement.pdf",
+            "gs://outside/stolen/statement.pdf",
+            " az://outside/stolen/statement.pdf",
+        ] {
+            assert_eq!(
+                path_escape(bare, rendered),
+                Some("a URI scheme or authority"),
+                "{rendered}"
+            );
+        }
+        assert_eq!(path_escape(bare, "101/statement.pdf"), None);
+        // A URI the YAML wrote, with or without a templated bucket, is the author's.
+        assert_eq!(
+            path_escape("s3://statements/{{ each.id }}.pdf", "s3://statements/101.pdf"),
+            None
+        );
+        assert_eq!(
+            path_escape(
+                "s3://{{ each.bucket }}/{{ each.id }}.pdf",
+                "s3://eu-statements/101.pdf"
+            ),
+            None
+        );
     }
 
     #[test]

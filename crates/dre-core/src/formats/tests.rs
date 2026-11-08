@@ -116,6 +116,11 @@ fn one_table_formats_split_several_queries_into_files() {
         files("csv", None, false).plan("sales.csv", &["a/b", "c"]),
         Err("`a/b` can't be used in a file name".to_string())
     );
+    // Two tabs of one name (case aside) would write one file twice.
+    assert_eq!(
+        files("csv", None, false).plan("sales.csv", &["Summary", "summary"]),
+        Err("tabs `Summary` and `summary` would both write `sales_Summary.csv` (file names ignore case on some systems); give the queries different `tab_name`s".to_string())
+    );
 }
 
 #[test]
