@@ -39,7 +39,8 @@ pub struct Held {
 /// the files it sends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeldEntry {
-    /// `<output>/<key>/<n>` for a per-row output, `<output>/<n>` otherwise.
+    /// `<output>/<row>/<n>` for a per-row output (`<row>`: its key, or a composite key's values
+    /// each prefixed by its length), `<output>/<n>` otherwise.
     pub id: String,
     pub output: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,6 +119,8 @@ pub struct ReleaseOutcome {
     pub released: Vec<Released>,
     /// Entries skipped because an earlier release delivered them.
     pub already: usize,
+    /// Cancelled part-way, and how many chosen entries were never sent.
+    pub cancelled: Option<(crate::engine::CancelReason, usize)>,
 }
 
 impl ReleaseOutcome {
@@ -164,6 +167,11 @@ pub fn release(
         opts,
         events,
     };
+    let pending = held
+        .entries
+        .iter()
+        .filter(|e| chosen(e) && !done.contains(&e.id))
+        .count();
     let mut progress = RowsLeft::new(
         held.entries.iter().filter(|e| chosen(e) && !done.contains(&e.id)),
         opts.rate,
@@ -175,6 +183,11 @@ pub fn release(
             continue;
         }
         let Some(r) = sender.send(e) else {
+            let reason = opts
+                .cancel
+                .reason()
+                .unwrap_or(crate::engine::CancelReason::Interrupt);
+            outcome.cancelled = Some((reason, pending - outcome.released.len()));
             break;
         };
         if r.status == "delivered" {
@@ -356,16 +369,19 @@ fn write_record(
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| serde_json::json!({}));
     let failed = outcome.failed();
+    // A release has no timeout: only a signal cancels it.
+    let status = match outcome.cancelled {
+        Some(_) => Status::Cancelled,
+        None if failed => Status::Error,
+        None => Status::Success,
+    };
     if let Json::Object(m) = &mut record {
         m.insert(
             "schema_version".into(),
             Json::from(crate::run_results::SCHEMA_VERSION),
         );
         m.insert("run_id".into(), Json::from(release_id));
-        m.insert(
-            "status".into(),
-            serde_json::json!(if failed { Status::Error } else { Status::Success }),
-        );
+        m.insert("status".into(), serde_json::json!(status));
         m.insert(
             "started_at".into(),
             Json::from(started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
@@ -383,12 +399,23 @@ fn write_record(
         m.insert("error".into(), Json::Null);
         m.insert("error_code".into(), Json::Null);
         m.insert("error_kind".into(), Json::Null);
-        if failed {
-            m.insert(
-                "error".into(),
-                Json::from("one or more held deliveries failed or were refused"),
-            );
-            m.insert("error_code".into(), Json::from(Code::ReleaseFailed.to_string()));
+        let error = match outcome.cancelled {
+            Some((_, left)) => Some((
+                Code::RunCancelled,
+                format!(
+                    "the release was cancelled; {left} held deliveries weren't sent: release again to send them"
+                ),
+            )),
+            None if failed => Some((
+                Code::ReleaseFailed,
+                "one or more held deliveries failed or were refused".to_string(),
+            )),
+            None => None,
+        };
+        if let Some((code, message)) = error {
+            m.insert("error".into(), Json::from(message));
+            m.insert("error_code".into(), Json::from(code.to_string()));
+            m.insert("error_kind".into(), Json::from(code.kind().as_str()));
         }
         m.remove("retry_of");
     }

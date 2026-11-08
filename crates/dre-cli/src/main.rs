@@ -1161,7 +1161,11 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
     match result {
         Err(e) => {
             printer.error(&e.message);
-            exit::failed()
+            if e.code == Code::RunInProgress {
+                exit::busy()
+            } else {
+                exit::failed()
+            }
         }
         Ok(o) => {
             let n = |s: &str| o.released.iter().filter(|r| r.status == s).count();
@@ -1185,7 +1189,14 @@ fn release(ctx: &Context, a: ReleaseArgs, printer: &output::Printer) -> ExitCode
                     String::new()
                 }
             );
-            if o.failed() {
+            if let Some((reason, left)) = o.cancelled {
+                printer.line(
+                    output::Tone::Bad,
+                    "Cancelled",
+                    &format!("{summary}; {left} not sent"),
+                );
+                ExitCode::from(reason.exit_code())
+            } else if o.failed() {
                 printer.line(output::Tone::Bad, "Failed", &summary);
                 exit::failed()
             } else {

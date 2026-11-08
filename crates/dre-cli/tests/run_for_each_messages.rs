@@ -479,3 +479,189 @@ fn short_secret_values_are_masked_where_they_stand_alone() {
         "{d:?}"
     );
 }
+
+// Two composite keys that print the same (`acme_us_1`): each is its own row everywhere.
+const ORGS: &str = "queries: [orgs, books]\noutput:\n\
+    \x20 - name: book\n    format: csv\n    queries: [orgs, books]\n    for_each: {query: orgs, key: [org, region]}\n    file_name: \"{{ each.name }}.csv\"\n    destination: {profile: outbox, path: \"out/{{ each.name }}.csv\"}\n\
+    \x20 - name: email\n    format: message\n    for_each: {query: orgs, key: [org, region]}\n    file_name: \"{{ each.name }}.md\"\n    text: hi\n    destination: {profile: mail, to: \"{{ each.email }}\", attach: book}\n";
+
+fn orgs_project(extra: &[(&str, &str)]) -> (TestProject, std::path::PathBuf) {
+    let mut files = vec![
+        (
+            "reports/m/statements/orgs.sql",
+            "select * from (values ('acme_us', '1', 'Ann', 'ann@example.com'), ('acme', 'us_1', 'Bob', 'bob@example.com')) t(org, region, name, email)",
+        ),
+        (
+            "reports/m/statements/books.sql",
+            "select * from (values ('acme_us', '1', 'Growth'), ('acme', 'us_1', 'Cash')) t(org, region, fund)",
+        ),
+    ];
+    files.extend_from_slice(extra);
+    project(ORGS, &files)
+}
+
+#[test]
+fn composite_keys_that_print_alike_keep_their_own_attachments_and_retries() {
+    // Bob's book fails to deliver (its path is a folder): his message is skipped, never sent
+    // with Ann's book.
+    let (p, rec) = orgs_project(&[("out/Bob.csv/keep", "")]);
+    p.dre("run", &["statements", "--row-concurrency", "1"]).failed();
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0]["options"]["to"], "ann@example.com");
+    let ann = d[0]["files"][0]["content"].as_str().unwrap();
+    assert!(ann.contains("Growth") && !ann.contains("Cash"), "{ann}");
+    // The retry redoes Bob's row, though Ann's (which prints the same key) succeeded.
+    std::fs::remove_dir_all(p.path("out/Bob.csv")).unwrap();
+    let first = run_id(&p);
+    p.dre(
+        "run",
+        &["statements", "--retry-failed", &first, "--keep-runs", "5"],
+    )
+    .ok();
+    assert!(p.read("out/Bob.csv").contains("Cash"));
+    let d = deliveries(&rec);
+    assert_eq!(d.len(), 2, "{d:?}");
+    assert_eq!(d[1]["options"]["to"], "bob@example.com");
+    let bob = d[1]["files"][0]["content"].as_str().unwrap();
+    assert!(bob.contains("Cash") && !bob.contains("Growth"), "{bob}");
+}
+
+#[test]
+fn a_separator_in_a_key_value_never_matches_another_rows_details() {
+    // The driver's (`alpha<US>beta`, `gamma`) and the detail's (`alpha`, `beta<US>gamma`) are
+    // different tuples: the detail row is in no copy.
+    let (p, _rec) = orgs_project(&[
+        (
+            "reports/m/statements/orgs.sql",
+            "select 'alpha' || chr(31) || 'beta' as org, 'gamma' as region, 'Ann' as name, 'ann@example.com' as email",
+        ),
+        (
+            "reports/m/statements/books.sql",
+            "select 'alpha' as org, 'beta' || chr(31) || 'gamma' as region, 'Lost' as fund",
+        ),
+    ]);
+    p.dre("run", &["statements", "--no-deliver"])
+        .says("isn't in the driver");
+}
+
+#[test]
+fn two_unnamed_per_row_outputs_keep_their_own_journals_and_held_deliveries() {
+    let (p, rec) = project(
+        "queries: [members, holdings]\noutput:\n\
+         \x20 - format: csv\n    queries: [members, holdings]\n    for_each: {query: members, key: member_id}\n    destination: {profile: mail, to: \"{{ each.email }}\", hold: true}\n\
+         \x20 - format: message\n    for_each: {query: members, key: member_id}\n    text: hi\n    destination: {profile: mail, to: \"{{ each.email }}\", hold: true}\n",
+        &[],
+    );
+    p.dre("run", &["statements", "--row-concurrency", "1"]).ok();
+    for journal in ["statements-csv", "statements-md"] {
+        let rows = p.read(&format!("target/run/statements/default/{journal}.rows.jsonl"));
+        assert_eq!(rows.lines().count(), 2, "{journal}: {rows}");
+    }
+    let held = p.json("target/run/statements/default/held.json");
+    let mut ids: Vec<&str> = held["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), 4, "{ids:?}");
+    let id = run_id(&p);
+    p.dre("release", &["statements", "--run", &id])
+        .ok()
+        .says("4 delivered");
+    assert_eq!(deliveries(&rec).len(), 4);
+}
+
+#[test]
+fn a_release_of_a_busy_binding_exits_75_and_sends_nothing() {
+    let (p, rec) = project(
+        &format!(
+            "queries: [members, holdings]\noutput:\n{STATEMENT}    destination: {{profile: mail, to: \"{{{{ each.email }}}}\", hold: true}}\n"
+        ),
+        &[],
+    );
+    p.dre("run", &["statements"]).ok();
+    let id = run_id(&p);
+    let runs = dre_core::runs::BindingRuns::new(&p.path("target/run/statements/default"));
+    let guard = runs.lock("busy", chrono::Utc::now(), "release-test").unwrap();
+    let out = p.dre_env(
+        "release",
+        &["statements", "--run", &id],
+        &[("DRE_HOST_NAME", "release-test")],
+    );
+    assert_eq!(out.code, 75, "{out:?}");
+    out.says("is busy");
+    assert!(deliveries(&rec).is_empty());
+    drop(guard);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_terminated_release_is_cancelled_and_exits_143() {
+    use std::time::{Duration, Instant};
+    let (p, rec) = project(
+        &format!(
+            "queries: [members, holdings]\noutput:\n{STATEMENT}    destination: {{profile: mail, to: \"{{{{ each.email }}}}\", hold: true}}\n"
+        ),
+        &[],
+    );
+    p.dre("run", &["statements"]).ok();
+    let id = run_id(&p);
+    // One a minute: the second waits for its turn when the signal comes.
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_dre"))
+        .args([
+            "release",
+            "statements",
+            "--run",
+            &id,
+            "--rate",
+            "1/minute",
+            "--project-dir",
+        ])
+        .arg(p.root())
+        .arg("--profiles-dir")
+        .arg(p.dir.path().join("profiles"))
+        .env("DRE_PLUGINS_DIR", &p.plugins)
+        .env("HOME", p.dir.path().join("home"))
+        .env_remove("DRE_PROFILES_DIR")
+        .env_remove("DRE_TARGET")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while deliveries(&rec).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(deliveries(&rec).len(), 1);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert_eq!(deliveries(&rec).len(), 1);
+    let runs = p.path("target/run/statements/default/runs");
+    let release: serde_json::Value = std::fs::read_dir(&runs)
+        .unwrap()
+        .flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path().join("run_results.json")).ok())
+        .map(|t| serde_json::from_str::<serde_json::Value>(&t).unwrap())
+        .find(|r| r["release_of"] == id.as_str())
+        .unwrap();
+    assert_eq!(release["status"], "cancelled", "{release}");
+    assert_eq!(release["released"].as_array().unwrap().len(), 1, "{release}");
+    // The next release sends only the one left.
+    p.dre("release", &["statements", "--run", &id])
+        .ok()
+        .says("1 already released");
+    assert_eq!(deliveries(&rec).len(), 2);
+}

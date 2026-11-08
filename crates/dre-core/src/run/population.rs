@@ -174,6 +174,15 @@ impl Population {
             .map_err(|e| e.to_string())
     }
 
+    /// Row `i`'s [identity].
+    pub fn id(&self, i: usize) -> Result<String, String> {
+        self.db
+            .lock()
+            .unwrap()
+            .query_row("SELECT key FROM driver WHERE i=?1", [i], |r| r.get(0))
+            .map_err(|e| e.to_string())
+    }
+
     pub fn contains(&self, key: &str) -> Result<bool, String> {
         self.db
             .lock()
@@ -301,6 +310,17 @@ impl Population {
     }
 }
 
+/// A row's identity, for matching and for what's recorded per row: its one key value, or each
+/// of a composite key's values prefixed by its length, so no two tuples share one. The values
+/// joined with `_` are only for display: (`acme_us`, `1`) and (`acme`, `us_1`) both show
+/// `acme_us_1`.
+pub(super) fn identity(parts: &[String]) -> String {
+    match parts {
+        [one] => one.clone(),
+        _ => parts.iter().map(|p| format!("{}:{p}", p.len())).collect(),
+    }
+}
+
 fn scan(
     result: &Produced,
     keys: &[String],
@@ -323,8 +343,25 @@ fn scan(
                 return Err("population indexing was cancelled".into());
             }
             let parts: Vec<String> = formats.iter().map(|f| f.value(r).to_string()).collect();
-            row(index, r, &parts.join("\u{1f}"), &parts.join("_"))?;
+            row(index, r, &identity(&parts), &parts.join("_"))?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::identity;
+
+    #[test]
+    fn composite_keys_that_print_alike_have_their_own_identity() {
+        let id = |parts: &[&str]| identity(&parts.iter().map(|p| p.to_string()).collect::<Vec<_>>());
+        assert_ne!(id(&["acme_us", "1"]), id(&["acme", "us_1"]));
+        assert_ne!(
+            id(&["alpha\u{1f}beta", "gamma"]),
+            id(&["alpha", "beta\u{1f}gamma"])
+        );
+        // A one-column key is its value, as recorded before.
+        assert_eq!(id(&["101"]), "101");
+    }
 }
