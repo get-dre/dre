@@ -18,7 +18,8 @@ DRE core starts and talks to over stdin and stdout. Plugins ship in packages: on
 serve several plugins (the `databricks` package is a source and a destination; `object_store`
 is three destinations), and core names the one it wants in the handshake. Plugins can be written
 in any language. This document
-is the contract between core and a plugin. Any change to it means a new protocol version.
+is the contract between core and a plugin. Only an incompatible wire change means a new protocol
+version; [compatible additions](#versioning) don't.
 
 The reference implementation is the [`dre-protocol`](https://crates.io/crates/dre-protocol) crate
 (`cargo add dre-protocol`). It has its own version, apart from both DRE's and this protocol's.
@@ -627,10 +628,8 @@ only messages or only files. Older plugins, which advertise neither, keep workin
 ## Versioning
 
 Version 1 added request ids, `cancel`, `log`, `progress` and the error `kind` and `code`. Core
-0.4 requires version 1; a plugin that only speaks version 0 is refused with a message naming
-`dre plugin update <package>`. The SDKs speak versions 0 and 1, so a plugin built on them still
-works with core 0.3: on version 0 they send no ids and log to stderr with the prefixes core 0.3
-shows (`info: `, `warning: `).
+Core requires version 1: a plugin that only speaks version 0 is refused with a message naming
+`dre plugin update <package>`.
 
 The protocol version is a single integer. Core and plugins release independently, so each side
 states the range it supports and the handshake picks the highest common version.

@@ -342,8 +342,7 @@ connections:
         database: shop_prod
 ```
 
-Plugin packages and macro packages are declared in `dependencies.yml` (or `packages.yml`, or
-both):
+Plugin packages and macro packages are declared in `dependencies.yml`:
 
 ```yaml
 plugins:

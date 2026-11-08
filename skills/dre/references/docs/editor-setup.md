@@ -34,7 +34,7 @@ To apply a schema to every file of a kind without a comment line, map them in yo
   "yaml.schemas": {
     "https://getdre.com/schemas/v0.11/report.schema.json": "reports/**/*.yml",
     "https://getdre.com/schemas/v0.11/project.schema.json": "dre_project.yml",
-    "https://getdre.com/schemas/v0.11/dependencies.schema.json": ["dependencies.yml", "packages.yml"],
+    "https://getdre.com/schemas/v0.11/dependencies.schema.json": "dependencies.yml",
     "https://getdre.com/schemas/v0.11/schedules.schema.json": "schedules.yml",
     "https://getdre.com/schemas/v0.11/timings.schema.json": "timings.yml",
     "https://getdre.com/schemas/v0.11/sets.schema.json": "sets.yml",
