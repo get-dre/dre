@@ -60,7 +60,8 @@ keep their usual comma-separated and list forms.
 ## Files
 
 Each row's file is `<output>/<key>.<ext>` in the run folder (`statement/12345.pdf`; a
-composite key is joined with `_`), or what `file_name:` renders (`"{{ each.member_id }}_q3.pdf"`).
+composite key is joined with `_`). An unnamed per-row output is called after its report; when two
+unnamed ones share a report, each takes its file extension too (`statements-pdf`, `statements-xlsx`), or what `file_name:` renders (`"{{ each.member_id }}_q3.pdf"`).
 Key values are made safe for file names: letters and digits in any script (`東京`, `Zoë`),
 `.`, `-` and `_` stay, anything else becomes `_`, cut at 100 bytes. Before anything renders, the run fails when two rows
 have the same key, or would write the same file name, so rows never overwrite each other. A
@@ -122,7 +123,7 @@ three-hour send shows it's alive:
   Progress  output `email`: 1,200/20,000 rows, 0 failed, 98/min (rate 100/min), ~3h11m left
 ```
 
-A send under 30 seconds prints no extra line. `--output json` writes a `rows_progress` event
+A send under 30 seconds prints no extra line. `--log-format json` writes a `rows_progress` event
 (`output`, `done`, `total`, `failed`, `rate`, `rows_per_second`, `seconds_left`) on the same
 schedule, and `-q` shows neither.
 
@@ -185,7 +186,11 @@ outputs. Retrying again (of either run) never re-sends a row that succeeded, and
 goes again only to the destinations it failed on (one it reached or held isn't sent twice). A
 run that was pruned (`keep_runs`) can't be retried; with `for_each.keep_results: false` nothing
 is saved, and a retry runs the queries again, with a warning. The same goes when a query has
-`secret_columns`: they're saved masked, so a retry runs the queries again.
+`secret_columns`: they're saved masked, so a retry runs the queries again. A retry is refused,
+before anything is sent, when an output's destinations (their profiles, paths or order) changed
+since the original run, because it matches each by its place: run the report again instead.
+Rows are matched by their whole key, so composite keys such as `(acme_us, 1)` and `(acme, us_1)`
+never share records.
 
 `--only-keys 101,102` and `--limit-rows 10` make only some rows (recorded as `partial`).
 
@@ -221,7 +226,9 @@ dre release statements --run 20261017T060000Z-k3f9 --exclude-keys 103
 and delivers from the run folder's files, byte for byte what was reviewed: it never
 re-renders or re-queries, and refuses a file whose SHA-256 changed since the run. It takes the
 Binding's lock, is its own run folder (`release_of`, `released_by`, and each delivery's result in
-`released`), and never sends a delivery twice: releasing again sends only what's still held. It
+`released`), and never sends a delivery twice: releasing again sends only what's still held. A
+release stopped by Ctrl-C or SIGTERM is recorded as `cancelled` and exits `130` or `143`, saying
+how many deliveries weren't sent; release again for them. A busy Binding exits `75`. It
 works for any output, per-row or not (`--binding <set>` for a report with Sets). Keep the run
 in the target path for the review window: a shared target path, and `keep_runs`.
 

@@ -237,7 +237,7 @@ codes! {
         "The key belonged to an older DRE. The message says what replaces it.";
     InvalidField = "invalid-field", Config,
         "A key has a value of the wrong type or shape.",
-        "The value doesn't fit the key: a string where a list is expected, a number out of range, an unknown choice. The message says what the key takes.";
+        "The value doesn't fit the key: a string where a list is expected, a number out of range, an unknown choice, an unknown key inside a `var_schema` declaration (`allowd:` for `allowed:`), or a Set in `sets.yml` that isn't a map. The message says what the key takes.";
     MissingField = "missing-field", Config,
         "A required key is missing.",
         "The file leaves out a key it needs, e.g. `name:` in dre_project.yml, or the name of a report outside a report folder.";
@@ -295,7 +295,7 @@ codes! {
         "Outputs of one report need unique `name:`s, and two unnamed outputs of one format would write the same file. Give each output a `name:`.";
     InvalidOutputOption = "invalid-output-option", Config,
         "An output option is wrong.",
-        "A shared output key (`template`, `extension`, ...) or a format's option has a bad value, or applies to another format. The message names the option.";
+        "A shared output key (`template`, `extension`, ...) or a format's option has a bad value, or applies to another format, or two tabs of one file-per-tab output would write the same file name. The message names the option.";
     InvalidDestinationOption = "invalid-destination-option", Config,
         "A destination option is wrong.",
         "An `output.destination` entry has a bad value for one of its options (`attach:` naming no output, a plugin's option of the wrong type). The message names the option.";
@@ -473,7 +473,7 @@ codes! {
     // -- lookups ----------------------------------------------------------------------------
     InvalidLookup = "invalid-lookup", Config,
         "A lookup or its config is wrong.",
-        "A lookup is a csv, xlsx, xls, json or jsonl file under `lookups/` (or a `.yml` of rows), with an optional `<name>.yml` config of `columns`, `sheet` and `load`. The message names the problem.";
+        "A lookup is a csv, xlsx, xls, json or jsonl file under `lookups/` (or a `.yml` of rows), with an optional `<name>.yml` config of `columns`, `sheet` and `load`. `sheet` is a sheet name, so quote one that looks like a number (`'2026'`). The message names the problem.";
     DuplicateLookup = "duplicate-lookup", Config,
         "Two lookups have the same name.",
         "Lookups are named after their file, without the extension; two files with one name are ambiguous.";
@@ -513,10 +513,10 @@ codes! {
         "One or more rows of a `for_each` output failed to render or deliver. With `on_row_error: continue` (the default) the other rows were made and delivered; with `fail`, nothing was delivered. Each failed row's key, code and message are in `run_results.json` (`output_results[].for_each.failed_keys`) and in the `<output>.rows.jsonl` sidecar. Fix the cause and run `dre run <report> --retry-failed <run id>` to redo only those rows, from the same saved results.";
     ReleaseFailed = "release-failed", Delivery,
         "`dre release` couldn't deliver every held delivery.",
-        "`dre release` delivers a run's held deliveries from the files in its run folder. It fails when the run isn't in the target path (keep it with `keep_runs` for the review window), has no `held.json`, or when a delivery failed or was refused because its file changed since the run rendered it (the SHA-256 recorded at the run must match). Delivered entries are recorded, so releasing again sends only what's still held.";
+        "`dre release` delivers a run's held deliveries from the files in its run folder. It fails when the run isn't in the target path (keep it with `keep_runs` for the review window), has no `held.json`, or when a delivery failed or was refused because its file changed since the run rendered it (the SHA-256 recorded at the run must match). A release stopped by Ctrl-C or a termination signal is recorded as `cancelled` (exit 130 or 143) and says how many deliveries weren't sent; another release sends them. Delivered entries are recorded, so releasing again sends only what's still held.";
     RetryFailed = "retry-failed", Usage,
         "`--retry-failed` can't redo that run.",
-        "`dre run --retry-failed <run id>` redoes a run's failed and never-started rows from the query results it saved in its run folder. The run must still be in the target path (`keep_runs` prunes older runs; `dre history` lists them) with its `results/` folder. A run whose per-row outputs have `keep_results: false` saved none, and a retry of it runs the queries again.";
+        "`dre run --retry-failed <run id>` redoes a run's failed and never-started rows from the query results it saved in its run folder. The run must still be in the target path (`keep_runs` prunes older runs; `dre history` lists them) with its `results/` folder. A run whose per-row outputs have `keep_results: false` saved none, and a retry of it runs the queries again. A retry is refused when a per-row output's destinations (their profiles, paths or order) changed since that run, because it matches each by its place: run the report again instead.";
     NoData = "no-data", Query,
         "An output with `on_empty: fail` had no data.",
         "Every query of the output returned no rows (or a query with `on_empty: fail` returned none), and `on_empty: fail` makes that a failure, so nothing was delivered. Check the data upstream; if empty is acceptable, use `on_empty: skip` (deliver nothing) or `continue` (deliver it empty). A `count(*)` returning 0 is one row, not empty. See \"When there's no data\" in docs/building-reports.md.";

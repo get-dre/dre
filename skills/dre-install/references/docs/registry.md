@@ -79,7 +79,7 @@ updated any more.)
       "versions": [
         {
           "version": "1.2.0",
-          "protocol": 0,
+          "protocol": 1,
           "artifacts": {
             "macos-aarch64":  { "url": "https://…/dre-plugin-object_store-1.2.0-macos-aarch64.tar.gz", "sha256": "…" },
             "linux-x86_64":   { "url": "https://…/dre-plugin-object_store-1.2.0-linux-x86_64.tar.gz",  "sha256": "…" },
@@ -307,9 +307,8 @@ How the commands use it:
 
 The checksums are the ones the registry publishes for every platform of that version. When a
 source publishes none (a GitHub release without `.sha256` files), each platform's first
-download is recorded, and later downloads on that platform must match it. A `dre.lock` from
-before per-platform checksums has a single `sha256:` value: it's accepted when it matches the
-registry's checksum for any platform of that version, and rewritten in the new form.
+download is recorded, and later downloads on that platform must match it. A `dre.lock` with a single
+`sha256:` value instead of a platform map is rejected; delete the file and run `dre deps` to write a new one.
 
 ## Other places to install from
 
@@ -352,8 +351,7 @@ error.)
 ## Macro packages
 
 A macro package is a folder with a `dre_package.yml` (`name: dre_utils`) and a `macros/` folder.
-Declare packages under `packages:` in `dependencies.yml` or `packages.yml` at the project root
-(either file, or both):
+Declare packages under `packages:` in `dependencies.yml` at the project root:
 
 ```yaml
 packages:
