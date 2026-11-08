@@ -258,3 +258,43 @@ func TestIfExistsRefusesOrNumbersANameAlreadyTaken(t *testing.T) {
 		t.Fatal(loc, err)
 	}
 }
+
+func TestAFailedCopyToAMountKeepsTheOldFileAndLeavesNoPart(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Volumes", "main", "fin", "out")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "d.csv"), []byte("old, complete"), 0o644)
+	t.Setenv("DATABRICKS_RUNTIME_VERSION", "16.4")
+	t.Setenv("DRE_VOLUMES_ROOT", root)
+	// A folder opens but can't be read, so the copy fails part way.
+	unreadable := t.TempDir()
+	for _, ifExists := range []string{"overwrite", "error", "number"} {
+		if _, err := deliver(unreadable, "/Volumes/main/fin/out/d.csv", nil, map[string]any{"if_exists": ifExists, "retries": 0.0}); err == nil {
+			t.Fatalf("%s: no error", ifExists)
+		}
+		if _, err := deliver(unreadable, "/Volumes/main/fin/out/new.csv", nil, map[string]any{"if_exists": ifExists, "retries": 0.0}); err == nil {
+			t.Fatalf("%s: no error", ifExists)
+		}
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != "d.csv" {
+		t.Fatalf("%v", entries)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "d.csv")); string(b) != "old, complete" {
+		t.Fatalf("%q", b)
+	}
+}
+
+func TestATruncatedReplyIsAFailedUpload(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(200)
+		w.Write([]byte("x"))
+	}))
+	t.Cleanup(srv.Close)
+	err := volumeRequest(srv.Client(), srv.URL+"/api/2.0/fs/files/x", &auth{token: "good"}, localFile(t, "x"))
+	if err == nil {
+		t.Fatal("a truncated reply passed as a success")
+	}
+}

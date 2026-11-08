@@ -199,8 +199,11 @@ func volumeRequest(client *http.Client, url string, a *auth, local string) error
 	if err != nil {
 		return temporary(fmt.Errorf("can't reach Databricks: %v", err), 0, "")
 	}
-	text, _ := io.ReadAll(resp.Body)
+	text, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("can't read Databricks' reply (HTTP %d): %v", resp.StatusCode, err)
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
