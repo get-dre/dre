@@ -89,6 +89,10 @@ struct RowDest {
 /// `<output>.destinations.json` in a run folder: its destination plan, for `--retry-failed`.
 const DESTINATIONS: &str = "destinations.json";
 
+/// `retry_of` in a retry's run folder: the run it redoes, written before any row is sent, so a
+/// retry killed before its `run_results.json` still counts for the next one.
+const RETRY_OF: &str = "retry_of";
+
 /// A run folder's saved query results, for `--retry-failed`.
 pub(super) const SNAPSHOT_DIR: &str = "results";
 
@@ -863,6 +867,9 @@ impl BindingRun<'_> {
             ));
         }
         self.same_destinations(id, &original)?;
+        std::fs::create_dir_all(&self.run_dir).map_err(|e| e.to_string())?;
+        crate::fs::write_atomic(&self.run_dir.join(RETRY_OF), original.as_bytes())
+            .map_err(|e| e.to_string())?;
         let (done, sent) = self.rows_done(&original);
         self.retry = Some(Retry {
             original: original.clone(),
@@ -920,10 +927,11 @@ impl BindingRun<'_> {
             let text = std::fs::read_to_string(self.runs.run_dir(run).join("run_results.json")).ok()?;
             serde_json::from_str(&text).ok()
         };
-        // The run, then its retries, oldest first.
+        // The run, then its retries (finished or killed part-way), oldest first.
         let mut runs = vec![original.to_string()];
         runs.extend(self.runs.list().into_iter().filter(|run| {
-            read(run).is_some_and(|r| r.get("retry_of").and_then(Json::as_str) == Some(original))
+            std::fs::read_to_string(self.runs.run_dir(run).join(RETRY_OF)).is_ok_and(|o| o == original)
+                || read(run).is_some_and(|r| r.get("retry_of").and_then(Json::as_str) == Some(original))
         }));
         let mut done: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
         let mut sent: Sent = HashMap::new();
