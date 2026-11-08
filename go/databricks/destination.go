@@ -21,7 +21,7 @@ import (
 )
 
 // deliveryOptions: `if_exists` (the shared delivery rules). Volumes and workspace files appear
-// only once uploaded, so there's no temporary name.
+// only once uploaded, and a mount always takes a temporary name, so there's no `atomic`.
 func deliveryOptions() []plugin.OptionField {
 	return plugin.DeliveryOptions()[:1]
 }
@@ -81,7 +81,8 @@ func failed(what, path string, err error) error {
 }
 
 // mountStore writes to /Volumes or /Workspace where Databricks compute mounts them; root stands
-// in for /. Files are written in place, as before the delivery rules.
+// in for /. A file is written under a temporary name beside the final one, then renamed, so a
+// failed copy never leaves a partial file under the final name or replaces a complete one.
 type mountStore struct{ root string }
 
 func (s mountStore) path(p string) string {
@@ -89,7 +90,7 @@ func (s mountStore) path(p string) string {
 }
 
 func (mountStore) Caps() plugin.Caps {
-	return plugin.Caps{CreateExclusive: true, VisibleWhenComplete: true}
+	return plugin.Caps{CreateExclusive: true, RenameNoReplace: true}
 }
 
 func (s mountStore) Write(local, remote string, exclusive bool) error {
@@ -120,8 +121,26 @@ func (s mountStore) Write(local, remote string, exclusive bool) error {
 	return out.Close()
 }
 
-func (s mountStore) Rename(from, to string, _ bool) error {
-	return os.Rename(s.path(from), s.path(to))
+// Rename without replace links to's name, which fails if something is there; a mount that
+// can't link looks first, then renames.
+func (s mountStore) Rename(from, to string, replace bool) error {
+	from, to = s.path(from), s.path(to)
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	if !replace {
+		err := os.Link(from, to)
+		if err == nil {
+			return os.Remove(from)
+		}
+		if errors.Is(err, fs.ErrExist) {
+			return plugin.ErrExists
+		}
+		if _, err := os.Stat(to); err == nil {
+			return plugin.ErrExists
+		}
+	}
+	return os.Rename(from, to)
 }
 
 func (s mountStore) Exists(remote string) (bool, error) {
