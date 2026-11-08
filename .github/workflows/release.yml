@@ -628,7 +628,14 @@ jobs:
 
       - name: Attach the wheels to the release
         if: env.DRY_RUN != 'true'
-        run: gh release upload "$TAG" wheels/*.whl
+        run: |
+          # An immutable release (a repository setting) takes no assets after it is published:
+          # the files then stay in the workflow artifacts and on PyPI.
+          if [[ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isImmutable -q .isImmutable)" == true ]]; then
+            echo "::warning::$TAG is an immutable release; not attaching files to it"
+          else
+            gh release upload "$TAG" wheels/*.whl -R "$GITHUB_REPOSITORY"
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -688,7 +695,14 @@ jobs:
         with:
           name: wheel-sboms
           path: sboms
-      - run: gh release upload "$TAG" sboms/*.cdx.json -R "$GITHUB_REPOSITORY"
+      - run: |
+          # An immutable release (a repository setting) takes no assets after it is published:
+          # the files then stay in the workflow artifacts and on PyPI.
+          if [[ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isImmutable -q .isImmutable)" == true ]]; then
+            echo "::warning::$TAG is an immutable release; not attaching files to it"
+          else
+            gh release upload "$TAG" sboms/*.cdx.json -R "$GITHUB_REPOSITORY"
+          fi
 
   release-wheels:
     name: Wheels from ${{ inputs.tag }}
@@ -714,7 +728,13 @@ jobs:
             gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "dre-${TAG#v}-*" -D dist
             python3 .github/scripts/build_wheels.py --dist dist --version "${TAG#v}" --out wheels
             GITHUB_TOKEN="$GH_TOKEN" .github/scripts/smoke_wheel.sh
-            gh release upload "$TAG" wheels/*.whl -R "$GITHUB_REPOSITORY"
+            # An immutable release (a repository setting) takes no assets after it is published:
+            # the files then stay in the workflow artifacts and on PyPI.
+            if [[ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isImmutable -q .isImmutable)" == true ]]; then
+              echo "::warning::$TAG is an immutable release; not attaching files to it"
+            else
+              gh release upload "$TAG" wheels/*.whl -R "$GITHUB_REPOSITORY"
+            fi
           fi
           ls -l wheels
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
