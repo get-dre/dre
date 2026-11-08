@@ -111,7 +111,8 @@ sales.customers  warehouse   main.customers          (unused)
 sales.orders     warehouse   main.raw_orders_v2      daily, monthly
 ```
 
-`(unused)` flags declarations no report reads. `--output json` gives the manifest's `sources`.
+`(unused)` flags declarations no report reads. `--output json` gives the manifest's `sources`, under
+`"schema_version": "dre/sources/v1"` (a listing, not a manifest).
 
 ## Columns and `dre validate --live`
 

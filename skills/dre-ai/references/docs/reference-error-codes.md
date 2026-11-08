@@ -37,7 +37,7 @@ DRE looks for `dre_project.yml` in `--project-dir` (default: the current folder)
 
 `--retry-failed` can't redo that run.
 
-`dre run --retry-failed <run id>` redoes a run's failed and never-started rows from the query results it saved in its run folder. The run must still be in the target path (`keep_runs` prunes older runs; `dre history` lists them) with its `results/` folder. A run whose per-row outputs have `keep_results: false` saved none, and a retry of it runs the queries again.
+`dre run --retry-failed <run id>` redoes a run's failed and never-started rows from the query results it saved in its run folder. The run must still be in the target path (`keep_runs` prunes older runs; `dre history` lists them) with its `results/` folder. A run whose per-row outputs have `keep_results: false` saved none, and a retry of it runs the queries again. A retry is refused when a per-row output's destinations (their profiles, paths or order) changed since that run, because it matches each by its place: run the report again instead.
 
 ### selector-matches-nothing
 
@@ -207,7 +207,7 @@ An `output.destination` entry has a bad value for one of its options (`attach:` 
 
 A key has a value of the wrong type or shape.
 
-The value doesn't fit the key: a string where a list is expected, a number out of range, an unknown choice. The message says what the key takes.
+The value doesn't fit the key: a string where a list is expected, a number out of range, an unknown choice, an unknown key inside a `var_schema` declaration (`allowd:` for `allowed:`), or a Set in `sets.yml` that isn't a map. The message says what the key takes.
 
 ### invalid-folder-config
 
@@ -225,13 +225,13 @@ A locale isn't one the number filters know.
 
 A lookup or its config is wrong.
 
-A lookup is a csv, xlsx, xls, json or jsonl file under `lookups/` (or a `.yml` of rows), with an optional `<name>.yml` config of `columns`, `sheet` and `load`. The message names the problem.
+A lookup is a csv, xlsx, xls, json or jsonl file under `lookups/` (or a `.yml` of rows), with an optional `<name>.yml` config of `columns`, `sheet` and `load`. `sheet` is a sheet name, so quote one that looks like a number (`'2026'`). The message names the problem.
 
 ### invalid-output-option
 
 An output option is wrong.
 
-A shared output key (`template`, `extension`, ...) or a format's option has a bad value, or applies to another format. The message names the option.
+A shared output key (`template`, `extension`, ...) or a format's option has a bad value, or applies to another format, or two tabs of one file-per-tab output would write the same file name. The message names the option.
 
 ### invalid-package
 
@@ -715,7 +715,7 @@ The destination plugin failed to deliver the file or message. The message has th
 
 `dre release` couldn't deliver every held delivery.
 
-`dre release` delivers a run's held deliveries from the files in its run folder. It fails when the run isn't in the target path (keep it with `keep_runs` for the review window), has no `held.json`, or when a delivery failed or was refused because its file changed since the run rendered it (the SHA-256 recorded at the run must match). Delivered entries are recorded, so releasing again sends only what's still held.
+`dre release` delivers a run's held deliveries from the files in its run folder. It fails when the run isn't in the target path (keep it with `keep_runs` for the review window), has no `held.json`, or when a delivery failed or was refused because its file changed since the run rendered it (the SHA-256 recorded at the run must match). A release stopped by Ctrl-C or a termination signal is recorded as `cancelled` (exit 130 or 143) and says how many deliveries weren't sent; another release sends them. Delivered entries are recorded, so releasing again sends only what's still held.
 
 ### rows-failed
 
