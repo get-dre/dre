@@ -63,7 +63,7 @@ docker network create dre-test-ssh >/dev/null 2>&1 || true
 # Postgres wants its key owned by itself with mode 0600, which a bind mount can't promise.
 docker run -d --name dre-test-pg-tls --network dre-test-ssh --network-alias db.internal \
   -p 5433:5432 -e POSTGRES_USER=dre -e POSTGRES_PASSWORD=dre -e POSTGRES_DB=dre \
-  -v "$work/pg:/certs:ro" --entrypoint sh mirror.gcr.io/library/postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b -c '
+  -v "$work/pg:/certs:ro" --entrypoint sh mirror.gcr.io/library/postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac -c '
     install -o postgres -m 600 /certs/server.key /var/lib/postgresql/server.key
     install -o postgres -m 644 /certs/server.crt /var/lib/postgresql/server.crt
     exec docker-entrypoint.sh postgres -c ssl=on \
@@ -77,7 +77,7 @@ docker run -d --name dre-test-ch-tls --network dre-test-ssh --network-alias ch.i
   >/dev/null
 
 docker run -d --name dre-test-bastion --network dre-test-ssh -p 2223:22 \
-  -v "$key.pub:/keys/id.pub:ro" mirror.gcr.io/library/alpine:3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a sh -c '
+  -v "$key.pub:/keys/id.pub:ro" mirror.gcr.io/library/alpine:3@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf sh -c '
     apk add --no-cache openssh >/dev/null
     adduser -D dre && echo dre:dre-pass | chpasswd
     mkdir -p /home/dre/.ssh && cp /keys/id.pub /home/dre/.ssh/authorized_keys
