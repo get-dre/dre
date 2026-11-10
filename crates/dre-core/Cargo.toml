@@ -40,7 +40,7 @@ tar = "0.4"
 croner = "4"
 rrule = "0.14"
 # Disk-backed per-row key and job indexes keep population memory bounded. SQLite is MIT.
-rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 tempfile.workspace = true
 sqlparser = { version = "0.63", features = ["visitor"] }
 
