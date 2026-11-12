@@ -1411,7 +1411,7 @@ dependencies = [
  "log",
  "quick-xml 0.42.0",
  "serde",
- "zip 9.2.0",
+ "zip 9.4.1",
 ]
 
 [[package]]
@@ -1880,7 +1880,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2236,7 +2236,7 @@ dependencies = [
  "tempfile",
  "umya-spreadsheet",
  "windows-sys 0.61.2",
- "zip 9.2.0",
+ "zip 9.4.1",
 ]
 
 [[package]]
@@ -2273,7 +2273,7 @@ dependencies = [
  "ureq",
  "walkdir",
  "windows-sys 0.61.2",
- "zip 9.2.0",
+ "zip 9.4.1",
 ]
 
 [[package]]
@@ -6272,7 +6272,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ca3d0e879a578c1313c2800ab0c6c029d38eed18098675e50341a30d32372ed"
 dependencies = [
  "tempfile",
- "zip 9.2.0",
+ "zip 9.4.1",
 ]
 
 [[package]]
@@ -8891,9 +8891,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.2.0"
+version = "9.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f5b58784007ff6e5f280ec82c8596686a3b9b5dd5836c63288d4479f84728b9"
+checksum = "23f17fbc870bfac28c6228aed7d6e6df352e26bf7015c4313727e16a7a01ce5e"
 dependencies = [
  "aes",
  "constant_time_eq",
@@ -8902,6 +8902,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac 0.13.0",
  "indexmap",
+ "libc",
  "memchr",
  "nix",
  "pbkdf2 0.13.0",
