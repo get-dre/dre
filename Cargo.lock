@@ -2311,7 +2311,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-duckdb"
-version = "1.4.0"
+version = "2.0.0"
 dependencies = [
  "arrow 59.3.0",
  "dre-plugin-host",
