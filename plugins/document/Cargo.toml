@@ -23,7 +23,7 @@ fulgur = "0.41"
 ttf-parser = "0.25"
 # PDF open passwords (`password:`): AES-256 (PDF 2.0, R6) on fulgur's output. Already in the tree
 # through fulgur. MIT.
-lopdf = { version = "0.46", default-features = false }
+lopdf = { version = "0.47", default-features = false }
 # The random file key and owner password. MIT or Apache-2.0.
 getrandom = "0.4"
 
@@ -33,4 +33,4 @@ dre-core.workspace = true
 dre-plugin-host.workspace = true
 tempfile.workspace = true
 flate2 = "1.1"
-lopdf = { version = "0.46", default-features = false }
+lopdf = { version = "0.47", default-features = false }
