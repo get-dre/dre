@@ -186,7 +186,9 @@ impl DuckDb {
     }
     fn open_with(&mut self, c: &Map<String, Value>, read_only: bool, sandbox: bool) -> Result<()> {
         let path = conn_str(c, "path").unwrap_or(":memory:");
-        let mut config = Config::default();
+        // DuckDB 2.0 writes new files in a format 1.x can't open. Keep files DRE creates
+        // readable by 1.5; existing files keep their own format.
+        let mut config = Config::default().with("storage_compatibility_version", "v1.5.0")?;
         if read_only && path != ":memory:" {
             config = config.access_mode(AccessMode::ReadOnly)?;
         }
@@ -353,19 +355,12 @@ fn execute(conn: &Connection, sql: &str, out: &mut dyn ResultSink) -> Result<()>
     Ok(())
 }
 
-/// duckdb-rs panics if fetching fails mid-stream; turn that into an error.
+/// Fetches the next batch; a mid-stream failure comes back as an error.
 fn next_batch(stream: &mut duckdb::ArrowStream<'_>) -> Result<Option<duckdb::arrow::array::RecordBatch>> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stream.next())).map_err(|p| {
-        let msg = p
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
-        format!(
-            "DuckDB failed while fetching results: {}",
-            msg.unwrap_or_default()
-        )
-        .into()
-    })
+    stream
+        .next()
+        .transpose()
+        .map_err(|e| format!("DuckDB failed while fetching results: {e}").into())
 }
 
 fn main() {
@@ -463,6 +458,23 @@ mod tests {
         };
         db.open(&Map::new(), false).unwrap();
         assert_interrupted(finishes(move || db.execute(SLOW, None, &mut Discard)));
+    }
+
+    #[test]
+    fn new_database_files_stay_readable_by_duckdb_1_5() {
+        let mut db = DuckDb::default();
+        db.open(&Map::new(), false).unwrap();
+        let v: String = db
+            .session()
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT current_setting('storage_compatibility_version')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, "v1.5.0");
     }
 
     #[test]
