@@ -10,27 +10,27 @@ require (
 	// shared module's arrow-go v18. Drop v12 when the driver moves.
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/arrow/go/v12 v12.0.1
-	github.com/databricks/databricks-sdk-go v0.191.1
-	github.com/databricks/databricks-sql-go v1.18.0
+	github.com/databricks/databricks-sdk-go v0.195.0
+	github.com/databricks/databricks-sql-go v1.19.0
 	github.com/get-dre/dre/go/plugin v0.0.0
 )
 
 require (
 	cloud.google.com/go/auth v0.24.1-0.20261001053825-dbc26066f70a // indirect
-	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect
+	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	github.com/andybalholm/brotli v1.2.8 // indirect
 	github.com/apache/thrift v0.24.0 // indirect
 	github.com/bitfield/gotestdox v0.2.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/darwin_amd64 v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/darwin_arm64 v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_amd64 v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_arm v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_arm64 v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/windows_amd64 v1.3.0 // indirect
-	github.com/databricks/databricks-sql-kernel-bindings/lib/windows_arm64 v1.3.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/darwin_amd64 v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/darwin_arm64 v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_amd64 v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_arm v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/linux_arm64 v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/windows_amd64 v1.4.0 // indirect
+	github.com/databricks/databricks-sql-kernel-bindings/lib/windows_arm64 v1.4.0 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
@@ -71,7 +71,7 @@ require (
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/oauth2 v0.37.0 // indirect
+	golang.org/x/oauth2 v0.38.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260924152758-ed294f943157 // indirect
@@ -80,9 +80,9 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.51.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/api v0.310.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
-	google.golang.org/grpc v1.84.0 // indirect
+	google.golang.org/api v0.311.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261026165753-2ffab32bce7e // indirect
+	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 	gotest.tools/gotestsum v1.13.0 // indirect
