@@ -498,3 +498,33 @@ fn run_query_in_an_unmanaged_report_may_only_read() {
         "n\r\n12\r\n"
     );
 }
+
+#[test]
+fn a_plugin_that_exits_at_the_hello_is_named_with_its_version_and_an_update_hint() {
+    let p = project(&[
+        ("reports/fin/f/f.yml", "queries: [fq]\nprofile: fixture\n"),
+        ("reports/fin/f/fq.sql", "rows 1;"),
+    ]);
+    let exe = common::workspace_bin("dre-source-fixture");
+    let dir = p.dir.path().join("old-plugins");
+    let vdir = dir.join("fixture").join("1.2.1");
+    std::fs::create_dir_all(&vdir).unwrap();
+    let name = exe.file_name().unwrap().to_string_lossy().to_string();
+    std::fs::copy(&exe, vdir.join(&name)).unwrap();
+    std::fs::write(
+        vdir.join("plugin.json"),
+        format!("{{\"executable\": \"{name}\", \"provides\": [\"source/fixture\"]}}"),
+    )
+    .unwrap();
+    let r = p.dre_env(
+        "run",
+        &["f"],
+        &[
+            ("DRE_PLUGINS_DIR", dir.to_str().unwrap()),
+            ("DRE_FIXTURE_MODE", "exit_at_hello"),
+        ],
+    );
+    r.failed()
+        .says("plugin package `fixture` 1.2.1 may only speak protocol 0")
+        .says("dre plugin update fixture");
+}

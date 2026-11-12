@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use dre_plugin_host::host::{
-    Canceller, Description, Execution, LogSink, PluginInfo, PluginProcess, StderrSync,
+    Canceller, Description, Execution, HostError, LogSink, PluginInfo, PluginProcess, StderrSync,
 };
 use dre_protocol::msg::{ConnectionField, DeliveryFile, FieldKind, Message, ResultSetMeta};
 use dre_protocol::{PluginId, parse_executable_name};
@@ -279,6 +279,36 @@ fn spawn(
     Ok((process, registration))
 }
 
+/// A plugin that exits before it answers the hello most likely predates protocol 1 (it can't
+/// parse the hello): name its package and installed version, and say how to update it.
+fn exited_at_hello(e: HostError, plugin: &Located) -> HostError {
+    if !matches!(e, HostError::Crashed { .. }) {
+        return e;
+    }
+    // Versioned installs live in `<plugins dir>/<package>/<version>/`.
+    let version = plugin
+        .path
+        .parent()
+        .filter(|v| {
+            v.parent()
+                .and_then(Path::file_name)
+                .is_some_and(|n| n == plugin.package.as_str())
+        })
+        .and_then(Path::file_name)
+        .map(|v| format!(" {}", v.to_string_lossy()))
+        .unwrap_or_default();
+    let package = &plugin.package;
+    HostError::Plugin {
+        message: format!(
+            "{e}\nplugin package `{package}`{version} may only speak protocol 0 (this DRE needs {}); run `dre plugin update {package}`",
+            dre_protocol::CORE_MIN_VERSION,
+        ),
+        plugin: package.clone(),
+        kind: None,
+        code: None,
+    }
+}
+
 impl SubprocessHost {
     /// A host finding plugins as `env` says.
     pub fn new(env: &Env) -> SubprocessHost {
@@ -323,7 +353,8 @@ impl PluginHost for SubprocessHost {
             cwd,
             &self.env,
             &self.running,
-        )?;
+        )
+        .map_err(|e| exited_at_hello(e, plugin))?;
         Ok(Box::new(Subprocess {
             process: Some(process),
             font_context: crate::context::Context::subprocess(self.env.clone()),

@@ -4,6 +4,7 @@
 //! - `old_protocol`: answers the handshake claiming only versions 7..=9
 //! - `protocol_zero`: answers the handshake claiming only version 0, as a plugin from before
 //!   protocol 1 does
+//! - `exit_at_hello`: reads the hello and exits 0 without answering, as a protocol 0 plugin does
 //! - `garbage`: writes bytes that aren't a frame
 //! - `silent`: never answers
 //! - `die`: logs to stderr and exits 5 at start
@@ -235,6 +236,10 @@ fn main() {
                 },
             );
             std::process::exit(1);
+        }
+        Ok("exit_at_hello") => {
+            let _ = dre_protocol::frame::read_frame(&mut std::io::stdin());
+            std::process::exit(0);
         }
         Ok("garbage") => {
             let _ = std::io::stdout().write_all(&[0, 0, 0, 3, b'Z', 1, 2]);
