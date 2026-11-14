@@ -41,6 +41,8 @@ Set in the report's `output.destination` entry.
 | `channel` | string |  | A channel ID (C0123) or #name. |
 | `user` | string |  | A user ID (U0123), for a direct message. |
 | `message` | string |  | The text posted with the files. |
+| `blocks` | list |  | Block Kit blocks and components, posted as one message (the message text stays the notification text) |
+| `files_in` | string |  | Where files go with `blocks`: `thread` (default, a reply under the message) or `message` (a separate message after it) One of `thread`, `message`. |
 | `retries` | integer |  | How many times to try again after a temporary error such as a rate limit (0: never) |
 | `retry_wait` | string |  | The first wait before trying again (`30s`), doubling each try; a server's Retry-After wins. |
 | `max_retry_wait` | string |  | The longest wait between tries (`10m`) |
@@ -105,10 +107,55 @@ output:
       - {profile: team_slack, channel: "#finance", attach: [workbook]}
 ```
 
+**Block Kit** (slack 1.4.0): `blocks:` on the entry posts the message as Block Kit with
+`chat.postMessage`. Each `blocks` entry is an inline block (`{type: divider}`) or a
+`component:` (a reusable `.json` file of Block Kit JSON that core renders with the query
+results); `keep: first | last` on an entry chooses which points a chart over Slack's limit keeps
+(default `first`); `files_in` (`thread` or `message`) places the files. The message's `text` (its title and text, or `message:` for a file output)
+is sent along as the notification and fallback text. Files (`attach:`, a file output, or the
+full `.md` of a cut message) go in a thread under the blocks message, or, with
+`files_in: message`, as a separate message after it. Blocks and files are never sent in one call.
+
+```yaml
+destination:
+  - profile: team_slack
+    channel: "#finance"
+    attach: [workbook]
+    files_in: thread          # default; `message` = a separate message
+    blocks:
+      - component: header.json
+      - {type: divider}
+```
+
+Slack's limits never fail a delivery. The plugin fixes the blocks when it delivers and warns,
+naming the component, the block's position and the limit. `--preview` shows the blocks before
+these fixes; the warnings appear in a real run's output:
+
+| Limit | What happens |
+|---|---|
+| a chart over 20 points | keeps 20 (`first` or `last`); the categories are trimmed to match |
+| over 12 series or pie segments | keeps the first 12 |
+| over 2 charts in a message | keeps the first 2 |
+| over 50 blocks | keeps the first 50 |
+| labels and series names over 20 characters, titles and axis labels over 50 | cut with `…` (category and point labels stay matched) |
+| pie values of 0 or less, or not numbers | dropped (a numeric string such as a DECIMAL's `"12.50"` is a number) |
+| a series missing a category | the point is filled with 0 |
+| a point whose label isn't in `axis_config.categories` | left out |
+| a chart with no points left (an empty query, no pie value over 0) | left out; with no block left, the plain message is posted |
+
+The plugin uploads the files before posting the blocks. If sharing them fails after the message
+is posted, the delivery still counts as delivered and warns that the files weren't shared, so a
+retry never posts the message twice.
+
+Buttons, selects and inputs without a `url` are posted with one warning: DRE has no server to
+answer them. If Slack rejects the blocks (`invalid_blocks`), the error says so; paste the
+previewed JSON into Block Kit Builder. With blocks the delivered location is the message's
+permalink plus the files' permalinks.
+
 If Slack rate-limits a call or answers 503, the plugin tries again after Slack's `Retry-After`
 (at most 60 seconds), up to `retries` times (see [Tries again](plugins.md#tries-again)). Errors such
 as a rejected token, a missing scope, or the bot not being in the channel are reported with what
-to fix. The delivered location is the uploaded files' permalinks.
+to fix. The delivered location is the uploaded files' permalinks (with `blocks`, see above).
 
 ## Try the headline project
 

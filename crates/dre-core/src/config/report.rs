@@ -294,7 +294,7 @@ pub struct Output {
     pub options: Map<serde_json::Value>,
 }
 
-/// Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). The built-in profile `local` copies the file to a local path.
+/// Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). An option's list may hold `component: <name>.json` entries (with `with:`), rendered after the queries (see Components in the Messages guide). The built-in profile `local` copies the file to a local path.
 #[derive(Clone, Deserialize, JsonSchema)]
 #[schemars(rename = "destination", extend("additionalProperties" = true))]
 pub struct Destination {

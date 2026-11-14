@@ -14,31 +14,81 @@ use std::path::{Component, Path, PathBuf};
 use crate::DEPS_DIR;
 use crate::{LOGS_DIR, TARGET_DIR};
 
-/// Resolve `name`, looked up from `from` (a folder inside `root`). The error is a sentence for
-/// the person: the name, and where it was looked for or the files it matched.
-pub fn resolve(root: &Path, from: &Path, name: &str) -> Result<PathBuf, String> {
+/// Why a template file name didn't resolve. Its `Display` is a sentence for the person; callers
+/// that decide anything branch on the variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// The name is empty.
+    Empty,
+    /// The name is a URL.
+    Url(String),
+    /// The path leaves the project (`..`, absolute).
+    Outside(String),
+    /// No such file. `path` is true for a name with `/`, taken from the project root.
+    Missing { name: String, path: bool },
+    /// The bare name matches several files outside the walk up, shown from the project root.
+    Ambiguous { name: String, matches: Vec<String> },
+}
+
+impl Error {
+    /// The sentence, calling the file a `what` ("template file", "component").
+    pub fn describe(&self, what: &str) -> String {
+        match self {
+            Error::Empty => format!("the {what} name is empty"),
+            Error::Url(name) => {
+                format!("`{name}` is a URL; templates are read from files in the project only")
+            }
+            Error::Outside(name) => format!(
+                "`{name}` must be a path inside the project, relative to its root (no `..`, not absolute)"
+            ),
+            Error::Missing { name, path: true } => {
+                format!("{what} `{name}` doesn't exist (a path with `/` is relative to the project root)")
+            }
+            Error::Missing { name, path: false } => format!(
+                "{what} `{name}` doesn't exist (looked next to the YAML, in each parent folder up to the project root, then anywhere in the project)"
+            ),
+            Error::Ambiguous { name, matches } => format!(
+                "{what} `{name}` matches {} files ({}); name one by its path from the project root",
+                matches.len(),
+                matches
+                    .iter()
+                    .map(|m| format!("`{m}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.describe("template file"))
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Resolve `name`, looked up from `from` (a folder inside `root`).
+pub fn resolve(root: &Path, from: &Path, name: &str) -> Result<PathBuf, Error> {
     if name.trim().is_empty() {
-        return Err("the template file name is empty".into());
+        return Err(Error::Empty);
     }
     if name.contains("://") {
-        return Err(format!(
-            "`{name}` is a URL; templates are read from files in the project only"
-        ));
+        return Err(Error::Url(name.into()));
     }
     if name.contains('/') || name.contains('\\') {
         let rel = Path::new(name);
         if rel.is_absolute() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
-            return Err(format!(
-                "`{name}` must be a path inside the project, relative to its root (no `..`, not absolute)"
-            ));
+            return Err(Error::Outside(name.into()));
         }
         let path = root.join(rel);
         return if path.is_file() {
             Ok(path)
         } else {
-            Err(format!(
-                "template file `{name}` doesn't exist (a path with `/` is relative to the project root)"
-            ))
+            Err(Error::Missing {
+                name: name.into(),
+                path: true,
+            })
         };
     }
     let from = if from.starts_with(root) { from } else { root };
@@ -53,20 +103,17 @@ pub fn resolve(root: &Path, from: &Path, name: &str) -> Result<PathBuf, String> 
         }
         dir = d.parent();
     }
-    let found = anywhere(root, name);
-    match found.as_slice() {
-        [one] => Ok(one.clone()),
-        [] => Err(format!(
-            "template file `{name}` doesn't exist (looked next to the YAML, in each parent folder up to the project root, then anywhere in the project)"
-        )),
-        many => Err(format!(
-            "template file `{name}` matches {} files ({}); name one by its path from the project root",
-            many.len(),
-            many.iter()
-                .map(|p| format!("`{}`", shown(root, p)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
+    let mut found = anywhere(root, name);
+    match found.len() {
+        1 => Ok(found.remove(0)),
+        0 => Err(Error::Missing {
+            name: name.into(),
+            path: false,
+        }),
+        _ => Err(Error::Ambiguous {
+            name: name.into(),
+            matches: found.iter().map(|p| shown(root, p)).collect(),
+        }),
     }
 }
 
@@ -111,7 +158,9 @@ mod tests {
     }
 
     fn found(root: &Path, from: &str, name: &str) -> Result<String, String> {
-        resolve(root, &root.join(from), name).map(|p| shown(root, &p))
+        resolve(root, &root.join(from), name)
+            .map(|p| shown(root, &p))
+            .map_err(|e| e.to_string())
     }
 
     /// (files, folder looked from, name, expected file or error fragment).

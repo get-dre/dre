@@ -1152,7 +1152,11 @@ impl BindingRun<'_> {
         let o = &self.b.outputs[plan.oi];
         let mut ctx_map: BTreeMap<String, minijinja::Value> = BTreeMap::new();
         ctx_map.insert("each".into(), row.each.1.clone());
-        if !o.is_message() {
+        let components = o
+            .destinations
+            .iter()
+            .any(|d| d.options.values().any(crate::components::is_list));
+        if !o.is_message() && !components {
             return Ok(minijinja::Value::from(ctx_map));
         }
         let slices = plan.pop.slices(row.i)?;
@@ -1172,6 +1176,9 @@ impl BindingRun<'_> {
             if let Ok(v) = base.get_attr(k) {
                 ctx_map.insert(k.into(), v);
             }
+        }
+        if !o.is_message() {
+            return Ok(minijinja::Value::from(ctx_map));
         }
         let message = self.row_message(
             plan.oi,
@@ -1284,6 +1291,16 @@ impl BindingRun<'_> {
             };
             let mut options = JsonMap::new();
             for (k, source) in &d.options {
+                if crate::components::is_list(source) {
+                    let (root, packages) = (self.project.root(), self.project.packages());
+                    let v = crate::components::render(&renderer, root, packages, file, source, ctx)
+                        .map_err(|e| format!("destination `{profile}` option `{k}`: {}", mask.apply(&e)))?;
+                    let unmask = self.opts.rows.unmask;
+                    let row = format!("row `{}`", job.key);
+                    self.preview_blocks(&row, &profile, k, &v, |s| if unmask { s } else { mask.apply(&s) });
+                    options.insert(k.clone(), v);
+                    continue;
+                }
                 let v = render_json_with(&renderer, file, source, ctx).map_err(|e| {
                     format!("destination `{profile}` option `{k}`: {}", mask.apply(&e.message))
                 })?;

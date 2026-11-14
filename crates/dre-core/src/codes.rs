@@ -311,6 +311,12 @@ codes! {
     MissingTemplate = "missing-template", Config,
         "A template file doesn't exist.",
         "`output.template.file` names a file that isn't in the project. Paths are relative to the project root.";
+    InvalidComponent = "invalid-component", Config,
+        "A component name is wrong.",
+        "A `component:` entry in a destination option must name a `.json` file inside the project or an installed package: a file name, a path from the project root, or `<package>/<file>.json`. A bare name that matches several files must be given as a path.";
+    MissingComponent = "missing-component", Config,
+        "A component file doesn't exist.",
+        "A `component:` entry names a `.json` file that isn't in the project or any installed package. A bare name is looked for next to the report's YAML, up to the project root, anywhere in the project, then by name in the installed packages. Run `dre deps` if it comes from a package.";
     InvalidCell = "invalid-cell", Config,
         "A cell reference isn't valid.",
         "Cells are written like `A1` or `AB12`.";

@@ -521,6 +521,13 @@ impl<'a> BindingRun<'a> {
                 }
             }
         }
+        if let Err(e) = self.render_components(oi) {
+            let e = e.or(Code::RenderFailed);
+            let e = Fail::new(e.code.clone(), format!("{}: {e}", self.b.outputs[oi].label(oi)));
+            self.outs[oi].status = Some(OutputStatus::Failed);
+            self.outs[oi].error = Some(e.message.clone());
+            return Err(e);
+        }
         match self.stages.deliver {
             Deliver::Keep(note) => {
                 self.outs[oi].delivery_note = Some(note.into());

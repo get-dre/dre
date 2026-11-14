@@ -13,7 +13,8 @@ use serde_json::{Map as JsonMap, Value as Json, json};
 
 use super::compile::render_json;
 use super::{
-    BindingRun, Fail, OutputStatus, ShownMessage, human_bytes, per_row, record_path, rel, thousands,
+    BindingRun, Fail, OutputStatus, RenderedDest, ShownMessage, human_bytes, per_row, record_path, rel,
+    thousands,
 };
 use crate::codes::Code;
 use crate::engine::Level;
@@ -329,6 +330,74 @@ impl BindingRun<'_> {
         Ok(true)
     }
 
+    /// Render the component lists in output `oi`'s destination options, now that the queries
+    /// ran; a preview shows each list's blocks instead.
+    pub(super) fn render_components(&mut self, oi: usize) -> Result<(), Fail> {
+        let lists = |d: &RenderedDest| d.options.values().any(crate::components::is_list);
+        if !self.outs[oi].dests.iter().any(lists) {
+            return Ok(());
+        }
+        let max_rows = self.b.outputs[oi]
+            .options
+            .get("max_rows")
+            .and_then(Json::as_u64)
+            .unwrap_or(crate::message::DEFAULT_MAX_ROWS);
+        let results = self.results_for(oi, max_rows)?;
+        let ctx = self.template_context(oi, &results);
+        let renderer = self.renderer(None)?;
+        let (root, packages) = (self.project.root(), self.project.packages());
+        let label = self.b.outputs[oi].label(oi);
+        let mut dests = std::mem::take(&mut self.outs[oi].dests);
+        let mut result = Ok(());
+        'dests: for d in &mut dests {
+            for (k, v) in d
+                .options
+                .iter_mut()
+                .filter(|(_, v)| crate::components::is_list(v))
+            {
+                match crate::components::render(&renderer, root, packages, &self.report.file, v, &ctx) {
+                    Ok(r) => *v = r,
+                    Err(e) => {
+                        result = Err(Fail::new(
+                            Code::RenderFailed,
+                            format!("destination `{}` option `{k}`: {e}", d.profile),
+                        ));
+                        break 'dests;
+                    }
+                }
+                self.preview_blocks(&label, &d.profile, k, v, |s| s);
+            }
+        }
+        self.outs[oi].dests = dests;
+        result
+    }
+
+    /// `--preview`: print the blocks of rendered component list `v` (option `k`, for `what` to
+    /// `profile`). `mask` hides a per-row output's row values (`--unmask` passes them through);
+    /// secret values are masked after it, as in every preview.
+    pub(super) fn preview_blocks(
+        &self,
+        what: &str,
+        profile: &str,
+        k: &str,
+        v: &Json,
+        mask: impl FnOnce(String) -> String,
+    ) {
+        if self.stages.preview.is_none() {
+            return;
+        }
+        let shown = mask(shown_blocks(v));
+        self.ui.step(
+            Level::Info,
+            "Blocks",
+            &format!(
+                "{what} to `{profile}` (`{k}`):\n{}",
+                self.ctx.secrets().mask(&shown)
+            ),
+            None,
+        );
+    }
+
     /// For `--preview`: how each destination of message output `oi` takes it, and its limit.
     fn destination_limits(&self, oi: usize, length: usize) -> Vec<String> {
         let mut out = Vec::new();
@@ -592,4 +661,17 @@ impl BindingRun<'_> {
         );
         Ok(serde_json::to_value(ctx).map_err(|e| e.to_string())?)
     }
+}
+
+/// A rendered component list's blocks, all in one `{"blocks": [...]}` as pretty JSON: what Block
+/// Kit Builder and the like take.
+fn shown_blocks(v: &Json) -> String {
+    let blocks: Vec<&Json> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("blocks").and_then(Json::as_array))
+        .flatten()
+        .collect();
+    serde_json::to_string_pretty(&json!({ "blocks": blocks })).unwrap_or_default()
 }
