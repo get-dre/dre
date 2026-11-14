@@ -16,6 +16,8 @@
 //! limit, it's one upload post instead: the files (plus the full `.md` when the text was cut short)
 //! with the text as its comment.
 
+mod blocks;
+
 use dre_protocol::delivery::{self, Retry, Rules, retry_rules};
 use dre_protocol::markdown;
 use dre_protocol::msg::{ConnectionField, Message};
@@ -61,6 +63,17 @@ impl Destination for Slack {
                 "a user ID (U0123), for a direct message",
             ),
             OptionField::new("message", OptionType::String, "the text posted with the files"),
+            OptionField::new(
+                "blocks",
+                OptionType::List,
+                "Block Kit blocks and components, posted as one message (the message text stays the notification text)",
+            ),
+            OptionField::new(
+                "files_in",
+                OptionType::String,
+                "where files go with `blocks`: `thread` (default, a reply under the message) or `message` (a separate message after it)",
+            )
+            .choices(&["thread", "message"]),
         ]
         .into_iter()
         .chain(delivery::retry_option_fields())
@@ -73,11 +86,14 @@ impl Destination for Slack {
                 .and_then(Value::as_str)
                 .is_some_and(|s| !s.trim().is_empty())
         };
+        let mut errs = Vec::new();
         if set("channel") && set("user") {
-            vec!["give the slack destination either `channel` or `user`, not both".into()]
-        } else {
-            Vec::new()
+            errs.push("give the slack destination either `channel` or `user`, not both".into());
         }
+        if let Some(b) = o.get("blocks").filter(|b| !b.is_null()) {
+            errs.extend(blocks::check(b));
+        }
+        errs
     }
 
     fn message_limit(&self) -> Option<u64> {
@@ -108,6 +124,9 @@ impl Destination for Slack {
             );
             files.push(m.path.clone().into());
         }
+        if let Some(b) = fixed_blocks(&d.options)? {
+            return api.post_blocks(&b, text, &files, &channel_id, &target, thread(&d.options)?);
+        }
         if files.is_empty() {
             let r = api.call(
                 "chat.postMessage",
@@ -117,7 +136,8 @@ impl Destination for Slack {
             let ts = r["ts"].as_str().unwrap_or_default();
             return Ok(format!("slack {} message {ts}", target.place(&channel_id)));
         }
-        api.share(&files, &channel_id, Some(text), &target)
+        api.share(&files, &channel_id, Some(text), &target, None)
+            .map(|l| location(&target.place(&channel_id), &l))
     }
 
     fn deliver_files(&mut self, d: &Delivery) -> Result<String> {
@@ -130,7 +150,51 @@ impl Destination for Slack {
         let api = Api::new(&d.connection, &d.options)?;
         let channel_id = api.channel_of(&target)?;
         let files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
-        api.share(&files, &channel_id, message, &target)
+        if let Some(b) = fixed_blocks(&d.options)? {
+            let text = message.unwrap_or_else(|| {
+                files
+                    .iter()
+                    .filter_map(|f| f.file_name()?.to_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
+            return api.post_blocks(&b, text, &files, &channel_id, &target, thread(&d.options)?);
+        }
+        api.share(&files, &channel_id, message, &target, None)
+            .map(|l| location(&target.place(&channel_id), &l))
+    }
+}
+
+/// The `blocks` option fixed for Slack's limits (warning for each fix); `None` when not given.
+fn fixed_blocks(o: &Map<String, Value>) -> Result<Option<Vec<Value>>> {
+    let Some(v) = o.get("blocks").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    if let Some(e) = blocks::check(v).first() {
+        return Err(e.clone().into());
+    }
+    let mut warns = Vec::new();
+    let fixed = blocks::fix(v.as_array().map_or(&[], Vec::as_slice), &mut warns)?;
+    for w in warns {
+        dre_protocol::log::warn!("{w}");
+    }
+    Ok(Some(fixed).filter(|b| !b.is_empty()))
+}
+
+/// Whether files go in a thread under the blocks message (`files_in`, default `thread`).
+fn thread(o: &Map<String, Value>) -> Result<bool> {
+    match o.get("files_in").and_then(Value::as_str) {
+        None | Some("thread") => Ok(true),
+        Some("message") => Ok(false),
+        Some(v) => Err(format!("slack option `files_in` must be `thread` or `message`, got `{v}`").into()),
+    }
+}
+
+fn location(place: &str, links: &[String]) -> String {
+    if links.is_empty() {
+        format!("slack {place}")
+    } else {
+        format!("slack {place}: {}", links.join(", "))
     }
 }
 
@@ -150,7 +214,8 @@ impl Api {
         channel_id: &str,
         comment: Option<String>,
         target: &Target,
-    ) -> Result<String> {
+        thread_ts: Option<&str>,
+    ) -> Result<Vec<String>> {
         let mut uploaded = Vec::new();
         for local in files {
             let bytes = std::fs::read(local).map_err(|e| format!("can't read {}: {e}", local.display()))?;
@@ -178,17 +243,61 @@ impl Api {
         if let Some(c) = comment {
             form.push(("initial_comment", c));
         }
+        if let Some(ts) = thread_ts {
+            form.push(("thread_ts", ts.to_string()));
+        }
         let r = self.call("files.completeUploadExternal", &form, target)?;
-        let links: Vec<&str> = r["files"]
+        Ok(r["files"]
             .as_array()
-            .map(|a| a.iter().filter_map(|f| f["permalink"].as_str()).collect())
-            .unwrap_or_default();
+            .map(|a| {
+                a.iter()
+                    .filter_map(|f| f["permalink"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Post `blocks` with `text` (the notification and fallback text), then share `files` in its
+    /// thread or as a separate message. The location is the message's permalink and the files'.
+    fn post_blocks(
+        &self,
+        blocks: &[Value],
+        text: String,
+        files: &[std::path::PathBuf],
+        channel_id: &str,
+        target: &Target,
+        in_thread: bool,
+    ) -> Result<String> {
+        let r = self.call(
+            "chat.postMessage",
+            &[
+                ("channel", channel_id.to_string()),
+                ("text", text),
+                ("blocks", Value::Array(blocks.to_vec()).to_string()),
+            ],
+            target,
+        )?;
+        let ts = r["ts"].as_str().unwrap_or_default().to_string();
         let place = target.place(channel_id);
-        Ok(if links.is_empty() {
-            format!("slack {place}")
+        // The permalink is a nicety: a failure to get it never fails a posted message.
+        let mut links: Vec<String> = self
+            .send(
+                "chat.getPermalink",
+                &[("channel", channel_id.to_string()), ("message_ts", ts.clone())],
+            )
+            .ok()
+            .and_then(|v| v["permalink"].as_str().map(str::to_string))
+            .into_iter()
+            .collect();
+        let place = if links.is_empty() {
+            format!("{place} message {ts}")
         } else {
-            format!("slack {place}: {}", links.join(", "))
-        })
+            place
+        };
+        if !files.is_empty() {
+            links.extend(self.share(files, channel_id, None, target, in_thread.then_some(ts.as_str()))?);
+        }
+        Ok(location(&place, &links))
     }
 }
 
@@ -421,6 +530,20 @@ fn explain(method: &str, v: &Value, target: &Target) -> String {
         }
         "channel_not_found" => format!("Slack can't find {to}, or the bot can't see it"),
         "user_not_found" | "users_not_found" => format!("Slack can't find {to}"),
+        "invalid_blocks" | "invalid_blocks_format" => {
+            let why: Vec<&str> = v["response_metadata"]["messages"]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            format!(
+                "Slack rejected the blocks for {to} ({error}{}); paste the previewed JSON into Block Kit Builder to find the problem",
+                if why.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", why.join("; "))
+                }
+            )
+        }
         "is_archived" => format!("{to} is archived"),
         "messages_tab_disabled" => format!(
             "the Slack app can't message {to}: turn on App Home > Messages Tab in the app's settings, then reinstall the app"

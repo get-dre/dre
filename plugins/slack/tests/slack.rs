@@ -128,6 +128,12 @@ fn fake_slack() -> (String, Calls) {
                     "chat.postMessage" if !form.contains_key("text") => {
                         json!({"ok": false, "error": "no_text"})
                     }
+                    "chat.postMessage" if form["channel"] == "C_BADBLOCKS" => {
+                        json!({"ok": false, "error": "invalid_blocks", "response_metadata": {"messages": ["[ERROR] bad block"]}})
+                    }
+                    "chat.getPermalink" => {
+                        json!({"ok": true, "permalink": format!("https://acme.slack.com/archives/{}/p{}", form["channel"], form["message_ts"].replace('.', ""))})
+                    }
                     "chat.postMessage" => {
                         json!({"ok": true, "channel": form["channel"], "ts": "1700000000.000100"})
                     }
@@ -150,6 +156,14 @@ fn fake_slack() -> (String, Calls) {
 
 fn quiet() -> LogSink {
     Arc::new(|_, _| {})
+}
+
+type Logs = Arc<Mutex<Vec<String>>>;
+
+fn logging() -> (LogSink, Logs) {
+    let logs: Logs = Arc::default();
+    let l = logs.clone();
+    (Arc::new(move |_, m| l.lock().unwrap().push(m.to_string())), logs)
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -628,4 +642,304 @@ fn a_title_over_the_limit_is_cut_short_too() {
     let comment = &done[0].form["initial_comment"];
     assert!(comment.chars().count() <= 4_000, "{}", comment.chars().count());
     assert!(comment.starts_with("*ttt"), "{comment}");
+}
+
+// ---- Block Kit ----
+
+fn post_logged(
+    m: &Message,
+    attach: &[DeliveryFile],
+    conn: Value,
+    options: Value,
+) -> (Result<String, String>, Vec<String>) {
+    let (sink, logs) = logging();
+    let mut p = PluginProcess::start(bin(), sink).unwrap();
+    let r = p
+        .deliver_message(m, attach, obj(conn), obj(options))
+        .map_err(|e| e.to_string());
+    let _ = p.close();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let l = logs.lock().unwrap().clone();
+    (r, l)
+}
+
+fn entry(component: &str, blocks: Value) -> Value {
+    json!({"component": component, "blocks": blocks})
+}
+
+fn points(n: usize) -> Vec<Value> {
+    (1..=n)
+        .map(|i| json!({"label": format!("d{i:02}"), "value": i}))
+        .collect()
+}
+
+fn line(series: Value, cats: Vec<String>) -> Value {
+    json!({"type": "data_visualization", "title": "Revenue", "chart": {
+        "type": "line", "series": series, "axis_config": {"categories": cats}}})
+}
+
+fn sent_blocks(calls: &Calls) -> Vec<Value> {
+    let sent: Vec<Call> = calls_to(calls, "chat.postMessage")
+        .into_iter()
+        .filter(|c| c.form.contains_key("text"))
+        .collect();
+    assert_eq!(sent.len(), 1);
+    serde_json::from_str(&sent[0].form["blocks"]).unwrap()
+}
+
+#[test]
+fn blocks_are_posted_with_the_title_and_text_and_files_go_in_a_thread() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let (r, logs) = post_logged(
+        &message(&f, "Daily", "Revenue **up**"),
+        &[f.file("detail.xlsx", b"x")],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [
+            entry("header.json", json!([{"type": "header", "text": {"type": "plain_text", "text": "Hi"}}])),
+            {"blocks": [{"type": "divider"}]}
+        ]}),
+    );
+    assert_eq!(
+        r.unwrap(),
+        "slack C9: https://acme.slack.com/archives/C9/p1700000000000100, https://acme.slack.com/files/F1"
+    );
+    assert!(logs.is_empty(), "{logs:?}");
+    let sent = calls_to(&calls, "chat.postMessage");
+    assert_eq!(sent[0].form["text"], "*Daily*\nRevenue *up*");
+    let b = sent_blocks(&calls);
+    assert_eq!(b[0]["type"], "header");
+    assert_eq!(b[1], json!({"type": "divider"}));
+    let done = calls_to(&calls, "files.completeUploadExternal");
+    assert_eq!(done[0].form["thread_ts"], "1700000000.000100");
+    assert!(!done[0].form.contains_key("initial_comment"));
+}
+
+#[test]
+fn files_in_message_posts_the_files_separately() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    post(
+        &message(&f, "Daily", "x"),
+        &[f.file("detail.xlsx", b"x")],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "files_in": "message", "blocks": [{"blocks": [{"type": "divider"}]}]}),
+    )
+    .unwrap();
+    assert!(
+        !calls_to(&calls, "files.completeUploadExternal")[0]
+            .form
+            .contains_key("thread_ts")
+    );
+    let err = post(
+        &message(&f, "Daily", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "files_in": "nowhere"}),
+    )
+    .unwrap_err();
+    assert!(err.contains("files_in"), "{err}");
+}
+
+#[test]
+fn a_cut_message_attaches_the_full_text_in_the_thread() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let long: String = (0..400).map(|i| format!("line {i} of the message\n")).collect();
+    let (r, logs) = post_logged(
+        &message(&f, "Long", &long),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [{"blocks": [{"type": "divider"}]}]}),
+    );
+    r.unwrap();
+    assert!(logs.iter().any(|l| l.contains("4000 characters")), "{logs:?}");
+    let text = &calls_to(&calls, "chat.postMessage")[0].form["text"];
+    assert!(text.chars().count() <= 4_000);
+    let get = calls_to(&calls, "files.getUploadURLExternal");
+    assert_eq!(get[0].form["filename"], "daily.md");
+    assert_eq!(
+        calls_to(&calls, "files.completeUploadExternal")[0].form["thread_ts"],
+        "1700000000.000100"
+    );
+}
+
+#[test]
+fn a_file_output_posts_blocks_with_its_message_as_text() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let loc = send(
+        &[f.file("a.csv", b"1")],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "message": "Summary", "blocks": [{"blocks": [{"type": "divider"}]}]}),
+    )
+    .unwrap();
+    assert!(
+        loc.contains("/archives/C9/") && loc.ends_with("files/F1"),
+        "{loc}"
+    );
+    assert_eq!(calls_to(&calls, "chat.postMessage")[0].form["text"], "Summary");
+    assert_eq!(
+        calls_to(&calls, "files.completeUploadExternal")[0].form["thread_ts"],
+        "1700000000.000100"
+    );
+}
+
+fn post_chart(block: Value, keep: &str) -> (Vec<Value>, Vec<String>) {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let (r, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [{"component": "line.json", "keep": keep, "blocks": [block]}]}),
+    );
+    r.unwrap();
+    (sent_blocks(&calls), logs)
+}
+
+#[test]
+fn over_20_points_keep_the_first_or_last_and_warn() {
+    let cats: Vec<String> = (1..=25).map(|i| format!("d{i:02}")).collect();
+    let block = line(json!([{"name": "rev", "data": points(25)}]), cats);
+    let (b, logs) = post_chart(block.clone(), "first");
+    let c = &b[0]["chart"];
+    assert_eq!(c["axis_config"]["categories"][0], "d01");
+    assert_eq!(c["axis_config"]["categories"].as_array().unwrap().len(), 20);
+    assert_eq!(c["series"][0]["data"].as_array().unwrap().len(), 20);
+    assert_eq!(c["series"][0]["data"][19]["label"], "d20");
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("line.json, block 1") && l.contains("20")),
+        "{logs:?}"
+    );
+
+    let (b, _) = post_chart(block, "last");
+    let c = &b[0]["chart"];
+    assert_eq!(c["axis_config"]["categories"][0], "d06");
+    assert_eq!(c["series"][0]["data"][0]["label"], "d06");
+    assert_eq!(c["series"][0]["data"][19]["label"], "d25");
+}
+
+#[test]
+fn long_names_cut_missing_points_filled_and_series_limited() {
+    let long = "x".repeat(30);
+    let mut series: Vec<Value> = (1..=14)
+        .map(|i| json!({"name": format!("s{i}"), "data": [{"label": long, "value": 1}]}))
+        .collect();
+    series[0]["name"] = json!(long);
+    series[1]["data"] = json!([]); // a series with no point for the category
+    let mut block = line(json!(series), vec![long.clone()]);
+    block["title"] = json!("t".repeat(60));
+    block["chart"]["axis_config"]["x_label"] = json!("a".repeat(60));
+    let (b, logs) = post_chart(block, "first");
+    let c = &b[0]["chart"];
+    let cut20 = format!("{}…", "x".repeat(19));
+    assert_eq!(b[0]["title"], format!("{}…", "t".repeat(49)));
+    assert_eq!(c["axis_config"]["x_label"], format!("{}…", "a".repeat(49)));
+    assert_eq!(c["axis_config"]["categories"], json!([cut20]));
+    assert_eq!(c["series"].as_array().unwrap().len(), 12);
+    assert_eq!(c["series"][0]["name"], cut20);
+    assert_eq!(c["series"][0]["data"][0]["label"], cut20);
+    assert_eq!(c["series"][1]["data"], json!([{"label": cut20, "value": 0}]));
+    for needle in [
+        "series",
+        "filled with 0",
+        "title",
+        "axis labels",
+        "labels or names",
+    ] {
+        assert!(logs.iter().any(|l| l.contains(needle)), "{needle}: {logs:?}");
+    }
+}
+
+#[test]
+fn pie_values_of_zero_or_less_are_dropped_and_segments_limited() {
+    let mut segs: Vec<Value> = (1..=16)
+        .map(|i| json!({"label": format!("p{i}"), "value": i}))
+        .collect();
+    segs[0]["value"] = json!(0);
+    segs[1]["value"] = json!(-3);
+    let block =
+        json!({"type": "data_visualization", "title": "Share", "chart": {"type": "pie", "segments": segs}});
+    let (b, logs) = post_chart(block, "first");
+    let s = b[0]["chart"]["segments"].as_array().unwrap();
+    assert_eq!(s.len(), 12);
+    assert_eq!(s[0]["label"], "p3");
+    assert!(
+        logs.iter().any(|l| l.contains("dropped 2 pie values")),
+        "{logs:?}"
+    );
+    assert!(logs.iter().any(|l| l.contains("14 pie segments")), "{logs:?}");
+}
+
+#[test]
+fn over_two_charts_or_fifty_blocks_are_trimmed_and_buttons_warned_once() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let pie = json!({"type": "data_visualization", "title": "P", "chart": {"type": "pie", "segments": [{"label": "a", "value": 1}]}});
+    let mut blocks = vec![pie.clone(), pie.clone(), pie];
+    blocks.extend(
+        (0..60).map(|_| json!({"type": "actions", "elements": [{"type": "button", "action_id": "a"}]})),
+    );
+    let (r, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [entry("many.json", json!(blocks))]}),
+    );
+    r.unwrap();
+    let sent = sent_blocks(&calls);
+    assert_eq!(sent.len(), 50);
+    assert_eq!(
+        sent.iter().filter(|b| b["type"] == "data_visualization").count(),
+        2
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("many.json, block 3") && l.contains("2 charts")),
+        "{logs:?}"
+    );
+    assert!(logs.iter().any(|l| l.contains("Slack allows 50")), "{logs:?}");
+    assert_eq!(
+        logs.iter().filter(|l| l.contains("interactive")).count(),
+        1,
+        "{logs:?}"
+    );
+
+    // A link button is not interactive.
+    let (_, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [{"blocks": [{"type": "actions", "elements": [{"type": "button", "url": "https://x.test", "text": {"type": "plain_text", "text": "Go"}}]}]}]}),
+    );
+    assert!(logs.is_empty(), "{logs:?}");
+}
+
+#[test]
+fn invalid_blocks_are_explained_and_bad_options_rejected() {
+    let (base, _calls) = fake_slack();
+    let f = Files::new();
+    let err = post(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C_BADBLOCKS", "blocks": [{"blocks": [{"type": "divider"}]}]}),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("Slack rejected the blocks")
+            && err.contains("bad block")
+            && err.contains("Block Kit Builder"),
+        "{err}"
+    );
+
+    for options in [
+        json!({"channel": "C9", "blocks": "nope"}),
+        json!({"channel": "C9", "blocks": [{"keep": "middle", "component": "a.json"}]}),
+        json!({"channel": "C9", "blocks": [{"nothing": 1}]}),
+    ] {
+        assert!(post(&message(&f, "T", "x"), &[], conn(&base, "xoxb-good"), options).is_err());
+    }
 }
