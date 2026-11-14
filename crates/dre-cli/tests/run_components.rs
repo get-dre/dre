@@ -182,9 +182,49 @@ fn validate_rejects_a_bad_missing_or_ambiguous_component_name() {
     );
     p.dre("validate", &[])
         .failed()
+        .says("[invalid-component]")
         .says("component `header.yml` must name a `.json` file")
+        .says("[missing-component]")
         .says("component `nope.json` doesn't exist")
         .says("component `twice.json` matches 2 files (`components/twice.json`, `shared/twice.json`)");
+}
+
+#[test]
+fn a_package_component_is_found_by_file_name_anywhere_in_the_package() {
+    let (p, rec) = project(
+        &report(
+            "      - component: dre_utils/kpi.json
+",
+        ),
+        &[],
+    );
+    with_package(&p);
+    p.dre("run", &["daily"]).ok();
+    assert_eq!(
+        blocks(&rec),
+        json!([{"component": "dre_utils/components/slack/kpi.json", "blocks": [{"at": "package"}]}])
+    );
+}
+
+#[test]
+fn a_package_file_name_matching_several_files_is_ambiguous() {
+    let (p, _rec) = project(
+        &report(
+            "      - component: dre_utils/kpi.json
+      - component: kpi.json
+",
+        ),
+        &[],
+    );
+    with_package(&p);
+    let teams = p.root().join("../shared/dre_utils/components/teams");
+    std::fs::create_dir_all(&teams).unwrap();
+    std::fs::write(teams.join("kpi.json"), "{}").unwrap();
+    p.dre("validate", &[])
+        .failed()
+        .says("[invalid-component]")
+        .says("component `dre_utils/kpi.json` matches 2 files in package `dre_utils` (`dre_utils/components/slack/kpi.json`, `dre_utils/components/teams/kpi.json`)")
+        .says("component `kpi.json` isn't in the project and matches 2 files in packages");
 }
 
 #[test]

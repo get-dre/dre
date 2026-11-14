@@ -1295,24 +1295,9 @@ impl BindingRun<'_> {
                     let (root, packages) = (self.project.root(), self.project.packages());
                     let v = crate::components::render(&renderer, root, packages, file, source, ctx)
                         .map_err(|e| format!("destination `{profile}` option `{k}`: {}", mask.apply(&e)))?;
-                    if self.stages.preview.is_some() {
-                        let shown = super::format::shown_blocks(&v);
-                        let shown = if self.opts.rows.unmask {
-                            shown
-                        } else {
-                            mask.apply(&shown)
-                        };
-                        self.ui.step(
-                            Level::Info,
-                            "Blocks",
-                            &format!(
-                                "row `{}` to `{profile}` (`{k}`):\n{}",
-                                job.key,
-                                self.ctx.secrets().mask(&shown)
-                            ),
-                            None,
-                        );
-                    }
+                    let unmask = self.opts.rows.unmask;
+                    let row = format!("row `{}`", job.key);
+                    self.preview_blocks(&row, &profile, k, &v, |s| if unmask { s } else { mask.apply(&s) });
                     options.insert(k.clone(), v);
                     continue;
                 }

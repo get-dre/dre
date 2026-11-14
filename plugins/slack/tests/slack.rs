@@ -847,7 +847,8 @@ fn long_names_cut_missing_points_filled_and_series_limited() {
         "filled with 0",
         "title",
         "axis labels",
-        "labels or names",
+        "cut 1 labels to 20",
+        "cut 1 series names",
     ] {
         assert!(logs.iter().any(|l| l.contains(needle)), "{needle}: {logs:?}");
     }
@@ -942,4 +943,118 @@ fn invalid_blocks_are_explained_and_bad_options_rejected() {
     ] {
         assert!(post(&message(&f, "T", "x"), &[], conn(&base, "xoxb-good"), options).is_err());
     }
+}
+
+#[test]
+fn empty_charts_are_dropped_and_with_no_block_left_the_plain_text_is_posted() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let empty_line = line(json!([]), vec![]);
+    let zero_pie = json!({"type": "data_visualization", "title": "P", "chart": {"type": "pie",
+        "segments": [{"label": "a", "value": 0}]}});
+    let (r, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [entry("empty.json", json!([empty_line, zero_pie]))]}),
+    );
+    r.unwrap();
+    let posted = calls_to(&calls, "chat.postMessage");
+    assert_eq!(posted.len(), 1);
+    assert!(!posted[0].form.contains_key("blocks"), "{:?}", posted[0].form);
+    assert_eq!(posted[0].form["text"], "*T*\nx");
+    for needle in [
+        "empty.json, block 1: the chart has no points",
+        "empty.json, block 2: the chart has no points",
+        "no blocks left",
+    ] {
+        assert!(logs.iter().any(|l| l.contains(needle)), "{needle}: {logs:?}");
+    }
+}
+
+#[test]
+fn pie_values_given_as_numeric_strings_are_numbers() {
+    let block = json!({"type": "data_visualization", "title": "P", "chart": {"type": "pie", "segments": [
+        {"label": "a", "value": "12.50"}, {"label": "b", "value": "0.00"}, {"label": "c", "value": "n/a"}]}});
+    let (b, logs) = post_chart(block, "first");
+    assert_eq!(b[0]["chart"]["segments"], json!([{"label": "a", "value": 12.5}]));
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("dropped 1 pie values of 0 or less")),
+        "{logs:?}"
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("dropped 1 pie values that aren't numbers")),
+        "{logs:?}"
+    );
+}
+
+#[test]
+fn points_outside_the_categories_warn_and_each_cut_label_counts_once() {
+    let long = "y".repeat(30);
+    let series = json!([
+        {"name": "a", "data": [{"label": long, "value": 1}, {"label": "zz", "value": 2}]},
+        {"name": "b", "data": [{"label": long, "value": 3}]}
+    ]);
+    let (_, logs) = post_chart(line(series, vec![long.clone()]), "first");
+    assert!(
+        logs.iter().any(|l| l.contains(
+            "line.json, block 1: left out 1 points whose label isn't in `axis_config.categories` (zz)"
+        )),
+        "{logs:?}"
+    );
+    assert!(logs.iter().any(|l| l.contains("cut 1 labels to 20")), "{logs:?}");
+}
+
+#[test]
+fn the_block_and_interactive_warnings_name_the_component_and_position() {
+    let (base, _calls) = fake_slack();
+    let f = Files::new();
+    let mut blocks: Vec<Value> = (0..51).map(|_| json!({"type": "divider"})).collect();
+    blocks[2] = json!({"type": "actions", "elements": [{"type": "button", "action_id": "a"}]});
+    let (r, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C9", "blocks": [entry("many.json", json!(blocks))]}),
+    );
+    r.unwrap();
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("Slack allows 50") && l.contains("many.json, block 51")),
+        "{logs:?}"
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("interactive") && l.contains("many.json, block 3")),
+        "{logs:?}"
+    );
+}
+
+#[test]
+fn a_failed_file_share_after_the_post_never_reposts_on_a_retry() {
+    let (base, calls) = fake_slack();
+    let f = Files::new();
+    let (r, logs) = post_logged(
+        &message(&f, "T", "x"),
+        &[f.file("detail.xlsx", b"x")],
+        conn(&base, "xoxb-good"),
+        json!({"channel": "C_OUT", "blocks": [{"blocks": [{"type": "divider"}]}]}),
+    );
+    // The message went, so the delivery isn't failed (a retry would post it again).
+    let loc = r.unwrap();
+    assert!(loc.contains("/archives/C_OUT/"), "{loc}");
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("posted") && l.contains("files weren't shared")),
+        "{logs:?}"
+    );
+    let order: Vec<String> = calls.lock().unwrap().iter().map(|c| c.path.clone()).collect();
+    let up = order.iter().position(|p| p.starts_with("/upload/")).unwrap();
+    let posted = order.iter().position(|p| p == "/api/chat.postMessage").unwrap();
+    assert!(
+        up < posted,
+        "files upload before the message is posted: {order:?}"
+    );
 }

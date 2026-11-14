@@ -191,6 +191,12 @@ A cell reference isn't valid.
 
 Cells are written like `A1` or `AB12`.
 
+### invalid-component
+
+A component name is wrong.
+
+A `component:` entry in a destination option must name a `.json` file inside the project or an installed package: a file name, a path from the project root, or `<package>/<file>.json`. A bare name that matches several files must be given as a path.
+
 ### invalid-connection-setting
 
 A profile entry's connection setting is wrong.
@@ -340,6 +346,12 @@ A Jinja template in SQL or YAML has a syntax error: an unclosed `{{` or `{%`, an
 `packages:` is in the wrong file.
 
 Macro packages are declared in dependencies.yml at the project root.
+
+### missing-component
+
+A component file doesn't exist.
+
+A `component:` entry names a `.json` file that isn't in the project or any installed package. A bare name is looked for next to the report's YAML, up to the project root, anywhere in the project, then by name in the installed packages. Run `dre deps` if it comes from a package.
 
 ### missing-field
 

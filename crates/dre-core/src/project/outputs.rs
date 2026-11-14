@@ -1,6 +1,7 @@
 //! Outputs: layering `output:` config, reading it as typed config, and checking it.
 
 use super::*;
+use crate::codes::ErrorCode;
 use crate::config::report::{Destination as DestinationConfig, OutputLayer};
 
 impl Loader {
@@ -1346,6 +1347,7 @@ impl Loader {
 
     pub(super) fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
+        let mut seen_components = BTreeSet::new();
         let scope = self.scope();
         // Each destination option's component names (`component: <name>.json`).
         for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
@@ -1356,12 +1358,17 @@ impl Loader {
                 .flat_map(|d| d.options.values());
             for v in lists {
                 for e in crate::components::check(&self.root, project.packages(), &r.file, v) {
-                    if seen.insert((r.name.clone(), e.clone(), String::new())) {
+                    // Components only report core codes.
+                    let code = match e.code {
+                        ErrorCode::Core(c) => c,
+                        ErrorCode::Plugin { .. } => Code::InvalidComponent,
+                    };
+                    if seen_components.insert((r.name.clone(), e.message.clone())) {
                         self.diags.error(
-                            Code::MissingTemplate,
+                            code,
                             Some(r.file.clone()),
                             None,
-                            format!("report `{}`: {e}", r.name),
+                            format!("report `{}`: {}", r.name, e.message),
                         );
                     }
                 }
@@ -1636,7 +1643,7 @@ fn same<T: PartialEq>(a: Option<&Loose<T>>, b: Option<&Loose<T>>) -> bool {
 pub fn resolve_template(root: &Path, yaml: &Path, file: &str) -> Result<PathBuf, String> {
     let yaml = root.join(yaml);
     let from = yaml.parent().unwrap_or(root);
-    crate::template_file::resolve(root, from, file)
+    crate::template_file::resolve(root, from, file).map_err(|e| e.to_string())
 }
 
 /// Sheet names in an xlsx template, read without modifying it.

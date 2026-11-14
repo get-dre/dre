@@ -365,23 +365,37 @@ impl BindingRun<'_> {
                         break 'dests;
                     }
                 }
-                if self.stages.preview.is_some() {
-                    let shown = shown_blocks(v);
-                    self.ui.step(
-                        Level::Info,
-                        "Blocks",
-                        &format!(
-                            "{label} to `{}` (`{k}`):\n{}",
-                            d.profile,
-                            self.ctx.secrets().mask(&shown)
-                        ),
-                        None,
-                    );
-                }
+                self.preview_blocks(&label, &d.profile, k, v, |s| s);
             }
         }
         self.outs[oi].dests = dests;
         result
+    }
+
+    /// `--preview`: print the blocks of rendered component list `v` (option `k`, for `what` to
+    /// `profile`). `mask` hides a per-row output's row values (`--unmask` passes them through);
+    /// secret values are masked after it, as in every preview.
+    pub(super) fn preview_blocks(
+        &self,
+        what: &str,
+        profile: &str,
+        k: &str,
+        v: &Json,
+        mask: impl FnOnce(String) -> String,
+    ) {
+        if self.stages.preview.is_none() {
+            return;
+        }
+        let shown = mask(shown_blocks(v));
+        self.ui.step(
+            Level::Info,
+            "Blocks",
+            &format!(
+                "{what} to `{profile}` (`{k}`):\n{}",
+                self.ctx.secrets().mask(&shown)
+            ),
+            None,
+        );
     }
 
     /// For `--preview`: how each destination of message output `oi` takes it, and its limit.
@@ -651,7 +665,7 @@ impl BindingRun<'_> {
 
 /// A rendered component list's blocks, all in one `{"blocks": [...]}` as pretty JSON: what Block
 /// Kit Builder and the like take.
-pub(super) fn shown_blocks(v: &Json) -> String {
+fn shown_blocks(v: &Json) -> String {
     let blocks: Vec<&Json> = v
         .as_array()
         .into_iter()

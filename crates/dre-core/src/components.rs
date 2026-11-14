@@ -1,19 +1,23 @@
-//! Component lists: a destination option whose value is a list of maps, each a
-//! `component: <name>.json` entry or an inline one. Core resolves each component, renders it after the queries ran (the context a
-//! message's `text:` gets, plus `args` from the entry's `with:`), parses the JSON, and sends the
-//! plugin `{"component": <file>, "blocks": [...], ...other keys}` per entry. An entry without
-//! `component:` is inline: its strings are rendered and it arrives as `{"blocks": [<entry>]}`.
-//! Core knows nothing of what the blocks mean; the plugin does.
+//! Component lists: a destination option whose value is a list of maps, each a `component: <name>.json`
+//! entry or an inline one. Core resolves each component, renders it after the queries ran (the context a
+//! message's `text:` gets, plus `args` from the entry's `with:`), parses the JSON, and sends the plugin
+//! `{"component": <file>, "blocks": [...], ...other keys}` per entry. An entry without `component:` is
+//! inline: its strings are rendered and it arrives as `{"blocks": [<entry>]}`. Core knows nothing of what
+//! the blocks mean; the plugin does.
 //!
-//! Lookup is the template rule ([`crate::template_file`]), then installed packages: a
-//! `<package>/<file>.json` name, or a bare name not in the project and unique across packages.
+//! Lookup is the template rule ([`crate::template_file`]), then installed packages: `<package>/<path>`
+//! (or `<package>/<file>.json`, found by name anywhere in the package and unique there), or a bare name
+//! not in the project and unique across packages.
 
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map as JsonMap, Value as Json};
 
+use crate::codes::Code;
+use crate::error::Error;
 use crate::packages::Package;
 use crate::render::Renderer;
+use crate::template_file;
 
 const COMPONENT: &str = "component";
 const WITH: &str = "with";
@@ -26,17 +30,23 @@ pub fn is_list(v: &Json) -> bool {
 }
 
 /// Check every `component:` name in option value `v` (from a report whose YAML is `yaml`)
-/// without rendering: each problem is a sentence.
-pub fn check(root: &Path, packages: &[Package], yaml: &Path, v: &Json) -> Vec<String> {
+/// without rendering.
+pub fn check(root: &Path, packages: &[Package], yaml: &Path, v: &Json) -> Vec<Error> {
     let Some(list) = v.as_array().filter(|_| is_list(v)) else {
         return Vec::new();
     };
     list.iter()
         .filter_map(|e| match e.get(COMPONENT)? {
             Json::String(name) => resolve(root, packages, yaml, name).err(),
-            _ => Some("`component` must be a file name ending in `.json`".into()),
+            _ => Some(invalid(
+                "`component` must be a file name ending in `.json`".into(),
+            )),
         })
         .collect()
+}
+
+fn invalid(message: String) -> Error {
+    Error::new(Code::InvalidComponent, message)
 }
 
 /// Where component `name` is read from, and the name it's shown (and sent) by: its path from
@@ -46,38 +56,74 @@ pub fn resolve(
     packages: &[Package],
     yaml: &Path,
     name: &str,
-) -> Result<(PathBuf, String), String> {
+) -> Result<(PathBuf, String), Error> {
     if !name.ends_with(".json") {
-        return Err(format!("component `{name}` must name a `.json` file"));
+        return Err(invalid(format!("component `{name}` must name a `.json` file")));
     }
     let yaml = root.join(yaml);
     let from = yaml.parent().unwrap_or(root);
-    let err = match crate::template_file::resolve(root, from, name) {
+    let missing = match crate::template_file::resolve(root, from, name) {
         Ok(p) => {
             let shown = crate::slash_relative(root, &p).to_string_lossy().into_owned();
             return Ok((p, shown));
         }
-        Err(e) => e.replace("template file", "component"),
+        Err(e @ template_file::Error::Missing { .. }) => e.describe("component"),
+        Err(e) => return Err(invalid(e.describe("component"))),
     };
     if let Some((pkg, rest)) = name.split_once('/') {
         let Some(p) = packages.iter().find(|p| p.name == pkg) else {
-            return Err(err);
+            return Err(Error::new(Code::MissingComponent, missing));
         };
-        let path = p.dir.join(rest);
         let inside = Path::new(rest)
             .components()
             .all(|c| matches!(c, Component::Normal(_)));
-        return if inside && path.is_file() {
-            Ok((path, name.to_string()))
+        if !inside {
+            return Err(invalid(format!(
+                "component `{name}` must be a path inside package `{pkg}`"
+            )));
+        }
+        let path = p.dir.join(rest);
+        if path.is_file() {
+            return Ok((path, name.to_string()));
+        }
+        // `<package>/<file>.json`: the file by name anywhere in the package.
+        let found = if rest.contains('/') {
+            Vec::new()
         } else {
-            Err(format!("component `{name}` doesn't exist in package `{pkg}`"))
+            by_name(std::slice::from_ref(p), rest)
+        };
+        return match <[_; 1]>::try_from(found) {
+            Ok([one]) => Ok(one),
+            Err(found) if found.is_empty() => Err(Error::new(
+                Code::MissingComponent,
+                format!("component `{name}` doesn't exist in package `{pkg}`"),
+            )),
+            Err(found) => Err(invalid(format!(
+                "component `{name}` matches {} files in package `{pkg}` ({}); name one as `<package>/<path>`",
+                found.len(),
+                listed(&found)
+            ))),
         };
     }
-    // Only a name missing from the project falls back to packages; an ambiguous one doesn't.
-    if !err.contains("doesn't exist") {
-        return Err(err);
+    // A bare name missing from the project: by name across the packages, where it must be unique.
+    match <[_; 1]>::try_from(by_name(packages, name)) {
+        Ok([one]) => Ok(one),
+        Err(found) if found.is_empty() => Err(Error::new(
+            Code::MissingComponent,
+            format!("{missing}, or in the installed packages"),
+        )),
+        Err(found) => Err(invalid(format!(
+            "component `{name}` isn't in the project and matches {} files in packages ({}); name one as `<package>/<path>`",
+            found.len(),
+            listed(&found)
+        ))),
     }
-    let mut found: Vec<(PathBuf, String)> = Vec::new();
+}
+
+/// Every file called `name` in `packages` (hidden folders skipped), with its shown name
+/// `<package>/<path in the package>`.
+fn by_name(packages: &[Package], name: &str) -> Vec<(PathBuf, String)> {
+    let mut found = Vec::new();
     for p in packages {
         for e in walkdir::WalkDir::new(&p.dir)
             .sort_by_file_name()
@@ -90,18 +136,15 @@ pub fn resolve(
             found.push((e.into_path(), format!("{}/{}", p.name, inner.display())));
         }
     }
-    match found.len() {
-        0 => Err(format!("{err}, or in the installed packages")),
-        1 => Ok(found.remove(0)),
-        n => Err(format!(
-            "component `{name}` isn't in the project and matches {n} files in packages ({}); name one as `<package>/<path>`",
-            found
-                .iter()
-                .map(|(_, s)| format!("`{s}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
+    found
+}
+
+fn listed(found: &[(PathBuf, String)]) -> String {
+    found
+        .iter()
+        .map(|(_, s)| format!("`{s}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Render component list `v` with `ctx` (the message context: `results`, `each`, ...), for a
@@ -125,7 +168,7 @@ pub fn render(
         let Json::String(name) = name else {
             return Err("`component` must be a file name ending in `.json`".into());
         };
-        let (path, shown) = resolve(root, packages, yaml, name)?;
+        let (path, shown) = resolve(root, packages, yaml, name).map_err(|e| e.message)?;
         let args = match entry.get(WITH) {
             None => Json::Object(JsonMap::new()),
             Some(w @ Json::Object(_)) => strings(renderer, yaml, w, ctx)?,

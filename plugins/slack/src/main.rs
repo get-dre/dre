@@ -124,8 +124,8 @@ impl Destination for Slack {
             );
             files.push(m.path.clone().into());
         }
-        if let Some(b) = fixed_blocks(&d.options)? {
-            return api.post_blocks(&b, text, &files, &channel_id, &target, thread(&d.options)?);
+        if let Some(at) = api.post_blocks(&d.options, || text.clone(), &files, &channel_id, &target)? {
+            return Ok(at);
         }
         if files.is_empty() {
             let r = api.call(
@@ -150,39 +150,43 @@ impl Destination for Slack {
         let api = Api::new(&d.connection, &d.options)?;
         let channel_id = api.channel_of(&target)?;
         let files: Vec<std::path::PathBuf> = d.files.iter().map(|f| f.local.clone()).collect();
-        if let Some(b) = fixed_blocks(&d.options)? {
-            let text = message.unwrap_or_else(|| {
+        let text = || {
+            message.clone().unwrap_or_else(|| {
                 files
                     .iter()
                     .filter_map(|f| f.file_name()?.to_str())
                     .collect::<Vec<_>>()
                     .join(", ")
-            });
-            return api.post_blocks(&b, text, &files, &channel_id, &target, thread(&d.options)?);
+            })
+        };
+        if let Some(at) = api.post_blocks(&d.options, text, &files, &channel_id, &target)? {
+            return Ok(at);
         }
         api.share(&files, &channel_id, message, &target, None)
             .map(|l| location(&target.place(&channel_id), &l))
     }
 }
 
-/// The `blocks` option fixed for Slack's limits (warning for each fix); `None` when not given.
-fn fixed_blocks(o: &Map<String, Value>) -> Result<Option<Vec<Value>>> {
+/// The `blocks` option fitted to Slack's limits (a warning for each fix); `None` when it's not
+/// given, or when no block is left (the plain message is posted instead).
+fn slack_blocks(o: &Map<String, Value>) -> Result<Option<Vec<Value>>> {
     let Some(v) = o.get("blocks").filter(|v| !v.is_null()) else {
         return Ok(None);
     };
-    if let Some(e) = blocks::check(v).first() {
-        return Err(e.clone().into());
-    }
     let mut warns = Vec::new();
-    let fixed = blocks::fix(v.as_array().map_or(&[], Vec::as_slice), &mut warns)?;
+    let fixed = blocks::fix(v, &mut warns)?;
     for w in warns {
         dre_protocol::log::warn!("{w}");
     }
-    Ok(Some(fixed).filter(|b| !b.is_empty()))
+    if fixed.is_empty() {
+        dre_protocol::log::warn!("no blocks left to post; posting the plain message instead");
+        return Ok(None);
+    }
+    Ok(Some(fixed))
 }
 
 /// Whether files go in a thread under the blocks message (`files_in`, default `thread`).
-fn thread(o: &Map<String, Value>) -> Result<bool> {
+fn files_in_thread(o: &Map<String, Value>) -> Result<bool> {
     match o.get("files_in").and_then(Value::as_str) {
         None | Some("thread") => Ok(true),
         Some("message") => Ok(false),
@@ -216,6 +220,12 @@ impl Api {
         target: &Target,
         thread_ts: Option<&str>,
     ) -> Result<Vec<String>> {
+        let uploaded = self.upload_files(files, target)?;
+        self.complete(uploaded, channel_id, comment, target, thread_ts)
+    }
+
+    /// Upload `files`; nothing is shown in Slack until [`Api::complete`] shares them.
+    fn upload_files(&self, files: &[std::path::PathBuf], target: &Target) -> Result<Vec<Value>> {
         let mut uploaded = Vec::new();
         for local in files {
             let bytes = std::fs::read(local).map_err(|e| format!("can't read {}: {e}", local.display()))?;
@@ -236,6 +246,18 @@ impl Api {
                 .map_err(|e| format!("uploading {name} to Slack failed: {e}"))?;
             uploaded.push(json!({"id": id, "title": name}));
         }
+        Ok(uploaded)
+    }
+
+    /// Share uploaded files in one post with `comment`; return where they landed.
+    fn complete(
+        &self,
+        uploaded: Vec<Value>,
+        channel_id: &str,
+        comment: Option<String>,
+        target: &Target,
+        thread_ts: Option<&str>,
+    ) -> Result<Vec<String>> {
         let mut form = vec![
             ("files", Value::Array(uploaded).to_string()),
             ("channel_id", channel_id.to_string()),
@@ -257,23 +279,32 @@ impl Api {
             .unwrap_or_default())
     }
 
-    /// Post `blocks` with `text` (the notification and fallback text), then share `files` in its
-    /// thread or as a separate message. The location is the message's permalink and the files'.
+    /// Post the `blocks` option (fitted to Slack's limits) with `text` (the notification and
+    /// fallback text), then share `files` in its thread or as a separate message; `None` when
+    /// there are no blocks to post. The location is the message's permalink and the files'.
+    ///
+    /// The files are uploaded first, so only the final share can fail once the message is
+    /// posted. That failure is a warning, not a failed delivery: a retry would post the message
+    /// again.
     fn post_blocks(
         &self,
-        blocks: &[Value],
-        text: String,
+        options: &Map<String, Value>,
+        text: impl FnOnce() -> String,
         files: &[std::path::PathBuf],
         channel_id: &str,
         target: &Target,
-        in_thread: bool,
-    ) -> Result<String> {
+    ) -> Result<Option<String>> {
+        let Some(blocks) = slack_blocks(options)? else {
+            return Ok(None);
+        };
+        let in_thread = files_in_thread(options)?;
+        let uploaded = self.upload_files(files, target)?;
         let r = self.call(
             "chat.postMessage",
             &[
                 ("channel", channel_id.to_string()),
-                ("text", text),
-                ("blocks", Value::Array(blocks.to_vec()).to_string()),
+                ("text", text()),
+                ("blocks", Value::Array(blocks).to_string()),
             ],
             target,
         )?;
@@ -294,10 +325,21 @@ impl Api {
         } else {
             place
         };
-        if !files.is_empty() {
-            links.extend(self.share(files, channel_id, None, target, in_thread.then_some(ts.as_str()))?);
+        if !uploaded.is_empty() {
+            match self.complete(
+                uploaded,
+                channel_id,
+                None,
+                target,
+                in_thread.then_some(ts.as_str()),
+            ) {
+                Ok(l) => links.extend(l),
+                Err(e) => dre_protocol::log::warn!(
+                    "the message was posted, but its files weren't shared: {e}. Not failing the delivery, so a retry doesn't post the message again"
+                ),
+            }
         }
-        Ok(location(&place, &links))
+        Ok(Some(location(&place, &links)))
     }
 }
 

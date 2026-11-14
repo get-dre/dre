@@ -171,11 +171,15 @@ destination:
   each parent folder up to the project root (the nearest wins), then anywhere in the project if
   unique. A name with `/` is a path from the project root. A name not in the project is looked
   for in the installed [packages](reference-dependencies.md), where it must be unique;
-  `<package>/<path>` names a package's file. The project's own file wins over a package's.
+  `<package>/<path>` names a package's file, and `<package>/<file>.json` finds the file by name
+  anywhere in that package (unique there). The project's own file wins over a package's.
 - `dre validate` checks every name. A component that renders invalid JSON fails the run
   (`render-failed`), naming the file, the line and the text near the error.
 - `dre run --preview` prints each list's rendered blocks as one `{"blocks": [...]}`, ready to
-  paste into Slack's Block Kit Builder, and posts nothing.
+  paste into Slack's Block Kit Builder, and posts nothing. These are the blocks before the
+  destination plugin fits them to the service's limits: the plugin only runs when it delivers,
+  so its fixes and their warnings show in a real run's output (a target
+  with `deliver: false` calls no plugin, so it shows none either).
 
 ## Before sending
 

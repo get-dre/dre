@@ -127,8 +127,9 @@ destination:
       - {type: divider}
 ```
 
-Slack's limits never fail a delivery. The plugin fixes the blocks and warns, naming the
-component, the block's position and the limit:
+Slack's limits never fail a delivery. The plugin fixes the blocks when it delivers and warns,
+naming the component, the block's position and the limit. `--preview` shows the blocks before
+these fixes; the warnings appear in a real run's output:
 
 | Limit | What happens |
 |---|---|
@@ -137,8 +138,14 @@ component, the block's position and the limit:
 | over 2 charts in a message | keeps the first 2 |
 | over 50 blocks | keeps the first 50 |
 | labels and series names over 20 characters, titles and axis labels over 50 | cut with `…` (category and point labels stay matched) |
-| pie values of 0 or less | dropped |
+| pie values of 0 or less, or not numbers | dropped (a numeric string such as a DECIMAL's `"12.50"` is a number) |
 | a series missing a category | the point is filled with 0 |
+| a point whose label isn't in `axis_config.categories` | left out |
+| a chart with no points left (an empty query, no pie value over 0) | left out; with no block left, the plain message is posted |
+
+The plugin uploads the files before posting the blocks. If sharing them fails after the message
+is posted, the delivery still counts as delivered and warns that the files weren't shared, so a
+retry never posts the message twice.
 
 Buttons, selects and inputs without a `url` are posted with one warning: DRE has no server to
 answer them. If Slack rejects the blocks (`invalid_blocks`), the error says so; paste the

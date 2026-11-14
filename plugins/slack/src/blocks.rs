@@ -70,48 +70,72 @@ pub fn check(v: &Value) -> Vec<String> {
     errs
 }
 
-/// Fix the entries' blocks into one message's blocks, pushing a warning per fix.
-pub fn fix(entries: &[Value], warns: &mut Vec<String>) -> Result<Vec<Value>, String> {
-    let (mut out, mut n, mut charts, mut interactive) = (Vec::new(), 0, 0, false);
+/// Fix option `v` (the rendered entries) into one message's blocks, pushing a warning per
+/// fix. Fails only on an option that isn't a list of rendered entries.
+pub fn fix(v: &Value, warns: &mut Vec<String>) -> Result<Vec<Value>, String> {
+    let Some(entries) = v.as_array() else {
+        return Err("slack option `blocks` must be a list".into());
+    };
+    // Each kept block, with who it is: `<component>, block <n>`.
+    let (mut out, mut n, mut charts) = (Vec::<(Value, String)>::new(), 0, 0);
     for (i, e) in entries.iter().enumerate() {
         let Some(blocks) = e["blocks"].as_array() else {
             return Err(format!("slack `blocks` entry {} has no rendered `blocks`", i + 1));
         };
+        let last = match e.get("keep") {
+            None => false,
+            Some(k) => match k.as_str() {
+                Some("first") => false,
+                Some("last") => true,
+                _ => {
+                    return Err(format!(
+                        "slack `blocks` entry {}: `keep` must be `first` or `last`, got {k}",
+                        i + 1
+                    ));
+                }
+            },
+        };
         let name = e["component"].as_str().unwrap_or("inline block");
-        let last = e["keep"].as_str() == Some("last");
         for b in blocks {
             n += 1;
             let who = format!("{name}, block {n}");
             let mut b = b.clone();
             if b["type"] == "data_visualization" {
-                charts += 1;
-                if charts > MAX_CHARTS {
+                if charts == MAX_CHARTS {
                     warns.push(format!(
                         "{who}: Slack allows {MAX_CHARTS} charts per message; left this one out"
                     ));
                     continue;
                 }
-                fix_chart(&mut b, last, &who, warns);
+                if !fix_chart(&mut b, last, &who, warns) {
+                    warns.push(format!("{who}: the chart has no points left; left it out"));
+                    continue;
+                }
+                charts += 1;
             }
-            interactive |= has_interactive(&b);
-            out.push(b);
+            out.push((b, who));
         }
     }
     if out.len() > MAX_BLOCKS {
+        let gone: Vec<String> = out.drain(MAX_BLOCKS..).map(|(_, who)| who).collect();
         warns.push(format!(
-            "the message has {} blocks; Slack allows {MAX_BLOCKS}, so the last {} were left out",
-            out.len(),
-            out.len() - MAX_BLOCKS
+            "the message has {} blocks; Slack allows {MAX_BLOCKS}, so left out {}",
+            MAX_BLOCKS + gone.len(),
+            left_out(&gone)
         ));
-        out.truncate(MAX_BLOCKS);
     }
-    if interactive {
-        warns.push(
-            "the blocks have interactive elements without a `url`; DRE can't answer them, so they do nothing when used"
-                .into(),
-        );
+    let interactive: Vec<String> = out
+        .iter()
+        .filter(|(b, _)| has_interactive(b))
+        .map(|(_, who)| who.clone())
+        .collect();
+    if !interactive.is_empty() {
+        warns.push(format!(
+            "{} have interactive elements without a `url`; DRE can't answer them, so they do nothing when used",
+            left_out(&interactive)
+        ));
     }
-    Ok(out)
+    Ok(out.into_iter().map(|(b, _)| b).collect())
 }
 
 fn has_interactive(v: &Value) -> bool {
@@ -151,31 +175,54 @@ fn left_out(gone: &[String]) -> String {
     format!("{}{}", shown.join(", "), if gone.len() > 5 { ", …" } else { "" })
 }
 
-fn fix_chart(b: &mut Value, last: bool, who: &str, w: &mut Vec<String>) {
-    let Some(o) = b.as_object_mut() else { return };
+/// Fix a chart block; false when it has no points left (Slack rejects an empty chart).
+fn fix_chart(b: &mut Value, last: bool, who: &str, w: &mut Vec<String>) -> bool {
+    let Some(o) = b.as_object_mut() else { return true };
     if cut_field(o, "title", MAX_TITLE) {
         w.push(format!("{who}: title cut to {MAX_TITLE} characters"));
     }
     let Some(chart) = o.get_mut("chart").and_then(Value::as_object_mut) else {
-        return;
+        return true;
     };
     match chart.get("type").and_then(Value::as_str) {
         Some("pie") => fix_pie(chart, who, w),
         Some("bar" | "area" | "line") => fix_xy(chart, last, who, w),
-        _ => {}
+        _ => true,
     }
 }
 
-fn fix_pie(chart: &mut Map<String, Value>, who: &str, w: &mut Vec<String>) {
+/// A number, or a numeric string (a DECIMAL column arrives as one).
+fn number(v: &Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+fn fix_pie(chart: &mut Map<String, Value>, who: &str, w: &mut Vec<String>) -> bool {
     let Some(segs) = chart.get_mut("segments").and_then(Value::as_array_mut) else {
-        return;
+        return false;
     };
-    let before = segs.len();
-    segs.retain(|s| s["value"].as_f64().is_some_and(|v| v > 0.0));
-    if segs.len() < before {
+    let (mut not_numbers, mut not_positive) = (0, 0);
+    segs.retain_mut(|s| match number(&s["value"]) {
+        None => {
+            not_numbers += 1;
+            false
+        }
+        Some(v) if v <= 0.0 => {
+            not_positive += 1;
+            false
+        }
+        Some(v) => {
+            s["value"] = json!(v);
+            true
+        }
+    });
+    if not_positive > 0 {
         w.push(format!(
-            "{who}: dropped {} pie values of 0 or less (Slack needs more than 0)",
-            before - segs.len()
+            "{who}: dropped {not_positive} pie values of 0 or less (Slack needs more than 0)"
+        ));
+    }
+    if not_numbers > 0 {
+        w.push(format!(
+            "{who}: dropped {not_numbers} pie values that aren't numbers"
         ));
     }
     if segs.len() > MAX_SERIES {
@@ -192,11 +239,12 @@ fn fix_pie(chart: &mut Map<String, Value>, who: &str, w: &mut Vec<String>) {
     if cut_n > 0 {
         w.push(format!("{who}: cut {cut_n} labels to {MAX_LABEL} characters"));
     }
+    !segs.is_empty()
 }
 
-fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<String>) {
+fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<String>) -> bool {
     let Some(mut series) = chart.get("series").and_then(Value::as_array).cloned() else {
-        return;
+        return false;
     };
     let strs = |v: &Value| -> Vec<String> {
         v.as_array()
@@ -208,7 +256,25 @@ fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<Str
         .and_then(|a| a.get("categories"))
         .map(strs)
         .unwrap_or_default();
-    if cats.is_empty() {
+    if !cats.is_empty() {
+        let mut outside: Vec<String> = Vec::new();
+        for l in series
+            .iter()
+            .flat_map(|s| s["data"].as_array().into_iter().flatten())
+            .filter_map(|p| p["label"].as_str())
+        {
+            if !cats.iter().any(|c| c == l) {
+                outside.push(l.to_string());
+            }
+        }
+        if !outside.is_empty() {
+            w.push(format!(
+                "{who}: left out {} points whose label isn't in `axis_config.categories` ({})",
+                outside.len(),
+                left_out(&outside)
+            ));
+        }
+    } else {
         for p in series
             .iter()
             .flat_map(|s| s["data"].as_array().into_iter().flatten())
@@ -240,7 +306,8 @@ fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<Str
         ));
         series.truncate(MAX_SERIES);
     }
-    let (mut filled, mut cut_n) = (0, 0);
+    // A point's label is its category's, so the categories count the cut labels once.
+    let (mut filled, mut names_cut) = (0, 0);
     for s in series.iter_mut().filter_map(Value::as_object_mut) {
         let old = s
             .get("data")
@@ -255,13 +322,13 @@ fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<Str
                     json!({"label": c, "value": 0})
                 });
                 if let Some(p) = p.as_object_mut() {
-                    cut_n += usize::from(cut_field(p, "label", MAX_LABEL));
+                    cut_field(p, "label", MAX_LABEL);
                 }
                 p
             })
             .collect();
         s.insert("data".into(), data.into());
-        cut_n += usize::from(cut_field(s, "name", MAX_LABEL));
+        names_cut += usize::from(cut_field(s, "name", MAX_LABEL));
     }
     if filled > 0 {
         w.push(format!("{who}: {filled} missing points filled with 0"));
@@ -271,7 +338,7 @@ fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<Str
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    cut_n += cats.iter().filter(|c| c.chars().count() > MAX_LABEL).count();
+    let labels_cut = cats.iter().filter(|c| c.chars().count() > MAX_LABEL).count();
     axis.insert(
         "categories".into(),
         cats.iter().map(|c| cut(c, MAX_LABEL)).collect::<Vec<_>>().into(),
@@ -280,14 +347,21 @@ fn fix_xy(chart: &mut Map<String, Value>, last: bool, who: &str, w: &mut Vec<Str
         .iter()
         .filter(|k| cut_field(&mut axis, k, MAX_TITLE))
         .count();
-    if cut_n > 0 {
+    if labels_cut > 0 {
         w.push(format!(
-            "{who}: cut {cut_n} labels or names to {MAX_LABEL} characters"
+            "{who}: cut {labels_cut} labels to {MAX_LABEL} characters"
+        ));
+    }
+    if names_cut > 0 {
+        w.push(format!(
+            "{who}: cut {names_cut} series names to {MAX_LABEL} characters"
         ));
     }
     if long_axis > 0 {
         w.push(format!("{who}: cut axis labels to {MAX_TITLE} characters"));
     }
+    let empty = cats.is_empty() || series.is_empty();
     chart.insert("series".into(), series.into());
     chart.insert("axis_config".into(), axis.into());
+    !empty
 }
