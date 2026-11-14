@@ -1,5 +1,5 @@
-//! Component lists: a destination option whose value is a list holding `component: <name>.json`
-//! entries. Core resolves each component, renders it after the queries ran (the context a
+//! Component lists: a destination option whose value is a list of maps, each a
+//! `component: <name>.json` entry or an inline one. Core resolves each component, renders it after the queries ran (the context a
 //! message's `text:` gets, plus `args` from the entry's `with:`), parses the JSON, and sends the
 //! plugin `{"component": <file>, "blocks": [...], ...other keys}` per entry. An entry without
 //! `component:` is inline: its strings are rendered and it arrives as `{"blocks": [<entry>]}`.
@@ -18,10 +18,11 @@ use crate::render::Renderer;
 const COMPONENT: &str = "component";
 const WITH: &str = "with";
 
-/// Whether a destination option's value is a component list: a list with a `component:` entry.
+/// Whether a destination option's value is a component list: a list of maps (components and
+/// inline entries). No other destination option is a list of maps.
 pub fn is_list(v: &Json) -> bool {
     v.as_array()
-        .is_some_and(|a| a.iter().any(|e| e.get(COMPONENT).is_some()))
+        .is_some_and(|a| !a.is_empty() && a.iter().all(Json::is_object))
 }
 
 /// Check every `component:` name in option value `v` (from a report whose YAML is `yaml`)

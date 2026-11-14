@@ -240,3 +240,16 @@ fn preview_prints_the_rendered_blocks_and_posts_nothing() {
         .says("\"type\": \"divider\"");
     assert!(all_blocks(&rec).is_empty());
 }
+
+#[test]
+fn a_list_of_inline_blocks_alone_is_rendered_late_and_wrapped() {
+    let (p, rec) = project(
+        &report("      - {type: section, text: \"{{ results.revenue.row_count }} days\"}\n"),
+        &[],
+    );
+    p.dre("run", &["daily"]).ok();
+    assert_eq!(
+        blocks(&rec),
+        json!([{"blocks": [{"type": "section", "text": "2 days"}]}])
+    );
+}
