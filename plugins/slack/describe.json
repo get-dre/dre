@@ -90,6 +90,22 @@
         "required": false
       },
       {
+        "name": "blocks",
+        "type": "list",
+        "description": "Block Kit blocks and components, posted as one message (the message text stays the notification text)",
+        "required": false
+      },
+      {
+        "name": "files_in",
+        "type": "string",
+        "description": "where files go with `blocks`: `thread` (default, a reply under the message) or `message` (a separate message after it)",
+        "required": false,
+        "choices": [
+          "thread",
+          "message"
+        ]
+      },
+      {
         "name": "retries",
         "type": "integer",
         "description": "how many times to try again after a temporary error such as a rate limit (0: never)",
