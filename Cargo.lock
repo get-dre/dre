@@ -2373,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "dre-plugin-host"
-version = "0.13.0"
+version = "0.12.0"
 dependencies = [
  "arrow 59.3.0",
  "dre-protocol",
