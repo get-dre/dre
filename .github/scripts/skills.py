@@ -636,6 +636,8 @@ def bundle_docs(root):
             (folder / path.name).write_text(text)
         for path in sorted((root / "docs").glob("*.json")):
             shutil.copy(path, folder / path.name)
+        if (root / "docs/assets").exists():
+            shutil.copytree(root / "docs/assets", folder / "assets")
         (references / "docs-index.md").write_text(index)
 
 
