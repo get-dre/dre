@@ -16,7 +16,7 @@ Where: a `.yml` file under `reports/`.
 For editor autocomplete and validation, add this as the first line of the file ([editor setup](editor-setup.md)):
 
 ```yaml
-# yaml-language-server: $schema=https://getdre.com/schemas/v0.12/report.schema.json
+# yaml-language-server: $schema=https://getdre.com/schemas/v0.13/report.schema.json
 ```
 
 For copyable examples and common errors, see [Build and run reports](building-reports.md). The [glossary](glossary.md) defines DRE's terms.
@@ -119,7 +119,7 @@ How a report's result is written and where it goes. Besides the keys below, each
 
 ## `output[].destination[]`
 
-Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). The built-in profile `local` copies the file to a local path.
+Where a file is delivered: the name of a destination profile in `profiles.yml`, an optional `path`, and the options of that destination's plugin (e.g. `to`, `subject` and `body` for email). An option's list may hold `component: <name>.json` entries (with `with:`), rendered after the queries (see Components in the Messages guide). The built-in profile `local` copies the file to a local path.
 
 | Key | Type | Default | Description |
 |---|---|---|---|

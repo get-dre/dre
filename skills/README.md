@@ -73,6 +73,7 @@ the plugins'. Each release supports a range of DRE minor versions (every `SKILL.
 | 5.1.0 | 0.9.x and 0.10.x |
 | 5.2.x | 0.9.x through 0.11.x |
 | 5.3.x | 0.9.x through 0.12.x; data tests need 0.11 or newer |
+| 5.4.x | 0.9.x through 0.13.x; components need 0.13 |
 
 A new DRE minor gets a skills release that supports it. Dropping support for an older DRE minor
 is a new major skills version, so if you stay on an older DRE, pin the skills release that

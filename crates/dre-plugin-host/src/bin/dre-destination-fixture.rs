@@ -10,7 +10,7 @@
 //!   `message_only`: it refuses files.
 //! - A connection with `fail: true` makes every delivery fail; `temporary_failures: n` fails the
 //!   first `n` tries with a temporary error, which the SDK's retry tries again at once.
-//! - Its options are `to`, `subject` and `message`, recorded as given.
+//! - Its options are `to`, `subject`, `message` and `blocks`, recorded as given.
 
 use std::io::Write;
 
@@ -39,6 +39,7 @@ impl Destination for Fixture {
             OptionField::new("to", OptionType::Strings, "recorded"),
             OptionField::new("subject", OptionType::String, "recorded"),
             OptionField::new("message", OptionType::String, "recorded"),
+            OptionField::new("blocks", OptionType::List, "recorded (a component list)"),
         ]
     }
 

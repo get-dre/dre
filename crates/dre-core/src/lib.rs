@@ -14,6 +14,7 @@ pub mod catalog;
 pub mod checksum;
 pub mod codes;
 pub(crate) mod coltypes;
+pub mod components;
 pub mod config;
 pub mod constraints;
 pub mod context;

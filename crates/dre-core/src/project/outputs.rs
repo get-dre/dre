@@ -1347,6 +1347,26 @@ impl Loader {
     pub(super) fn check_template_files(&mut self, project: &Project) {
         let mut seen = BTreeSet::new();
         let scope = self.scope();
+        // Each destination option's component names (`component: <name>.json`).
+        for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
+            let lists = r
+                .bindings
+                .iter()
+                .flat_map(|b| b.outputs.iter().flat_map(|o| o.destinations.iter()))
+                .flat_map(|d| d.options.values());
+            for v in lists {
+                for e in crate::components::check(&self.root, project.packages(), &r.file, v) {
+                    if seen.insert((r.name.clone(), e.clone(), String::new())) {
+                        self.diags.error(
+                            Code::MissingTemplate,
+                            Some(r.file.clone()),
+                            None,
+                            format!("report `{}`: {e}", r.name),
+                        );
+                    }
+                }
+            }
+        }
         for r in project.reports.iter().filter(|r| in_scope(&scope, &r.name)) {
             for (format, t) in r.bindings.iter().flat_map(|b| {
                 b.outputs

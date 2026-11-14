@@ -250,6 +250,11 @@ impl BindingRun<'_> {
                 };
                 let mut options = JsonMap::new();
                 for (k, v) in &d.options {
+                    // A component list reads `results`: it renders after the queries.
+                    if crate::components::is_list(v) {
+                        options.insert(k.clone(), v.clone());
+                        continue;
+                    }
                     let v = render_json(&renderer, &self.report.file, v)
                         .map_err(|e| format!("destination `{profile}` option `{k}`: {e}"))?;
                     options.insert(k.clone(), v);

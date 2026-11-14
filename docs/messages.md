@@ -139,6 +139,44 @@ no deduplication and no escalation. A report that should say "revenue dropped" s
 the data shows it. Alerting on whether a run succeeded belongs to your orchestrator or the
 Platform.
 
+## Components
+
+Some destination options take a list of structured blocks: Slack's `blocks:`, say. Such a list
+may hold **components**: `.json` files of JSON with Jinja in them, rendered after the queries
+ran with what a message's `text:` reads (`results.<query>`, `var()`, `run.*`, `each.*` in a
+per-row output) plus `args`, the entry's `with:` map (its values rendered first).
+
+```yaml
+destination:
+  - profile: team_slack
+    blocks:
+      - component: header.json
+        with: {text: "Daily KPIs {{ run.date.iso }}"}
+      - component: team_blocks/slack/bar_chart.json
+        keep: last
+        with: {query: revenue_by_day, label: day, values: [revenue]}
+      - {type: divider}
+```
+
+```json
+{"type": "header", "text": {"type": "plain_text", "text": {{ args.text | tojson }}}}
+```
+
+- A component renders to one JSON object (one block) or a list (several). Print values with
+  `| tojson` so quotes in the data can't break the JSON.
+- An entry without `component:` is an inline block: its strings are rendered, and it's sent
+  as is.
+- Other keys on an entry (`keep:` above) go to the plugin untouched.
+- The name must end in `.json`. It's looked up like a template: next to the report's YAML, then
+  each parent folder up to the project root (the nearest wins), then anywhere in the project if
+  unique. A name with `/` is a path from the project root. A name not in the project is looked
+  for in the installed [packages](reference-dependencies.md), where it must be unique;
+  `<package>/<path>` names a package's file. The project's own file wins over a package's.
+- `dre validate` checks every name. A component that renders invalid JSON fails the run
+  (`render-failed`), naming the file, the line and the text near the error.
+- `dre run --preview` prints each list's rendered blocks as one `{"blocks": [...]}`, ready to
+  paste into Slack's Block Kit Builder, and posts nothing.
+
 ## Before sending
 
 `invalid-output-option` identifies a malformed message template or a query name absent from
