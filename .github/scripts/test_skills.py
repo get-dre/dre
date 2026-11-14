@@ -371,6 +371,24 @@ class BundledDocs(unittest.TestCase):
             self.assertIn("`--preview`", index)
             self.assertNotIn("example_value", index)
 
+    def test_bundle_image_assets_and_remove_stale_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self.fixture(root)
+            (root / "docs/assets").mkdir()
+            image = root / "docs/assets/report.webp"
+            image.write_bytes(b"image fixture")
+            page = root / "docs/start.md"
+            page.write_text(page.read_text() + "![Report](assets/report.webp)\n")
+            skills.bundle_docs(root)
+            references = root / "skills/test/references"
+            self.assertEqual((references / "docs/assets/report.webp").read_bytes(), image.read_bytes())
+            self.assertEqual(skills.docs_link_problems(references), [])
+            image.unlink()
+            skills.bundle_docs(root)
+            self.assertFalse((references / "docs/assets/report.webp").exists())
+            self.assertTrue(skills.docs_link_problems(references))
+
     def test_bundle_links_drift_and_removed_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
