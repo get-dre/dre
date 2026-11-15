@@ -24,7 +24,7 @@ EXTERNAL = {"overdue-loans/oracle": "requires Oracle and user-supplied JDBC driv
             "warehouses": "requires Postgres, ClickHouse, Databricks, BigQuery and Snowflake"}
 # Minimum versions for callers checking examples with an older installed CLI. CI uses the
 # latest published CLI below 1.0, or the source build for mixed engine changes.
-NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0),
+NEEDS = {"monthly-finance": (0, 11, 0), "password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0),
          "cloud-delivery": (0, 13, 0), "messages": (0, 13, 0), "warehouses": (0, 13, 0)}
 PASSPHRASE = "example-passphrase"
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -274,12 +274,12 @@ def check(dre, plugins, names):
         for var, value in placeholders(names, scratch).items():
             environment.setdefault(var, value)
 
-        def run(project, *args, target="dev"):
+        def run(project, *args, target="dev", success=True):
             command = [dre, *args, *locations(project)]
             if args[0] not in ("schedule", "deps"):
                 command.extend(["--target", target])
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
-            if result.returncode:
+            if (result.returncode == 0) != success:
                 raise AssertionError(" ".join(command) + "\n" + result.stdout + result.stderr)
             return result.stdout + result.stderr
 
@@ -338,6 +338,30 @@ def check(dre, plugins, names):
                 run(project, "build", "--schedule", "checked_daily")
                 assert (project / "out/checked.csv").read_text(encoding="utf-8").startswith("execution,amount")
                 run(project, "run", "checked")
+            elif name == "monthly-finance":
+                run(project, "test", "finance")
+                tested = current(project, "finance")
+                assert {t["test"] for t in tested.get("tests", [])} == {"nonnegative", "reconcile_revenue"}
+                assert all(t["status"] == "pass" for t in tested["tests"])
+                assert not tested["outputs"] and not tested["deliveries"]
+                assert not (project / "out").exists(), "test must not publish report files"
+                run(project, "build", "finance")
+                built = current(project, "finance")
+                assert built["outputs"] and all(t["status"] == "pass" for t in built["tests"])
+
+                # An incomplete account mapping drops Services from Detail, but not Summary.
+                bad = scratch / "unmapped-finance"
+                shutil.copytree(project, bad, ignore=shutil.ignore_patterns("target", "out", "dre_deps", "dre.lock"))
+                lookup = bad / "lookups/accounts.yml"
+                lookup.write_text(lookup.read_text(encoding="utf-8").replace(
+                    "  - {category: Services, account_code: '4100'}\n", ""), encoding="utf-8")
+                run(bad, "build", "finance", success=False)
+                failed = current(bad, "finance")
+                assert any(t["test"] == "reconcile_revenue" and t["status"] == "fail"
+                           and t["failures"] == 1 for t in failed["tests"]), failed
+                assert not failed["outputs"] and not failed["deliveries"]
+                assert not (bad / "out").exists(), "failed build must not publish the finance pack"
+                print("monthly-finance: test and build passed; bad account mapping blocked both workbooks")
             elif name == "mcp":
                 run(project, "run", "setup", "--no-deliver")
                 run(project, "run", "revenue", "--no-deliver")

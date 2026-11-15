@@ -2,14 +2,26 @@
 
 Synthetic Acme Corp sales; no external database. `setup.sql` creates a temporary table
 on the report's DuckDB session. The source declaration names it; a typed YAML lookup maps
-Hardware and Services to account codes. Detail and Summary queries share that session.
+Hardware and Services to account codes. Detail and Summary queries share that session. DRE 0.11+ runs the attached data tests.
 
 ```bash
 dre validate
-dre run finance
+dre test finance
+dre build finance
 ```
 
-Expected files:
+`dre test finance` executes the queries and their checks without report files or delivery.
+`dre build finance` checks the data before writing either workbook. `dre run finance` skips
+attached checks; use `build` when publishing this pack.
+
+The reusable Jinja test blocks in `macros/checks.sql` reject negative revenue and reconcile
+Detail's revenue with Summary's earlier saved result, within one cent. Summary totals the
+source directly; Detail joins the account mapping. If the Services mapping is missing from
+`lookups/accounts.yml`, its revenue disappears from Detail, the reconciliation fails, and
+`build` writes or delivers neither workbook. The tests inspect saved query results without
+rerunning the source SQL. Test tolerance is supplied by YAML, not hard-coded in the macro.
+
+Expected files after a successful build:
 
 - `out/finance-2026-01.xlsx`: Detail, Summary, Targets and Calendar tabs; revenue 3,500
   total; comma-separated decimals, styled tabs, a commission formula on every detail row and
@@ -27,7 +39,7 @@ assert its expanded formula, while the normal workbook's totals have cached valu
 Change the month:
 
 ```bash
-dre run finance --var month=2026-02
+dre build finance --var month=2026-02
 ```
 
 February totals 2,500 and writes new month-labelled files. The committed

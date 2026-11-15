@@ -19,7 +19,18 @@ timezone: America/New_York
 locale: en-US
 queries:
   - {query: setup, tab: false}
+  - query: summary
+    tab_name: Summary
+    columns:
+      revenue: {format: "#,##0.00"}
+    style: {align: right, border: medium, borders: medium, bold: true}
   - query: detail
+    data_tests:
+      - nonnegative: {arguments: {column: revenue}}
+      # Account mappings must not drop revenue from the styled detail sheet.
+      - reconcile_revenue:
+          query_results: {expected: summary}
+          arguments: {tolerance: 0.01}
     tab_name: Detail
     columns:
       revenue: {format: "#,##0.00"}
@@ -29,11 +40,6 @@ queries:
         total: sum
         style: {italic: true, font_color: "#555555"}
     style: {align: left, border: thin, borders: thin}
-  - query: summary
-    tab_name: Summary
-    columns:
-      revenue: {format: "#,##0.00"}
-    style: {align: right, border: medium, borders: medium, bold: true}
   - query: targets
     tab_name: Targets
     columns:
