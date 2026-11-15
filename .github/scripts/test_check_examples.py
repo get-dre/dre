@@ -95,7 +95,9 @@ class ValidateOnly(unittest.TestCase):
             if prebuilt:
                 plugins = root / "plugins with spaces"
                 plugins.mkdir()
-                (plugins / "dre-plugin-csv").write_text("prebuilt plugin")
+                (plugins / "a-build/dre-plugin-csv").mkdir(parents=True)
+                (plugins / "z-bin").mkdir()
+                (plugins / "z-bin/dre-plugin-csv").write_text("prebuilt plugin")
                 command.extend(["--plugins-dir", str(plugins)])
             result = subprocess.run(command, capture_output=True, text=True, env=env)
             if example == "sftp-delivery":

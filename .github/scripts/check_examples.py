@@ -319,7 +319,7 @@ def check(dre, plugins, names):
                     environment["DRE_PLUGINS_DIR"] = str(bootstrap / "dre_deps" / "plugins")
                 directory = Path(environment["DRE_PLUGINS_DIR"])
                 executable = "dre-plugin-csv" + (".exe" if os.name == "nt" else "")
-                binaries = sorted(directory.rglob(executable))
+                binaries = sorted(path for path in directory.rglob(executable) if path.is_file())
                 if not binaries:
                     raise AssertionError(f"CSV executable missing from {directory}")
                 local_binary = project / ".plugins/dre-plugin-csv.exe"
