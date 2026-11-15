@@ -1,5 +1,5 @@
 description: Revenue by region on Databricks, written back to a Unity Catalog Volume.
-queries: [dbx_orders]
+queries: [databricks_orders]
 output:
   format: csv
   destination:

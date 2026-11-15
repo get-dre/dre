@@ -11,7 +11,7 @@ the first time.
 | [Tutorial](tutorial/) | One workbook, a variable, another tab, formats, Sets, a schedule and local delivery |
 | [Data tests](data-tests/) | Saved-result and source checks, reconciliation, run/test/build, warning/error Bindings and capped CSV evidence |
 | [Monthly finance](monthly-finance/) | dbt-style source declarations, YAML, CSV and Excel lookups, typed variables, styled tabs, formulas, totals and an Excel template |
-| [Overdue loans](overdue-loans/) | Oracle/SQL Server JDBC preparation, independent business checks, ordinary/template workbooks and unexecuted SAS reference |
+| [Overdue loans](overdue-loans/) | Oracle/SQL Server JDBC preparation, stored procedures, TLS/TCPS targets, independent business checks, ordinary/template workbooks and unexecuted SAS reference |
 | [Bank file](bank-file/) | Fixed-width layout, zero padding, implied decimals and CRLF records, plus a readable copy with a header |
 | [Regional reports](regional-reports/) | The same report with five Sets (renamed tabs, empty-result rules, excluded queries), schedules and shared timings |
 | [Slack headline](slack-headline/) | A result-driven message and a `when:` threshold |
@@ -40,7 +40,7 @@ example that needs no server or account in the development target, and checks th
 formats, formulas, template expansion, text record bytes and skipped message branch.
 It also creates a new project with `dre new` and tests each tutorial step.
 Scratch projects use the system temporary directory and are removed, including on failure.
-The overdue-loan and warehouse projects are validated only. The overdue-loan project has its own clean-run checker and runs against the pinned database
+This script validates the overdue-loan and warehouse projects without running them. The overdue-loan project has its own clean-run checker and runs against the pinned database
 services in JDBC CI; see its README for credentials, Java and user-supplied driver requirements.
 
 To check a local build with prebuilt plugins:

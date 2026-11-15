@@ -213,19 +213,26 @@ def placeholders(names, scratch):
     """Inert values for every `env_var('NAME')` without a default in the selected examples: key
     files and key text are throwaway SSH keys (files encrypted with the placeholder passphrase),
     other files are empty, fingerprints and URLs are well-formed, the rest is plain text."""
-    empty, key_file, key = scratch / "placeholder", scratch / "placeholder_key", scratch / "key"
+    empty = scratch / "placeholder"
     empty.touch()
-    for path, passphrase in ((key_file, PASSPHRASE), (key, "")):
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", str(path)],
-                       check=True, capture_output=True)
+
+    def ssh_key(name, passphrase):
+        path = scratch / name
+        if not path.exists():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", str(path)],
+                           check=True, capture_output=True)
+        return path
+
     values = {}
     for name in names:
         for path in (ROOT / "examples" / name).rglob("*.yml"):
+            # Suffixes are checked in order: `_KEY_FILE` before `_KEY` (any `_KEY`, an access
+            # key too, gets an SSH key's text, which a plain secret accepts as well).
             for var in re.findall(r"env_var\('([A-Z0-9_]+)'\)", path.read_text(encoding="utf-8")):
                 if var.endswith("_KEY_FILE"):
-                    values[var] = str(key_file)
+                    values[var] = str(ssh_key("key_file", PASSPHRASE))
                 elif var.endswith("_KEY"):
-                    values[var] = key.read_text(encoding="utf-8")
+                    values[var] = ssh_key("key_text", "").read_text(encoding="utf-8")
                 elif var.endswith("_PASSPHRASE"):
                     values[var] = PASSPHRASE
                 elif var.endswith(("_FILE", "_KNOWN_HOSTS", "_JAR", "_TRUSTSTORE")):
@@ -241,6 +248,11 @@ def placeholders(names, scratch):
                 else:
                     values[var] = "not-a-real-" + var.lower().replace("_", "-")
     return values
+
+
+def locations(project):
+    profiles = project / "profiles" if (project / "profiles").is_dir() else project
+    return ["--project-dir", str(project), "--profiles-dir", str(profiles)]
 
 
 def check(dre, plugins, names):
@@ -263,8 +275,7 @@ def check(dre, plugins, names):
             environment.setdefault(var, value)
 
         def run(project, *args, target="dev"):
-            command = [dre, *args, "--project-dir", str(project),
-                       "--profiles-dir", str(project / "profiles" if (project / "profiles").is_dir() else project)]
+            command = [dre, *args, *locations(project)]
             if args[0] != "schedule":
                 command.extend(["--target", target])
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
@@ -277,8 +288,7 @@ def check(dre, plugins, names):
         def validate(project):
             run(project, "validate")
             # Every target's settings; unset or unknown keys are mistakes, not warnings.
-            command = [dre, "validate", "--all-targets", "--project-dir", str(project), "--profiles-dir",
-                       str(project / "profiles" if (project / "profiles").is_dir() else project)]
+            command = [dre, "validate", "--all-targets", *locations(project)]
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
             output = result.stdout + result.stderr
             if result.returncode or re.search(r"warning\[(unknown-|unset-env-var)", output):
@@ -290,15 +300,16 @@ def check(dre, plugins, names):
                 print(f"{name}: skipped, it needs DRE {'.'.join(map(str, NEEDS[name]))} (this is {have})")
                 continue
             project = scratch / name
-            shutil.copytree(ROOT / "examples" / name.split("/")[0], scratch / name.split("/")[0],
-                            dirs_exist_ok=True,
+            # A variant (overdue-loans/oracle) is copied with its parent's shared files.
+            parent, _, variant = name.partition("/")
+            shutil.copytree(ROOT / "examples" / parent, scratch / parent, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("target", "out", "dre_deps",
                                                         "dre.lock", "__pycache__"))
             if name in EXTERNAL:
-                if name.startswith("overdue-loans/"):
+                if (scratch / parent / "prepare.py").exists() and variant:
                     # Its seed.sql is generated from the CSV inputs, without a database.
-                    subprocess.run([sys.executable, str(scratch / "overdue-loans/prepare.py"),
-                                    name.split("/")[1]], check=True, capture_output=True)
+                    subprocess.run([sys.executable, str(scratch / parent / "prepare.py"), variant],
+                                   check=True, capture_output=True)
                 validate(project)
                 print(f"{name}: validated in every target, not run; {EXTERNAL[name]}")
                 continue
