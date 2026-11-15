@@ -20,6 +20,13 @@ if sys.argv[1:] == ["--version"]:
     print("dre 0.13.1")
     sys.exit(0)
 project = Path(sys.argv[sys.argv.index("--project-dir") + 1])
+if project.name == "sftp-delivery":
+    known_hosts = os.environ.get("OPS_SFTP_KNOWN_HOSTS", "~/.ssh/known_hosts")
+    assert Path(known_hosts).expanduser().is_file(), "missing SFTP known_hosts"
+    if sys.argv[1] != "validate":
+        sys.exit("validated SFTP; stop before service-free output checks")
+    if "EXPECTED_KNOWN_HOSTS" in os.environ:
+        assert known_hosts == os.environ["EXPECTED_KNOWN_HOSTS"]
 if sys.argv[1] == "deps":
     assert "--target" not in sys.argv, "deps takes no target"
     binary = project / "dre_deps/plugins/csv/1.2.0/dre-plugin-csv"
@@ -71,12 +78,19 @@ class ExampleCli(unittest.TestCase):
 class ValidateOnly(unittest.TestCase):
     """Examples that need a service or an account are validated in every target, never run."""
 
-    def calls(self, example, prebuilt=False):
+    def calls(self, example, prebuilt=False, configured_hosts=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / "calls.jsonl"
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("DRE_", "PG", "DATABRICKS"))}
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("DRE_", "PG", "DATABRICKS")) and "SFTP" not in k}
             env["FAKE_DRE_LOG"] = str(log)
+            home = root / "empty-home"
+            home.mkdir()
+            env.update(HOME=str(home), USERPROFILE=str(home))
+            if configured_hosts:
+                hosts = root / "configured_hosts"
+                hosts.touch()
+                env.update(OPS_SFTP_KNOWN_HOSTS=str(hosts), EXPECTED_KNOWN_HOSTS=str(hosts))
             command = [sys.executable, str(SCRIPT), "--dre", str(fake_dre(root)), "--example", example]
             if prebuilt:
                 plugins = root / "plugins with spaces"
@@ -84,8 +98,17 @@ class ValidateOnly(unittest.TestCase):
                 (plugins / "dre-plugin-csv").write_text("prebuilt plugin")
                 command.extend(["--plugins-dir", str(plugins)])
             result = subprocess.run(command, capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            if example == "sftp-delivery":
+                self.assertIn("validated SFTP; stop before service-free output checks", result.stderr)
+            else:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    def test_defaulted_sftp_file_is_supplied_without_personal_ssh_files(self):
+        self.calls("sftp-delivery", prebuilt=True)
+
+    def test_explicit_sftp_file_is_preserved(self):
+        self.calls("sftp-delivery", prebuilt=True, configured_hosts=True)
 
     def test_service_example_is_validated_in_every_target_and_not_run(self):
         calls = self.calls("warehouses")

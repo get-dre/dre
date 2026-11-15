@@ -210,7 +210,7 @@ def selected_examples(names):
 
 
 def placeholders(names, scratch):
-    """Inert values for every `env_var('NAME')` without a default in the selected examples: key
+    """Inert values for required env vars and defaulted file paths in the selected examples: key
     files and key text are throwaway SSH keys (files encrypted with the placeholder passphrase),
     other files are empty, fingerprints and URLs are well-formed, the rest is plain text."""
     empty = scratch / "placeholder"
@@ -228,7 +228,9 @@ def placeholders(names, scratch):
         for path in (ROOT / "examples" / name).rglob("*.yml"):
             # Suffixes are checked in order: `_KEY_FILE` before `_KEY` (any `_KEY`, an access
             # key too, gets an SSH key's text, which a plain secret accepts as well).
-            for var in re.findall(r"env_var\('([A-Z0-9_]+)'\)", path.read_text(encoding="utf-8")):
+            for var, default in re.findall(r"env_var\('([A-Z0-9_]+)'(\s*,[^)]*)?\)", path.read_text(encoding="utf-8")):
+                if default and not var.endswith(("_FILE", "_KNOWN_HOSTS", "_JAR", "_TRUSTSTORE")):
+                    continue
                 if var.endswith("_KEY_FILE"):
                     values[var] = str(ssh_key("key_file", PASSPHRASE))
                 elif var.endswith("_KEY"):
