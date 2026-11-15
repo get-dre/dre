@@ -10,7 +10,15 @@ output:
     format: pdf
     template: {file: statement.html}
     queries: [members, holdings]
-    for_each: {query: members, key: member_id}
+    for_each:
+      query: members
+      key: member_id
+      # Render every statement first, and deliver none unless all of them rendered.
+      on_row_error: fail
+      # A holding for a member who isn't in `members` is a data error: fail the run.
+      on_orphan_rows: fail
+    # The file's name in the run folder (the delivered copy is named by `path`).
+    file_name: "{{ each.member_id }}_statement.pdf"
     password: "{{ each.pdf_password }}"
     destination: {profile: local, path: "out/statements/{{ each.member_id }}.pdf"}
 
@@ -31,4 +39,4 @@ output:
       profile: local
       path: "out/pack-{{ run.date.yyyymmdd }}.zip"
       attach: [fees]
-      zip: {password: "{{ env_var('PACK_PASSWORD') }}"}
+      zip: {password: "{{ env_var('PACK_PASSWORD') }}", encryption: aes256}

@@ -1,6 +1,6 @@
 ---
 title: "Tested examples"
-description: "Complete, copyable projects with checked output: Excel, bank files, Sets, Slack, SFTP and password-protected statements."
+description: "Complete, copyable projects with checked output: Excel, bank files, Sets, messages, SFTP, cloud storage, warehouses and password-protected statements."
 section: build-reports
 position: 10
 ---
@@ -8,7 +8,7 @@ position: 10
 # Tested examples
 
 These [public example projects](../examples/README.md) include the YAML, SQL and supporting
-files needed to run them. Every project uses synthetic data and DuckDB, so local runs need
+files needed to run them. Every project uses synthetic data; most run on DuckDB and need
 no database account. Start with [Your first report in 10 minutes](first-report.md).
 
 | Example | Output | Files |
@@ -21,11 +21,15 @@ no database account. Start with [Your first report in 10 minutes](first-report.m
 | SFTP delivery | CSV and an environment-based remote profile | [SFTP project](../examples/sftp-delivery/README.md) |
 | Password statements | Password PDFs per member, a password list and an AES-256 zip pack | [Password project](../examples/password-statements/README.md) |
 | Multilingual | A workbook and a PDF letter per office in nine languages and scripts, no fonts in the project | [Multilingual project](../examples/multilingual/README.md) |
+| Cloud delivery | Parquet and partner files to S3, GCS, Azure Blob, FTPS and FTP | [Cloud delivery project](../examples/cloud-delivery/README.md) |
+| Messages | One headline by email, Teams, Google Chat and Slack, and a per-row email | [Messages project](../examples/messages/README.md) |
+| Warehouses | Postgres, ClickHouse, Databricks, BigQuery and Snowflake connections (validated only) | [Warehouses project](../examples/warehouses/README.md) |
+| MCP | A report described for AI clients | [MCP project](../examples/mcp/README.md) |
 
 [Install DRE](install.md), copy the chosen project directory and run `dre validate` from it.
 Each README gives the run commands and expected values. Dependencies install on demand.
 
-Slack and SFTP default to `dev: {deliver: false}`: outputs stay local. To use a real destination,
+Every remote destination defaults to `dev: {deliver: false}`: outputs stay local. To use a real destination,
 set your own environment variables, inspect the local output and explicitly select `--target prod`.
 
 CI validates all seven projects, runs their local paths and checks saved output. It also exercises

@@ -4,7 +4,8 @@ queries:
   - {query: checks_expected, tab: false}
   - query: checks_detail
     data_tests:
-      - nonnegative: {}
+      # The defaults, written out: checked against the saved result, and a failure is an error.
+      - nonnegative: {config: {execution: local, severity: error}}
       - reconcile_total:
           query_results: {expected: checks_expected}
   - query: checks_counter

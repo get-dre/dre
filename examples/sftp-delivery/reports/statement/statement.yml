@@ -2,7 +2,22 @@ queries: [statement]
 output:
   format: csv
   destination:
-    profile: partner_sftp
-    path: /incoming/client_a.csv
-    atomic: true
-    if_exists: error
+    # The partner's copy: uploaded under a temporary name and renamed, never replacing a file.
+    - profile: partner_sftp
+      path: /incoming/client_a.csv
+      atomic: true
+      if_exists: error
+    # The bank picks up any new file, so the temporary file goes to another folder first.
+    - profile: bank_sftp
+      path: upload/client_a.csv
+      if_exists: overwrite
+      temp_dir: upload/.partial
+      retries: 5
+      retry_wait: 1m
+      max_retry_wait: 15m
+    # The archive keeps every run: a second file gets a number.
+    - profile: archive_sftp
+      path: "statements/client_a-{{ run.date.yyyymmdd }}.csv"
+      if_exists: number
+    - profile: ops_sftp
+      path: drop/client_a.csv

@@ -1,0 +1,24 @@
+description: One email per regional manager with their own region's sales.
+queries: [managers, region_sales]
+output:
+  - name: note
+    format: message
+    title: "{{ each.region }} sales, {{ var('day') }}"
+    text: "{% for row in results.region_sales.rows %}{{ row.category }}: {{ row.revenue | currency('AUD') }}\n{% endfor %}"
+    for_each:
+      query: managers
+      key: region_id
+      concurrency: 2
+      # A failed row is recorded and the others are still sent.
+      on_row_error: continue
+      # Sales rows for a region with no manager are reported, not fatal.
+      on_orphan_rows: warn
+      keep_results: true
+      # Show the managers' addresses in the logs (they're colleagues, not customers).
+      mask_row_values: false
+    destination:
+      profile: relay_mail
+      to: "{{ each.email }}"
+      # At most 30 emails a minute, up to 5 back to back.
+      rate: 30/minute
+      burst: 5

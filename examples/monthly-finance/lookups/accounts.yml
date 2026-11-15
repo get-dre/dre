@@ -1,4 +1,6 @@
+# A lookup kept in YAML: typed columns and the rows, inlined into the SQL.
 columns: {category: string, account_code: string}
+load: inline
 rows:
   - {category: Hardware, account_code: '4000'}
   - {category: Services, account_code: '4100'}

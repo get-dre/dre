@@ -20,7 +20,10 @@ def package(output):
     for database in ("oracle", "sqlserver"):
         for name in ("dre_project.yml", "profiles.yml", "dependencies.yml", "templates/reporting.xlsx",
                      "reports/overdue/overdue.yml", "reports/overdue/prepare.sql", "reports/overdue/detail.sql",
-                     "reports/overdue/summary.sql", "reports/overdue/exceptions.sql"):
+                     "reports/overdue/summary.sql", "reports/overdue/exceptions.sql",
+                     "reports/aging/aging.yml", "reports/aging/aging.sql",
+                     *{"oracle": ("procedures.sql", "reports/aging/call_aging.sql"),
+                       "sqlserver": ("reports/aging/prepare_aging.sql",)}[database]):
             path = Path(database) / name
             files[path] = ROOT / path
     files[Path("parity.py")] = (ROOT / "parity.py" if (ROOT / "parity.py").exists()

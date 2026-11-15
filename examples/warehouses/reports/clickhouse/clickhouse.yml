@@ -1,0 +1,5 @@
+description: Revenue by region on ClickHouse over HTTP, and the server version over native TCP.
+queries:
+  - ch_orders
+  # This query runs on another connection than the folder's.
+  - {query: ch_version, profile: ch_native}

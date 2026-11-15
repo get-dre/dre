@@ -4,6 +4,7 @@ connections:
       dev: {type: duckdb}
       prod: {type: duckdb}
 destinations:
+  # A password, with the server's host key pinned by its fingerprint.
   partner_sftp:
     targets:
       dev: {deliver: false}
@@ -13,3 +14,41 @@ destinations:
         username: "{{ env_var('SFTP_USERNAME') }}"
         password: "{{ env_var('DRE_SECRET_SFTP_PASSWORD') }}"
         host_key_fingerprint: "{{ env_var('SFTP_HOST_KEY_FINGERPRINT') }}"
+  # A key file with a passphrase, the host key checked against a known_hosts file.
+  bank_sftp:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: sftp.bank.example
+        port: 2222
+        username: acme_corp
+        private_key_path: "{{ env_var('BANK_SFTP_KEY_FILE') }}"
+        private_key_passphrase: "{{ env_var('DRE_SECRET_BANK_SFTP_KEY_PASSPHRASE') }}"
+        known_hosts_path: "{{ env_var('BANK_SFTP_KNOWN_HOSTS') }}"
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+  # The key's text from a secret store (a CI secret, say), and RSA keys refused.
+  archive_sftp:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: sftp.archive.example
+        username: acme_corp
+        private_key: "{{ env_var('DRE_SECRET_ARCHIVE_SFTP_KEY') }}"
+        allow_rsa_keys: false
+        host_key_fingerprint: "{{ env_var('ARCHIVE_SFTP_HOST_KEY_FINGERPRINT') }}"
+  # The keys in your SSH agent; a host missing from ~/.ssh/known_hosts is refused.
+  ops_sftp:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: sftp
+        host: sftp.ops.internal
+        username: "{{ env_var('USER', 'reporter') }}"
+        use_agent: true
+        accept_unknown_host: false

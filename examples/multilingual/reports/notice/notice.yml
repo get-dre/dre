@@ -1,0 +1,39 @@
+# One notice with every office's greeting, printed on several paper sizes. The template sets
+# no @page size, so each output's page_size and orientation apply.
+name: notice
+description: A notice board page greeting every office in its own script.
+queries: [notice]
+output:
+  # A poster for the lobby. With missing_fonts: warn, a script whose font can't be fetched
+  # (offline, nothing cached) prints as boxes and the run warns instead of failing.
+  - name: poster
+    format: pdf
+    template: {file: notice.html}
+    page_size: A3
+    orientation: landscape
+    missing_fonts: warn
+    max_rows: 50
+    destination: {profile: local, path: out/notice/poster-a3.pdf}
+  - name: handout
+    format: pdf
+    template: {file: notice.html}
+    page_size: A5
+    destination: {profile: local, path: out/notice/handout-a5.pdf}
+  # The US and legal-size copies for the New York office's printers.
+  - name: us_letter
+    format: pdf
+    template: {file: notice.html}
+    page_size: Letter
+    destination: {profile: local, path: out/notice/letter.pdf}
+  - name: us_legal
+    format: pdf
+    template: {file: notice.html}
+    page_size: Legal
+    destination: {profile: local, path: out/notice/legal.pdf}
+  # A web page with its fonts and styles inlined, so it works wherever it's opened.
+  - name: web
+    format: html
+    template: {file: notice.html}
+    embed_assets: true
+    max_rows: 50
+    destination: {profile: local, path: out/notice/notice.html}

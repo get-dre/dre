@@ -1,0 +1,4 @@
+# Sets the Postgres report can run as, one per way of reaching the server.
+pg_direct: {profile: pg_direct, vars: {mode: direct}}
+pg_tls: {profile: pg_tls, vars: {mode: tls}}
+pg_bastion: {profile: pg_bastion, vars: {mode: bastion}, locale: en-AU}

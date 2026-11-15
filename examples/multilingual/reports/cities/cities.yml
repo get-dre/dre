@@ -14,6 +14,14 @@ output:
   - name: letter
     format: pdf
     template: {file: letter.html}
+    # A4 portrait with 20 mm margins, unless the template's CSS sets its own @page.
+    page_size: A4
+    orientation: portrait
+    margins: 20mm
+    author: Acme Corp
+    subject: Office letter
+    # A letter with boxes for its script is worse than none: fail if a font can't be fetched.
+    missing_fonts: error
     queries: [offices, staff]
     for_each: {query: offices, key: city}
     destination: {profile: local, path: "out/letters/{{ each.city }}.pdf"}

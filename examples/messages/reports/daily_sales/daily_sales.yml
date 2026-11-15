@@ -1,0 +1,53 @@
+description: Yesterday's sales, as a headline in every channel and a file by email and Slack.
+queries: [headline, by_region]
+output:
+  # The file: emailed with its own subject and body, and posted to Slack with a message.
+  - name: by_region
+    format: csv
+    queries: [by_region]
+    destination:
+      - profile: relay_mail
+        to: [north@acme.example, south@acme.example]
+        cc: sales-ops@acme.example
+        bcc: archive@acme.example
+        subject: "Sales by region, {{ var('day') }}"
+        body: "Attached: sales by region for {{ var('day') }}."
+        attachment_name: "sales-{{ var('day') }}.csv"
+        retries: 2
+        retry_wait: 1m
+        max_retry_wait: 5m
+      - profile: sales_slack
+        channel: "#sales"
+        message: "Sales by region for {{ var('day') }}"
+        retries: 2
+        retry_wait: 30s
+        max_retry_wait: 2m
+
+  # The headline: one message, rendered for each destination.
+  - name: headline
+    format: message
+    queries: [headline]
+    title: "Acme Corp sales, {{ var('day') }}"
+    text: "Revenue: **{{ results.headline.value | currency('AUD') }}** from {{ results.headline.rows[0].orders }} orders."
+    destination:
+      # STARTTLS email to the default recipients, with the file attached.
+      - {profile: finance_mail, subject: "Sales {{ var('day') }}", attach: [by_region]}
+      # Implicit-TLS email to the board.
+      - {profile: board_mail, to: board@acme.example}
+      - {profile: sales_teams}
+      - {profile: ops_chat}
+      # Block Kit in the default channel, the file in a thread under it.
+      - profile: sales_slack
+        attach: [by_region]
+        files_in: thread
+        blocks:
+          - {type: header, text: {type: plain_text, text: "Acme Corp sales"}}
+          - {type: divider}
+          - {type: section, text: {type: mrkdwn, text: "Revenue: *{{ results.headline.value | currency('AUD') }}*"}}
+      # The same blocks to the sales director's DM, the file in a separate message.
+      - profile: sales_slack
+        user: U0123ABCD
+        attach: [by_region]
+        files_in: message
+        blocks:
+          - {type: section, text: {type: mrkdwn, text: "Revenue: *{{ results.headline.value | currency('AUD') }}*"}}

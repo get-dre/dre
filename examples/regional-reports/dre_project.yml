@@ -1,2 +1,9 @@
 name: regional_reports
 default_profile: sample
+# The Set a report runs as when none is chosen and the report names no default_set.
+default_set: north
+# Weeks start on Monday and are numbered ISO 8601 style, for run.date week arithmetic.
+week_start: monday
+week_numbering: iso
+vars:
+  out_dir: out

@@ -10,7 +10,9 @@ plugins:
 # owner/admin declaration of acceptance, intended for your normal configuration PR review.
 # A changed EULA requires manual review and a changed accept_license value; tools never rewrite it.
 # It is NOT a licence key and does not enable report exposure.
-# extensions:
-#   - name: dre-mcp
-#     version: "0.1.0-rc.1"
-#     accept_license: "2026-10"
+# `dre deps` asks before installing it (or takes --accept-proprietary); without a terminal it
+# installs nothing and says so.
+extensions:
+  - name: dre-mcp
+    version: "0.1.0-rc.3"
+    # accept_license: "2026-10"

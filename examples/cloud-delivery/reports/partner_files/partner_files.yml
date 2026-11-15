@@ -1,0 +1,72 @@
+description: One query, formatted to each partner's file specification.
+queries: [partner_orders, order_amounts]
+output:
+  # The bank: every field quoted, Windows line endings and a byte order mark, over FTPS.
+  # Held until someone checks it and runs `dre release`.
+  - name: bank
+    format: csv
+    queries: [partner_orders]
+    quoting: all
+    quote: '"'
+    line_ending: "\r\n"
+    byte_order_mark: true
+    encoding: utf-8
+    destination:
+      profile: bank_ftps
+      path: "inbound/acme-{{ var('day') }}.csv"
+      if_exists: error
+      atomic: true
+      temp_dir: inbound/.partial
+      retries: 5
+      retry_wait: 1m
+      max_retry_wait: 15m
+      hold: true
+  # The insurer: text columns quoted, an explicit null marker, formulas defused.
+  - name: insurer
+    format: csv
+    queries: [partner_orders]
+    quoting: strings
+    "null": "NULL"
+    formula_guard: true
+    destination: {profile: acme_gcs, path: "insurer/acme-{{ var('day') }}.csv", if_exists: overwrite}
+  # The warehouse loader: no quoting and no header row.
+  - name: loader
+    format: csv
+    queries: [order_amounts]
+    quoting: none
+    delimiter: ";"
+    header: false
+    destination: {profile: acme_s3, path: "loader/acme-{{ var('day') }}.csv", if_exists: number}
+  # The old mainframe feed: pipe-separated Latin-1, nothing quoted, in a ZipCrypto zip (weak,
+  # but it is the only encryption the receiving system opens).
+  - name: legacy
+    format: delimited
+    queries: [order_amounts]
+    delimiter: "|"
+    quoting: none
+    encoding: latin1
+    line_ending: "\n"
+    header: false
+    "null": ""
+    formula_guard: false
+    extension: txt
+    destination:
+      profile: legacy_ftp
+      path: "drop/acme-{{ var('day') }}.zip"
+      if_exists: overwrite
+      zip: {password: "{{ env_var('DRE_SECRET_LEGACY_ZIP_PASSWORD') }}", encryption: zipcrypto}
+  # A tab-separated file for the partner's spreadsheet users: text quoted, ' as the quote.
+  - name: partner_tab
+    format: delimited
+    queries: [partner_orders]
+    delimiter: "\t"
+    quoting: strings
+    line_ending: "\r\n"
+    destination: {profile: partner_azure, path: "acme-{{ var('day') }}.tsv", if_exists: number}
+  # A semicolon file quoted only where needed, with the project's delimited defaults otherwise.
+  - name: minimal
+    format: delimited
+    queries: [partner_orders]
+    delimiter: ";"
+    quoting: minimal
+    destination: {profile: legacy_ftp, path: "drop/acme-{{ var('day') }}-min.txt", if_exists: number}

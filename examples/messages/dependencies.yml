@@ -1,0 +1,7 @@
+plugins:
+  - duckdb
+  - csv
+  - email
+  - slack
+  - teams
+  - google_chat

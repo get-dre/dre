@@ -1,3 +1,6 @@
+# Named schedules. DRE doesn't fire them: your scheduler runs `dre run --schedule <name>`.
+# Each schedule beyond the Monday pair writes into its own folder (`out_dir`), so no two
+# schedules overwrite the same file.
 - name: monday_north
   report: regional
   set: north
@@ -8,3 +11,68 @@
   set: south
   cron: '0 9 * * 1'
   timezone: UTC
+
+# On shared timings from timings.yml.
+- name: month_close_all          # every report in the folder, with every Set
+  select: regional
+  timing: month_close
+  vars: {out_dir: out/month-close}
+- name: review_combined
+  report: regional
+  set: combined
+  timing: second_tuesday
+  vars: {out_dir: out/review}
+- name: east_fortnightly
+  report: regional
+  set: east
+  timing: fortnightly
+  vars: {out_dir: out/fortnightly}
+- name: quarterly_combined
+  report: regional
+  set: combined
+  timing: quarterly
+  vars: {out_dir: out/quarterly}
+- name: north_every_three_days
+  report: regional
+  set: north
+  timing: every_three_days
+  vars: {out_dir: out/three-day}
+
+# With the timing written in the schedule itself.
+- name: west_every_two_weeks
+  report: regional
+  set: west
+  every: {weeks: 2}
+  starting: "2026-01-06"
+  at: "09:30"
+  vars: {out_dir: out/west}
+- name: combined_monthly
+  report: regional
+  set: combined
+  every: {months: 1}
+  starting: "2026-01-31"
+  at: "18:00"
+  vars: {out_dir: out/monthly}
+- name: north_daily
+  report: regional
+  set: north
+  every: {days: 1}
+  starting: "2026-01-01"
+  at: "07:00"
+  except: ["2026-12-25"]
+  vars: {out_dir: out/daily}
+- name: south_last_friday
+  report: regional
+  set: south
+  rrule: "FREQ=MONTHLY;BYDAY=-1FR"
+  at: "17:00"
+  timezone: Europe/London
+  also: ["2026-12-23"]
+  vars: {out_dir: out/last-friday}
+# Paused: kept with its settings, but with no occurrences.
+- name: legacy_daily
+  report: regional
+  set: north
+  cron: '0 4 * * *'
+  enabled: false
+  vars: {out_dir: out/legacy}

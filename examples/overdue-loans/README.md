@@ -104,6 +104,39 @@ formulas; this example checks business values. Open output in your intended Exce
 before adopting a changed template. The inherited template's existing print range is a demo
 layout, not a guarantee that arbitrary larger reports fit on one page.
 
+## Aging by stored procedure
+
+The `aging` report sums the overdue balance by bucket. It reuses the `seed` and `prepare`
+queries, then a stored procedure fills a table that the last query reads, all on the same
+session. January's buckets add up to the same **AUD 3,480.01**.
+
+- **SQL Server**: `prepare_aging.sql` creates a temporary stored procedure (`#prepare_aging`,
+  this session only, no `CREATE PROCEDURE` permission) and runs it with `exec`. DRE runs a
+  query file statement by statement, so each statement is its own batch and the procedure
+  body uses no semicolons.
+- **Oracle**: a PL/SQL body contains semicolons, so it can't be created from a report. Run
+  `oracle/procedures.sql` once with SQL\*Plus or SQL Developer (it needs `CREATE PROCEDURE`
+  too). It creates a global temporary table, whose rows stay private to each session, and the
+  `acme_prepare_aging` procedure. The report only calls it: `call acme_prepare_aging()`.
+
+```bash
+cd oracle
+dre run aging
+```
+
+## TLS targets
+
+Each variant has a second target for an encrypted, verified connection, checked with
+`dre validate --target <name>` and not run by this project's checks:
+
+- `sqlserver --target tls`: `encrypt: true` with `trustServerCertificate: false`, a trust
+  store holding your CA (`SQLSERVER_TRUSTSTORE`, its password in
+  `DRE_SECRET_SQLSERVER_TRUSTSTORE_PASSWORD`) and the host name the certificate must carry.
+- `oracle --target tcps`: a `tcps://` URL on port 2484 with a PKCS12 trust store
+  (`ORACLE_TRUSTSTORE`) and `oracle.net.ssl_server_dn_match`.
+
+Both name the driver class (`driver_class`) instead of relying on service discovery.
+
 ## Change date, run unattended, recover
 
 ```bash

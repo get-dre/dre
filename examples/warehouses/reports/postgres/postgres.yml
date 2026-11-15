@@ -1,0 +1,15 @@
+description: Revenue by region on Postgres, reached directly, over TLS or through a bastion.
+# The session's temporary table, declared as a source in this report's own file.
+sources:
+  - name: pg_session
+    schema: pg_temp
+    tables:
+      - {name: orders, identifier: acme_orders}
+queries:
+  - {query: pg_setup, tab: false}
+  - pg_orders
+# The Sets come from sets.yml; each picks a connection. `dre run postgres --set all` runs all three.
+sets: [pg_direct, pg_tls, pg_bastion]
+default_set: pg_direct
+output:
+  destination: {profile: local, path: "out/postgres-{{ var('mode') }}.csv"}

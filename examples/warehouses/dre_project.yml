@@ -1,0 +1,64 @@
+name: warehouses
+default_profile: local_duckdb
+meta:
+  owner: data-platform@acme.example
+target_path: target
+vars:
+  region: North
+
+# Where dispatch() looks for each package's macros: this project first, so its
+# clickhouse__quote_identifier replaces the package's default.
+dispatch:
+  - macro_namespace: dre_utils
+    search_order: [warehouses, dre_utils]
+  - macro_namespace: acme_sql
+    search_order: [acme_sql]
+
+# Every output starts as a csv; a folder or report can change it.
+default_output: {format: csv}
+
+# Folder config: each warehouse's reports run on its own connection.
+reports:
+  postgres:
+    +profile: pg_direct
+    +tags: [postgres]
+  clickhouse:
+    +profile: ch_http
+    +tags: [clickhouse]
+  databricks:
+    +profile: databricks
+    +tags: [databricks]
+    # Databricks SQL warehouses run in UTC; run.date follows suit.
+    +timezone: UTC
+  bigquery:
+    +profile: bigquery
+    +tags: [bigquery, validate_only]
+    +meta: {cost_center: analytics}
+    +vars: {region: EU}
+    +locale: en-GB
+    +output: {format: csv, on_empty: continue}
+  snowflake:
+    +profile: snowflake
+    +tags: [snowflake, validate_only]
+
+# How DRE itself behaves (each has a DRE_ environment variable that wins).
+flags:
+  http_timeout: 120
+  keep_runs: 3
+  run_timeout: 30m
+
+# Secrets and per-row values stay masked; unlisted .sql files are an error.
+mask_secrets: true
+mask_row_values: true
+allow_unmanaged: false
+run_query_max_rows: 5000
+lookup_inline_max_rows: 100
+
+# Sources may be declared in any project file, this one included.
+sources:
+  - name: local_targets
+    profile: local_duckdb
+    schema: main
+    tables:
+      - name: targets
+        identifier: region_targets

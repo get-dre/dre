@@ -1,0 +1,25 @@
+description: One day's orders as Parquet, in three cloud stores.
+queries: [orders]
+output:
+  # Today's file, replaced on every run.
+  - name: latest
+    format: parquet
+    destination:
+      - {profile: acme_s3, path: "orders/latest.parquet", if_exists: overwrite}
+      - {profile: acme_gcs, path: "orders/latest.parquet", if_exists: overwrite}
+      - {profile: acme_azure, path: "orders/latest.parquet", if_exists: overwrite}
+  # One file per day, never replaced: a second run for the same day fails.
+  - name: archive
+    format: parquet
+    destination:
+      - {profile: acme_s3, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
+      - {profile: acme_gcs, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
+      - {profile: acme_azure, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
+  # Every run kept: a rerun is written next to the earlier file with a number.
+  - name: audit
+    format: parquet
+    destination:
+      - {profile: acme_s3, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
+      - {profile: acme_gcs, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
+      - {profile: acme_azure, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
+      - {profile: analyst_share, path: "orders/{{ var('day') }}.parquet"}
