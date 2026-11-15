@@ -11,6 +11,7 @@ destinations:
       prod:
         type: sftp
         host: "{{ env_var('SFTP_HOST') }}"
+        port: "{{ env_var('SFTP_PORT', '22') }}"
         username: "{{ env_var('SFTP_USERNAME') }}"
         password: "{{ env_var('DRE_SECRET_SFTP_PASSWORD') }}"
         host_key_fingerprint: "{{ env_var('SFTP_HOST_KEY_FINGERPRINT') }}"
@@ -20,9 +21,9 @@ destinations:
       dev: {deliver: false}
       prod:
         type: sftp
-        host: sftp.bank.example
-        port: 2222
-        username: acme_corp
+        host: "{{ env_var('BANK_SFTP_HOST', 'sftp.bank.example') }}"
+        port: "{{ env_var('BANK_SFTP_PORT', '2222') }}"
+        username: "{{ env_var('BANK_SFTP_USERNAME', 'acme_corp') }}"
         private_key_path: "{{ env_var('BANK_SFTP_KEY_FILE') }}"
         private_key_passphrase: "{{ env_var('DRE_SECRET_BANK_SFTP_KEY_PASSPHRASE') }}"
         known_hosts_path: "{{ env_var('BANK_SFTP_KNOWN_HOSTS') }}"
@@ -37,18 +38,21 @@ destinations:
       dev: {deliver: false}
       prod:
         type: sftp
-        host: sftp.archive.example
-        username: acme_corp
+        host: "{{ env_var('ARCHIVE_SFTP_HOST', 'sftp.archive.example') }}"
+        port: "{{ env_var('ARCHIVE_SFTP_PORT', '22') }}"
+        username: "{{ env_var('ARCHIVE_SFTP_USERNAME', 'acme_corp') }}"
         private_key: "{{ env_var('DRE_SECRET_ARCHIVE_SFTP_KEY') }}"
         allow_rsa_keys: false
         host_key_fingerprint: "{{ env_var('ARCHIVE_SFTP_HOST_KEY_FINGERPRINT') }}"
-  # The keys in your SSH agent; a host missing from ~/.ssh/known_hosts is refused.
+  # The keys in your SSH agent; a host missing from the selected known_hosts file is refused.
   ops_sftp:
     targets:
       dev: {deliver: false}
       prod:
         type: sftp
-        host: sftp.ops.internal
-        username: "{{ env_var('USER', 'reporter') }}"
+        host: "{{ env_var('OPS_SFTP_HOST', 'sftp.ops.internal') }}"
+        port: "{{ env_var('OPS_SFTP_PORT', '22') }}"
+        username: "{{ env_var('OPS_SFTP_USERNAME', env_var('USER', 'reporter')) }}"
+        known_hosts_path: "{{ env_var('OPS_SFTP_KNOWN_HOSTS', '~/.ssh/known_hosts') }}"
         use_agent: true
         accept_unknown_host: false
