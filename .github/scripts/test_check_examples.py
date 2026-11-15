@@ -20,9 +20,15 @@ if sys.argv[1:] == ["--version"]:
     print("dre 0.13.1")
     sys.exit(0)
 project = Path(sys.argv[sys.argv.index("--project-dir") + 1])
+if sys.argv[1] == "deps":
+    assert "--target" not in sys.argv, "deps takes no target"
+    binary = project / "dre_deps/plugins/csv/1.2.0/dre-plugin-csv"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("installed plugin")
 with open(os.environ["FAKE_DRE_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"args": sys.argv[1:], "env": sorted(os.environ),
-                          "seeded": (project / "reports/overdue/seed.sql").exists()}) + "\\n")
+                          "seeded": (project / "reports/overdue/seed.sql").exists(),
+                          "local_plugin": (project / ".plugins/dre-plugin-csv.exe").is_file()}) + "\\n")
 """
 
 
@@ -65,14 +71,19 @@ class ExampleCli(unittest.TestCase):
 class ValidateOnly(unittest.TestCase):
     """Examples that need a service or an account are validated in every target, never run."""
 
-    def calls(self, example):
+    def calls(self, example, prebuilt=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / "calls.jsonl"
             env = {k: v for k, v in os.environ.items() if not k.startswith(("DRE_", "PG", "DATABRICKS"))}
             env["FAKE_DRE_LOG"] = str(log)
-            result = subprocess.run([sys.executable, str(SCRIPT), "--dre", str(fake_dre(root)),
-                                     "--example", example], capture_output=True, text=True, env=env)
+            command = [sys.executable, str(SCRIPT), "--dre", str(fake_dre(root)), "--example", example]
+            if prebuilt:
+                plugins = root / "plugins with spaces"
+                plugins.mkdir()
+                (plugins / "dre-plugin-csv").write_text("prebuilt plugin")
+                command.extend(["--plugins-dir", str(plugins)])
+            result = subprocess.run(command, capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
@@ -86,6 +97,16 @@ class ValidateOnly(unittest.TestCase):
         calls = self.calls("warehouses")
         self.assertIn("DRE_SECRET_PG_PASSWORD", calls[0]["env"])
         self.assertIn("DATABRICKS_HOST", calls[0]["env"])
+
+    def test_alternate_plugin_sources_validate_with_a_real_local_binary(self):
+        calls = self.calls("warehouses")
+        validations = [c for c in calls if c["args"][0] == "validate"]
+        self.assertTrue(validations and all(c["local_plugin"] for c in validations))
+
+    def test_prebuilt_plugins_need_no_bootstrap_install(self):
+        calls = self.calls("warehouses", prebuilt=True)
+        self.assertEqual({c["args"][0] for c in calls}, {"validate"})
+        self.assertTrue(all(c["local_plugin"] for c in calls))
 
     def test_jdbc_example_is_prepared_then_validated(self):
         calls = self.calls("overdue-loans/oracle")

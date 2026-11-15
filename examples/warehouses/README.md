@@ -16,6 +16,19 @@ The project also shows macro packages (a pinned git package and a local one, wit
 choosing per database), Sets from `sets.yml`, folder config, `flags` and a source declared in
 `dre_project.yml`.
 
+The dependency declarations also show a GitHub release source (`duckdb`) and a local CSV
+executable (`.plugins/dre-plugin-csv.exe`). Before validating, install DuckDB from the default
+registry with `dre plugin install duckdb` in a directory outside this project. Set
+`DRE_PLUGINS_DIR` to the directory holding that install (normally `~/.dre/plugins`, expanded to
+an absolute path). Copy a CSV plugin executable you built or extracted from a published release
+to `.plugins/dre-plugin-csv.exe` in this project.
+Use that filename on every OS (Unix executables can also have an `.exe` suffix). A local plugin
+path must name the executable, not its folder. Keep that file available while using the project.
+
+CI supplies these installed executables before validation. It checks the source declarations
+and the real plugins' configuration, including every target; it does not test downloading a
+plugin through GitHub releases. The remaining packages install from their declared registry.
+
 ```bash
 dre validate --all-targets
 dre run local                       # DuckDB only: needs no server

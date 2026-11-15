@@ -1,12 +1,13 @@
 plugins:
   # A bare name, or a map with a version range or another registry index.
-  - duckdb
+  - {name: duckdb, github: get-dre/dre}
   - {name: postgres, version: ">=1.6"}
   - clickhouse
-  - databricks
+  - {name: databricks, registry: "https://github.com/get-dre/dre/releases/download/registry/packages.json"}
   - bigquery
   - snowflake
-  - {name: csv, registry: "https://github.com/get-dre/dre/releases/download/registry/packages.json"}
+  # A package you built or extracted yourself; this points to its executable, not a folder.
+  - {name: csv, local: .plugins/dre-plugin-csv.exe}
 
 # Macro packages: a public git package pinned to a tag, and one kept in this project. A local
 # package inside the project goes in a hidden folder, which DRE doesn't read as project config.

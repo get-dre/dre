@@ -276,7 +276,7 @@ def check(dre, plugins, names):
 
         def run(project, *args, target="dev"):
             command = [dre, *args, *locations(project)]
-            if args[0] != "schedule":
+            if args[0] not in ("schedule", "deps"):
                 command.extend(["--target", target])
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
             if result.returncode:
@@ -305,6 +305,24 @@ def check(dre, plugins, names):
             shutil.copytree(ROOT / "examples" / parent, scratch / parent, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("target", "out", "dre_deps",
                                                         "dre.lock", "__pycache__"))
+            if name == "warehouses":
+                # Validate alternate plugin sources with real descriptors already installed;
+                # this checks their configuration, not the GitHub download path.
+                if not plugins:
+                    bootstrap = scratch / "plugin-bootstrap"
+                    bootstrap.mkdir()
+                    (bootstrap / "dre_project.yml").write_text("name: plugin_bootstrap\n", encoding="utf-8")
+                    (bootstrap / "dependencies.yml").write_text("plugins: [duckdb, csv]\n", encoding="utf-8")
+                    run(bootstrap, "deps")
+                    environment["DRE_PLUGINS_DIR"] = str(bootstrap / "dre_deps" / "plugins")
+                directory = Path(environment["DRE_PLUGINS_DIR"])
+                executable = "dre-plugin-csv" + (".exe" if os.name == "nt" else "")
+                binaries = sorted(directory.rglob(executable))
+                if not binaries:
+                    raise AssertionError(f"CSV executable missing from {directory}")
+                local_binary = project / ".plugins/dre-plugin-csv.exe"
+                local_binary.parent.mkdir()
+                shutil.copy2(binaries[0], local_binary)
             if name in EXTERNAL:
                 if (scratch / parent / "prepare.py").exists() and variant:
                     # Its seed.sql is generated from the CSV inputs, without a database.
