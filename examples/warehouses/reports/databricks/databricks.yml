@@ -1,0 +1,21 @@
+description: Revenue by region on Databricks, written back to a Unity Catalog Volume.
+queries:
+  - {query: databricks_setup, tab: false}
+  - databricks_orders
+output:
+  format: csv
+  destination:
+    # Replaced on every run, signing in as the service principal.
+    - profile: volume_oauth
+      path: "/Volumes/main/acme/reports/revenue-latest.csv"
+      if_exists: overwrite
+    # One file per day, never replaced.
+    - profile: volume_pat
+      path: "/Volumes/main/acme/reports/revenue-{{ run.date.iso }}.csv"
+      if_exists: error
+    # Every run kept, numbered.
+    - profile: volume_token
+      path: "/Volumes/main/acme/audit/revenue-{{ run.date.iso }}.csv"
+      if_exists: number
+    - profile: volume_auto
+      path: "/Volumes/main/acme/shared/revenue.csv"

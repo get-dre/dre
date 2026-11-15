@@ -1,0 +1,117 @@
+# Two targets: `dev` (the default) renders every message and file locally and sends nothing;
+# `prod` sends them. `local` sends to a mail catcher and a webhook mock on this machine.
+# Secrets come from environment variables; names starting DRE_SECRET_ are masked in DRE's output.
+connections:
+  sample:
+    targets:
+      dev: {type: duckdb}
+      local: {type: duckdb}
+      prod: {type: duckdb}
+
+destinations:
+  # Microsoft 365 or Gmail: STARTTLS on port 587, with an app password.
+  finance_mail:
+    targets:
+      dev: {deliver: false}
+      local: &mail_catcher
+        type: email
+        host: "{{ env_var('SMTP_HOST', 'localhost') }}"
+        port: "{{ env_var('SMTP_PORT', '1025') }}"
+        tls: none
+        from: "Acme Reports <reports@acme.example>"
+      prod:
+        type: email
+        host: smtp.office365.com
+        port: 587
+        tls: starttls
+        username: reports@acme.example
+        password: "{{ env_var('DRE_SECRET_SMTP_PASSWORD') }}"
+        from: "Acme Reports <reports@acme.example>"
+        to: finance@acme.example
+        cc: controller@acme.example
+        bcc: archive@acme.example
+        max_attachment_mb: 10
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+
+  # A provider that only offers implicit TLS (SMTPS) on port 465.
+  board_mail:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: email
+        host: "{{ env_var('SMTP_HOST', 'localhost') }}"
+        port: "{{ env_var('SMTPS_PORT', '1465') }}"
+        tls: implicit
+        # Only for a local test server with a self-signed certificate.
+        tls_accept_invalid_certs: true
+        username: reports
+        password: "{{ env_var('DRE_SECRET_SMTP_PASSWORD') }}"
+        from: "Acme Reports <reports@acme.example>"
+      prod:
+        type: email
+        host: smtp.mail.example
+        port: 465
+        tls: implicit
+        username: reports@acme.example
+        password: "{{ env_var('DRE_SECRET_SMTP_PASSWORD') }}"
+        from: "Acme Reports <reports@acme.example>"
+
+  # The office relay: plain SMTP on the internal network, no sign-in.
+  relay_mail:
+    targets:
+      dev: {deliver: false}
+      local: *mail_catcher
+      prod:
+        type: email
+        host: relay.acme.internal
+        port: 25
+        tls: none
+        from: "Acme Reports <reports@acme.example>"
+
+  # A Teams channel's Workflows webhook, and a Google Chat space's webhook. A webhook URL is a
+  # credential: keep it in an environment variable.
+  sales_teams:
+    targets:
+      dev: {deliver: false}
+      local: {type: teams, webhook_url: "{{ env_var('TEAMS_WEBHOOK_URL') }}"}
+      prod:
+        type: teams
+        webhook_url: "{{ env_var('TEAMS_WEBHOOK_URL') }}"
+        connect_timeout: 30s
+        timeout: 1m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 5m
+  ops_chat:
+    targets:
+      dev: {deliver: false}
+      local: {type: google_chat, webhook_url: "{{ env_var('GOOGLE_CHAT_WEBHOOK_URL') }}"}
+      prod:
+        type: google_chat
+        webhook_url: "{{ env_var('GOOGLE_CHAT_WEBHOOK_URL') }}"
+        connect_timeout: 30s
+        timeout: 1m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 5m
+
+  # A Slack bot (xoxb- token) with a default channel.
+  sales_slack:
+    targets:
+      dev: {deliver: false}
+      local: &slack
+        type: slack
+        token: "{{ env_var('DRE_SECRET_SLACK_TOKEN') }}"
+        channel: "{{ env_var('SLACK_CHANNEL') }}"
+      prod:
+        <<: *slack
+        api_url: https://slack.com/api
+        connect_timeout: 30s
+        timeout: 1m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 5m

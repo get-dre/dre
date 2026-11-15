@@ -1,0 +1,2 @@
+description: Revenue by region on BigQuery. Validated only; needs a Google Cloud project.
+queries: [bq_orders]

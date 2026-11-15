@@ -1,0 +1,7 @@
+name: messages
+default_profile: sample
+# Amounts in messages are formatted for Australia, and run.date is a Sydney date.
+locale: en-AU
+timezone: Australia/Sydney
+vars:
+  day: '2026-01-31'

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Acme Corp offices</title>
+  <style>
+    body { font-family: sans-serif; }
+    h1 { color: #1f7a4d; }
+    li { font-size: 14pt; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>Hello from every Acme Corp office</h1>
+  <ul>
+  {% for row in results.notice.rows %}
+    <li lang="{{ row.lang }}" dir="{{ row.dir }}">{{ row.city }}: {{ row.greeting }}</li>
+  {% endfor %}
+  </ul>
+</body>
+</html>

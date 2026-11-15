@@ -1,0 +1,2 @@
+description: Revenue by region on Snowflake. Validated only; needs a Snowflake account.
+queries: [sf_orders]

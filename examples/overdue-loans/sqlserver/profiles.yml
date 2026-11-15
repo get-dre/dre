@@ -11,3 +11,19 @@ connections:
           databaseName: "{{ env_var('DRE_TEST_JDBC_CATALOG', 'master') }}"
           encrypt: "{{ env_var('DRE_TEST_JDBC_ENCRYPT', 'true') }}"
           trustServerCertificate: "{{ env_var('DRE_TEST_JDBC_TRUST_CERTIFICATE', 'false') }}"
+      # TLS with the server's certificate checked against your own CA's trust store, and the
+      # host name it must carry. The driver class is named instead of found by discovery.
+      tls:
+        type: jdbc
+        url: "{{ env_var('DRE_TEST_JDBC_URL') }}"
+        driver_jars: "{{ env_var('DRE_TEST_JDBC_JAR') }}"
+        driver_class: com.microsoft.sqlserver.jdbc.SQLServerDriver
+        properties:
+          user: "{{ env_var('DRE_TEST_JDBC_USER') }}"
+          password: "{{ env_var('DRE_TEST_JDBC_PASSWORD') }}"
+          databaseName: "{{ env_var('DRE_TEST_JDBC_CATALOG', 'master') }}"
+          encrypt: true
+          trustServerCertificate: false
+          trustStore: "{{ env_var('SQLSERVER_TRUSTSTORE') }}"
+          trustStorePassword: "{{ env_var('DRE_SECRET_SQLSERVER_TRUSTSTORE_PASSWORD') }}"
+          hostNameInCertificate: "{{ env_var('SQLSERVER_TLS_HOST', 'localhost') }}"

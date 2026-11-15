@@ -1,0 +1,148 @@
+# Three targets: `dev` (the default) formats every file locally and delivers nothing; `local`
+# delivers to emulators on this machine; `prod` delivers to the real stores. Secrets come from
+# environment variables; names starting DRE_SECRET_ are masked in DRE's output.
+connections:
+  sample:
+    targets:
+      dev: {type: duckdb}
+      local: {type: duckdb}
+      prod: {type: duckdb}
+
+destinations:
+  # Amazon S3. Locally an S3-compatible emulator with static keys; in production a named AWS
+  # profile, which may use SSO or `credential_process` from ~/.aws/config.
+  acme_s3:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: s3
+        bucket: acme-extracts
+        region: us-east-1
+        endpoint: "{{ env_var('S3_ENDPOINT', 'http://localhost:9000') }}"
+        allow_http: true
+        access_key_id: "{{ env_var('AWS_ACCESS_KEY_ID') }}"
+        secret_access_key: "{{ env_var('DRE_SECRET_AWS_SECRET_ACCESS_KEY') }}"
+        session_token: "{{ env_var('DRE_SECRET_AWS_SESSION_TOKEN') }}"
+      prod:
+        type: s3
+        bucket: acme-extracts
+        region: ap-southeast-2
+        profile: acme-reporting
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+
+  # Google Cloud Storage. Locally an emulator, with a key's JSON text; in production a key file.
+  acme_gcs:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: gcs
+        bucket: acme-extracts
+        endpoint: "{{ env_var('GCS_ENDPOINT', 'http://localhost:4443') }}"
+        service_account_key: "{{ env_var('DRE_SECRET_GCS_KEY_JSON') }}"
+      prod:
+        type: gcs
+        bucket: acme-extracts
+        service_account_key_path: "{{ env_var('GCS_KEY_FILE') }}"
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+
+  # Azure Blob Storage. Locally an emulator through a connection string; in production the
+  # machine's managed identity.
+  acme_azure:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: azure_blob
+        container: acme-extracts
+        connection_string: "{{ env_var('DRE_SECRET_AZURE_CONNECTION_STRING') }}"
+      prod:
+        type: azure_blob
+        account_name: acmeextracts
+        container: acme-extracts
+        use_managed_identity: true
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+
+  # A partner's storage account: an account key locally, a SAS token they issue in production.
+  partner_azure:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: azure_blob
+        account_name: "{{ env_var('AZURE_ACCOUNT_NAME', 'devstoreaccount1') }}"
+        container: partner-drop
+        access_key: "{{ env_var('DRE_SECRET_AZURE_ACCESS_KEY') }}"
+        endpoint: "{{ env_var('AZURE_BLOB_ENDPOINT', 'http://localhost:10000/devstoreaccount1') }}"
+      prod:
+        type: azure_blob
+        account_name: partnerdrop
+        container: acme
+        sas_token: "{{ env_var('DRE_SECRET_PARTNER_SAS_TOKEN') }}"
+
+  # The analysts' share, uploaded by whoever runs it with their own `az login`.
+  analyst_share:
+    # The entry used when no --target is given (the default is already dev).
+    target: dev
+    targets:
+      dev: {deliver: false}
+      local: {deliver: false}
+      prod:
+        type: azure_blob
+        account_name: acmeanalysts
+        container: shared
+        use_azure_cli: true
+
+  # The bank's FTPS server (explicit TLS). The local test server has a self-signed certificate.
+  bank_ftps:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: ftp
+        host: "{{ env_var('FTP_HOST', 'localhost') }}"
+        port: "{{ env_var('FTPS_PORT', '990') }}"
+        username: acme
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: explicit
+        tls_accept_invalid_certs: true
+      prod:
+        type: ftp
+        host: ftps.bank.example
+        username: acme_corp
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: explicit
+        passive: true
+        connect_timeout: 30s
+        timeout: 2m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+
+  # An old plain-FTP server inside the network: the password crosses it in clear text.
+  legacy_ftp:
+    targets:
+      dev: {deliver: false}
+      local:
+        type: ftp
+        host: "{{ env_var('FTP_HOST', 'localhost') }}"
+        port: "{{ env_var('FTP_PORT', '21') }}"
+        username: acme
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: none
+        passive: true
+      prod:
+        type: ftp
+        host: ftp.legacy.internal
+        username: acme_corp
+        password: "{{ env_var('DRE_SECRET_FTP_PASSWORD') }}"
+        tls: none
+        passive: false

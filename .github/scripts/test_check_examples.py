@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check public-example discovery and selection at the checker CLI boundary."""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,6 +10,40 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name("check_examples.py")
+EXAMPLES = SCRIPT.parents[2] / "examples"
+# A stand-in CLI: logs each call's arguments, the env vars it was given and whether the
+# overdue-loans seed exists, and succeeds.
+FAKE_DRE = """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if sys.argv[1:] == ["--version"]:
+    print("dre 0.13.1")
+    sys.exit(0)
+project = Path(sys.argv[sys.argv.index("--project-dir") + 1])
+if project.name == "sftp-delivery":
+    known_hosts = os.environ.get("OPS_SFTP_KNOWN_HOSTS", "~/.ssh/known_hosts")
+    assert Path(known_hosts).expanduser().is_file(), "missing SFTP known_hosts"
+    if sys.argv[1] != "validate":
+        sys.exit("validated SFTP; stop before service-free output checks")
+    if "EXPECTED_KNOWN_HOSTS" in os.environ:
+        assert known_hosts == os.environ["EXPECTED_KNOWN_HOSTS"]
+if sys.argv[1] == "deps":
+    assert "--target" not in sys.argv, "deps takes no target"
+    binary = project / "dre_deps/plugins/csv/1.2.0/dre-plugin-csv"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("installed plugin")
+with open(os.environ["FAKE_DRE_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"args": sys.argv[1:], "env": sorted(os.environ),
+                          "seeded": (project / "reports/overdue/seed.sql").exists(),
+                          "local_plugin": (project / ".plugins/dre-plugin-csv.exe").is_file()}) + "\\n")
+"""
+
+
+def fake_dre(root):
+    dre = root / "dre"
+    dre.write_text(FAKE_DRE, encoding="utf-8")
+    dre.chmod(0o755)
+    return dre
 
 
 class ExampleCli(unittest.TestCase):
@@ -37,6 +72,71 @@ class ExampleCli(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("new-project", result.stderr)
             self.assertIn("register", result.stderr)
+
+
+@unittest.skipIf(os.name == "nt", "the stand-in CLI is a POSIX script")
+class ValidateOnly(unittest.TestCase):
+    """Examples that need a service or an account are validated in every target, never run."""
+
+    def calls(self, example, prebuilt=False, configured_hosts=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "calls.jsonl"
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("DRE_", "PG", "DATABRICKS")) and "SFTP" not in k}
+            env["FAKE_DRE_LOG"] = str(log)
+            home = root / "empty-home"
+            home.mkdir()
+            env.update(HOME=str(home), USERPROFILE=str(home))
+            if configured_hosts:
+                hosts = root / "configured_hosts"
+                hosts.touch()
+                env.update(OPS_SFTP_KNOWN_HOSTS=str(hosts), EXPECTED_KNOWN_HOSTS=str(hosts))
+            command = [sys.executable, str(SCRIPT), "--dre", str(fake_dre(root)), "--example", example]
+            if prebuilt:
+                plugins = root / "plugins with spaces"
+                plugins.mkdir()
+                (plugins / "a-build/dre-plugin-csv").mkdir(parents=True)
+                (plugins / "z-bin").mkdir()
+                (plugins / "z-bin/dre-plugin-csv").write_text("prebuilt plugin")
+                command.extend(["--plugins-dir", str(plugins)])
+            result = subprocess.run(command, capture_output=True, text=True, env=env)
+            if example == "sftp-delivery":
+                self.assertIn("validated SFTP; stop before service-free output checks", result.stderr)
+            else:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    def test_defaulted_sftp_file_is_supplied_without_personal_ssh_files(self):
+        self.calls("sftp-delivery", prebuilt=True)
+
+    def test_explicit_sftp_file_is_preserved(self):
+        self.calls("sftp-delivery", prebuilt=True, configured_hosts=True)
+
+    def test_service_example_is_validated_in_every_target_and_not_run(self):
+        calls = self.calls("warehouses")
+        commands = [c["args"][0] for c in calls]
+        self.assertNotIn("run", commands)
+        self.assertTrue(any("--all-targets" in c["args"] for c in calls if c["args"][0] == "validate"))
+
+    def test_credentials_get_inert_placeholders(self):
+        calls = self.calls("warehouses")
+        self.assertIn("DRE_SECRET_PG_PASSWORD", calls[0]["env"])
+        self.assertIn("DATABRICKS_HOST", calls[0]["env"])
+
+    def test_alternate_plugin_sources_validate_with_a_real_local_binary(self):
+        calls = self.calls("warehouses")
+        validations = [c for c in calls if c["args"][0] == "validate"]
+        self.assertTrue(validations and all(c["local_plugin"] for c in validations))
+
+    def test_prebuilt_plugins_need_no_bootstrap_install(self):
+        calls = self.calls("warehouses", prebuilt=True)
+        self.assertEqual({c["args"][0] for c in calls}, {"validate"})
+        self.assertTrue(all(c["local_plugin"] for c in calls))
+
+    def test_jdbc_example_is_prepared_then_validated(self):
+        calls = self.calls("overdue-loans/oracle")
+        self.assertTrue(calls and all(c["seeded"] for c in calls))
+        self.assertEqual({c["args"][0] for c in calls}, {"validate"})
 
 
 if __name__ == "__main__":

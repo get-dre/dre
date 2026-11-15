@@ -1,0 +1,23 @@
+# Shared timings: schedules use them by name (`timing: month_close`), so a calendar is written
+# once. `dre schedule ls` shows when each one fires.
+month_close:
+  cron: "0 6 1 * *"
+  timezone: Europe/London
+  except: ["2026-01-01"]          # no close on New Year's Day
+second_tuesday:
+  rrule: "FREQ=MONTHLY;BYDAY=2TU"
+  at: "08:00"
+  timezone: Europe/London
+  also: ["2026-04-03"]            # one extra review, on a Friday
+fortnightly:
+  every: {weeks: 2}
+  starting: "2026-01-05"
+  at: "07:00"
+quarterly:
+  every: {months: 3}
+  starting: "2026-01-02"
+  at: "07:30"
+every_three_days:
+  every: {days: 3}
+  starting: "2026-01-01"
+  at: "06:00"

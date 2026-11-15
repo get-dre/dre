@@ -17,12 +17,16 @@ import zlib
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("tutorial", "monthly-finance", "bank-file", "regional-reports",
          "slack-headline", "sftp-delivery", "password-statements", "multilingual",
-         "data-tests", "mcp")
+         "data-tests", "mcp", "cloud-delivery", "messages")
+# Validated in every target, never run: they need a database service or an account.
 EXTERNAL = {"overdue-loans/oracle": "requires Oracle and user-supplied JDBC drivers",
-            "overdue-loans/sqlserver": "requires SQL Server and user-supplied JDBC drivers"}
+            "overdue-loans/sqlserver": "requires SQL Server and user-supplied JDBC drivers",
+            "warehouses": "requires Postgres, ClickHouse, Databricks, BigQuery and Snowflake"}
 # Minimum versions for callers checking examples with an older installed CLI. CI uses the
 # latest published CLI below 1.0, or the source build for mixed engine changes.
-NEEDS = {"password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0)}
+NEEDS = {"monthly-finance": (0, 11, 0), "password-statements": (0, 7, 0), "multilingual": (0, 9, 0), "data-tests": (0, 11, 0),
+         "cloud-delivery": (0, 13, 0), "messages": (0, 13, 0), "warehouses": (0, 13, 0)}
+PASSPHRASE = "example-passphrase"
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 sys.dont_write_bytecode = True
 
@@ -205,6 +209,54 @@ def selected_examples(names):
     return sorted(selected)
 
 
+def placeholders(names, scratch):
+    """Inert values for required env vars and defaulted file paths in the selected examples: key
+    files and key text are throwaway SSH keys (files encrypted with the placeholder passphrase),
+    other files are empty, fingerprints and URLs are well-formed, the rest is plain text."""
+    empty = scratch / "placeholder"
+    empty.touch()
+
+    def ssh_key(name, passphrase):
+        path = scratch / name
+        if not path.exists():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", str(path)],
+                           check=True, capture_output=True)
+        return path
+
+    values = {}
+    for name in names:
+        for path in (ROOT / "examples" / name).rglob("*.yml"):
+            # Suffixes are checked in order: `_KEY_FILE` before `_KEY` (any `_KEY`, an access
+            # key too, gets an SSH key's text, which a plain secret accepts as well).
+            for var, default in re.findall(r"env_var\('([A-Z0-9_]+)'(\s*,[^)]*)?\)", path.read_text(encoding="utf-8")):
+                if default and not var.endswith(("_FILE", "_KNOWN_HOSTS", "_JAR", "_TRUSTSTORE")):
+                    continue
+                if var.endswith("_KEY_FILE"):
+                    values[var] = str(ssh_key("key_file", PASSPHRASE))
+                elif var.endswith("_KEY"):
+                    values[var] = ssh_key("key_text", "").read_text(encoding="utf-8")
+                elif var.endswith("_PASSPHRASE"):
+                    values[var] = PASSPHRASE
+                elif var.endswith(("_FILE", "_KNOWN_HOSTS", "_JAR", "_TRUSTSTORE")):
+                    values[var] = str(empty)
+                elif var.endswith("_FINGERPRINT"):
+                    values[var] = "SHA256:" + "A" * 43
+                elif var.endswith("JDBC_URL"):
+                    values[var] = "jdbc:example://localhost"
+                elif var.endswith("_URL"):
+                    values[var] = "https://example.invalid/hook"
+                elif var.endswith("_JSON"):
+                    values[var] = "{}"
+                else:
+                    values[var] = "not-a-real-" + var.lower().replace("_", "-")
+    return values
+
+
+def locations(project):
+    profiles = project / "profiles" if (project / "profiles").is_dir() else project
+    return ["--project-dir", str(project), "--profiles-dir", str(profiles)]
+
+
 def check(dre, plugins, names):
     environment = dict(os.environ)
     environment.pop("DRE_TARGET", None)
@@ -221,40 +273,104 @@ def check(dre, plugins, names):
     })
     with tempfile.TemporaryDirectory(prefix="dre-examples-") as scratch:
         scratch = Path(scratch)
+        for var, value in placeholders(names, scratch).items():
+            environment.setdefault(var, value)
 
-        def run(project, *args, target="dev"):
-            command = [dre, *args, "--project-dir", str(project),
-                       "--profiles-dir", str(project / "profiles" if (project / "profiles").is_dir() else project)]
-            if args[0] != "schedule":
+        def run(project, *args, target="dev", success=True):
+            command = [dre, *args, *locations(project)]
+            if args[0] not in ("schedule", "deps"):
                 command.extend(["--target", target])
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
-            if result.returncode:
+            if (result.returncode == 0) != success:
                 raise AssertionError(" ".join(command) + "\n" + result.stdout + result.stderr)
             return result.stdout + result.stderr
 
         version = subprocess.run([dre, "--version"], capture_output=True, text=True).stdout
         have = tuple(int(x) for x in version.split()[-1].split("-")[0].split(".")[:3])
+        def validate(project):
+            run(project, "validate")
+            # Every target's settings; unset or unknown keys are mistakes, not warnings.
+            command = [dre, "validate", "--all-targets", *locations(project)]
+            result = subprocess.run(command, env=environment, capture_output=True, text=True)
+            output = result.stdout + result.stderr
+            if result.returncode or re.search(r"warning\[(unknown-|unset-env-var)", output):
+                raise AssertionError(" ".join(command) + "\n" + output)
+
         projects = {}
         for name in names:
-            if name in EXTERNAL:
-                print(f"{name}: not run locally; {EXTERNAL[name]}")
-                continue
             if have < NEEDS.get(name, (0, 0, 0)):
                 print(f"{name}: skipped, it needs DRE {'.'.join(map(str, NEEDS[name]))} (this is {have})")
                 continue
             project = scratch / name
-            shutil.copytree(ROOT / "examples" / name, project,
+            # A variant (overdue-loans/oracle) is copied with its parent's shared files.
+            parent, _, variant = name.partition("/")
+            shutil.copytree(ROOT / "examples" / parent, scratch / parent, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("target", "out", "dre_deps",
                                                         "dre.lock", "__pycache__"))
+            if name == "warehouses":
+                # Validate alternate plugin sources with real descriptors already installed;
+                # this checks their configuration, not the GitHub download path.
+                if not plugins:
+                    bootstrap = scratch / "plugin-bootstrap"
+                    bootstrap.mkdir()
+                    (bootstrap / "dre_project.yml").write_text("name: plugin_bootstrap\n", encoding="utf-8")
+                    (bootstrap / "dependencies.yml").write_text("plugins: [duckdb, csv]\n", encoding="utf-8")
+                    run(bootstrap, "deps")
+                    environment["DRE_PLUGINS_DIR"] = str(bootstrap / "dre_deps" / "plugins")
+                directory = Path(environment["DRE_PLUGINS_DIR"])
+                executable = "dre-plugin-csv" + (".exe" if os.name == "nt" else "")
+                binaries = sorted(path for path in directory.rglob(executable) if path.is_file())
+                if not binaries:
+                    raise AssertionError(f"CSV executable missing from {directory}")
+                local_binary = project / ".plugins/dre-plugin-csv.exe"
+                local_binary.parent.mkdir()
+                shutil.copy2(binaries[0], local_binary)
+            if name in EXTERNAL:
+                if (scratch / parent / "prepare.py").exists() and variant:
+                    # Its seed.sql is generated from the CSV inputs, without a database.
+                    subprocess.run([sys.executable, str(scratch / parent / "prepare.py"), variant],
+                                   check=True, capture_output=True)
+                validate(project)
+                print(f"{name}: validated in every target, not run; {EXTERNAL[name]}")
+                continue
             projects[name] = project
-            run(project, "validate")
-            if name in ("slack-headline", "sftp-delivery"):
-                run(project, "validate", target="prod")
+            validate(project)
             if name == "data-tests":
                 run(project, "test", "checked")
                 run(project, "build", "--schedule", "checked_daily")
                 assert (project / "out/checked.csv").read_text(encoding="utf-8").startswith("execution,amount")
                 run(project, "run", "checked")
+            elif name == "monthly-finance":
+                run(project, "test", "finance")
+                tested = current(project, "finance")
+                assert {t["test"] for t in tested.get("tests", [])} == {"nonnegative", "reconcile_revenue"}
+                assert all(t["status"] == "pass" for t in tested["tests"])
+                assert not tested["outputs"] and not tested["deliveries"]
+                assert not (project / "out").exists(), "test must not publish report files"
+                run(project, "build", "finance")
+                built = current(project, "finance")
+                assert built["outputs"] and all(t["status"] == "pass" for t in built["tests"])
+
+                # An incomplete account mapping drops Services from Detail, but not Summary.
+                bad = scratch / "unmapped-finance"
+                shutil.copytree(project, bad, ignore=shutil.ignore_patterns("target", "out", "dre_deps", "dre.lock"))
+                lookup = bad / "lookups/accounts.yml"
+                lookup.write_text(lookup.read_text(encoding="utf-8").replace(
+                    "  - {category: Services, account_code: '4100'}\n", ""), encoding="utf-8")
+                run(bad, "build", "finance", success=False)
+                failed = current(bad, "finance")
+                assert any(t["test"] == "reconcile_revenue" and t["status"] == "fail"
+                           and t["failures"] == 1 for t in failed["tests"]), failed
+                assert not failed["outputs"] and not failed["deliveries"]
+                assert not (bad / "out").exists(), "failed build must not publish the finance pack"
+                print("monthly-finance: test and build passed; bad account mapping blocked both workbooks")
+            elif name == "cloud-delivery":
+                run(project, "run")
+                # Hold renders real delivery paths without contacting external stores.
+                run(project, "run", "orders", "--hold", target="local")
+                planned = current(project, "orders")
+                assert len(planned["outputs"]) == 3
+                assert any(d["status"] == "held" for d in planned["deliveries"])
             elif name == "mcp":
                 run(project, "run", "setup", "--no-deliver")
                 run(project, "run", "revenue", "--no-deliver")
@@ -280,9 +396,21 @@ def check(dre, plugins, names):
                 assert book["Sales"]["D2"][1] == "#,##0.00", "Revenue lost its number format"
             assert_cell(workbook(projects[name] / "out/North.xlsx")["Sales"], "D3", 800)
 
+        regional = projects.get("regional-reports")
+        if regional:
+            combined = workbook(regional / "out/All.xlsx")
+            assert_cell(combined["Sales"], "D6", 3500)
+            assert "All targets" in combined, "the combined Set renames the targets tab"
+            assert (regional / "out/East.xlsx").exists(), "an empty East workbook is still written"
+            assert not (regional / "out/West.xlsx").exists(), "an empty West run writes nothing"
+
         if "monthly-finance" in projects:
             finance = workbook(projects["monthly-finance"] / "out/finance-2026-01.xlsx")
-            assert set(finance) == {"Detail", "Summary"}
+            # Exceptions is empty, so its tab is left out; Calendar starts at B3 with no header.
+            assert set(finance) == {"Detail", "Summary", "Targets", "Calendar"}
+            assert_cell(finance["Targets"], "D2", 2000)
+            assert_cell(finance["Targets"], "E2", 240)
+            assert finance["Calendar"]["B3"][1] == "dd/mm/yyyy" and "A1" not in finance["Calendar"]
             assert_cell(finance["Detail"], "D6", 3500)
             assert_cell(finance["Detail"], "F2", 120)
             assert finance["Detail"]["F2"][2] == "ROUND(D2*0.1,2)"
@@ -290,6 +418,7 @@ def check(dre, plugins, names):
             assert_cell(finance["Summary"], "B4", 3500)
             presentation = workbook(projects["monthly-finance"] / "out/presentation-2026-01.xlsx")
             assert_cell(presentation["Summary"], "A1", "Acme Corp - 2026-01")
+            assert_cell(presentation["Summary"], "B2", 3500)
             assert_cell(presentation["Summary"], "B5", 2000)
             assert_cell(presentation["Summary"], "B6", 1500)
             assert presentation["Summary"]["B7"][2] == "SUM(B5:B6)", "Template total failed to expand"
@@ -305,6 +434,25 @@ def check(dre, plugins, names):
             record = latest(records(projects[name]))
             assert record["deliveries"] and all(
                 d["status"] == "not_delivered" for d in record["deliveries"])
+        cloud = projects.get("cloud-delivery")
+        if cloud:
+            files = current(cloud, "partner_files")
+            folder = cloud / "target/run/partner_files/default/runs" / files["run_id"]
+            assert (folder / "bank.csv").read_bytes().startswith(
+                b'\xef\xbb\xbf"order_id","region","amount","note"\r\n'), "bank file layout"
+            assert (folder / "legacy.txt").read_text(encoding="latin-1") == (
+                "5001|North|1200.00\n5002|North|800.00\n5003|South|900.00\n")
+            assert (folder / "insurer.csv").read_text(encoding="utf-8").splitlines()[2] == \
+                '5002,"North",800.00,NULL'
+            for report in ("orders", "partner_files"):
+                assert {d["status"] for d in current(cloud, report)["deliveries"]} <= {
+                    "not_delivered", "held"}, report
+        messages = projects.get("messages")
+        if messages:
+            sales = current(messages, "daily_sales")
+            assert sales["deliveries"] and all(d["status"] == "not_delivered" for d in sales["deliveries"])
+            headline = next(o for o in sales["output_results"] if o.get("message"))
+            assert headline["message"]["text"].startswith("Revenue: **A$3,500**"), headline["message"]
         if "slack-headline" in projects:
             headline = latest(records(projects["slack-headline"]))["output_results"][0]
             assert headline["message"]["text"] == "Acme Corp revenue: $3,500"

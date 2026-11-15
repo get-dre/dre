@@ -1,0 +1,425 @@
+# Each connection shows one way of reaching a warehouse. `dev` is a server on this machine
+# (for example in Docker); `prod` is the real one. Secrets come from environment variables;
+# names starting DRE_SECRET_ are masked in DRE's output.
+connections:
+  # DuckDB in memory, for the local report.
+  local_duckdb:
+    targets:
+      dev: {type: duckdb, threads: 4, memory_limit: 1GB}
+      prod: {type: duckdb, threads: 8, memory_limit: 4GB}
+
+  # --- Postgres -------------------------------------------------------------------------------
+  # Direct: no TLS on the local server; on prod TLS with the certificate and host name checked.
+  pg_direct:
+    targets:
+      dev:
+        type: postgres
+        host: "{{ env_var('PGHOST', 'localhost') }}"
+        port: "{{ env_var('PGPORT', '5432') }}"
+        user: "{{ env_var('PGUSER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        database: "{{ env_var('PGDATABASE', 'acme') }}"
+        sslmode: disable
+        # Up to two Bindings run on this connection at once.
+        threads: 2
+      prod:
+        type: postgres
+        host: db.acme.example
+        port: 5432
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        dbname: acme
+        sslmode: verify-full
+        sslrootcert: "{{ env_var('PG_CA_FILE') }}"
+        # First on the search path, and SET ROLE after connecting.
+        schema: reporting
+        role: report_reader
+        connect_timeout: 10s
+        retries: 3
+        retry_wait: 5s
+        max_retry_wait: 1m
+
+  # TLS: encrypted but unchecked on dev, the CA checked (not the host name) on prod.
+  pg_tls:
+    # The entry used without --target or DRE_TARGET (`dev` is the default anyway).
+    target: dev
+    targets:
+      dev:
+        type: postgres
+        host: "{{ env_var('PGHOST', 'localhost') }}"
+        port: "{{ env_var('PGPORT', '5432') }}"
+        user: "{{ env_var('PGUSER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        database: "{{ env_var('PGDATABASE', 'acme') }}"
+        sslmode: require
+      prod:
+        type: postgres
+        host: db.acme.example
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        database: acme
+        sslmode: verify-ca
+        sslrootcert: "{{ env_var('PG_CA_FILE') }}"
+
+  # Through an SSH bastion: DRE opens the tunnel itself. The host key is pinned or read from
+  # a known_hosts file; the key comes from a file, the key's text, or your SSH agent.
+  pg_bastion:
+    targets:
+      dev:
+        type: postgres
+        host: db.internal
+        port: 5432
+        user: "{{ env_var('PGUSER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        database: acme
+        sslmode: prefer
+        ssh:
+          host: "{{ env_var('BASTION_HOST', 'localhost') }}"
+          port: "{{ env_var('BASTION_PORT', '22') }}"
+          username: "{{ env_var('BASTION_USER', 'reporter') }}"
+          private_key_path: "{{ env_var('BASTION_KEY_FILE') }}"
+          private_key_passphrase: "{{ env_var('DRE_SECRET_BASTION_KEY_PASSPHRASE') }}"
+          host_key_fingerprint: "{{ env_var('BASTION_HOST_KEY_FINGERPRINT') }}"
+      prod:
+        type: postgres
+        host: db.internal
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_PG_PASSWORD') }}"
+        database: acme
+        sslmode: verify-full
+        sslrootcert: "{{ env_var('PG_CA_FILE') }}"
+        ssh:
+          host: bastion.acme.example
+          username: dre
+          use_agent: true
+          known_hosts_path: "{{ env_var('BASTION_KNOWN_HOSTS') }}"
+
+  # --- ClickHouse -----------------------------------------------------------------------------
+  # HTTP (the default driver): plain locally, TLS with a private CA on prod.
+  ch_http:
+    targets:
+      dev:
+        type: clickhouse
+        driver: http
+        host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+        port: "{{ env_var('CLICKHOUSE_HTTP_PORT', '8123') }}"
+        user: "{{ env_var('CLICKHOUSE_USER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        compression: gzip
+      prod:
+        type: clickhouse
+        driver: http
+        host: clickhouse.acme.example
+        port: 8443
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        secure: true
+        verify: true
+        ca_cert: "{{ env_var('CLICKHOUSE_CA_FILE') }}"
+        compression: br
+        connect_timeout: 30s
+        send_receive_timeout: 5m
+        retries: 3
+        custom_settings:
+          max_execution_time: 300
+
+  # Native TCP: plain locally; mutual TLS on prod, where the certificate names another host.
+  ch_native:
+    targets:
+      dev:
+        type: clickhouse
+        driver: native
+        host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+        port: "{{ env_var('CLICKHOUSE_NATIVE_PORT', '9000') }}"
+        user: "{{ env_var('CLICKHOUSE_USER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        compression: lz4
+      prod:
+        type: clickhouse
+        driver: native
+        host: 10.0.4.12
+        port: 9440
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        secure: true
+        ca_cert: "{{ env_var('CLICKHOUSE_CA_FILE') }}"
+        client_cert: "{{ env_var('CLICKHOUSE_CLIENT_CERT_FILE') }}"
+        client_cert_key: "{{ env_var('CLICKHOUSE_CLIENT_KEY_FILE') }}"
+        server_host_name: clickhouse.acme.example
+        compression: zstd
+
+  # HTTP without compression locally, deflate on prod, through an SSH bastion.
+  ch_bastion:
+    targets:
+      dev:
+        type: clickhouse
+        host: clickhouse.internal
+        port: 8123
+        user: "{{ env_var('CLICKHOUSE_USER', 'reporter') }}"
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        compression: none
+        ssh:
+          host: "{{ env_var('BASTION_HOST', 'localhost') }}"
+          port: "{{ env_var('BASTION_PORT', '22') }}"
+          username: "{{ env_var('BASTION_USER', 'reporter') }}"
+          private_key: "{{ env_var('DRE_SECRET_BASTION_KEY') }}"
+          host_key_fingerprint: "{{ env_var('BASTION_HOST_KEY_FINGERPRINT') }}"
+      prod:
+        type: clickhouse
+        host: clickhouse.internal
+        user: dre_reporter
+        password: "{{ env_var('DRE_SECRET_CLICKHOUSE_PASSWORD') }}"
+        schema: acme
+        compression: deflate
+        ssh:
+          host: bastion.acme.example
+          username: dre
+          use_agent: true
+
+  # --- Databricks -----------------------------------------------------------------------------
+  # OAuth: a browser sign-in on dev (the session is kept in ~/.dre), a service principal on prod.
+  databricks:
+    targets:
+      dev:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: oauth
+        redirect_port: 8020
+        scopes: [all-apis, offline_access]
+        catalog: "{{ env_var('DATABRICKS_CATALOG', 'workspace') }}"
+        schema: "{{ env_var('DATABRICKS_SCHEMA', 'acme') }}"
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: oauth
+        client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+        client_secret: "{{ env_var('DRE_SECRET_DATABRICKS_CLIENT_SECRET') }}"
+        catalog: main
+        schema: acme
+        # Wait up to 20 minutes for a stopped warehouse to start.
+        retry_timeout: 1200
+        retries: 3
+
+  # A personal access token (`pat`; `token` is the same thing under dbt's name).
+  databricks_pat:
+    targets:
+      dev:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: pat
+        token: "{{ env_var('DRE_SECRET_DATABRICKS_TOKEN') }}"
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: token
+        token: "{{ env_var('DRE_SECRET_DATABRICKS_TOKEN') }}"
+
+  # `auto`: whatever Databricks' own tools would use, here a ~/.databrickscfg profile.
+  databricks_auto:
+    targets:
+      dev:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: auto
+        profile: DEFAULT
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+        auth_type: auto
+
+  # --- BigQuery (validated only) --------------------------------------------------------------
+  # gcloud's application-default credentials on dev, run as a service account; a key file on prod.
+  bigquery:
+    targets:
+      dev:
+        type: bigquery
+        method: oauth
+        project: acme-analytics
+        dataset: reporting
+        location: EU
+        impersonate_service_account: dre-reporting@acme-analytics.iam.gserviceaccount.com
+        scopes: [https://www.googleapis.com/auth/bigquery]
+        execution_project: acme-sandbox
+        quota_project: acme-sandbox
+        priority: interactive
+        maximum_bytes_billed: 10000000000
+      prod:
+        type: bigquery
+        method: service-account
+        keyfile: "{{ env_var('BIGQUERY_KEY_FILE') }}"
+        project: acme-analytics
+        dataset: reporting
+        location: EU
+        priority: batch
+        job_execution_timeout_seconds: 600
+        job_creation_timeout_seconds: 60
+        retries: 3
+        job_retries: 2
+        job_retry_deadline_seconds: 900
+  # A key's JSON from a secret store, and an emulator or Private Service Connect endpoint.
+  bigquery_json:
+    targets:
+      dev:
+        type: bigquery
+        method: service-account-json
+        keyfile_json: "{{ env_var('DRE_SECRET_BIGQUERY_KEY_JSON') }}"
+        project: acme-analytics
+        api_endpoint: "{{ env_var('BIGQUERY_ENDPOINT', 'http://localhost:9050') }}"
+  # An OAuth client: an access token, or a refresh token exchanged for one.
+  bigquery_secrets:
+    targets:
+      dev:
+        type: bigquery
+        method: oauth-secrets
+        project: acme-analytics
+        token: "{{ env_var('DRE_SECRET_BIGQUERY_TOKEN') }}"
+      prod:
+        type: bigquery
+        method: oauth-secrets
+        project: acme-analytics
+        refresh_token: "{{ env_var('DRE_SECRET_BIGQUERY_REFRESH_TOKEN') }}"
+        client_id: "{{ env_var('BIGQUERY_CLIENT_ID') }}"
+        client_secret: "{{ env_var('DRE_SECRET_BIGQUERY_CLIENT_SECRET') }}"
+        token_uri: https://oauth2.googleapis.com/token
+  # Workload identity federation from Microsoft Entra.
+  bigquery_wif:
+    targets:
+      prod:
+        type: bigquery
+        method: external-oauth-wif
+        project: acme-analytics
+        workload_pool_provider_path: projects/123456/locations/global/workloadIdentityPools/acme/providers/entra
+        token_endpoint:
+          type: entra
+          request_url: https://login.microsoftonline.com/acme.example/oauth2/v2.0/token
+          request_data: "client_id={{ env_var('ENTRA_CLIENT_ID') }}&client_secret={{ env_var('DRE_SECRET_ENTRA_CLIENT_SECRET') }}&grant_type=client_credentials&scope=api://acme-bigquery/.default"
+        service_account_impersonation_url: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/dre-reporting@acme-analytics.iam.gserviceaccount.com:generateAccessToken
+
+  # --- Snowflake (validated only) -------------------------------------------------------------
+  # Your company's SSO on dev; a service user with an encrypted key file on prod.
+  snowflake:
+    targets:
+      dev:
+        type: snowflake
+        account: acme-analytics
+        user: "{{ env_var('SNOWFLAKE_USER') }}"
+        authenticator: externalbrowser
+        client_store_temporary_credential: true
+        role: REPORTER
+        warehouse: REPORTING_WH
+        database: ANALYTICS
+        schema: MARTS
+      prod:
+        type: snowflake
+        account: acme-analytics
+        user: DRE_SVC
+        authenticator: jwt
+        private_key_path: "{{ env_var('SNOWFLAKE_KEY_FILE') }}"
+        private_key_passphrase: "{{ env_var('DRE_SECRET_SNOWFLAKE_KEY_PASSPHRASE') }}"
+        role: REPORTER
+        warehouse: REPORTING_WH
+        database: ANALYTICS
+        schema: MARTS
+        query_tag: dre-reports
+        client_session_keep_alive: true
+        connect_retries: 3
+        connect_timeout: 30s
+  # A password with Duo MFA, the MFA token cached; through a proxy to a private-link host.
+  snowflake_mfa:
+    targets:
+      dev:
+        type: snowflake
+        account: acme-analytics
+        user: "{{ env_var('SNOWFLAKE_USER') }}"
+        authenticator: username_password_mfa
+        password: "{{ env_var('DRE_SECRET_SNOWFLAKE_PASSWORD') }}"
+        client_request_mfa_token: true
+        host: acme-analytics.privatelink.snowflakecomputing.com
+        port: 443
+        protocol: https
+        proxy_host: proxy.acme.example
+        proxy_port: 3128
+        insecure_mode: false
+        retries: 2
+  # The key's text from a secret store, and OAuth with a refresh token.
+  snowflake_key_text:
+    targets:
+      prod:
+        type: snowflake
+        account: acme-analytics
+        user: DRE_SVC
+        private_key: "{{ env_var('DRE_SECRET_SNOWFLAKE_PRIVATE_KEY') }}"
+  snowflake_oauth:
+    targets:
+      prod:
+        type: snowflake
+        account: acme-analytics
+        user: DRE_SVC
+        authenticator: oauth
+        token: "{{ env_var('DRE_SECRET_SNOWFLAKE_REFRESH_TOKEN') }}"
+        oauth_client_id: "{{ env_var('SNOWFLAKE_OAUTH_CLIENT_ID') }}"
+        oauth_client_secret: "{{ env_var('DRE_SECRET_SNOWFLAKE_OAUTH_CLIENT_SECRET') }}"
+  # Workload identity: the Azure managed identity of the machine running DRE.
+  snowflake_wif:
+    targets:
+      prod:
+        type: snowflake
+        account: acme-analytics
+        user: DRE_SVC
+        authenticator: workload_identity
+        workload_identity_provider: AZURE
+        workload_identity_entra_resource: api://acme-snowflake
+
+destinations:
+  # Databricks Volumes, one destination per way of signing in. Nothing is delivered on dev.
+  volume_oauth:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        auth_type: oauth
+        client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+        client_secret: "{{ env_var('DRE_SECRET_DATABRICKS_CLIENT_SECRET') }}"
+        scopes: [all-apis]
+        redirect_port: 8020
+        connect_timeout: 30s
+        timeout: 5m
+        retries: 3
+        retry_wait: 30s
+        max_retry_wait: 10m
+  volume_pat:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        auth_type: pat
+        token: "{{ env_var('DRE_SECRET_DATABRICKS_TOKEN') }}"
+  volume_token:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        auth_type: token
+        token: "{{ env_var('DRE_SECRET_DATABRICKS_TOKEN') }}"
+  volume_auto:
+    targets:
+      dev: {deliver: false}
+      prod:
+        type: databricks
+        host: "{{ env_var('DATABRICKS_HOST') }}"
+        auth_type: auto
+        profile: DEFAULT

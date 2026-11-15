@@ -1,0 +1,6 @@
+plugins:
+  - duckdb
+  - parquet
+  - csv            # csv and delimited
+  - ftp
+  - object_store   # s3, gcs and azure_blob

@@ -1,0 +1,17 @@
+plugins:
+  # A bare name, or a map with a version range or another registry index.
+  - {name: duckdb, github: get-dre/dre}
+  - {name: postgres, version: ">=1.6"}
+  - clickhouse
+  - {name: databricks, registry: "https://github.com/get-dre/dre/releases/download/registry/packages.json"}
+  - bigquery
+  - snowflake
+  # A package you built or extracted yourself; this points to its executable, not a folder.
+  - {name: csv, local: .plugins/dre-plugin-csv.exe}
+
+# Macro packages: a public git package pinned to a tag, and one kept in this project. A local
+# package inside the project goes in a hidden folder, which DRE doesn't read as project config.
+packages:
+  - git: https://github.com/get-dre/dre_utils.git
+    revision: v0.2.0
+  - local: .packages/acme_sql

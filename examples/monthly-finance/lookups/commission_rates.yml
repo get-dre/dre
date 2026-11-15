@@ -1,0 +1,5 @@
+# lookups/commission_rates.xlsx, made in Excel: read its Rates sheet. `auto` inlines a small
+# lookup into the SQL and loads a big one into a temp table.
+sheet: Rates
+columns: {category: string, commission_rate: number}
+load: auto

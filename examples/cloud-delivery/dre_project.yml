@@ -1,0 +1,11 @@
+name: cloud_delivery
+default_profile: sample
+vars:
+  day: '2026-01-31'
+# Defaults for every csv and delimited output; an output's own keys win.
+format_options:
+  csv: {quoting: minimal, line_ending: "\n", header: true}
+  delimited: {quoting: all, quote: "'", byte_order_mark: false}
+# Weeks start on Sunday and are numbered US-style, as the US warehouse team counts them.
+week_start: sunday
+week_numbering: us

@@ -1,0 +1,3 @@
+# Types for region_targets.csv: without them every value is text. Loaded into a temp table.
+columns: {region: string, target: number, headcount: integer, active: boolean, effective_from: date}
+load: temp_table

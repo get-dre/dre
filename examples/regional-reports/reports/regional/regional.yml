@@ -3,10 +3,28 @@ queries:
     tab_name: Sales
     columns:
       revenue: {format: "#,##0.00", total: sum}
+  - {query: targets, tab_name: Targets}
 sets:
   - {name: north, vars: {region: North}}
-  - {name: south, vars: {region: South}}
+  # Number filters in this Set format for the UK.
+  - {name: south, vars: {region: South}, locale: en-GB}
+  # Every region: no sales would be an error, and the targets tab is renamed and left out
+  # when empty. The managers' addresses are masked in DRE's logs and results.
+  - name: combined
+    vars: {region: All}
+    queries:
+      - {query: sales, tab_name: Sales, on_empty: fail}
+      - {query: targets, on_empty: skip, secret_columns: [manager_email]}
+    tab_names: {targets: All targets}
+  # A new region with no sales yet: its workbook is still written, empty, with a warning.
+  - name: east
+    vars: {region: East}
+    queries:
+      - {query: sales, tab_name: Sales, on_empty: continue}
+    output: {on_empty: continue}
+  # Another new region, without the targets tab; an empty run writes nothing.
+  - {name: west, vars: {region: West}, exclude: [targets]}
 default_set: north
 output:
   format: xlsx
-  destination: {profile: local, path: "out/{{ var('region') }}.xlsx"}
+  destination: {profile: local, path: "{{ var('out_dir') }}/{{ var('region') }}.xlsx"}

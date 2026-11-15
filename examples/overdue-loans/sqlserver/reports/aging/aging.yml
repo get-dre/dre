@@ -1,0 +1,13 @@
+# Overdue balance by aging bucket, prepared by a temporary stored procedure. It reuses the
+# overdue report's seed and preparation on the same session.
+queries:
+  - {query: seed, tab: false}
+  - {query: prepare, tab: false}
+  - {query: prepare_aging, tab: false}
+  - query: aging
+    tab_name: Aging
+    columns:
+      balance: {format: '#,##0.00', total: sum}
+output:
+  format: xlsx
+  destination: {profile: local, path: 'out/aging-{{ var("report_date") }}.xlsx'}

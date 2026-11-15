@@ -1,7 +1,50 @@
+# dbt-style source declarations: a dbt sources.yml pastes in unchanged. `profile:` is DRE's
+# addition. Keys DRE doesn't use yet (freshness, loaded_at_field, tests, ...) are accepted, and
+# `dre validate` notes them once.
+version: 2
 sources:
   - name: finance
+    description: Monthly sales by region and category, prepared by setup.sql.
     profile: sample
+    # DuckDB keeps temporary tables in its `temp` catalog.
+    database: temp
     schema: main
+    quoting: {database: true, schema: true, identifier: true}
+    tags: [finance]
+    meta: {owner: finance-reporting@acme.example}
+    loader: setup.sql
+    loaded_at_field: loaded_at
+    loaded_at_query: select max(loaded_at) from sample_sales
+    freshness: {warn_after: {count: 1, period: day}}
+    config: {enabled: true}
+    overrides: finance_base
+    docs: {show: true}
     tables:
       - name: sales
         identifier: sample_sales
+        description: One row per region, month and category.
+        quoting: {identifier: true}
+        tags: [monthly]
+        meta: {grain: region-month-category}
+        loaded_at_field: loaded_at
+        loaded_at_query: select max(loaded_at) from sample_sales
+        freshness: {error_after: {count: 2, period: day}}
+        external: {location: "s3://acme-finance/sales/"}
+        config: {enabled: true}
+        docs: {show: true}
+        tests: [unique_region_month]
+        data_tests: [not_empty]
+        # Checked by `dre validate --live`: the column exists, and its type loosely matches.
+        columns:
+          - name: revenue
+            description: Revenue in USD, before commission.
+            data_type: decimal
+            meta: {unit: USD}
+            tags: [money]
+            quote: false
+            tests: [not_null]
+            data_tests: [not_null]
+            constraints: [{type: not_null}]
+            config: {enabled: true}
+            docs: {show: true}
+            granularity: month

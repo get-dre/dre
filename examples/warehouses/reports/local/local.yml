@@ -1,0 +1,6 @@
+description: Regional targets on DuckDB, read through a source declared in dre_project.yml.
+queries:
+  - {query: targets_setup, tab: false}
+  - targets
+output:
+  destination: {profile: local, path: out/targets.csv}

@@ -9,3 +9,18 @@ connections:
           user: "{{ env_var('DRE_TEST_JDBC_USER') }}"
           password: "{{ env_var('DRE_TEST_JDBC_PASSWORD') }}"
           oracle.jdbc.fanEnabled: false
+      # Oracle over TLS (TCPS), checked against a trust store; validated only. The driver class
+      # is named instead of found by service discovery.
+      tcps:
+        type: jdbc
+        url: "jdbc:oracle:thin:@tcps://{{ env_var('ORACLE_TCPS_HOST', 'localhost') }}:2484/FREEPDB1"
+        driver_jars: "{{ env_var('DRE_TEST_JDBC_JAR') }}"
+        driver_class: oracle.jdbc.OracleDriver
+        properties:
+          user: "{{ env_var('DRE_TEST_JDBC_USER') }}"
+          password: "{{ env_var('DRE_TEST_JDBC_PASSWORD') }}"
+          javax.net.ssl.trustStore: "{{ env_var('ORACLE_TRUSTSTORE') }}"
+          javax.net.ssl.trustStoreType: PKCS12
+          javax.net.ssl.trustStorePassword: "{{ env_var('DRE_SECRET_ORACLE_TRUSTSTORE_PASSWORD') }}"
+          oracle.net.ssl_server_dn_match: true
+          oracle.jdbc.fanEnabled: false
