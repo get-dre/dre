@@ -12,14 +12,14 @@ output:
   - name: archive
     format: parquet
     destination:
-      - {profile: acme_s3, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
-      - {profile: acme_gcs, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
-      - {profile: acme_azure, path: "orders/archive/{{ var('day') }}.parquet", if_exists: error}
+      - {profile: acme_s3, path: "orders/archive/archive-{{ var('day') }}.parquet", if_exists: error}
+      - {profile: acme_gcs, path: "orders/archive/archive-{{ var('day') }}.parquet", if_exists: error}
+      - {profile: acme_azure, path: "orders/archive/archive-{{ var('day') }}.parquet", if_exists: error}
   # Every run kept: a rerun is written next to the earlier file with a number.
   - name: audit
     format: parquet
     destination:
-      - {profile: acme_s3, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
-      - {profile: acme_gcs, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
-      - {profile: acme_azure, path: "orders/audit/{{ var('day') }}.parquet", if_exists: number}
-      - {profile: analyst_share, path: "orders/{{ var('day') }}.parquet"}
+      - {profile: acme_s3, path: "orders/audit/audit-{{ var('day') }}.parquet", if_exists: number}
+      - {profile: acme_gcs, path: "orders/audit/audit-{{ var('day') }}.parquet", if_exists: number}
+      - {profile: acme_azure, path: "orders/audit/audit-{{ var('day') }}.parquet", if_exists: number}
+      - {profile: analyst_share, path: "orders/audit-{{ var('day') }}.parquet"}

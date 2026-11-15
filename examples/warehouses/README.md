@@ -2,7 +2,8 @@
 
 The same synthetic Acme Corp revenue query on Postgres, ClickHouse, Databricks, BigQuery and
 Snowflake, with every way of connecting to each. Each report creates its own sample rows on
-its session, so no tables need to exist.
+its session, so no tables need to exist. Databricks uses a hidden setup query to create its
+temporary view before the visible revenue query reads it on the same session.
 
 | Connection | Shows |
 |---|---|

@@ -30,4 +30,9 @@ What each output shows:
 | `legacy` | Pipe-delimited Latin-1, in a ZipCrypto zip over plain FTP |
 | `partner_tab`, `minimal` | Tab- and `;`-delimited, quoted strings or only where needed |
 
+The dated Parquet files use distinct basenames: `archive-2026-01-31.parquet` and
+`audit-2026-01-31.parquet`. DRE formats them in the same run folder before delivery, so
+separate remote directories alone do not prevent a filename collision. `latest.parquet`
+keeps its stable name.
+
 `dre_project.yml` sets the csv and delimited defaults (`format_options`) and US-style weeks.

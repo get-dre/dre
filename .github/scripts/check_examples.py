@@ -362,6 +362,13 @@ def check(dre, plugins, names):
                 assert not failed["outputs"] and not failed["deliveries"]
                 assert not (bad / "out").exists(), "failed build must not publish the finance pack"
                 print("monthly-finance: test and build passed; bad account mapping blocked both workbooks")
+            elif name == "cloud-delivery":
+                run(project, "run")
+                # Hold renders real delivery paths without contacting external stores.
+                run(project, "run", "orders", "--hold", target="local")
+                planned = current(project, "orders")
+                assert len(planned["outputs"]) == 3
+                assert any(d["status"] == "held" for d in planned["deliveries"])
             elif name == "mcp":
                 run(project, "run", "setup", "--no-deliver")
                 run(project, "run", "revenue", "--no-deliver")
