@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/get-dre/dre/go/plugin"
@@ -36,13 +37,57 @@ func rulesFor(conn, opts map[string]any) (plugin.Rules, error) {
 // uploads is the running delivery's context, which core's cancel ends (destinationRole.Cancel).
 var uploads plugin.Request
 
-// uploadClient is one delivery's HTTP client: the profile's connect_timeout and timeout (for the
-// response to start), with every request ending when ctx does.
+// uploadClient is one delivery's HTTP client: the profile's connect_timeout, and timeout as an
+// inactivity limit on the response starting and on every read and write of a body (a transfer
+// making progress never times out), with every request ending when ctx does.
 func uploadClient(ctx context.Context, r plugin.Rules) *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DialContext = (&net.Dialer{Timeout: r.ConnectTimeout, KeepAlive: 30 * time.Second}).DialContext
+	d := &net.Dialer{Timeout: r.ConnectTimeout, KeepAlive: 30 * time.Second}
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, err := d.DialContext(ctx, network, addr)
+		if err != nil || r.Timeout <= 0 {
+			return c, err
+		}
+		ic := &idleConn{Conn: c, idle: r.Timeout}
+		ic.touch()
+		return ic, nil
+	}
 	t.ResponseHeaderTimeout = r.Timeout
 	return &http.Client{Transport: withContext{ctx, t}}
+}
+
+// idleConn fails a read or write once the connection has made no progress (no byte either way)
+// for idle. A read waiting on the reply while the request is still uploading keeps waiting.
+type idleConn struct {
+	net.Conn
+	idle time.Duration
+	last atomic.Int64 // unix nanoseconds of the last byte moved
+}
+
+func (c *idleConn) touch() { c.last.Store(time.Now().UnixNano()) }
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	for {
+		c.Conn.SetReadDeadline(time.Unix(0, c.last.Load()).Add(c.idle))
+		n, err := c.Conn.Read(p)
+		if n > 0 {
+			c.touch()
+		}
+		var ne net.Error
+		if n == 0 && errors.As(err, &ne) && ne.Timeout() && time.Since(time.Unix(0, c.last.Load())) < c.idle {
+			continue // the other direction moved meanwhile
+		}
+		return n, err
+	}
+}
+
+func (c *idleConn) Write(p []byte) (int, error) {
+	c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.touch()
+	}
+	return n, err
 }
 
 // withContext sends each request under ctx.
