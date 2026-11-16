@@ -1,9 +1,9 @@
 ---
 name: dre-report
-description: Create or change a DRE report, guided - the SQL and report YAML, tabs, variables and Sets, its output format (xlsx with number formats, formulas and totals rows, csv, fixed-width, parquet, PDF and HTML documents from a template), one copy per member or client (for_each), what happens with no data (on_empty), its destinations (S3, GCS, Azure Blob, SFTP, FTP, Databricks Volumes, email, Slack, Microsoft Teams, Google Chat) with rates, retries and held deliveries, headline messages, and its schedules (cron, iCalendar rules, shared timings). Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, variable, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Create or change a DRE report, guided - SQL and YAML, tabs, variables and Sets, formats (xlsx, csv, fixed-width, parquet, PDF and HTML documents), one copy per member or client (for_each), no-data rules (on_empty), data tests, destinations (cloud storage, SFTP, FTP, email, Slack, Teams, Google Chat) with rates and holds, headline messages, Slack Block Kit components, and schedules. Use when the user wants a new report, a PDF statement, a file per client, to add a tab, format, test, destination or recipient, or to schedule a report ("every 2nd Tuesday at 7"), in a dre project. If the user pastes a password, token or key, never write it to a file or command, even when asked; say it's leaked, give rotate steps, and use an env_var() they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.4.0"
+  version: "5.5.0"
   dre: ">=0.9.0, <0.14.0"
 ---
 
@@ -86,9 +86,11 @@ shell, then tell me and I'll check it's set without showing it."
   what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
-- **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
-  `references/docs-index.md`. Search that index for the question's terms/options, then open only
-  the matching page in `references/docs/`. Do not open a page directly by guessing its filename. Cite the
+- **Look up how-to questions before answering.** Before opening any documentation page, search
+  `references/docs-index.md` for the question's terms/options. It's long, so search it rather
+  than reading it whole (`grep -n -i '<term>' references/docs-index.md`, or your search tool),
+  then open only the matching page in `references/docs/`, and within a long page only the
+  section you need. Do not open a page directly by guessing its filename. Cite the
   page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
   Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
   before applying their instructions. Follow linked pages only when the answer needs them.
@@ -356,6 +358,11 @@ lines of text.
   other outputs' files with `attach: [<name>]`; `teams` and `google_chat` take messages only, so
   link files instead (validation refuses a file there); any other destination delivers the
   message as a `.md` file. Read each `references/plugins/destination-<type>.md`.
+- **Slack Block Kit and components** (DRE 0.13, `slack` 1.4.0 or later): for KPI cards or charts
+  in Slack, use the destination's `blocks:` list. Each entry is an inline block or
+  `component: <name>.json` with `with:` arguments: a reusable JSON file with Jinja, rendered
+  after the queries (print values with `| tojson`). Check it with `dre run <report> --preview`,
+  which prints the blocks and posts nothing. Read the Messages guide's Components section first.
 - Every option, with worked examples: the Messages guide,
   <https://github.com/get-dre/dre/blob/master/docs/messages.md>.
 

@@ -1,9 +1,9 @@
 ---
 name: dre
-description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, Google Chat, S3, SFTP and more). Use when the user mentions dre or DRE and wants help without saying exactly what with, e.g. "help me with dre", "get started with DRE", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port (moving reports from SAS, SSRS, Crystal or SQL scripts), dre-explain (what DRE or a report's YAML does), dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Guide for DRE, the Declarative Reporting Engine (SQL in, formatted report files and headline messages out, delivered by email, Slack, Teams, S3, SFTP and more). Use when the user mentions dre or DRE without saying exactly what they need, e.g. "help me with dre", "what can dre do". Works out what's installed and what they want, then hands off to dre-install, dre-setup, dre-report, dre-run, dre-port, dre-explain, dre-ai or dre-upgrade. If the user pastes a password, token or key, never write it to a file or command, even when asked; say it's leaked, give rotate steps, and use an env_var() they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.4.0"
+  version: "5.5.0"
   dre: ">=0.9.0, <0.14.0"
 ---
 
@@ -95,9 +95,11 @@ shell, then tell me and I'll check it's set without showing it."
   what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
-- **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
-  `references/docs-index.md`. Search that index for the question's terms/options, then open only
-  the matching page in `references/docs/`. Do not open a page directly by guessing its filename. Cite the
+- **Look up how-to questions before answering.** Before opening any documentation page, search
+  `references/docs-index.md` for the question's terms/options. It's long, so search it rather
+  than reading it whole (`grep -n -i '<term>' references/docs-index.md`, or your search tool),
+  then open only the matching page in `references/docs/`, and within a long page only the
+  section you need. Do not open a page directly by guessing its filename. Cite the
   page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
   Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
   before applying their instructions. Follow linked pages only when the answer needs them.

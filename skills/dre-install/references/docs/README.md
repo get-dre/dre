@@ -26,7 +26,7 @@ Queries, outputs, templates, lookups and messages.
 - [DRE practices](practices.md): The opinions DRE’s agent skills give, and the reasons behind them.
 - [AI-ready reports](ai-ready-reports.md): Turn reviewed report logic and upstream documentation into trustworthy context for AI.
 - [Project configuration](project-configuration.md): Share defaults, override reports and Sets, and bound template queries.
-- [Tested examples](examples.md): Complete, copyable projects with checked output: Excel, bank files, Sets, Slack, SFTP and password-protected statements.
+- [Tested examples](examples.md): Complete, copyable projects with checked output: Excel, bank files, Sets, messages, SFTP, cloud storage, warehouses and password-protected statements.
 - [Moving from SAS, SSRS or Crystal](moving-from-ssrs-or-crystal.md): Migrate reporting from SAS, SSRS, Crystal or SQL with dre-port: dependency assessment, database SQL, business-rule validation and optional output parity.
 
 ## Connect

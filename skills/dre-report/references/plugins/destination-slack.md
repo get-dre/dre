@@ -107,7 +107,9 @@ output:
       - {profile: team_slack, channel: "#finance", attach: [workbook]}
 ```
 
-**Block Kit** (slack 1.4.0): `blocks:` on the entry posts the message as Block Kit with
+#### Block Kit
+
+With slack 1.4.0, `blocks:` on the entry posts the message as Block Kit with
 `chat.postMessage`. Each `blocks` entry is an inline block (`{type: divider}`) or a
 `component:` (a reusable `.json` file of Block Kit JSON that core renders with the query
 results); `keep: first | last` on an entry chooses which points a chart over Slack's limit keeps
@@ -126,6 +128,14 @@ destination:
       - component: header.json
       - {type: divider}
 ```
+
+The daily KPI demo uses reusable `.json` components for three KPI cards and a 14-day revenue
+line chart. The Excel workbook and PDF use the same query results and are posted after the
+Block Kit message with `attach: [workbook, summary_pdf]` and `files_in: message`.
+
+![Slack Block Kit post with Revenue, Orders and Avg order value KPI cards, a 14-day revenue chart, and daily_kpis.xlsx and daily_kpis.pdf attached](../docs/assets/slack-blockkit.webp)
+
+*Real Slack output from the daily KPI demo, using fictional data.*
 
 Slack's limits never fail a delivery. The plugin fixes the blocks when it delivers and warns,
 naming the component, the block's position and the limit. `--preview` shows the blocks before

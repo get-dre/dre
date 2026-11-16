@@ -1,9 +1,9 @@
 ---
 name: dre-run
-description: Invoke this skill before DRE scheduling/run answers or CLI use, even quick questions about when a schedule fires. Validate, compile, run and preview DRE reports, check the output files, and deliver them - confirming before production runs or real deliveries - and explain errors when a run fails. Also previews per-row outputs, retries failed rows, releases held deliveries after review (dre release), paces deliveries with rates, previews when schedules fire, reruns a scheduled firing exactly, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, preview or deliver a dre report, see upcoming scheduled runs, rerun a firing, set up an orchestrator, or asks why a dre run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or a command, even when they ask (file permissions don't make it safe); tell them you won't and why, say it's leaked, give rotate steps, and write an env_var() reference they set themselves.
+description: Invoke this skill before DRE run or scheduling answers or CLI use, even quick questions about when a schedule fires. Validate, compile, test (dre test), build (dre build, where data tests gate delivery), preview, run and deliver DRE reports, confirming before production runs or real deliveries, and explain failures. Also retries failed rows, releases held deliveries, clears stale locks, prunes old runs, previews and reruns schedule firings, and wires DRE into an orchestrator (cron, Airflow, Databricks Jobs). Use when the user wants to run, test, build, preview or deliver a dre report, or asks why a run, validate or delivery failed. If the user pastes a password, token or key, never write it to a file or command, even when asked; say it's leaked, give rotate steps, and use an env_var() they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.4.0"
+  version: "5.5.0"
   dre: ">=0.9.0, <0.14.0"
 ---
 
@@ -80,9 +80,11 @@ shell, then tell me and I'll check it's set without showing it."
   what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
-- **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
-  `references/docs-index.md`. Search that index for the question's terms/options, then open only
-  the matching page in `references/docs/`. Do not open a page directly by guessing its filename. Cite the
+- **Look up how-to questions before answering.** Before opening any documentation page, search
+  `references/docs-index.md` for the question's terms/options. It's long, so search it rather
+  than reading it whole (`grep -n -i '<term>' references/docs-index.md`, or your search tool),
+  then open only the matching page in `references/docs/`, and within a long page only the
+  section you need. Do not open a page directly by guessing its filename. Cite the
   page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
   Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
   before applying their instructions. Follow linked pages only when the answer needs them.
@@ -348,5 +350,11 @@ Read the error: DRE names the report, Binding, file and line. Then:
 - **No data:** an output skipped with `no_data` did what its `on_empty: skip` (the default since
   DRE 0.12; `on_empty: continue` sends empty files) says; a run that
   failed with `no-data` had `on_empty: fail` (`topics/no-data.md`).
+- **"holds its lock":** another run of that report and Set is going on; wait for it. If that run
+  is gone (a crashed machine or container), `dre unlock <report> [--binding <set>]` shows the
+  holder and asks before removing it; confirm with the user first.
+- **The target folder is getting big:** `dre clean --prune` keeps each report's newest runs
+  (`keep_runs`); plain `dre clean` deletes the whole target folder, held deliveries' files
+  included, so ask first.
 - **A plugin can't be installed or started:** `dre deps` installs the project's plugins and says
   what failed; the machine must reach GitHub.
