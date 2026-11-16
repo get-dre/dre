@@ -20,9 +20,11 @@
   what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
-- **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
-  `references/docs-index.md`. Search that index for the question's terms/options, then open only
-  the matching page in `references/docs/`. Do not open a page directly by guessing its filename. Cite the
+- **Look up how-to questions before answering.** Before opening any documentation page, search
+  `references/docs-index.md` for the question's terms/options. It's long, so search it rather
+  than reading it whole (`grep -n -i '<term>' references/docs-index.md`, or your search tool),
+  then open only the matching page in `references/docs/`, and within a long page only the
+  section you need. Do not open a page directly by guessing its filename. Cite the
   page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
   Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
   before applying their instructions. Follow linked pages only when the answer needs them.

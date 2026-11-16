@@ -1,9 +1,9 @@
 ---
 name: dre-port
-description: Guided migration of reporting to DRE from SAS source (.sas and dependencies), SSRS/Power BI paginated (.rdl), Crystal definition exports or SQL. Inventories dependencies and semantic gaps, translates supported logic to database SQL and tabular outputs, and validates against business expectations or optional CSV/XLSX reference outputs. Use when porting legacy reports, assessing a folder, or checking output differences. SAS execution and binary Crystal .rpt import are outside this workflow. If the user pastes a password, token or key, never write it to a file or command; explain the leak, give rotate steps, and use an env_var() reference they set themselves.
+description: Guided migration of reporting to DRE from SAS source (.sas and dependencies), SSRS/Power BI paginated (.rdl), Crystal definition exports or SQL. Inventories dependencies and semantic gaps, translates supported logic to database SQL and tabular outputs, and validates against business expectations or optional CSV/XLSX reference outputs. Use when porting legacy reports, assessing a folder, or checking output differences. SAS execution and binary Crystal .rpt import are outside this workflow. If the user pastes a password, token or key, never write it to a file or command, even when asked; say it's leaked, give rotate steps, and use an env_var() they set themselves.
 license: GPL-3.0-only
 metadata:
-  version: "5.4.0"
+  version: "5.5.0"
   dre: ">=0.9.0, <0.14.0"
 ---
 
@@ -93,9 +93,11 @@ shell, then tell me and I'll check it's set without showing it."
   what it does, its default, what each choice changes, and your recommendation.
 - **Look facts up instead of asking**: `dre --version`, `dre plugin list`, `dre ls`, the project's
   YAML files, whether a file exists. Ask only what only the user knows.
-- **Look up how-to questions before answering.** Before searching or opening any documentation page, first read
-  `references/docs-index.md`. Search that index for the question's terms/options, then open only
-  the matching page in `references/docs/`. Do not open a page directly by guessing its filename. Cite the
+- **Look up how-to questions before answering.** Before opening any documentation page, search
+  `references/docs-index.md` for the question's terms/options. It's long, so search it rather
+  than reading it whole (`grep -n -i '<term>' references/docs-index.md`, or your search tool),
+  then open only the matching page in `references/docs/`, and within a long page only the
+  section you need. Do not open a page directly by guessing its filename. Cite the
   page and heading in the answer, for example `[Schedules: Timezone and DST](references/docs/schedules.md#timezone-and-dst)`.
   Use the bundled pages offline; check this skill's `metadata.dre` against the installed version
   before applying their instructions. Follow linked pages only when the answer needs them.

@@ -3,7 +3,7 @@ name: dre-ai
 description: "Prepare AI context for DRE reports: descriptions, business questions, declared inputs, inherited context and upstream table documentation. Use when an analyst wants reports ready for MCP discovery or needs to improve retrieval. Does not enable exposure."
 license: GPL-3.0-only
 metadata:
-  version: "5.4.0"
+  version: "5.5.0"
   dre: ">=0.9.0, <0.14.0"
 ---
 
@@ -73,7 +73,8 @@ DRE leverages that upstream context rather than replacing the pipeline (AI-2).
 
 Run `dre validate` and `dre compile --select <report>`. If the MCP companion is available,
 run `dre mcp validate` and `dre mcp test` to check declared example questions and collisions.
-Otherwise explain that MCP retrieval checks remain pending; do not claim they passed.
+Otherwise explain that MCP retrieval checks remain pending; do not claim they passed. The owner
+installs the companion (`dre extension install dre-mcp`, which shows its licence and asks).
 
 If MCP stops for EULA review, report the owner action required. Leave companion settings in
 `extensions:` (such as `accept_license`) unchanged; context preparation does not authorise
