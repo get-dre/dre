@@ -42,7 +42,7 @@ rrule = "0.14"
 # Disk-backed per-row key and job indexes keep population memory bounded. SQLite is MIT.
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 tempfile.workspace = true
-sqlparser = { version = "0.63", features = ["visitor"] }
+sqlparser = { version = "0.64", features = ["visitor"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
