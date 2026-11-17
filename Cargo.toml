@@ -37,7 +37,7 @@ assert_cmd = "2"
 # The `duckdb` crate (1.20000, DuckDB 2.0) is built on arrow 60, so the DuckDB plugin converts
 # batches between that and this one through the Arrow C data interface (plugins/duckdb/src/bridge.rs).
 # Once this workspace moves to arrow 60, drop the bridge and use one version.
-arrow = "59"
+arrow = "60"
 # Snappy only: the parquet plugin always writes Snappy, and nothing in DRE reads other codecs.
 # The default codecs pulled in zstd 0.13, whose advisories are fixed only in zstd 0.14 (parquet 60).
 parquet = { version = "59", default-features = false, features = ["arrow", "snap", "simdutf8"] }
