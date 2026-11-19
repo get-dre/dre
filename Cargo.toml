@@ -5,7 +5,7 @@ members = ["crates/*", "plugins/*", "tests/duckdb-seed"]
 default-members = ["crates/*", "plugins/*"]
 
 [workspace.package]
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://github.com/get-dre/dre"
@@ -14,10 +14,10 @@ publish = false
 [workspace.dependencies]
 # DRE's own crates, published to crates.io. dre-core's version is DRE's (above; bump both
 # together, release_plan.py checks it). dre-protocol has its own version.
-dre-core = { path = "crates/dre-core", version = "=0.13.1" }
-dre-plugin-host = { path = "crates/dre-plugin-host", version = "=0.12.0" }
-dre-template = { path = "crates/dre-template", version = "=0.13.0" }
-dre-protocol = { path = "crates/dre-protocol", version = "0.12.0" }
+dre-core = { path = "crates/dre-core", version = "=0.13.2" }
+dre-plugin-host = { path = "crates/dre-plugin-host", version = "=0.13.0" }
+dre-template = { path = "crates/dre-template", version = "=0.13.2" }
+dre-protocol = { path = "crates/dre-protocol", version = "0.13.0" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -37,11 +37,11 @@ assert_cmd = "2"
 # The `duckdb` crate (1.20000, DuckDB 2.0) is built on arrow 60, so the DuckDB plugin converts
 # batches between that and this one through the Arrow C data interface (plugins/duckdb/src/bridge.rs).
 # Once this workspace moves to arrow 60, drop the bridge and use one version.
-arrow = "59"
+arrow = "60"
 # Snappy only: the parquet plugin always writes Snappy, and nothing in DRE reads other codecs.
 # The default codecs pulled in zstd 0.13, whose advisories are fixed only in zstd 0.14 (parquet 60).
-parquet = { version = "59", default-features = false, features = ["arrow", "snap", "simdutf8"] }
-duckdb = { version = "~1.20000.1", features = ["bundled"] }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "simdutf8"] }
+duckdb = { version = "~1.20000.2", features = ["bundled"] }
 
 # Native DuckDB debug symbols dominate development/test disk usage. Omit debug
 # info only for libduckdb-sys. Its build script also sets native NDEBUG, as in

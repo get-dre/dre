@@ -78,15 +78,19 @@ def crates_io(path):
         raise
 
 
-def protocol_changes():
-    """How dre-protocol differs from the crates.io release of the same version, if there is one.
+# Published crates versioned apart from DRE: dre-core and dre-cli pin them by version.
+SUPPORT_CRATES = ["dre-protocol", "dre-plugin-host", "dre-template"]
 
-    The release publishes dre-protocol only when its version is new, and dre-core is then
+
+def crate_changes(crate):
+    """How a support crate differs from the crates.io release of the same version, if there is one.
+
+    The release publishes each support crate only when its version is new, and dre-core is then
     verified against the crates.io copy. So a change to its sources or dependencies (an arrow
-    bump: arrow types are in its API) without a version bump fails the release at crates.io,
+    bump: arrow types are in their APIs) without a version bump fails the release at crates.io,
     after the builds. This catches it first.
     """
-    meta = metadata("dre-protocol")
+    meta = metadata(crate)
     crate, version = meta["name"], meta["version"]
     if crates_io(f"{crate}/{version}") is None:
         return []
@@ -181,14 +185,15 @@ def plan(tag):
         req = next(d["req"] for d in cli["dependencies"] if d["name"] == "dre-core")
         if req != f"={version}":
             sys.exit(f"tag {tag}: the workspace's dre-core dependency is `{req}`; make it `={version}` in Cargo.toml")
-        changes = protocol_changes()
-        if changes:
-            v = cargo_version("dre-protocol")
-            sys.exit(
-                f"tag {tag}: dre-protocol {v} is already on crates.io, but it has changed since:\n  "
-                + "\n  ".join(changes)
-                + "\nBump its version in crates/dre-protocol/Cargo.toml and the workspace's Cargo.toml."
-            )
+        for crate in SUPPORT_CRATES:
+            changes = crate_changes(crate)
+            if changes:
+                v = cargo_version(crate)
+                sys.exit(
+                    f"tag {tag}: {crate} {v} is already on crates.io, but it has changed since:\n  "
+                    + "\n  ".join(changes)
+                    + f"\nBump its version in crates/{crate}/Cargo.toml and the workspace's Cargo.toml."
+                )
     return {
         "kind": kind,
         "package": package,

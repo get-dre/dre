@@ -3,7 +3,7 @@ name = "dre-protocol"
 description = "The DRE plugin protocol: frames, messages and plugin SDK"
 # Versioned on its own, not with DRE: plugins depend on it. The wire protocol has its own
 # integer version too (MIN_VERSION/MAX_VERSION), which changes only when the messages do.
-version = "0.12.0"
+version = "0.13.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,7 +18,7 @@ log = { version = "0.4", features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
-sqlparser = "0.63"
+sqlparser = "0.64"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
