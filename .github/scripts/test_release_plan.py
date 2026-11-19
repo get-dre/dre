@@ -48,7 +48,7 @@ class Plan(unittest.TestCase):
 
         self.assertEqual(problems, [])
 
-    @patch("release_plan.protocol_changes")
+    @patch("release_plan.crate_changes")
     @patch("release_plan.metadata", return_value={
         "version": "0.10.0",
         "dependencies": [{"name": "dre-core", "req": "=0.10.0"}],

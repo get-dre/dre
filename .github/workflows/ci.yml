@@ -290,7 +290,7 @@ jobs:
     timeout-minutes: 90
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+        image: mirror.gcr.io/library/postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
         env:
           POSTGRES_USER: dre
           POSTGRES_PASSWORD: dre

@@ -63,7 +63,7 @@ docker network create dre-test-ssh >/dev/null 2>&1 || true
 # Postgres wants its key owned by itself with mode 0600, which a bind mount can't promise.
 docker run -d --name dre-test-pg-tls --network dre-test-ssh --network-alias db.internal \
   -p 5433:5432 -e POSTGRES_USER=dre -e POSTGRES_PASSWORD=dre -e POSTGRES_DB=dre \
-  -v "$work/pg:/certs:ro" --entrypoint sh mirror.gcr.io/library/postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac -c '
+  -v "$work/pg:/certs:ro" --entrypoint sh mirror.gcr.io/library/postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32 -c '
     install -o postgres -m 600 /certs/server.key /var/lib/postgresql/server.key
     install -o postgres -m 644 /certs/server.crt /var/lib/postgresql/server.crt
     exec docker-entrypoint.sh postgres -c ssl=on \

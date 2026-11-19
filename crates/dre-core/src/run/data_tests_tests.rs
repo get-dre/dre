@@ -111,7 +111,7 @@ fn unsupported_types_and_extensions_fail_explicitly_without_changing_spools() {
     .collect();
     fields.push(
         Field::new("extension", DataType::Int64, true)
-            .with_metadata([("ARROW:extension:name".into(), "custom_type".into())].into()),
+            .with_metadata([("ARROW:extension:name", "custom_type")]),
     );
     for field in fields {
         let temp = tempfile::tempdir().unwrap();
