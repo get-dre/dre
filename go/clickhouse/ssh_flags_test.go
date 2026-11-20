@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// A profile's env_var() reaches the plugin as text: `allow_rsa_keys: "false"` must still refuse
-// an RSA key, and `use_agent: "false"` must not count as set.
+// A profile's env_var() reaches the plugin as text: `use_agent: "false"` must not count as set,
+// and the deprecated `allow_rsa_keys: "false"` no longer refuses an RSA key.
 func TestSSHFlagsGivenAsText(t *testing.T) {
 	k, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -21,8 +21,8 @@ func TestSSHFlagsGivenAsText(t *testing.T) {
 	if errs := checkSSH(s); len(errs) != 0 {
 		t.Fatalf("checkSSH: %v", errs)
 	}
-	if _, err := (&tunnel{}).sshAuth(s); err == nil || !strings.Contains(err.Error(), "refuses RSA keys") {
-		t.Fatalf("an RSA key with allow_rsa_keys \"false\": got %v", err)
+	if _, err := (&tunnel{}).sshAuth(s); err != nil {
+		t.Fatalf("an RSA key with allow_rsa_keys \"false\": %v", err)
 	}
 	s["allow_rsa_keys"] = "true"
 	if _, err := (&tunnel{}).sshAuth(s); err != nil {

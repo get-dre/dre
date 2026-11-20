@@ -12,6 +12,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -251,9 +252,10 @@ func (t *tunnel) sshAuth(s map[string]any) ([]ssh.AuthMethod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't read the SSH private key: %v", err)
 	}
-	// An `env_var()` gives text ("false"): read it as the profile means it, never as unset.
-	if allow, _ := plugin.Bool(s, "allow_rsa_keys", true); !allow && signer.PublicKey().Type() == ssh.KeyAlgoRSA {
-		return nil, errors.New("the SSH private key is an RSA key, and `ssh.allow_rsa_keys: false` refuses RSA keys")
+	// Deprecated, kept for one minor release: DRE's other SSH plugins dropped their RSA warning
+	// once RUSTSEC-2023-0071 was fixed, and this option goes with it.
+	if _, set := s["allow_rsa_keys"]; set {
+		slog.Warn("`ssh.allow_rsa_keys` is deprecated and has no effect: RSA keys need no opt-in. Remove it; it stops being accepted in the next minor release.")
 	}
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 }

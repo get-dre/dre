@@ -640,7 +640,7 @@ fn connecting_is_tried_again_and_refused_credentials_are_not() {
 }
 
 #[test]
-fn the_tunnel_warns_about_rsa_keys_and_can_refuse_them() {
+fn the_tunnel_takes_rsa_keys_and_deprecates_allow_rsa_keys() {
     let dir = tempfile::tempdir().unwrap();
     let rsa = dir.path().join("id_rsa");
     assert!(
@@ -662,11 +662,16 @@ fn the_tunnel_warns_about_rsa_keys_and_can_refuse_them() {
                 "private_key_path": rsa.to_str().unwrap(), "allow_rsa_keys": allow}})
     };
     let (_, log) = open_logged(conn(Value::Null));
-    assert!(log.iter().any(|l| l.contains("RUSTSEC-2023-0071")), "{log:?}");
-    let (err, _) = open_logged(conn(json!(false)));
     assert!(
-        err.contains("`ssh.allow_rsa_keys: false` refuses RSA keys"),
-        "{err}"
+        !log.iter().any(|l| l.contains("RSA") || l.contains("RUSTSEC")),
+        "{log:?}"
+    );
+    let (err, log) = open_logged(conn(json!(false)));
+    assert!(!err.contains("refuses RSA"), "{err}");
+    assert!(
+        log.iter()
+            .any(|l| l.contains("`ssh.allow_rsa_keys` is deprecated")),
+        "{log:?}"
     );
 }
 

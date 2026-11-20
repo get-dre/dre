@@ -34,7 +34,7 @@ Set in `profiles.yml`, under `destinations:`, in a target with `type: sftp`.
 | `private_key` |  | The private key's text, e.g. from env_var() (instead of private_key_path) Secret: use `env_var()`. |
 | `host_key_fingerprint` |  | Pinned host key, SHA256:... (otherwise ~/.ssh/known_hosts is used) |
 | `use_agent` |  | Sign in with the keys in your SSH agent (SSH_AUTH_SOCK), instead of a password or key file. |
-| `allow_rsa_keys` |  | False refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning. |
+| `allow_rsa_keys` |  | Deprecated, no effect: RSA private keys need no opt-in any more. |
 | `connect_timeout` | `30s` | How long to wait for a connection (`30s`, `2m`, or seconds) A duration (`30s`, `2m`) or seconds. |
 | `timeout` | `60s` | How long a read or write may make no progress before it fails. A duration (`30s`, `2m`) or seconds. |
 | `retries` | `3` | How many times to try again after a temporary error (0: never) |
@@ -74,25 +74,11 @@ source's `ssh:` block takes the same settings.
 
 ## RSA keys
 
-RSA private keys sign through the `rsa` crate, which has a known timing weakness
-([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)) and no fixed
-release yet. This applies to `sftp` and to the `postgres` source's `ssh:` tunnel, and only to
-RSA keys DRE reads itself (`private_key_path`, `private_key`). Ed25519 and ECDSA keys, passwords
-and `use_agent: true` don't use it.
-
-The practical risk is low: an attack needs precise timings of many signatures, and DRE signs once
-per connection, a few times a run. So DRE keeps RSA keys working and warns once per run.
-`allow_rsa_keys` changes that:
-
-| Value | What happens |
-|---|---|
-| unset | RSA keys work, with a warning naming the advisory. |
-| `true` | RSA keys work without the warning: you've read this, and the key is only for a server you trust (a bank's SFTP server that accepts nothing else, say). |
-| `false` | RSA keys are refused, with what to do instead: for teams that want them blocked. |
-
-To move off RSA: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519`, add the `.pub` file on the server
-(its `authorized_keys`, or the bank's key upload), and point `private_key_path` at the new key.
-Or keep the RSA key in your SSH agent and set `use_agent: true`: OpenSSH signs, not DRE.
+RSA private keys work like any other key. Until rsa 0.10.0 fixed
+[RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html), DRE warned about them,
+and `allow_rsa_keys` silenced or refused them. That option is now deprecated and has no effect
+(`sftp` 1.4.0, `postgres` 1.7.0, `clickhouse` 1.1.0): a set value warns once per run, and it stops
+being accepted in the next minor release. Remove it from your profiles.
 
 ## Deliver a file without exposing a partial upload
 
