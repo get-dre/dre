@@ -42,7 +42,6 @@ destinations:
         port: "{{ env_var('ARCHIVE_SFTP_PORT', '22') }}"
         username: "{{ env_var('ARCHIVE_SFTP_USERNAME', 'acme_corp') }}"
         private_key: "{{ env_var('DRE_SECRET_ARCHIVE_SFTP_KEY') }}"
-        allow_rsa_keys: false
         host_key_fingerprint: "{{ env_var('ARCHIVE_SFTP_HOST_KEY_FINGERPRINT') }}"
   # The keys in your SSH agent; a host missing from the selected known_hosts file is refused.
   ops_sftp:

@@ -323,10 +323,10 @@ fn keygen(dir: &Path, kind: &str) -> String {
 }
 
 #[test]
-fn rsa_keys_warn_unless_allowed_and_can_be_refused() {
+fn rsa_keys_need_no_opt_in_and_allow_rsa_keys_is_deprecated() {
     let dir = tempfile::tempdir().unwrap();
     let rsa = keygen(dir.path(), "rsa");
-    // Nothing listens: the key is checked before connecting.
+    // Nothing listens: the run fails at the connection, after the key is read.
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -337,25 +337,21 @@ fn rsa_keys_warn_unless_allowed_and_can_be_refused() {
             "accept_unknown_host": true, "retries": 0, "allow_rsa_keys": allow})
     };
     let (r, log) = deliver_logged(conn(Value::Null));
-    assert!(r.is_err());
+    assert!(!r.unwrap_err().contains("RSA"));
+    assert!(
+        !log.iter().any(|l| l.contains("RSA") || l.contains("RUSTSEC")),
+        "{log:?}"
+    );
+    // `false` no longer refuses the key: it only warns that the option is deprecated.
+    let (r, log) = deliver_logged(conn(json!(false)));
+    assert!(!r.unwrap_err().contains("refuses RSA"));
     assert_eq!(
-        log.iter().filter(|l| l.contains("RUSTSEC-2023-0071")).count(),
+        log.iter()
+            .filter(|l| l.contains("`allow_rsa_keys` is deprecated"))
+            .count(),
         1,
         "{log:?}"
     );
-    let (_, log) = deliver_logged(conn(json!(true)));
-    assert!(!log.iter().any(|l| l.contains("RUSTSEC-2023-0071")), "{log:?}");
-    let (r, _) = deliver_logged(conn(json!(false)));
-    let err = r.unwrap_err();
-    assert!(
-        err.contains("`allow_rsa_keys: false` refuses RSA keys") && err.contains("ssh-keygen -t ed25519"),
-        "{err}"
-    );
-    // An Ed25519 key never warns.
-    let ed = keygen(dir.path(), "ed25519");
-    let (_, log) = deliver_logged(json!({"host": "127.0.0.1", "port": port, "username": "dre",
-        "private_key_path": ed, "accept_unknown_host": true, "retries": 0}));
-    assert!(!log.iter().any(|l| l.contains("RUSTSEC")), "{log:?}");
 }
 
 #[test]

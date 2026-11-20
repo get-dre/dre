@@ -30,37 +30,17 @@ enum Auth {
     Agent,
 }
 
-/// RSA keys sign with the `rsa` crate, which has a timing side channel (RUSTSEC-2023-0071) and no
-/// fixed release yet. The advice, for the warning and the refusal.
-const RSA_ADVICE: &str = "RSA private keys use code with a known timing weakness (RUSTSEC-2023-0071); \
-the practical risk is low, as DRE signs only once per connection. To move off RSA, make an Ed25519 \
-key (`ssh-keygen -t ed25519`) and add its public key on the server, or sign through your SSH agent \
-with `use_agent: true`. `allow_rsa_keys: true` keeps the RSA key without this warning";
-
-/// Whether the RSA warning has been given (once per run of the plugin).
+/// Whether the `allow_rsa_keys` deprecation warning has been given (once per run of the plugin).
 static RSA_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Refuse an RSA key with `allow_rsa_keys: false`; warn once when it's unset.
-fn check_rsa(key: &PrivateKey, allow: Option<bool>, prefix: &str) -> Result<()> {
-    if !matches!(key.algorithm(), russh::keys::Algorithm::Rsa { .. }) {
-        return Ok(());
-    }
-    match allow {
-        Some(false) => Err(format!(
-            "the private key is an RSA key, and `{prefix}allow_rsa_keys: false` refuses RSA keys. \
-             {RSA_ADVICE}"
-        )
-        .into()),
-        Some(true) => {
-            dre_protocol::log::debug!("using an RSA private key (`allow_rsa_keys: true`)");
-            Ok(())
-        }
-        None => {
-            if !RSA_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                dre_protocol::log::warn!("{RSA_ADVICE}.");
-            }
-            Ok(())
-        }
+/// `allow_rsa_keys` is deprecated: rsa 0.10.0 fixed RUSTSEC-2023-0071, so RSA keys need no opt-in.
+/// It's still accepted, and ignored, for one minor release.
+fn warn_allow_rsa_keys(prefix: &str) {
+    if !RSA_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        dre_protocol::log::warn!(
+            "`{prefix}allow_rsa_keys` is deprecated and has no effect: RSA keys are no longer weaker \
+             (RUSTSEC-2023-0071 is fixed). Remove it; it stops being accepted in the next minor release."
+        );
     }
 }
 
@@ -111,7 +91,7 @@ pub fn auth_fields() -> Vec<ConnectionField> {
         .manual(),
         ConnectionField::new(
             "allow_rsa_keys",
-            "false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning",
+            "deprecated, no effect: RSA private keys need no opt-in any more",
         )
         .kind(FieldKind::Boolean)
         .manual(),
@@ -162,7 +142,9 @@ impl Ssh {
             Some(Value::Bool(b)) => Ok(Some(*b)),
             Some(v) => Err(format!("`{prefix}{key}` must be true or false, got {v}")),
         };
-        let allow_rsa = flag("allow_rsa_keys")?;
+        if flag("allow_rsa_keys")?.is_some() {
+            warn_allow_rsa_keys(prefix);
+        }
         let use_agent = flag("use_agent")?.unwrap_or(false);
         let key_given = conn_str(c, "private_key_path").is_some() || conn_str(c, "private_key").is_some();
         if use_agent && key_given {
@@ -196,9 +178,6 @@ impl Ssh {
                 }
             },
         };
-        if let Auth::Key(key) = &auth {
-            check_rsa(key, allow_rsa, prefix)?;
-        }
         Ok(Ssh {
             host,
             port,

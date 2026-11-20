@@ -83,7 +83,7 @@
       },
       {
         "name": "allow_rsa_keys",
-        "description": "false refuses RSA private keys; true uses them without the RUSTSEC-2023-0071 warning",
+        "description": "deprecated, no effect: RSA private keys need no opt-in any more",
         "required": false,
         "secret": false,
         "manual": true,
