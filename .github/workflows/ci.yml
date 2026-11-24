@@ -266,7 +266,7 @@ jobs:
       - run: python3 .github/scripts/check_portable_tests.py
       # The Go plugin packages (databricks, bigquery, snowflake, clickhouse) and their shared
       # protocol module, each its own Go module.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
@@ -401,7 +401,7 @@ jobs:
               sleep 1
             done
           done
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
@@ -432,7 +432,7 @@ jobs:
         with:
           prefix-key: v2-rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: nextest
       # Build the plugins first: otherwise each test process builds them (DuckDB from C++
@@ -485,7 +485,7 @@ jobs:
           prefix-key: v2-rust
           # Both macOS partitions build the same targets: let the first one save.
           save-if: ${{ github.ref == 'refs/heads/master' && matrix.partition == 1 }}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go/plugin/go.mod
           cache-dependency-path: go/*/go.sum
@@ -508,7 +508,7 @@ jobs:
       # nextest runs test binaries in parallel (cargo test runs them one at a time), each test in
       # its own process. Locally, `cargo test` runs the same tests. --no-fail-fast runs every
       # test even after a failure, so one failure can't hide others.
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: nextest
       - name: Compile test binaries
