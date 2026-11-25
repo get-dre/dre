@@ -35,67 +35,67 @@
     "sha256": "587bd6c31cda747587493a113bec8602d3a0b0ca579b2b1b838ef71b19e6525d"
   },
   {
-    "artifact": "commons-codec:commons-codec:1.21.0",
+    "artifact": "commons-codec:commons-codec:1.23.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "4da851cb6abfb98bfe9eb77c5e5fc47f5414fa28b94e21b7fd9a646705dc167f"
+    "sha256": "47504a3ce71d73a1b0af07675546b8d8c5af87f82ef12b6381f9eb3c17dd5a5b"
   },
   {
-    "artifact": "io.netty:netty-buffer:4.2.9.Final",
+    "artifact": "io.netty:netty-buffer:4.2.20.Final",
     "licenses": [
       "Apache License, Version 2.0"
     ],
-    "sha256": "d013a96acea4889bc01ee03738d53c2e4a05e3faec14c25a92b4224c77d7a408"
+    "sha256": "794136fc6be78e44a286c2b1420a182e135c6d06eb8c397030c1551ee50acccd"
   },
   {
-    "artifact": "io.netty:netty-common:4.2.9.Final",
+    "artifact": "io.netty:netty-common:4.2.20.Final",
     "licenses": [
       "Apache License, Version 2.0"
     ],
-    "sha256": "99d965d507b09599ab2d215e940c690d4f7ce8cd97ff13776aa17eb4e0d90b8a"
+    "sha256": "5807fef7eb619bc0a5d1c0e6c83199ea9bca8503203a3eb73cfdccec2d215743"
   },
   {
-    "artifact": "org.apache.arrow:arrow-format:19.0.0",
+    "artifact": "org.apache.arrow:arrow-format:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "e805ea51ba8b517ec6c18a96ea83bef5cda5172a2b74419d4b48fb3584ce4504"
+    "sha256": "da6f644fc74fd8296aeb75731b5cf3570f14a94c2e7d5ceca6fc8296f9b88c35"
   },
   {
-    "artifact": "org.apache.arrow:arrow-jdbc:19.0.0",
+    "artifact": "org.apache.arrow:arrow-jdbc:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "23203193b6b459a91d509901539687ba090d854a4c1b9a95cd3f0196d93cf112"
+    "sha256": "daac6975b3c328dbf73a284252f7cf1d2597d255fea466bdeabb1a27209d9012"
   },
   {
-    "artifact": "org.apache.arrow:arrow-memory-core:19.0.0",
+    "artifact": "org.apache.arrow:arrow-memory-core:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "0d3646cc2fa9ae94e95dc8b3e0ed5a51e1df15b59dc548f359e941023471884d"
+    "sha256": "a12b7d7d37fe23e3079acc9b8afd9a8dfcc13e55b9cc4d88ad4826f99742e19a"
   },
   {
-    "artifact": "org.apache.arrow:arrow-memory-netty-buffer-patch:19.0.0",
+    "artifact": "org.apache.arrow:arrow-memory-netty-buffer-patch:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "47a8d7d1c9df06b3b84a0e49815615dad86c8c91afddf5b9817ed3e777784557"
+    "sha256": "76601857814acc05f3b3ed4a68050eddd1eeb5472d5bd370aebbbe4f599b31ba"
   },
   {
-    "artifact": "org.apache.arrow:arrow-memory-netty:19.0.0",
+    "artifact": "org.apache.arrow:arrow-memory-netty:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "e882e201a9a8de25f450e697491a3fb4689fb7cba9883c3323a966087fcf8c84"
+    "sha256": "57abdf80060642d70fd49eda0464fe3866906d38f0bbe2f7a49b9cb5ec34f85a"
   },
   {
-    "artifact": "org.apache.arrow:arrow-vector:19.0.0",
+    "artifact": "org.apache.arrow:arrow-vector:20.0.0",
     "licenses": [
       "Apache-2.0"
     ],
-    "sha256": "113e70317945e780050f13d17027d862d4c5d1cebe06c9fd8a5e922945bb2f8c"
+    "sha256": "a040e27bd6fb4b9e70f03dd763e8fb00e73a1bd1fb8979b018467384f32eb549"
   },
   {
     "artifact": "org.slf4j:slf4j-api:2.0.20",
