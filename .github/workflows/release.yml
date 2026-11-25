@@ -136,7 +136,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: rustup toolchain install stable --profile minimal --target "$TARGET" && rustup default stable
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         if: needs.plan.outputs.go != ''
         with:
           go-version-file: ${{ needs.plan.outputs.go }}/go.mod
@@ -155,7 +155,7 @@ jobs:
       # of `cargo install` on every runner.
       - name: Install cargo-auditable
         if: needs.plan.outputs.go == ''
-        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: cargo-auditable@0.7.6
 
