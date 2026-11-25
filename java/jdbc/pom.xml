@@ -8,7 +8,7 @@
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <arrow.version>19.0.0</arrow.version>
+    <arrow.version>20.0.0</arrow.version>
   </properties>
   <dependencyManagement>
     <dependencies>
