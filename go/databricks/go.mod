@@ -10,7 +10,7 @@ require (
 	// shared module's arrow-go v18. Drop v12 when the driver moves.
 	github.com/apache/arrow-go/v18 v18.9.0
 	github.com/apache/arrow/go/v12 v12.0.1
-	github.com/databricks/databricks-sdk-go v0.199.0
+	github.com/databricks/databricks-sdk-go v0.202.0
 	github.com/databricks/databricks-sql-go v1.19.0
 	github.com/get-dre/dre/go/plugin v0.0.0
 )
@@ -80,7 +80,7 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/api v0.315.0 // indirect
+	google.golang.org/api v0.316.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
 	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
