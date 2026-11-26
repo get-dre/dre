@@ -247,7 +247,9 @@ fn a_timeout_interrupts_the_local_check_and_removes_its_workspace() {
         "queries:\n  - query: data\n    data_tests: [{slow: {}}]\noutput: {format: message}\n",
         "{% test slow(relation) %}select sum(a.range * b.range) from range(1000000) a, range(1000000) b{% endtest %}",
     );
-    let run = p.dre("test", &["r", "--timeout", "1s"]);
+    // 5s, not 1s: a slow runner can spend a second starting the plugins and running the
+    // source query, so the timeout would fire before the check starts. The check never ends.
+    let run = p.dre("test", &["r", "--timeout", "5s"]);
     assert_eq!(run.code, 124, "{run:?}");
     let result = p.json("target/run/r/default/run_results.json");
     assert_eq!(result["status"], "timed_out");
